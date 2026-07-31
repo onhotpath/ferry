@@ -7,6 +7,12 @@ All measurements below were taken on this machine (Apple M1 Pro, `go1.26.5 darwi
 Every source link in this document is a permalink to that same commit, so the quoted line numbers stay correct as xtools moves on.
 Reproduction code for each measurement is described inline.
 
+**Go 1.27 amendment (2026-07-31).**
+Sections marked with 1.27 claims were re-verified against a real `go1.27rc2 darwin/arm64` toolchain installed locally via `golang.org/dl/go1.27rc2`, its `api/go1.27.txt`, and its `src/` tree.
+Go 1.27 is **not GA at time of writing** - `go.dev/dl` lists `go1.27rc2` as not stable.
+Stdlib links pinned to `refs/tags/go1.27rc2` are release-candidate source and can still change before GA; everything sourced from them is marked **(1.27 RC)**.
+Claims sourced from `tip.golang.org/doc/go1.27` alone, with no toolchain confirmation, are marked **(draft notes)**.
+
 ## Summary
 
 - **Generics do not remove the reflection walk, and it is worth saying so up front.**
@@ -22,8 +28,11 @@ Reproduction code for each measurement is described inline.
   xload has an equivalence test for exactly this that cannot catch it, because both subtests share one destination pointer.
 - **The stdlib has moved a long way since xload's design.**
   `errors.Join` (1.20), `sync.OnceValue` (1.21), `reflect.TypeFor` (1.22), `iter.Seq2` and `slices.Sorted`/`maps.Keys` (1.23), `reflect.TypeAssert` (1.25), and `reflect.Type.Fields()` / `Value.Fields()` (1.26) all post-date it and all bear on things xload does badly.
-  `encoding/json/v2` is in Go 1.26 behind `GOEXPERIMENT=jsonv2` and is a **Go 1.27 release blocker**, so it goes GA within about a month of this writing.
-  Nothing in it is importable by a third-party mapper; only its design is reusable.
+  **`encoding/json/v2` and `encoding/json/jsontext` are GA in Go 1.27** (verified on `go1.27rc2`: both appear in `api/go1.27.txt`, and both import and run with no `GOEXPERIMENT` set).
+  This **corrects** an earlier claim in this document that nothing in json/v2 is importable.
+  Most of it now is: the whole `encoding/json/v2` and `encoding/json/jsontext` exported surface, including `GetOption`.
+  What remains closed is narrower and still real - the struct field resolver is unexported, and `Options` is still sealed with `internal.NotForPublicUse` (section 2).
+  Setting `GOEXPERIMENT=nojsonv2` makes both packages unimportable again, which is a cost any dependant inherits (section 3, "What first-class `encoding/json/v2` could concretely mean").
 - **Typed values at the boundary are the highest-leverage departure from xload, but the honest justification is Dump, not Load.**
   Measured: a typed dump-then-load round trip is exact; a stringified one turns `port: 8080` into `port: "8080"` permanently.
   Load survives strings because the struct field type drives parsing.
@@ -109,7 +118,7 @@ The way to make the decoder lookup cheap is to resolve it once at schema-compile
 **(f) `errors.AsType[E error]` (Go 1.26) is the cleanest generics win of the lot.**
 `func AsType[E error](err error) (E, bool)` replaces the `var e *T; errors.As(err, &e)` two-step, and the [go1.26 release notes](https://go.dev/doc/go1.26) describe it as "type-safe, faster, and, in most cases, easier to use."
 It is a genuine correctness improvement for a library with a rich error taxonomy, because the constraint `E error` makes the value-versus-pointer footgun reproduced in section 5.14 unrepresentable: you cannot ask for a type that does not implement `error`.
-This costs ferry a `go 1.26` directive and nothing else.
+This costs ferry a `go 1.26` directive and nothing else, and recommendation 10 now argues for a `go 1.27` floor anyway, which subsumes it.
 
 ### Honest scorecard
 
@@ -269,21 +278,64 @@ Adjacent precomputation tricks worth stealing from `json/v2`'s `fields.go`:
 - **Index splitting.** `reindex()` (fields.go:38-57) splits `index []int` into `index0 int` plus a remainder slice "to avoid bounds check during runtime", and nils the remainder when empty "to avoid pinning the backing slice".
 - **`omitzero` checked before the marshaler runs** (arshal_default.go:1097-1100), whereas `omitempty` may require marshaling then unwriting (1115-1121). A real asymmetry worth copying if ferry adopts both.
 
-### What is *not* reusable
+### What is and is not reusable
 
-**`encoding/json/v2` is a closed system. A third-party mapper gets zero reuse of its field-resolution machinery.**
+**Corrected for Go 1.27.**
+This subsection previously read "`encoding/json/v2` is a closed system... zero reuse", and "there is just nothing to import."
+That was true while the package was `GOEXPERIMENT`-gated.
+It is **no longer true**: in Go 1.27 both `encoding/json/v2` and `encoding/json/jsontext` are ordinary importable stdlib packages under the Go 1 compatibility promise.
+The accurate statement is narrower, and the narrower part still bites.
 
-- `structFields`, `structField`, `fieldOptions`, `makeStructFields`, `parseFieldOptions`, `foldName`, `lookupArshaler` are all unexported.
-- `jsonopts` and `jsonflags` live under `encoding/json/internal/` and are compiler-blocked, not merely lowercase.
-  `json.Options` is an alias for `jsonopts.Options`, whose only method is `JSONOptions(internal.NotForPublicUse)` - a deliberate sealed-interface guard.
-  You cannot implement `Options` outside the json packages.
-- `jsontext` exports only syntax-layer machinery (`Encoder`, `Decoder`, `Token`, `Value`, `Pointer`) - nothing about Go struct fields or tags.
+**Verified on `go1.27rc2`:**
 
-The one extension point that *is* offered is `MarshalToFunc[T]` / `UnmarshalFromFunc[T]` plus `JoinMarshalers` / `WithMarshalers` ([arshal_funcs.go:175+](https://cs.opensource.google/go/go/+/refs/tags/go1.26.0:src/encoding/json/v2/arshal_funcs.go)), backed by its own `sync.Map` cache that also caches *negative* lookups (an explicit `nil` for "no funcs apply", arshal_funcs.go:146).
+- `grep -c "^pkg encoding/json/v2," api/go1.27.txt` returns **45**; `encoding/json/jsontext` returns **113**; `encoding/json` gains **21**.
+  A package listed in `api/go1.NN.txt` has passed the Go release API gate and is covered by the compatibility promise.
+- A module with `go 1.27` importing both packages builds and runs with `GOEXPERIMENT` unset (verified by running it).
+- `GOEXPERIMENT=nojsonv2` makes both packages vanish again: `imports encoding/json/v2: build constraints exclude all Go files`.
+  This is not hypothetical - `nojsonv2` is the release notes' documented escape hatch for compatibility problems, so any dependant that trips over v1/v2 differences and reaches for it takes ferry's build down too.
+
+**Still closed, and this is the part that matters to a mapper:**
+
+- `structFields`, `structField`, `fieldOptions`, `makeStructFields`, `parseFieldOptions`, `foldName`, `lookupArshaler` remain unexported in 1.27 ([fields.go](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/fields.go), [arshal.go:527-529](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/arshal.go)).
+  **ferry still writes its own field resolver.** This is the single most consequential "no reuse" fact and 1.27 does not change it.
+- `Options` is still sealed.
+  [`jsonopts/options.go:14-18`](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/internal/jsonopts/options.go) is unchanged:
+
+  ```go
+  type Options interface {
+      // JSONOptions is exported so related json packages can implement Options.
+      JSONOptions(internal.NotForPublicUse)
+  }
+  ```
+
+  Verified empirically: a package outside the json tree that tries to implement it fails at `use of internal package encoding/json/internal not allowed`.
+  [go.dev/issue/77703](https://go.dev/issue/77703) ("exported read-write aggregate Options type") is **closed**, so this is settled, not pending.
+- **New nuance, and it partially softens the above:** `GetOption` *is* exported and works from outside.
+  `func GetOption[T any](Options, func(T) Options) (T, bool)` lets third-party code **read** any option out of an opaque `Options` by passing the option constructor itself as the key.
+  Verified: `json.GetOption(opts, json.Deterministic)` returns `(true, true)`, `json.GetOption(opts, jsontext.WithIndent)` returns `("  ", true)`, and an unset option returns `ok == false`.
+  So the sealing is "you cannot **define** an option", not "you cannot **inspect** options".
+  For ferry, that means a ferry codec that wraps a json/v2 codec can read the caller's json options; it cannot add its own to the same bag.
+
+**`jsontext` exports more than this document previously credited, and some of it is directly relevant.**
+The old text said it exports "nothing about Go struct fields or tags", which is still true, but it undersold the syntax layer.
+Worth ferry's attention ([`api/go1.27.txt`](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:api/go1.27.txt), verified):
+
+- **`jsontext.Pointer`**, an RFC 6901 JSON Pointer as a `string` newtype, with `Tokens() iter.Seq[string]`, `Parent()`, `Contains(Pointer) bool`, `AppendToken(string) Pointer`, `LastToken()`, `IsValid()`.
+  Its godoc ([state.go:82-95](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/jsontext/state.go)) states the property ferry's flat key space lacks: "There is exactly one representation of a pointer to a particular value, so comparability of `Pointer` values is equivalent to checking whether they both point to the exact same value."
+  It also states the limitation ferry would inherit: "It is impossible to distinguish between an array index and an object name (that happens to be a base-10 encoded integer) without also knowing the structure of the top-level JSON value."
+  This is the closest thing in the stdlib to a **structured key path** and it is the obvious model to weigh against xload's flat delimiter-joined strings (5.10, and the measured `Flatten` nondeterminism in section 4).
+- **`jsontext.Token`** is a closed union that stores decoded scalars as **raw text plus a discriminator**, exactly the "tagged text" shape section 4 recommends.
+  Its own comment table ([token.go:56-86](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/jsontext/token.go)) enumerates the raw-versus-exact forms per kind.
+  Its accessors return `(T, error)` - `Token.Int() (int64, error)`, `Float()`, `Uint()` - not panics, which is the convention section 4 argues for against `cty` and `protoreflect`.
+- **`jsontext` does not import `reflect`.**
+  Verified with `go list -deps encoding/json/jsontext` on `go1.27rc2`: the output contains `internal/reflectlite` (pulled in by `errors`) and no `reflect`.
+  That confirms the syntactic/semantic split this document cites in section 3 as a template for ferry's own plane/codec versus struct-mapping layering.
+
+The extension point remains `MarshalToFunc[T]` / `UnmarshalFromFunc[T]` plus `JoinMarshalers` / `WithMarshalers` ([arshal_funcs.go](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/arshal_funcs.go)), backed by its own `sync.Map` cache that also caches *negative* lookups (an explicit `nil` for "no funcs apply").
 That is per-Go-type behaviour override riding json/v2's cache.
-It is useful as a **design template for ferry's typed decoder registration** (section 1c), and useless as an actual dependency for a non-JSON mapper.
+It is a **design template for ferry's typed decoder registration** (section 1c), and it is now also a real dependency ferry could take, at the cost analysed in section 3.
 
-The code is BSD-licensed, so copying the design is fine; there is just nothing to import.
+The code is BSD-licensed, so copying the design is fine; the difference from before is that importing is now also an option.
 
 **The only exported, general-purpose field mapper in the Go ecosystem is `github.com/jmoiron/sqlx/reflectx`** - and it is the weakest design of the five surveyed ([reflectx/reflect.go:62-113](https://github.com/jmoiron/sqlx/blob/master/reflectx/reflect.go#L62-L113)):
 
@@ -382,20 +434,28 @@ Where a claim is about behaviour rather than existence, the stdlib source is cit
 | **1.26** | `reflect.Type.Fields() iter.Seq[StructField]` | [#66631](https://go.dev/issue/66631) | The struct walk, natively |
 | **1.26** | `reflect.Value.Fields() iter.Seq2[StructField, Value]` | [#66631](https://go.dev/issue/66631) | Field plus value in one range |
 | **1.26** | `reflect.Type.Methods/Ins/Outs`, `Value.Methods()` | [#66631](https://go.dev/issue/66631) | Codec discovery, with a caveat below |
+| **1.27 (RC)** | `encoding/json/v2`, `encoding/json/jsontext` GA | [#71497](https://go.dev/issue/71497) | Importable at last; see the 1.27 subsection below |
+| **1.27 (RC)** | generic methods (language) | - | `d.Into[Config](...)` becomes expressible |
+| **1.27 (RC)** | `hash/maphash.Hasher[T]`, `ComparableHasher[T]` | [#70471](https://go.dev/issue/70471) | A named contract for a custom-keyed schema cache |
+| **1.27 (RC)** | `net/url.(*URL).Clone`, `url.Values.Clone` | [#73450](https://go.dev/issue/73450) | Deep copy for a `url.URL`-wrapping ferry type |
+| **1.27 (RC)** | `strings.CutLast`, `bytes.CutLast` | [#71151](https://go.dev/issue/71151) | Splitting a flat key on its last delimiter |
 
 Note that range-over-func was a `GOEXPERIMENT=rangefunc` preview in Go 1.22 ("Building with `GOEXPERIMENT=rangefunc` enables this feature", [go1.22 release notes](https://go.dev/doc/go1.22)) and became a language feature in **Go 1.23**, at the same time as package `iter`.
 
-**Not yet shipped, but directly relevant: generic methods in Go 1.27.**
-The [draft Go 1.27 release notes](https://go.dev/doc/go1.27) state that "a method declaration may declare its own type parameters", with the restriction that interface methods may not.
-This is the single biggest future lever on ferry's API shape, because it is the difference between
+**Generic methods in Go 1.27 - confirmed, and verified by compiling them.**
+The Go 1.27 release notes state that "a method declaration may declare its own type parameters", with the restriction that "methods of interfaces may not declare type parameters nor can interface methods be implemented by generic methods."
+Verified on `go1.27rc2`: `func (d *Dumper) Into[T any](v T) string` compiles and runs, `type J interface{ M[T any](T) }` fails with `interface method must have no type parameters`, and the feature is language-version gated - under a `go 1.26` directive the same file fails with `generic method requires go1.27 or later (-lang was set to go1.26; check go.mod)`.
+
+This is the single biggest lever on ferry's API shape, because it is the difference between
 
 ```go
 ferry.Into[Config](d, ...)          // today: package-level generic function
 d.Into[Config](...)                 // Go 1.27: generic method
 ```
 
-Go 1.27 is not GA at time of writing (the user confirms it is roughly a month out).
-**Do not depend on it, but do not design a package-level-function-only API that cannot later grow method forms.**
+Go 1.27 is still an RC at time of writing.
+The interface restriction is the part that constrains ferry: a generic method cannot satisfy an interface, so a plugin seam expressed as an interface can never take a type parameter.
+**Design so the package-level-function form can later grow method forms, and do not put a would-be generic method on any interface.**
 
 ### `errors.Join` - what it does and does not give you
 
@@ -516,7 +576,7 @@ aclements said as much on the proposal ([#66631](https://go.dev/issue/66631)): "
 `Fields()` also does **not** descend into embedded structs - "the i'th field yielded by `Fields` is the same as `Type.Field(i)` and `Value.Field(i)`" - so promoted fields still need `reflect.VisibleFields` (Go 1.17).
 
 It replaces load.go:85-87 and async.go:77-79 with a `range`, and that is all.
-It raises ferry's minimum Go version to 1.26.
+It raises ferry's minimum Go version to 1.26, which recommendation 10's `go 1.27` floor subsumes.
 Since ferry compiles the schema **once** per type, the loop it would improve runs once per type anyway, so the readability is free and the allocation concern is irrelevant.
 Adopt it in the compiler, not in any per-call path, and benchmark before assuming it is faster than `for i := range t.NumField()`.
 
@@ -631,45 +691,93 @@ For multi-key deterministic ordering, `cmp.Or(cmp.Compare(a.X, b.X), cmp.Compare
 
 ### `encoding/json/v2` status
 
-**In the stdlib, behind `GOEXPERIMENT=jsonv2`, off by default in Go 1.26, and generally available in Go 1.27 - roughly a month away at time of writing.**
+**GA in Go 1.27 (RC verified), importable with no build flags, and under the Go 1 compatibility promise.**
 
 The trajectory, verified per release:
 
 | Release | Status |
 | --- | --- |
 | **1.25** | Experimental, **opt-in** via `GOEXPERIMENT=jsonv2`. [go1.25 release notes](https://go.dev/doc/go1.25#json_v2), authorising proposal [#71845](https://go.dev/issue/71845). |
-| **1.26** | No change, and no mention in the release notes. Confirmed locally: still gated. |
-| **1.27** (not GA) | **Generally available, opt-OUT.** The [draft go1.27 notes](https://go.dev/doc/go1.27) say `encoding/json` "is now backed by the v2 implementation", with `GOEXPERIMENT=nojsonv2` to restore v1, and that opt-out "is expected to be removed in a future release." |
+| **1.26** | No change, and no mention in the release notes. Confirmed locally: still gated, `grep -c "encoding/json/v2" $GOROOT/api/go1.26.txt` returns 0. |
+| **1.27 (RC)** | **Generally available, opt-OUT.** Verified on `go1.27rc2`: `internal/buildcfg/exp.go:87` sets `JSONv2: true` in the baseline experiment set, `api/go1.27.txt` carries 45 `encoding/json/v2` lines and 113 `encoding/json/jsontext` lines, and a `go 1.27` module importing both builds and runs with `GOEXPERIMENT` unset. `GOEXPERIMENT=nojsonv2` restores v1 **and removes both new packages from the build**. The [go1.27 release notes](https://go.dev/doc/go1.27) say the opt-out "is expected to be removed in a future release." |
 
-That last row matters for ferry's positioning: within a month, every Go program's `encoding/json` behaviour changes, and the semantics ferry chooses for `omitempty`/`omitzero`, duplicate keys, and case sensitivity should be chosen against **v2**, not v1.
+Proposal [go.dev/issue/71497](https://go.dev/issue/71497) is **closed as completed**, labelled `Proposal-Accepted` and `release-blocker`, milestone **Go 1.27** (confirmed via `gh issue view`).
 
-Verified for Go 1.26:
+That last row matters for ferry's positioning: every Go program's `encoding/json` behaviour changes at 1.27, and the semantics ferry chooses for `omitempty`/`omitzero`, duplicate keys, and case sensitivity should be chosen against **v2**, not v1.
+
+**`encoding/json` v1 is now an options-configured skin over v2.**
+The 21 new `encoding/json` API lines in `api/go1.27.txt` are almost entirely legacy-semantics switches - `OmitEmptyWithLegacySemantics`, `CallMethodsWithLegacySemantics`, `MergeWithLegacySemantics`, `StringifyWithLegacySemantics`, `ReportErrorsWithLegacySemantics`, `FormatDurationAsNano`, `FormatByteArrayAsArray`, `UnmarshalArrayFromAnyLength`, `MatchCaseSensitiveDelimiter`, `ParseTimeWithLooseRFC3339`, `ParseBytesWithLooseRFC4648`, plus `DefaultOptionsV1`.
+Two of the new lines are structural and worth knowing:
+
+- `type RawMessage = jsontext.Value` - v1's `RawMessage` is now an **alias** for the v2 syntax-layer type ([v2_stream.go:190](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2_stream.go)).
+- `type Marshaler = json.Marshaler` and `type Unmarshaler = json.Unmarshaler` - v1's marshaler interfaces are now **aliases** for v2's.
+  So `encoding/json.Marshaler` and `encoding/json/v2.Marshaler` are the same type in 1.27, and a codec chain that probes for one finds the other.
+  Note this only holds when jsonv2 is enabled; under `nojsonv2` v1 declares its own identical interface.
+  Either way the method set is identical, so a `Type.Implements` probe behaves the same, which means ferry never needs to probe both.
+
+**Only `MarshalerTo` / `UnmarshalerFrom` are genuinely new interfaces**, and they are analysed in "What first-class `encoding/json/v2` could concretely mean" below.
+
+**The v2 tag grammar changed between 1.26 and 1.27, and this document's earlier "still moving" caveat resolved as follows** (diffed `doc.go` between the two toolchains):
+
+| 1.26 | 1.27 (RC) | Why |
+| --- | --- | --- |
+| `inline` | **renamed to `embed`** | [#79985](https://go.dev/issue/79985), commit [`6a1dd03`](https://github.com/golang/go/commit/6a1dd0342331). `json:",inline"` was already a widely-copied **no-op** in the Kubernetes ecosystem (~29k hits), so shipping it with real meaning would have silently changed those programs. |
+| `unknown` option, `DiscardUnknownMembers` | **removed** | [#77271](https://go.dev/issue/77271), commit [`c9cbeb0`](https://github.com/golang/go/commit/c9cbeb0a1b08). "Adding new features is always backwards compatible, but removing or changing them is not." `RejectUnknownMembers` survives for v1 `DisallowUnknownFields` compatibility. |
+| `format:` option | **removed from the supported set** | [#79071](https://go.dev/issue/79071), commit [`0b54a75`](https://github.com/golang/go/commit/0b54a7531935). "With Go 1.28 prospectively having typed struct tags in some form or another, the json/v2 working group decided to remove support for the `format` tag option since this would be more naturally expressed as a typed struct tag." |
+| `string` applied recursively | **top-level only** | [#79065](https://go.dev/issue/79065). "The `string` option only applies to the top-level of the Go struct field value." |
+| names via single-quoted string literal | **removed** | Gone from `doc.go` in 1.27. |
+
+`format:` is still *parsed*, and still rejected.
+Verified on `go1.27rc2`: `json:"t,format:'2006-01-02'"` on a `time.Time` field yields
+
+```
+json: cannot marshal from Go main.S: Go struct field T has unsupported `format` tag option
+```
+
+The implementation survives behind an internal `jsonflags.FormatTagSupported` flag that only the `github.com/go-json-experiment/json` mirror can set ([jsonopts/options.go:20-23](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/internal/jsonopts/options.go)).
+
+**The shipping 1.27 v2 tag option set is therefore exactly five: `omitzero`, `omitempty`, `string`, `case:ignore|strict`, `embed`** ([doc.go:68-119](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/doc.go)).
+
+Two lessons ferry should take from that churn, both cheap:
+
+1. **A tag option name that is already in circulation as a no-op is a compatibility hazard**, which is a concrete instance of the "tag keys are not namespaced" argument recorded later in this section.
+   ferry gets this for free by choosing a distinctive tag key, but the *option* names inside the tag have the same exposure if ferry ever supports a compatibility mode over an existing key.
+2. **The Go team removed a feature (`format:`) rather than ship it ahead of typed struct tags.**
+   ferry has the same choice for any per-field format directive, and the same reason to keep the surface small until [#74472](https://go.dev/issue/74472) resolves.
+
+Verified for Go 1.26 (retained because it is the state anyone on 1.26 still sees):
 
 - `$GOROOT/src/encoding/json/v2/` exists in go1.26.5, alongside `encoding/json/jsontext` and `encoding/json/internal/{jsonflags,jsonopts,jsonwire,jsontest}`.
 - Every file in `v2/` carries `//go:build goexperiment.jsonv2`.
   The flag is declared at `$GOROOT/src/internal/goexperiment/flags.go:106-107`.
 - `go env GOEXPERIMENT` is empty by default, and the gate was confirmed empirically: importing `encoding/json/v2` fails with "build constraints exclude all Go files" unless `GOEXPERIMENT=jsonv2` is set.
+- **The gate is transitive and cannot be satisfied by a library on its consumers' behalf.**
+  A module importing a library that imports `encoding/json/v2` fails to build unless the *consuming* build sets `GOEXPERIMENT=jsonv2`.
+  `go.mod` has no way to declare it: a `goexperiment jsonv2` line is rejected with `unknown directive`, and there is no `goexperiment` counterpart to the `godebug` directive.
+  This is why the "`go 1.26` plus GOEXPERIMENT" route is not open to ferry (recommendation 10).
 - `grep -c "encoding/json/v2" $GOROOT/api/go1.26.txt` returns **0**.
-  It is not yet under the Go 1 compatibility promise.
-- Proposal [go.dev/issue/71497](https://go.dev/issue/71497) "encoding/json/v2: new API for encoding/json" is **closed as completed**, labelled `Proposal-Accepted` and `release-blocker`, milestone **Go 1.27**.
+  It is not under the Go 1 compatibility promise in 1.26.
 - It first shipped as an experiment in Go 1.25 ([go.dev/blog/jsonv2-exp](https://go.dev/blog/jsonv2-exp)).
 - When the experiment is on, v1 is reimplemented on top of v2 (`$GOROOT/src/encoding/json/v2_decode.go:99` delegates to `jsonv2.Unmarshal` with `DefaultOptionsV1()`).
 - `github.com/go-json-experiment/json` is now just an upstream mirror; its README directs changes to the Go project.
 
-**Nothing in it is reusable by a third-party mapper.**
-See section 2 for the full exported-surface audit and the `internal.NotForPublicUse` sealing.
-The relevant takeaways for ferry are design patterns, not imports:
+**Corrected: it is no longer true that "nothing in it is reusable by a third-party mapper."**
+In 1.27 the packages import normally; what stays closed is the field resolver and the ability to define an `Options` value.
+See the rewritten section 2 subsection for the full audit.
+The design patterns below still stand on their own, and are now *also* available as imports:
 
-- `omitzero` semantics (`v2/doc.go:79-83`): omit if the value is zero "as determined by the `IsZero() bool` method if present, otherwise based on whether the field is the zero Go value."
+- `omitzero` semantics ([doc.go:70-74](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/doc.go)): omit if the value is zero "as determined by the `IsZero() bool` method if present, otherwise based on whether the field is the zero Go value."
   Contrast `omitempty`, which omits if the field would encode as null, empty string, empty object or empty array.
-  Explicitly (`doc.go:143-149`): "only a nil slice or map is omitted under `omitzero`, while an empty slice or map is omitted under `omitempty` regardless of nilness."
+  Explicitly ([doc.go:121-128](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/doc.go)): "only a nil slice or map is omitted under `omitzero`, while an empty slice or map is omitted under `omitempty` regardless of nilness."
+  1.27 also adds a caller-side `OmitZeroStructFields(bool)` option, "semantically equivalent to specifying the `omitzero` tag option on every field in a Go struct" ([options.go:174-182](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/options.go)) - a precedent for ferry offering the same choice per-call rather than only per-field.
   `omitzero` landed in **`encoding/json` v1 in Go 1.24** ([#45669](https://go.dev/issue/45669)).
   Crucially, v2 redefines `omitempty` in **JSON** terms while `omitzero` stays defined in **Go** terms, and the v1 migration doc says: "Existing usages of `omitempty` on a Go bool, number, pointer, or interface value should migrate to specifying `omitzero` instead (which is identically supported in both v1 and v2)."
   **If ferry has an omit-on-empty option, model it on `omitzero`, not `omitempty`** - it is the one with stable, backend-independent, Go-level semantics, which is exactly what a backend-agnostic mapper needs.
 - `Marshalers` / `Unmarshalers` (`json.MarshalToFunc[T]`, `UnmarshalFromFunc[T]`, `JoinMarshalers`, `WithMarshalers`) is the template for ferry's typed codec registration (section 1c).
   Two details worth copying: it caches negative lookups, and `SkipFunc` lets a registered function decline and fall through to the next one and then to the default.
   The full precedence chain is `WithMarshalers` funcs -> `MarshalerTo` -> `Marshaler` -> `encoding.TextAppender` -> `encoding.TextMarshaler` -> reflection, and it is **documented**, unlike xload's (section 5.9).
-  Known gap: [#73457](https://go.dev/issue/73457) (register by runtime `reflect.Type` rather than static type parameter) is still open, so json/v2 cannot do dynamic registration. ferry probably needs both.
+  Re-verified on `go1.27rc2` in source and by execution; see "What first-class `encoding/json/v2` could concretely mean" below for the mechanism and the both-interfaces case.
+  Known gap: [#73457](https://go.dev/issue/73457) (register by runtime `reflect.Type` rather than static type parameter) is **still open** at 1.27 (confirmed via `gh issue view`, milestone `Proposal`), so json/v2 cannot do dynamic registration. ferry probably needs both.
 - `omitzero` is evaluated *before* the marshaler runs; `omitempty` may require marshalling then unwriting.
   If ferry supports both, copy that asymmetry.
 - The v2 options model is worth studying for ferry's own option plumbing: one `Options` type shared across both packages and both directions, later options override earlier, variadic `...Options` on every entry point, and - the thing v1 structurally could not do - options are **threaded down the call stack and readable inside user methods** via `Encoder.Options()` / `Decoder.Options()`. xload's `options` struct is package-private and invisible to a user's `Decode` method ([options.go:37-42](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/options.go#L37-L42)); ferry should decide deliberately whether a user codec can see the load options.
@@ -686,16 +794,284 @@ Design decisions from the [json/v2 discussion document](https://github.com/golan
 
 ### Other things worth knowing, and things that are not
 
-- **The `go` directive is now a strict minimum (Go 1.21).** `go 1.26` in `go.mod` means the module cannot be built by Go 1.25, and the go command will download a newer toolchain automatically. GODEBUG-controlled behaviour changes key off it too. **This is a real API decision for ferry, not a formality**: `go 1.23` gets `iter` and `Value.Seq`; `go 1.26` additionally gets `errors.AsType` and `Value.Fields`. Pick deliberately and record it as an ADR.
+- **The `go` directive is now a strict minimum (Go 1.21).** `go 1.26` in `go.mod` means the module cannot be built by Go 1.25, and the go command will download a newer toolchain automatically. GODEBUG-controlled behaviour changes key off it too. **This is a real API decision for ferry, not a formality**: `go 1.23` gets `iter` and `Value.Seq`; `go 1.26` additionally gets `errors.AsType` and `Value.Fields`; `go 1.27` additionally gets generic methods and an unflagged `encoding/json/v2`. Pick deliberately and record it as an ADR (recommendation 10).
 - **`testing/synctest`** - experimental in 1.24 (`synctest.Run`), stable in 1.25 with a **renamed API** (`synctest.Test`). If ferry's watch API is concurrent or time-dependent, this is the right test harness. Also the reason `encoding/json` moved off `sync.WaitGroup` (section 2).
 - **Generic type aliases (1.24)** - `type Foo[T any] = Bar[T]` now works, previewed in 1.23 under `GOEXPERIMENT=aliastypeparams`. Useful for exposing `type Result[T any] = internal.Result[T]` shims; marginal otherwise.
-- **Type inference generalisation (1.21, extended in 1.27 draft)** - what makes `slices.SortFunc(x, myGenericCmp)` work without explicit instantiation. Relevant to how ergonomic ferry's typed codec registration can be without annotations.
+- **`new(expr)` (1.26, missed by the first pass of this document).** The built-in `new` now accepts an expression, not only a type: `new(x)` allocates a variable of `x`'s type initialised to `x`'s value ([spec, Allocation](https://go.dev/ref/spec#Allocation)). Verified compiling on both go1.26.5 and go1.27rc2 under a `go 1.26` directive. This is not a 1.27 feature, despite the 1.27 stdlib using it (`url.URL.Clone` is `uc := new(*u)`). It is worth recording here because the [go1.26 release notes](https://go.dev/doc/go1.26) motivate it with **exactly ferry's problem**: "This feature is particularly useful when working with serialization packages such as `encoding/json` or protocol buffers that use a pointer to represent an optional value, as it enables an optional field to be populated in a simple expression." That is xload's `cached` provider signature `Get(key string) (*string, error)` (5.1), and any ferry API that returns `*T` for a three-state value. It does not change the recommendation to prefer comma-ok over `*T` (5.1); it just makes the `*T` form cheaper to write where it does appear.
+- **Type inference generalisation (1.21, extended in 1.27, confirmed)** - what makes `slices.SortFunc(x, myGenericCmp)` work without explicit instantiation. The 1.27 change, quoted from the release notes: "Function type inference has been generalized to apply in all contexts where a generic function is assigned to a variable of (or converted to) a matching function type." Verified on `go1.27rc2`: `var f func(int) int = generic` compiles with no explicit instantiation, and is language-version gated like the other 1.27 language changes. Directly relevant to ferry's typed codec registration, since it is what lets a user pass a generic helper into `WithDecoder` without writing `[time.Duration]`.
 - **`unique` (1.23)** - interning. Potentially relevant if ferry interns key strings across many loads, but the win is small next to schema caching. Its internal design is cited in section 2 for the "generics for allocation avoidance, not type safety" argument.
-- **`maphash.Comparable` / `WriteComparable` (1.24)** - "make it possible to hash anything that can be used as a Go map key". `reflect.Type` is comparable, so this is a legitimate way to shard a schema cache. Almost certainly premature.
+- **`maphash.Comparable` / `WriteComparable` (1.24), plus `maphash.Hasher[T]` / `ComparableHasher[T]` (1.27)** - see "Go 1.27, verified against `go1.27rc2`" below. The 1.27 additions do **not** change the assessment: still a legitimate way to shard a schema cache, still premature.
 - **`sync.Map` reimplemented on `HashTrieMap` (1.24, [#70683](https://go.dev/issue/70683))** - "modifications of disjoint sets of keys... much less likely to contend". Background to section 2's read-cost comparison.
-- **`go vet` gains `stdversion` in `go test` by default (1.27 draft)** - will catch accidental use of, say, `Value.Fields` under a `go 1.23` directive. Useful safety net for the previous bullet.
+- **`go vet` gains `stdversion` in `go test` by default - confirmed landed in 1.27, with one RC caveat.** See below.
 
 Explicitly **not** relevant despite being recent: `structs.HostLayout`, `weak` and `runtime.AddCleanup` (a schema cache keyed by `reflect.Type` should not be weak, since those values are runtime-immortal anyway), `os.Root`, the `crypto/*` churn, `go/types` iterators.
+
+### Go 1.27, verified against `go1.27rc2`
+
+**Status: release candidate, not GA.**
+`go.dev/dl?mode=json&include=all` lists `go1.27rc1` and `go1.27rc2` with `"stable": false`; the newest stable is `go1.26.5`.
+Everything below was checked against a locally installed `go1.27rc2 darwin/arm64` (`golang.org/dl/go1.27rc2`), its `api/go1.27.txt`, and its `src/` tree, unless marked otherwise.
+An RC can still change before GA.
+Re-check `api/go1.27.txt` on the final release before treating any of it as fixed.
+
+**The relevant-package sweep, with "no change" stated explicitly.**
+Counts are `grep -c "^pkg <name>," api/go1.27.txt`, which is the Go release process's own API gate:
+
+| Package | New API in 1.27 | Bearing on ferry |
+| --- | --- | --- |
+| `reflect` | **0. No change.** | The struct walk is unchanged from 1.26. `Type.Fields()` / `Value.Fields()` / `TypeAssert` remain the newest tools. |
+| `errors` | **0. No change.** | `errors.AsType` (1.26) is still the newest. No `errors.Formatter`; the aggregate-formatting gap in this section is unchanged. |
+| `iter` | **0. No change.** | And [#71901](https://go.dev/issue/71901) is still open, so there is still **no** stdlib convention for errors in iterators. Recommendation 11 stands unchanged. |
+| `sync` | **0. No change.** | No generic `sync.Map`; `sync/v2` ([#71076](https://go.dev/issue/71076)) still has no milestone. Recommendation 13 stands. |
+| `slices` | **0. No change.** | `slices.Sorted(maps.Keys(m))` remains the determinism idiom. |
+| `maps` | **0. No change.** | As above. |
+| `cmp` | **0. No change.** | `cmp.Or` unchanged. |
+| `strings` | 1: `CutLast(string, string) (string, string, bool)` | [#71151](https://go.dev/issue/71151). Marginal but real for flat keys: `prefix, leaf, ok := strings.CutLast(key, ".")` replaces a `LastIndex` plus two slices when splitting a delimiter-joined key from the right. |
+| `bytes` | 1: `CutLast` | Same, for `[]byte` planes. |
+| `net/url` | 2: `(*URL).Clone() *URL`, `(Values).Clone() Values` | [#73450](https://go.dev/issue/73450). See below. |
+| `hash/maphash` | 6: `Hasher[T]`, `ComparableHasher[T]` and methods | [#70471](https://go.dev/issue/70471). See below. |
+| `encoding/json` | 21 | Mostly legacy-semantics options; two type aliases. Covered above. |
+| `encoding/json/v2` | 45 | GA. Covered above. |
+| `encoding/json/jsontext` | 113 | GA. Covered in section 2. |
+
+Nothing else in the 1.27 minor-library list touches a struct-tag-driven mapper.
+For the record, the rest is `compress/flate` (encoder rewrite, output bytes may differ), `crypto/*` (ML-DSA and TLS), `database/sql` (`ConvertAssign`, `RowsColumnScanner`), `go/constant`, `go/scanner`, `go/token`, `go/types`, `math/big`, `math/rand/v2`, `net`, `net/http`, `net/http/httptest`, `runtime/secret`, `syscall`, `testing/synctest` (new `Sleep` helper), and `unicode` (15 to 17).
+New packages `crypto/mldsa`, `uuid`, and the `GOEXPERIMENT=simd` `simd`/`simd/archsimd` packages are irrelevant here.
+
+**`hash/maphash.Hasher` and `ComparableHasher` - the assessment does not change.**
+The shapes ([hasher.go:122-140](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/hash/maphash/hasher.go)):
+
+```go
+type Hasher[T any] interface {
+    Hash(*Hash, T)
+    Equal(T, T) bool
+}
+type ComparableHasher[T comparable] struct{ ... }
+```
+
+The godoc frames this as a contract, not a container: "A `Hasher` defines the interface between a hash-based container and its elements... enabling those values to be inserted in hash tables and similar data structures", and notes that "Hashers may be useful even for comparable types, to define an equivalence relation that differs from the usual one (`==`)", with a case-insensitive string hasher as its worked example.
+`go/types` immediately adopted it: `go/types.Hasher` is "an implementation of `maphash.Hasher` for `Types` that respects the `Identical` equivalence relation", with `HasherIgnoreTags` for `IdenticalIgnoreTags`.
+
+For ferry this is **the same conclusion as before, with better vocabulary**.
+`reflect.Type` is comparable, so a `sync.Map` keyed by it already works and needs no hashing help.
+`Hasher` only earns its keep if ferry ever needs a schema cache keyed by something that is *not* `==`-comparable or where `==` is the wrong relation - for example keying on (type, tag-name) with case folding.
+There is still no hash-based container in the stdlib that consumes a `Hasher`, so adopting it today means writing the container too.
+**Still premature. Do not put it in the first cut.**
+
+**`net/url.Clone` - directly relevant to ferry's own type package.**
+xload's `xloadtype` wraps `url.URL` ([type/url.go](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/type/url.go)) and grew an accidental encoder via `URL.String()` (5.9).
+`url.URL` contains a `*Userinfo` pointer, so a plain struct copy shares it; `Clone` is three lines and copies it out ([url.go:1352-1363](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/net/url/url.go)):
+
+```go
+func (u *URL) Clone() *URL {
+    if u == nil { return nil }
+    uc := new(*u)
+    if u.User != nil { uc.User = new(*u.User) }
+    return uc
+}
+```
+
+`Values.Clone()` is the deep copy for `map[string][]string`.
+Two consequences for a ferry type package that owns a URL-like type:
+
+- If ferry ever hands a `*url.URL` to a sink, or caches one in a schema, `Clone` is now the correct copy and a struct assignment is not.
+- `url.Values` is the query-param plane's native representation (section 4's premise check).
+  A snapshot source (5.13) that captures `url.Values` should `Clone` it, or the caller can mutate the snapshot underneath the walk.
+
+Costing: both are one-line calls, and both push ferry's floor to `go 1.27` if used.
+Neither is load-bearing; hand-rolled equivalents are four lines.
+
+**`go vet`'s `stdversion` under `go test` - confirmed landed, with a caveat that matters right now.**
+`defaultVetFlags` in [`cmd/go/internal/test/test.go:654-690`](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/cmd/go/internal/test/test.go) contains `"-stdversion"` in 1.27 and does not in 1.26 (diffed directly between the two toolchains).
+The release notes describe it as reporting "the use of standard library symbols that are too new for the Go version in force in the referring file, as determined by `go` directive in `go.mod` and build tags on the file."
+
+**But it did not fire in an RC test.**
+A `go 1.26` module calling `strings.CutLast` (a 1.27 symbol) built, vetted, and tested clean under `go1.27rc2`.
+The reason is mechanical: `stdversion` resolves symbol versions from the vendored `x/tools` stdlib manifest, and in rc2 that manifest tops out at Go 1.26 - `grep -c '"CutLast"'` and `grep -c 'encoding/json/v2'` on [`cmd/vendor/golang.org/x/tools/internal/stdlib/manifest.go`](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/cmd/vendor/golang.org/x/tools/internal/stdlib/manifest.go) both return 0.
+So the *analyzer* is on by default, and its *data* has not been regenerated for 1.27 yet.
+
+Practical reading for ferry: `stdversion` is a genuine safety net for the "used a symbol newer than my `go` directive" mistake, it is on by default from 1.27, and it will presumably have current data by GA - but **do not rely on it to catch 1.27-era mistakes on 1.27 itself**, and re-test this at GA.
+Note also that `-structtag` is **still commented out** in the same `defaultVetFlags` block (it was renamed from `-structtags` but not enabled), so this section's conclusion that no user's CI validates a ferry tag is unchanged.
+Recommendation 12 stands.
+
+**The other 1.27 language changes.**
+Generic methods and generalized type inference are covered above.
+The third is minor: "A key in a struct literal may now be any valid field selector for the struct type, not just a (top-level) field name of the struct."
+That is a convenience for users writing ferry config literals with embedded structs; it changes nothing about ferry's API.
+
+There are three, not four.
+`new(expr)`, which 1.27's own `url.URL.Clone` uses (`uc := new(*u)`), is a **Go 1.26** language change, not a 1.27 one - verified by compiling it on go1.26.5 and by finding it in the [go1.26 release notes](https://go.dev/doc/go1.26).
+It is recorded in "Other things worth knowing" above.
+
+### What first-class `encoding/json/v2` could concretely mean
+
+The project has decided ferry will support `encoding/json/v2` first class.
+This subsection lays out what that could mean and what each reading costs.
+**It does not pick one; that is an ADR's job.**
+It also does not re-argue the decision, and it does not re-cost the two routes already closed: an unconditional `encoding/json/v2` import under a `go 1.26` directive (rejected because the GOEXPERIMENT requirement is transitive and every consumer would have to set it), and a `//go:build goexperiment.jsonv2` dual path inside ferry (rejected because ferry's round-trip guarantee would then have to hold identically on two code paths, doubling the property-test matrix).
+
+#### The interfaces, exactly
+
+From [`arshal_methods.go:39-122`](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/arshal_methods.go) on `go1.27rc2`:
+
+```go
+type Marshaler interface {
+    MarshalJSON() ([]byte, error)
+}
+type MarshalerTo interface {
+    MarshalJSONTo(*jsontext.Encoder) error
+}
+type Unmarshaler interface {
+    UnmarshalJSON([]byte) error
+}
+type UnmarshalerFrom interface {
+    UnmarshalJSONFrom(*jsontext.Decoder) error
+}
+```
+
+Three facts a codec chain has to handle:
+
+1. **v2's `Marshaler`/`Unmarshaler` are v1's.**
+   In 1.27, `encoding/json` declares `type Marshaler = json.Marshaler` and `type Unmarshaler = json.Unmarshaler` as aliases to the v2 types (`api/go1.27.txt`).
+   Even under `nojsonv2`, where v1 declares its own, the method sets are identical, so a `Type.Implements(reflect.TypeFor[json.Marshaler]())` probe gives the same answer either way.
+   **ferry does not need to probe both.**
+2. **A type may implement both, and `MarshalerTo` wins.**
+   The godoc says so ("If a type implements both `Marshaler` and `MarshalerTo`, then `MarshalerTo` takes precedence"), and so does the mechanism: `makeMethodArshaler` wraps `fncs.marshal` in source order `TextMarshaler` (line 132), `TextAppender` (158), `Marshaler` (181), `MarshalerTo` (212), each closure capturing the previous one, so the **last** wrapped is the outermost and therefore the effective handler.
+   Measured on `go1.27rc2` with a type implementing both: `json.Marshal` returned `"v2"`, not `"v1"`.
+   Same for `UnmarshalerFrom` over `Unmarshaler`.
+   Registering a `MarshalToFunc` for the same type beat both and returned `"func"`.
+3. **The full documented order is `WithMarshalers` funcs -> `MarshalerTo` -> `Marshaler` -> `encoding.TextAppender` -> `encoding.TextMarshaler` -> reflection.**
+   Note this inverts xload's, which puts its own `Decoder` first and then `encoding.TextUnmarshaler` before `json.Unmarshaler` (5.9).
+   The godoc also states the obligation ferry inherits if it honours both arms: when a type implements both, "both implementations should aim to have equivalent behavior for the default marshal options."
+   That is an **unenforceable prose rule**, exactly the kind section 4 recommendation 5 says to back with a conformance suite.
+
+**What ferry has to decide, and the cost of each answer:**
+
+| Option | Cost |
+| --- | --- |
+| Recognise **only** v1-shaped `MarshalJSON`/`UnmarshalJSON` | Cheapest, works on any Go version, and inherits the exact defect that caused v2 to exist: the value must be materialised as `[]byte` and re-parsed. Section 4 already identifies this as xload's `Decode(string) error` defect in another costume. |
+| Recognise **both**, `MarshalerTo` first | Matches v2 and is what a user who has already migrated will expect. Costs a hard `encoding/json/jsontext` import (so `go 1.27`, and breakage under `nojsonv2`), plus ferry must document what happens when the two implementations disagree - the stdlib merely asks that they not. |
+| Recognise **neither**, define ferry's own pair over `ferry.Value` | The only option that is honest about ferry being a non-JSON mapper: a `MarshalJSONTo(*jsontext.Encoder)` method cannot write to a Consul KV or an env var. Costs users a third interface to implement, and forfeits the "my type already works with json/v2" adoption story. |
+| Define ferry's own pair, and **additionally** adapt v2's as a fallback | Most user-friendly, largest surface, and the adapter has to answer the question the others dodge: what does a JSON-only encoder mean on a plane that has no JSON. Probably `jsontext` bytes into a ferry `Raw` arm (section 4f), which reintroduces parse-twice. |
+
+#### Which v2 *semantics* are portable to a non-JSON plane
+
+This is the part that matters most, because ferry's planes are not JSON.
+A semantic defined in **Go** terms transfers; one defined in **JSON** terms does not.
+Quotes are from [`v2_options.go:22-128`](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2_options.go), the stdlib's own v1-versus-v2 difference list.
+
+| v2 semantic | Defined in | Portable to a non-JSON plane? |
+| --- | --- | --- |
+| **`omitzero`** - omit if zero "as determined by the `IsZero() bool` method if present, otherwise based on whether the field is the zero Go value" | **Go terms** | **Yes, fully.** This is the one to adopt, and this document already recommended it before v2 went GA. It needs no notion of what the plane's "empty" is. |
+| **`omitempty`** - v2 omits if the field "encodes as an 'empty' JSON value, which is defined as a JSON null, or an empty JSON string, object, or array" | **JSON terms** | **No.** v2 deliberately moved it from Go terms (v1) to JSON terms. On a Consul plane there is no "empty JSON object". Adopting v2's `omitempty` would force ferry to define per-plane emptiness, which is the opposite of one tag grammar over many planes. |
+| **Case sensitivity** - v2 matches "using an exact, case-sensitive match" where v1 was case-insensitive; `case:ignore` / `case:strict` per field, `MatchCaseInsensitiveNames` per call | **Go/name terms** | **Yes.** Nothing JSON-specific about name matching. Note v2's `case:ignore` also ignores dashes and underscores, and on multiple matches "the field with an exact name match is selected, otherwise an error is reported due to an ambiguous set of candidate fields" - erroring on ambiguity rather than picking one is exactly what recommendation 8b asks ferry to do, and it is the opposite of viper's silent case folding (section 4f). |
+| **Duplicate name rejection** - "In v1, a JSON object with duplicate names is permitted. In contrast, in v2 a JSON object with duplicate names results in an error." | **Plane terms, but generically** | **Yes, in spirit.** Measured on `go1.27rc2`: unmarshaling `{"a":1,"a":2}` returns `jsontext: duplicate object member name "a"`. The generic form is "a plane that presents the same key twice is an error, not a last-wins race", which is precisely xload's collision problem (5.5, 5.6) and koanf's `Flatten` nondeterminism (section 4f). Adopt the **rule**; the enforcement point is ferry's, not `jsontext`'s. |
+| **Nil slice/map** - "In v1, a nil Go slice or Go map is marshaled as a JSON null. In contrast, v2 marshals a nil Go slice or Go map as an empty JSON array or JSON object" | **JSON terms** | **No, and see the round-trip warning below.** |
+| **Invalid UTF-8 rejection** | JSON string terms | Partly. The generic rule "reject values the plane cannot represent" transfers; the specific check does not. |
+| **Merge semantics on unmarshal** - v2 "merges when unmarshaling a JSON object, otherwise it replaces" | JSON terms | **No.** ferry's equivalent question ("does Load into a pre-populated struct merge or replace?") is real and open, but v2's answer is phrased entirely in JSON kinds. |
+| **`Deterministic`** | Go terms | Yes, and see the warning below. |
+| **`time.Duration` has no default representation** | Go terms | **Yes, and it is a decision ferry must make explicitly.** See below. |
+
+#### Round-trip fidelity: v2 versus v1, measured
+
+ferry's round-trip guarantee is a hard constraint, so this is worth measuring rather than assuming.
+All measured on `go1.27rc2 darwin/arm64`.
+
+**v2 round-trips nil-versus-empty *worse* than v1 by default.**
+
+```
+input: {S: nil, E: []string{}, M: nil}
+v1  out -> {"s":null,"e":[],"m":null}     round trip: S nil? true   E nil? false  M nil? true
+v2  out -> {"s":[],"e":[],"m":{}}         round trip: S nil? false  E nil? false  M nil? false
+v2 + FormatNilSliceAsNull(true) + FormatNilMapAsNull(true)
+    out -> {"s":null,"e":[],"m":null}     round trip: S nil? true   E nil? false  M nil? true
+```
+
+v1 preserved the nil-versus-empty distinction; v2's defaults destroy it.
+It is recoverable with two options, but a ferry that adopts "v2 defaults" wholesale silently loses a distinction its own three-state-presence rule (recommendation 4b) exists to preserve.
+**If ferry adopts v2 semantics, this is the one to override, and the ADR should say so in a sentence.**
+
+**v2 map output is nondeterministic by default; v1's was deterministic.**
+
+```
+map[string]int with 8 keys, 50 marshals each
+v2 default                 -> 8 distinct orderings
+v2 Deterministic(true)     -> 1
+v1                         -> 1
+```
+
+The `Deterministic` godoc ([options.go:134-141](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/options.go)) is careful about what it promises: "Different processes of the same program will serialize equal values to the same bytes, but different versions of the same program are not guaranteed to produce the exact same sequence of bytes."
+This directly contradicts recommendation 6, which makes determinism a package-wide invariant for ferry because dumped config must diff cleanly.
+**Another v2 default ferry must override, not inherit.**
+It is also a useful precedent for how narrowly to word ferry's own determinism promise.
+
+**Precision is unchanged, and section 4's convergent finding survives v2 GA intact.**
+
+```
+v2 marshal of uint64(18446744073709551615)
+  plain field  -> 18446744073709551615     (wire form is exact)
+  `,string`    -> "18446744073709551615"
+unmarshal the same bytes into `any`
+  plain field  -> 1.8446744073709552e+19   (float64, lossy)
+  `,string`    -> "18446744073709551615"   (string, exact)
+```
+
+The stdlib says this itself ([doc.go:215-229](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/doc.go)): "v1 and v2 may still lose precision when unmarshaling into an `any` interface value, where unmarshal uses a `float64` by default to represent a JSON number.
+To change the default, specify the `WithUnmarshalers` option with a custom unmarshaler that pre-populates the interface value with a concrete Go type that can preserve precision."
+So in Go 1.27, **the stdlib's answer to lossless numbers through a dynamically-typed boundary is still "quote them, or register a codec"**, which is exactly section 4's finding.
+Note that the escape hatch offered is `WithUnmarshalers` - the same typed-registration seam recommendation 7 tells ferry to copy.
+
+**`time.Duration` has no representation in v2, and this is a decision ferry cannot avoid.**
+Measured: `json.Marshal(struct{ D time.Duration }{time.Second})` on `go1.27rc2` returns
+
+```
+json: cannot marshal from Go time.Duration within "/D": no default representation
+```
+
+v1's behaviour (nanoseconds as a bare number) survives only through the `FormatDurationAsNano` option.
+xload handles `time.Duration` by comparing `Type.String()` to `"time.Duration"` ([load.go:301](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L301)), which this document already flags as wrong (5.9).
+The Go team's answer to the same problem was to **refuse to guess and make the user choose**.
+For a config mapper that is arguably the wrong default - `TIMEOUT=30s` is the single most common config value after strings and ints - but it means ferry cannot claim it is "just following json/v2" whichever way it goes.
+Decide it, and record that json/v2 deliberately went the other way.
+
+#### The four readings of "first class", with costs
+
+**(a) Codec-chain recognition only.**
+ferry's schema compiler probes for `MarshalerTo`/`UnmarshalerFrom` alongside its own interfaces and `encoding.TextMarshaler`/`TextUnmarshaler`, and calls them when the plane is JSON-shaped.
+
+- **Cost:** a hard `encoding/json/jsontext` import in ferry core, so `go 1.27` and a build break under `nojsonv2`.
+  A documented answer for what `MarshalJSONTo` means on a non-JSON plane, which is the awkward part: either "unsupported on this plane" (surprising) or "encode to `jsontext` bytes and hand the plane a `Raw`" (parse-twice).
+- **Cheapest thing that could count as first class**, and the one most likely to be what users mean.
+
+**(b) Adopt v2's *semantics* as ferry's own.**
+`omitzero` as the omit rule, case-sensitive matching with an opt-in `case:ignore`, duplicate keys are an error.
+
+- **Cost:** near zero in dependencies, since this is imitation, not import.
+  It costs the discipline of overriding two v2 defaults that are wrong for ferry (nil-as-empty, nondeterministic map order) and of *not* adopting the JSON-defined ones (`omitempty`, merge semantics).
+- This is the highest value-to-cost ratio of the four and it is available at any `go` version.
+  It is also the only one that keeps ferry's tag grammar coherent across planes.
+
+**(c) Use json/v2 or `jsontext` internally.**
+For example, `jsontext.Value` as the `Raw` arm of ferry's value union (section 4f), `jsontext.Pointer` as the model for structured keys, or json/v2 as the implementation of a JSON plane's encode/decode.
+
+- **Cost:** `go 1.27` and `nojsonv2` fragility for the whole of ferry core, in exchange for machinery ferry would otherwise write.
+  `jsontext.Value` in particular is attractive because v1's `RawMessage` is now an alias for it, so a ferry `Raw` arm typed as `jsontext.Value` is directly usable by anyone holding a `json.RawMessage`.
+  Against: it types ferry's value model to JSON at the very point where section 4 argues the model must be plane-agnostic, and `jsontext.Pointer`'s own godoc admits it cannot distinguish an array index from a numeric object name.
+- **Recommend deciding this per-item rather than wholesale.**
+  Copying `jsontext.Pointer`'s uniqueness property costs nothing; importing it costs a version floor.
+
+**(d) Ship a json/v2-backed sub-module.**
+`github.com/.../ferry/plane/json` as a separate Go module with its own `go.mod`.
+
+- **Cost:** one more module to version, tag, and release, and the usual sub-module friction (a `replace` during development, a two-step release when the core API changes).
+- **Benefit, and it is the decisive one:** ferry core keeps a lower `go` directive and does not break under `nojsonv2`, while the JSON plane gets `go 1.27` and first-class v2.
+  This is also already the plan of record for data planes - "core ships the engine but no data-plane implementations" - so a json/v2-backed plane module is not a new distribution shape, it is the existing one.
+- The tension: options (a) and (c) put v2 in **core**, which is precisely what this option avoids.
+  If the codec chain in core has to know about `MarshalerTo`, the sub-module does not save core from the version floor.
+  So (a) and (d) are in real conflict and the ADR has to resolve it.
+
+**The one cross-cutting cost, stated once:** every option that puts an `encoding/json/v2` or `encoding/json/jsontext` import in a given module raises that module's floor to `go 1.27` **and** makes it unbuildable under `GOEXPERIMENT=nojsonv2` (verified).
+`nojsonv2` is the release notes' own escape hatch for compatibility problems and is "expected to be removed in a future release", so the exposure is real but shrinking.
 
 ## 4. Typed values at the plane boundary
 
@@ -999,15 +1375,21 @@ This is the most important result in this section, and it partially vindicates x
 | `slog` `KindAny` | `fmt.Sprintf("%+v", ...)` | `text_handler.go:96-122` |
 | `attribute.Value` | `uint64 > MaxInt64` becomes a string | otel bridge sources |
 | `encoding/json` | `json.Number` is `type Number string` | `$GOROOT/src/encoding/json/decode.go:191` |
-| **`encoding/json/v2`** | **the `string` tag option** | `v2/doc.go:237-251` |
+| **`encoding/json/v2`** | **the `string` tag option** | [doc.go:215-229](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/doc.go) (line numbers updated for 1.27; was `doc.go:237-251` in 1.26) |
+| `jsontext.Token` | raw decoded text plus a kind discriminator | [token.go:56-86](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/jsontext/token.go) |
 | `yaml.Node` | `Tag string` plus `Value string` | `yaml.go:381-391` |
 
-The json/v2 quote is the punchline, because it is the newest design in the list (`v2/doc.go:237-251`):
+The json/v2 quote is the punchline, because it is the newest design in the list.
+Re-read on `go1.27rc2` after v2 went GA, where it is **unchanged in substance and slightly expanded**:
 
 > The `string` tag option can be used to specify that an integer type is to be quoted within a JSON string to avoid loss of precision.
-> Furthermore, **v1 and v2 may still lose precision when unmarshaling into an `any` interface value, where unmarshal uses a float64 by default.**
+> Furthermore, **v1 and v2 may still lose precision when unmarshaling into an `any` interface value, where unmarshal uses a float64 by default to represent a JSON number.**
+> To change the default, specify the `WithUnmarshalers` option with a custom unmarshaler that pre-populates the interface value with a concrete Go type that can preserve precision.
 
-**In 2026, the standard library's official answer to lossless numbers is still: quote them as strings.**
+Measured on `go1.27rc2`, which is the direct confirmation: `uint64(18446744073709551615)` marshals exactly on the wire, and unmarshaling those same bytes into an `any` yields `1.8446744073709552e+19`, while the `,string` field survives as the exact decimal text.
+
+**In 2026, with `encoding/json/v2` GA, the standard library's official answer to lossless numbers through a dynamically-typed boundary is still: quote them as strings, or register a typed codec.**
+The second half of that sentence is new in 1.27's wording and is worth noting, because the escape hatch the stdlib offers is `WithUnmarshalers` - the same typed-registration seam recommendation 7 tells ferry to build.
 
 Nobody who cared about lossless scalars ended up at a native machine number.
 They ended up at **decimal text plus a type tag**.
@@ -1136,12 +1518,37 @@ Two further rules fall out of the survey, and both are about **not** copying the
 - **Accessors must not panic.** `cty` and `protoreflect` both panic on type mismatch and both document it as intentional, because their callers are compilers and runtimes that type-check first. ferry's callers are backend authors. Return `(T, bool)` or an error.
 
 **Verification status.**
+This block covers the whole document, not only section 4.
+
+**Go 1.26 (stable), original research.**
 `driver.Value`, `sql.Null[T]`, `slog.Value`, `encoding/json`, and `encoding/json/v2` were read from `$(go env GOROOT)/src` on go1.26.5 and are quoted verbatim.
 `cty`, `protoreflect`, `structpb`, `koanf`, `viper`, `cast`, `pgx`, `yaml.v3`, `go-toml/v2`, `mapstructure`, and `otel` were read from shallow clones taken 2026-07-31; declarations and doc comments above are verbatim.
+Version claims are checked against `$(go env GOROOT)/api/go1.NN.txt`.
 Measurements marked as measured were executed on darwin/arm64, go1.26.5.
+
+**Go 1.27 (release candidate), 2026-07-31 amendment.**
+A real toolchain was installed and used: `go install golang.org/dl/go1.27rc2@latest && go1.27rc2 download`, giving `go version go1.27rc2 darwin/arm64` at `~/sdk/go1.27rc2`.
+Everything marked **(1.27 RC)** was verified against that toolchain's own `api/go1.27.txt` and `src/` tree, not against the draft notes.
+Specifically verified:
+
+- Package-level API counts per package from `api/go1.27.txt`, including the zero counts for `reflect`, `errors`, `iter`, `sync`, `slices`, `maps`, and `cmp`.
+- `encoding/json/v2` and `encoding/json/jsontext` import and run with `GOEXPERIMENT` unset, and fail to build under `GOEXPERIMENT=nojsonv2`.
+- `Options` sealing: reproduced the compile failure when implementing it from outside; `GetOption` reproduced working from outside.
+- Marshaler precedence with a type implementing both `Marshaler` and `MarshalerTo`, and the `WithMarshalers` override, by execution.
+- `format:` tag rejection, `time.Duration` "no default representation", duplicate-name rejection, nil slice/map round trip against v1 and against v2 with and without `FormatNil*AsNull`, map-ordering determinism over 50 marshals, and uint64 precision through `any`, all by execution.
+- Generic methods, the interface-method restriction, the `-lang` gate, and generalized type inference, by compilation.
+- That `new(expr)` is a **Go 1.26** language change and not a 1.27 one, by compiling it on go1.26.5 under a `go 1.26` directive and by locating it in the go1.26 release notes. The first pass of this document missed it entirely; it is now recorded in "Other things worth knowing".
+- `-stdversion` present in `defaultVetFlags` in 1.27 and absent in 1.26, by direct diff of the two toolchains' `cmd/go/internal/test/test.go`.
+- `inline` -> `embed`, `unknown` removal, and `format` removal by diffing `encoding/json/v2/doc.go` between the two toolchains, cross-referenced to commits `6a1dd03`, `c9cbeb0`, `0b54a75` and issues [#79985](https://go.dev/issue/79985), [#77271](https://go.dev/issue/77271), [#79071](https://go.dev/issue/79071).
+- Issue states and milestones for [#71497](https://go.dev/issue/71497), [#70471](https://go.dev/issue/70471), [#73450](https://go.dev/issue/73450), [#71151](https://go.dev/issue/71151), [#73457](https://go.dev/issue/73457), [#74819](https://go.dev/issue/74819), [#77703](https://go.dev/issue/77703), [#74472](https://go.dev/issue/74472) via `gh issue view`.
 
 Known gaps, stated rather than papered over:
 
+- **Go 1.27 is an RC, not GA.** `go.dev/dl` reports `go1.27rc2` with `"stable": false`. Anything sourced from `refs/tags/go1.27rc2` can change before release. **Re-verify the v2 tag option set, the `nojsonv2` behaviour, and `api/go1.27.txt` at GA before any of it hardens into an ADR.**
+- The prose of the release notes was read from `go.dev/doc/go1.27`, which is the draft; nothing in it was accepted where the toolchain disagreed, but sections quoted for wording (the language changes, the json paragraphs) are draft wording.
+- **`stdversion` could not be shown to actually fire on a 1.27 symbol**, because the vendored `x/tools` stdlib manifest in rc2 has no Go 1.27 entries. The analyzer's presence in `defaultVetFlags` is verified; its usefulness at 1.27 is not.
+- **The RC toolchain's json/v2 was not benchmarked.** The release notes' claim that "unmarshal performance is significantly faster" is taken on their word. The unresolved gap noted in section 2 - that no repo surveyed benchmarks cached versus uncached schema resolution in isolation - is unchanged.
+- **No ferry prototype was built against json/v2.** The four "first class" readings and their costs are analysis, not measurement. In particular the parse-twice cost of routing a non-JSON plane through `jsontext` bytes is asserted from the v2 design rationale, not measured.
 - **`starlark.Value`**: interface declarations and package doc only. Nothing verified on its `Int` representation, `Freeze` cost, or serialization. If the optional-interface pattern becomes load-bearing in an ADR, re-read `starlark/value.go` first.
 - **`cty`**: `convert/`, `gocty/`, and `msgpack/` were not read line by line, so the `gocty` ergonomics and msgpack precision claims are structural inference.
 - **`protobuf`**: `types/dynamicpb` not read at all.
@@ -1520,6 +1927,12 @@ Document that explicitly and offer a `StopOnFirstError` option.
 Every map iteration reaching a user-visible artifact gets `slices.Sorted(maps.Keys(m))`.
 xload gets this wrong in the collision error today (5.5, reproduced: three orderings in 40 runs), and ferry's dump direction makes it a correctness property rather than a cosmetic one.
 
+**This now conflicts directly with a json/v2 default and the conflict must be resolved deliberately.**
+Measured on `go1.27rc2`: v2 marshals a Go map in a nondeterministic order by default (8 distinct orderings over 50 marshals of one 8-key map) where v1 was deterministic; `Deterministic(true)` restores it.
+A ferry that adopts "v2 semantics" without qualification inherits nondeterministic dump output, which is the one thing this recommendation forbids.
+Worth copying instead is how narrowly v2 words its promise: "the same input value will be serialized as the exact same output bytes.
+Different processes of the same program will serialize equal values to the same bytes, but different versions of the same program are not guaranteed to produce the exact same sequence of bytes."
+
 **Cost.** Sorting on paths that did not need it.
 Negligible, and worth it for reproducible diffs of dumped config.
 
@@ -1529,8 +1942,13 @@ Copy `encoding/json/v2`'s `MarshalToFunc[T]` / `UnmarshalFromFunc[T]` / `JoinMar
 This is where generics genuinely pay (1c).
 Never do what xload does at [load.go:301](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L301) and identify a type by comparing `Type.String()` to `"time.Duration"`.
 
+Since 1.27 this shape is also importable rather than only copyable, and the precedence it documents was re-verified by execution: `WithMarshalers` funcs beat `MarshalerTo`, which beats `Marshaler`, which beats `encoding.TextAppender`, which beats `encoding.TextMarshaler`.
+Note ferry's chain will differ from xload's in a way worth calling out in the ADR: xload puts its own `Decoder` first and `encoding.TextUnmarshaler` ahead of `json.Unmarshaler` (5.9), which is the reverse of v2's ordering of the text and JSON arms.
+
 **Cost.** More API surface than "implement this one interface".
-Also: json/v2 still cannot register by runtime `reflect.Type` ([#73457](https://go.dev/issue/73457) open), and ferry probably needs both static and dynamic registration, which is more surface again.
+Also: json/v2 still cannot register by runtime `reflect.Type` ([#73457](https://go.dev/issue/73457) still open at 1.27), and ferry probably needs both static and dynamic registration, which is more surface again.
+And if ferry recognises `MarshalerTo`/`UnmarshalerFrom`, it inherits an unenforceable prose obligation: v2's godoc only *asks* that a type implementing both `Marshaler` and `MarshalerTo` "aim to have equivalent behavior".
+Back that with a conformance case rather than a sentence (recommendation 8b).
 
 ### 8. Reconsider the per-key pull interface. This may be the second-biggest win after caching.
 
@@ -1549,26 +1967,80 @@ Separately, flat string keys are lossy on their own terms, before any value-typi
 ferry inherits flat keys from xload.
 **Decide the collision rule and the case rule explicitly, and never fold case.**
 
-### 9. Do not build on `encoding/json/v2`, but do track it.
+### 9. Support `encoding/json/v2` first class, and be precise about which parts.
 
-Nothing in it is importable: the field resolver is `internal/`-fenced and `Options` is sealed with `internal.NotForPublicUse` (section 2).
-But it goes GA in Go 1.27, roughly a month out, and it changes what "normal" means for `omitempty` versus `omitzero`, duplicate keys, and case sensitivity.
-Choose ferry's semantics against v2.
-Prefer `omitzero` semantics: they are defined in Go terms and are therefore backend-independent, which is exactly ferry's problem.
+**Rewritten.**
+This recommendation previously read "do not build on `encoding/json/v2`, but do track it", on the evidence that nothing in it was importable.
+Half of that evidence has expired and half has not, so the replacement is narrower rather than simply inverted.
 
-**Cost.** None, other than the discipline of re-checking at 1.27 GA.
-Two v2 tag details were still moving at time of writing (`inline` versus `embed`, and whether `format:` survives); do not copy them without re-verifying.
+**What changed:** in Go 1.27 (RC verified) `encoding/json/v2` and `encoding/json/jsontext` are ordinary importable stdlib packages, in `api/go1.27.txt`, buildable with no `GOEXPERIMENT`.
+The blanket "nothing is importable" claim is withdrawn.
 
-### 10. Adopt Go 1.26 features knowingly, and pick the `go` directive as a decision.
+**What did not change, and still constrains ferry:**
 
-Since Go 1.21 the `go` line is a strict minimum, so it is an API decision.
-`go 1.23` buys `iter` and `Value.Seq`; `go 1.26` additionally buys `errors.AsType` and `reflect.Value.Fields`.
-Recommend `go 1.26` and record why.
-Use `Value.Fields()` in the **schema compiler only** - it allocates per iteration and is not a hot-path win (aclements on [#66631](https://go.dev/issue/66631)).
+- The struct field resolver (`makeStructFields`, `structFields`, `fieldOptions`, `foldName`, `lookupArshaler`) is still unexported.
+  **ferry writes its own schema compiler regardless.** This is the reuse that would have mattered most and it is still unavailable.
+  The nearest future relief is [#74819](https://go.dev/issue/74819) (`encoding/json/jsonstruct`), still **open** with no milestone.
+- `Options` is still sealed with `internal.NotForPublicUse`, and [#77703](https://go.dev/issue/77703), which asked for an open aggregate `Options` type, is **closed**.
+  ferry cannot add an option to json/v2's bag.
+  It *can* read one, via the exported `GetOption` - that is new and worth knowing.
+- json/v2 still cannot register a codec by runtime `reflect.Type` ([#73457](https://go.dev/issue/73457), still open).
+  ferry needs both static and dynamic registration and gets no help here.
+
+**What "first class" could mean concretely, and what each reading costs, is set out in section 3** ("What first-class `encoding/json/v2` could concretely mean").
+The four readings are codec-chain recognition of `MarshalerTo`/`UnmarshalerFrom`; adopting v2's semantics; importing json/v2 or `jsontext` internally; and shipping a json/v2-backed sub-module.
+They are not mutually exclusive and they are not all equally cheap.
+**Do not treat "first class" as a single decision.**
+
+**Three things the ADR must not get wrong**, all measured on `go1.27rc2`:
+
+- **`omitzero`, not `omitempty`.** v2 defines `omitzero` in Go terms and `omitempty` in JSON terms. Only the first is portable to a Consul or env plane.
+- **Override two v2 defaults rather than inherit them.** v2 marshals nil slices and maps as `[]` and `{}`, destroying the nil-versus-empty distinction that v1 preserved and that ferry's three-state presence rule exists to protect; and v2 map output is nondeterministic by default where v1's was deterministic, which contradicts recommendation 6.
+- **`time.Duration` has no representation in v2** and errors at runtime. ferry must decide this itself and cannot claim to be following json/v2 either way.
+
+**Cost.** Any module that imports `encoding/json/v2` or `encoding/json/jsontext` takes a `go 1.27` floor **and** stops building under `GOEXPERIMENT=nojsonv2` (verified).
+The semantics-only reading costs neither.
+The v2 tag grammar also churned right up to the RC - `inline` became `embed` ([#79985](https://go.dev/issue/79985)), `unknown` and `DiscardUnknownMembers` were removed ([#77271](https://go.dev/issue/77271)), `format:` was removed pending typed struct tags ([#79071](https://go.dev/issue/79071)) - so re-verify the shipping option set at GA before copying any of it.
+
+### 10. Pick the `go` directive as a decision. First-class json/v2 forces `go 1.27`.
+
+**Changed, and the trade-off is restated rather than silently flipped.**
+This previously recommended `go 1.26`.
+It now recommends **the first Go release where `encoding/json/v2` is GA, which is Go 1.27**, for any module that imports json/v2.
+
+Since Go 1.21 the `go` line is a **strict minimum**, not a hint.
+`go 1.27` in `go.mod` means a Go 1.26 toolchain cannot build the module at all; it will either download a newer toolchain or fail.
+**This line decides who can import ferry**, and it is the one decision here with no technical escape.
+
+What each floor buys:
+
+| Directive | Buys |
+| --- | --- |
+| `go 1.23` | `iter`, `reflect.Value.Seq`, range-over-func |
+| `go 1.26` | plus `errors.AsType`, `reflect.Value.Fields`, `reflect.TypeAssert` |
+| `go 1.27` | plus generic methods, generalized type inference, an unflagged `encoding/json/v2` and `jsontext`, `stdversion` under `go test` |
+
+**Why the `go 1.26` plus `GOEXPERIMENT=jsonv2` route is closed** (verified on go1.26.5, and recorded so the option is not revisited):
+
+- A `go 1.26` module with `GOEXPERIMENT=jsonv2` set can import `encoding/json/v2`; without the flag it fails with `build constraints exclude all Go files in $GOROOT/src/encoding/json/v2`.
+- **The requirement is transitive.** A module importing a library that imports json/v2 fails unless the *consuming* build sets the flag. A library cannot satisfy it for its consumers.
+- **`go.mod` cannot declare it.** A `goexperiment jsonv2` line is rejected with `unknown directive`; there is a `godebug` directive but no `goexperiment` counterpart.
+
+So the `go 1.26` route would make every ferry user set an environment variable to build. That is hostile and it is not on the table.
+The other rejected variant, a `//go:build goexperiment.jsonv2` dual path inside ferry, is rejected for a different reason: ferry's round-trip guarantee would have to hold identically on both paths, doubling the property-test matrix for a transitional benefit.
+
+**The trade-off, stated plainly.**
+`go 1.27` excludes everyone still on 1.26 and earlier, at a moment when 1.27 is not yet GA.
+That is a larger exclusion than `go 1.26` was, and it is deliberate: ferry is in design with no code and will not ship before 1.27 is out, so the exclusion is of users who will have upgraded by the time ferry exists.
+If that timing assumption breaks - if ferry ships sooner, or if a large consumer is pinned to 1.26 - the fallback is **recommendation 9's option (d)**: keep core at `go 1.26` with no json/v2 import, and put the v2 dependency in a sub-module at `go 1.27`.
+That preserves the choice at the cost of one more module to release.
+
+Independent of the json/v2 question:
+use `Value.Fields()` in the **schema compiler only** - it allocates per iteration and is not a hot-path win (aclements on [#66631](https://go.dev/issue/66631)).
 Avoid `Type.Methods()` entirely: it forces the linker to retain all exported methods in all packages.
 
-**Cost.** Excludes users on older toolchains.
-For a new library in mid-2026 with Go 1.27 a month away, that is a cheap exclusion.
+**Cost.** Excludes users on older toolchains, and the exclusion is now one release deeper than before.
+Record it as an ADR with the sub-module fallback named, so the decision is reversible without redesigning the core.
 
 ### 11. Decide the watch API's error convention explicitly, and expect to defend it.
 
