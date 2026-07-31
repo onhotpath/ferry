@@ -23,8 +23,10 @@ Reproduction code for each is described inline.
   `errors.Join` (1.20), `sync.OnceValue` (1.21), `reflect.TypeFor` (1.22), `iter.Seq2` and `slices.Sorted`/`maps.Keys` (1.23), `reflect.TypeAssert` (1.25), and `reflect.Type.Fields()` / `Value.Fields()` (1.26) all post-date it and all bear on things xload does badly.
   `encoding/json/v2` is in Go 1.26 behind `GOEXPERIMENT=jsonv2` and is a **Go 1.27 release blocker**, so it goes GA within about a month of this writing.
   Nothing in it is importable by a third-party mapper; only its design is reusable.
-- **Typed values at the plane boundary are the single highest-leverage departure from xload.**
-  Reproduced: a YAML list flattens to the empty string with no error today.
+- **Typed values at the boundary are the highest-leverage departure from xload, but the honest justification is Dump, not Load.**
+  Measured: a typed dump-then-load round trip is exact; a stringified one turns `port: 8080` into `port: "8080"` permanently.
+  Load survives strings because the struct field type drives parsing.
+  Two premises worth puncturing before the ADR: most backends (Consul, env, query params) have **no** type information to preserve, and every lossless design surveyed - including `encoding/json/v2` in 2026 - converged on **tagged text**, not native numbers.
 
 ## 1. Where generics genuinely remove reflection, and where reflection is unavoidable
 
@@ -704,6 +706,29 @@ The [json/v2 discussion](https://github.com/golang/go/discussions/63397) explain
 `Loader.Load(ctx, key) (string, error)` has exactly this shape.
 A YAML backend that already parsed `8080` into an `int` must render it back to `"8080"` so that `cast.ToInt64E` can parse it again.
 
+### First, check the premise: most backends do not know the type
+
+The ticket's framing assumes backends have type information to preserve.
+Checked against each backend's own source, that is true for a minority.
+
+| Backend | Does it know the type? | Evidence |
+| --- | --- | --- |
+| **Consul KV** | **No.** Opaque bytes. | `hashicorp/consul/api/kv.go:38-40`: "Value is the value for the key. This can be any value, but it will be base64 encoded upon transport. `Value []byte`" |
+| **env vars** | **No.** | `os.LookupEnv` returns `string`. |
+| **HTTP query params** | **No.** | `net/url.Values` is `map[string][]string`. |
+| **Vault** | **Barely**, and it reached for `json.Number` to keep what it has. | `api/secret.go:31` is `map[string]interface{}`, but `ParseSecret` at `api/secret.go:358` calls `dec.UseNumber()` before decoding. |
+| **JSON** | **Weakly.** All numbers are `float64`. | `$GOROOT/src/encoding/json/decode.go:55-64`. |
+| **YAML** | **Yes, but by guessing** - and quoting is the real signal. | `yaml.Node` carries `Kind`, `Tag`, `Value string`. `resolve.go:126-205` is literally `strconv.ParseInt` then `ParseUint` then `ParseFloat`. But `indicatedString()` (`yaml.go:463-467`) forces `!!str` for any quoted scalar. |
+| **TOML** | **Yes, without guessing.** The grammar disambiguates. | `go-toml/v2/unstable/kind.go:8-44`: `String, Bool, Float, Integer, LocalDate, LocalTime, LocalDateTime, DateTime, Array, InlineTable`. |
+
+The decisive confirmation: koanf has a fully open `map[string]any` value model, and its Consul provider still emits `string`, because there is nothing else to emit (`koanf/providers/consul/consul.go:95`: `mp[pair.Key] = string(pair.Value)`).
+
+**So a typed boundary buys YAML and TOML something real, JSON something partial, and Consul, env, and query params nothing at all.**
+xload is pitched partly at HTTP query params, which is the zero-benefit case.
+Say this out loud in the ADR rather than designing for the minority case silently.
+
+The one thing YAML knows that a string boundary genuinely destroys is **quoting**: `port: "8080"` and `port: 8080` are different documents, and the difference is authoritative rather than inferred.
+
 ### The design space
 
 There are four distinct answers in the Go ecosystem, and they differ mainly in whether the type set is **open** or **closed** and whether the value is an **interface** or a **struct**.
@@ -858,17 +883,98 @@ This is the fully **open** model: third parties add value types freely, and the 
 - **Cost to a new backend.** Low to add a type, but every *consumer* must handle the "this value does not implement the interface I need" case, so complexity moves from the type author to every call site.
 - **Relevance to ferry.** The optional-interface *technique* is worth borrowing for backend capability discovery (`if s, ok := src.(Snapshotter)`, section 5.13). As the value model itself it is wrong for ferry: ferry's consumers are ferry's own leaf setters, and they want exhaustive matching, not capability probing.
 
-#### (e) Bare `map[string]any` - `koanf`, `viper`
+#### (d2) Closed union with no escape hatch - `otel attribute.Value`
+
+`go.opentelemetry.io/otel/attribute/value.go:29-34`, a 48-byte struct with 12 kinds.
+Two things make it worth citing.
+
+**It is fully closed with no escape arm**, and the consequences are visible: `AsInterface()` returns an unexported `unknownValueType{}` (`value.go:401,431`) for anything it cannot name, accessors are unchecked (`AsBool` is `rawToBool(v.numeric)`, with the doc saying "Make sure that the Value's type is BOOL"), and the enum has already grown twice, leaving a deprecated `INVALID = EMPTY` alias behind.
+Compare `slog.Value`, whose `KindAny` escape arm meant its kind set never had to grow.
+**This is the argument for including an escape arm from day one.**
+
+**And OTel already ran the experiment ferry is considering, then reversed it.**
+`log/DESIGN.md:482-497`:
+
+> The original design defined `Kind`, `Value`, and `KeyValue` in `go.opentelemetry.io/otel/log`... Keeping log-specific types would **duplicate API surface, require conversion helpers, and make bridge code choose between two equivalent value models.** Therefore log records now use `attribute.Value`...
+
+That is a recorded, primary-source failure of the "one value model here, a different one there" shape.
+`DESIGN.md:449-461` also states the rationale for rejecting bare `any`: it "avoid[s] unconstrained `interface{}` handling in bridge implementations."
+
+#### (e) Closed recursive sum type - `structpb.Value`, and why it is the cautionary tale
+
+`google.golang.org/protobuf/types/known/structpb` is the closest existing analogue to a "config value" sum type: null, number, string, bool, struct, list.
+It is also lossy in three separate ways, all documented in its own generated source:
+
+- `struct.pb.go:315-316`: "When converting an int64 or uint64 to a NumberValue, **numeric precision loss is possible since they are stored as a float64**."
+- `struct.pb.go:297-313`: `[]byte` is "stored as StringValue; base64-encoded", and comes back from `AsInterface` as a **string**, not bytes.
+- `AsInterface` (`struct.pb.go:412-442`) returns `NaN`/`Inf` as the **strings** `"NaN"`/`"Infinity"`.
+
+**If ferry designs a JSON-shaped closed union, this is the result.**
+Do not copy it.
+
+#### (f) Bare `map[string]any` - `koanf`, `viper`
 
 The status quo for Go config libraries, and the thing ferry is presumably trying to beat.
 `koanf` carries `map[string]interface{}` throughout and delegates struct mapping to `mapstructure` (section 2), which caches nothing.
 
-The classic failure is numeric: `encoding/json` unmarshals every number to `float64`, YAML gives `int`, TOML gives `int64`, so the same logical config produces different Go types depending on which backend loaded it, and every consumer needs `cast`-style coercion.
-That is xload's problem with extra steps.
+**The important finding here is counterintuitive and it undercuts the whole "typed boundary" pitch if taken naively.**
+koanf has full type information in its map, and its accessors still corrupt values.
+`koanf.go:474-495`, `toInt64`, falls through to `strconv.ParseFloat(fmt.Sprintf("%v", v), 64)` then `int64(f)`, and `getters.go:10-16` discards the error:
 
-- **Lossless-ness.** Poor and, worse, **backend-dependent**. Two backends round-trip the same document to different Go types.
-- **Cost to a new backend.** Lowest possible.
-- **Verdict.** This is the anti-pattern. Its only virtue is the one ferry must preserve some other way: writing a backend is trivial.
+```go
+func (ko *Koanf) Int64(path string) int64 {
+	if v := ko.Get(path); v != nil {
+		i, _ := toInt64(v)   // error discarded
+		return i
+	}
+	return 0
+}
+```
+
+Measured end-to-end through real koanf v2 plus the real YAML parser:
+
+| YAML input | `Get()` Go type | `Int64()` | `String()` |
+| --- | --- | --- | --- |
+| `big: 18446744073709551615` | `uint64` (correct) | **`9223372036854775807`** | `"18446744073709551615"` (correct) |
+| `ratio: 3.9` | `float64` | **`3`**, no error | `"3.9"` |
+| `quoted: "8080"` | `string` | `8080` | `"8080"` |
+| `plain: 8080` | `int` | `8080` | `"8080"` |
+
+**For `big`, the string path was lossless and the typed path was lossy.**
+The loss did not happen in transport, it happened in conversion.
+A typed boundary does not fix a bad accessor, and ferry should not claim it does.
+
+koanf also sets `WeaklyTypedInput: true` by default at the struct boundary (`koanf.go:271`), opting back into weak typing anyway.
+
+viper is worse in ways ferry should explicitly avoid:
+
+- **Two conversion engines that disagree.** `viper.go:810-812` routes `GetInt` through `cast` while `Unmarshal` goes through `mapstructure` with different hooks. Measured on one viper instance with one set of env vars: `GetInt(f)` returns `1` silently while `Unmarshal` errors on the same key; `GetStringSlice` returns a **one**-element slice where `Unmarshal` produces **three**.
+- **Destructive key folding.** `util.go:89-100` lowercases every key on every config read. Measured: `myKey: A` / `MyKey: B` / `MYKEY: C` collapses to `{"mykey":"C"}` - two values destroyed, no error, winner decided by map iteration order.
+- Measured: `nul: null` makes `IsSet` false and vanishes from `AllSettings()`; `emptymap: {}` has `IsSet` true but is absent from `AllKeys()`, so `WriteConfig` drops it.
+
+And the flat-key namespace is itself lossy, independent of value typing.
+Measured over 300 runs, `koanf`'s `maps.Flatten({"a.b":1, "a":{"b":2}}, ".")` produced `{a.b:2}` 255 times and `{a.b:1}` 45 times.
+**ferry inherits flat string keys from xload and inherits this bug with them.**
+
+- **Lossless-ness.** Poor, backend-dependent, and undermined again at the accessor.
+- **Cost to a new backend.** The lowest, and this is the number ferry has to beat. koanf's `Provider` is two methods, and its 20 providers are **31 to 246 lines, median around 120**.
+- **Notable gap:** koanf has **no sink at all**. Grep for write/save/put across the repo returns nothing; the only egress is `Marshal(Parser) ([]byte, error)`. viper writes to files only. **Bidirectional struct-to-backend mapping is genuinely unoccupied territory**, which corroborates the prior-art sweep in `AGENTS.md`.
+
+For completeness, `spf13/cast`, which xload depends on, measured directly:
+
+```
+"010"   -> ToInt=8    (base 0: octal)
+"0x10"  -> ToInt=16   (base 0: hex)
+"0080"  -> ToInt=0    (invalid octal; ToInt swallows the error)
+"1.9"   -> ToInt=1
+""      -> ToInt=0    (indistinguishable from a real 0)
+"30"    -> ToDuration=30ns   (not 30 seconds)
+"a b c" -> ToStringSlice=["a","b","c"]   (splits on whitespace)
+"a,b,c" -> ToStringSlice=["a,b,c"]       (ONE element)
+```
+
+A zero-padded port `"0080"` silently becomes `0`.
+`enabled: yes` from YAML is `true`; `ENABLED=yes` from env is `false`.
 
 #### (f) Deferred decoding - `json.RawMessage`
 
@@ -878,45 +984,167 @@ Worth naming as an orthogonal technique rather than a competing model: keep the 
 For ferry this is the right representation for exactly one case: a backend that holds an encoded blob it cannot cheaply interpret (a JSON string in a Consul key, a secret payload).
 It should be one arm of the union, not the whole design, because it reintroduces the parse-twice cost everywhere else.
 
+### The convergent finding: everyone ends up at tagged text
+
+This is the most important result in this section, and it partially vindicates xload's ancestor.
+**Every design surveyed falls back to a string for the values its model cannot hold.**
+
+| Design | Fallback | Citation |
+| --- | --- | --- |
+| `driver.Value` scan | `asString` then `strconv.Parse*` | `$GOROOT/src/database/sql/convert.go:438-467, 498-520` |
+| pgx through `database/sql` | `var d string` for 93 of 106 registered types | `pgx/stdlib/sql.go:849-855` |
+| `cty/json` numbers | decimal text, with the type sent separately | `cty/json/value.go:31,62` |
+| `structpb` int64 | float64, or quoted per protojson | `struct.pb.go:315-316` |
+| `slog` `KindAny` | `fmt.Sprintf("%+v", ...)` | `text_handler.go:96-122` |
+| `attribute.Value` | `uint64 > MaxInt64` becomes a string | otel bridge sources |
+| `encoding/json` | `json.Number` is `type Number string` | `$GOROOT/src/encoding/json/decode.go:191` |
+| **`encoding/json/v2`** | **the `string` tag option** | `v2/doc.go:237-251` |
+| `yaml.Node` | `Tag string` plus `Value string` | `yaml.go:381-391` |
+
+The json/v2 quote is the punchline, because it is the newest design in the list (`v2/doc.go:237-251`):
+
+> The `string` tag option can be used to specify that an integer type is to be quoted within a JSON string to avoid loss of precision.
+> Furthermore, **v1 and v2 may still lose precision when unmarshaling into an `any` interface value, where unmarshal uses a float64 by default.**
+
+**In 2026, the standard library's official answer to lossless numbers is still: quote them as strings.**
+
+Nobody who cared about lossless scalars ended up at a native machine number.
+They ended up at **decimal text plus a type tag**.
+That is very close to what xload already does, with two differences that are the entire ballgame: xload's string carries **no tag**, and its conversion layer (`cast`) **swallows errors**.
+
+### Performance is not an argument here
+
+Measured, tagged-string versus packed union:
+
+```
+slog.Int64Value                 1.10 ns/op    0 B/op   0 allocs/op
+TaggedString{Tag, FormatInt}   17.58 ns/op    7 B/op   0 allocs/op
+slog.Value.Int64()              2.06 ns/op    0 B/op   0 allocs/op
+TaggedString + ParseInt        27.20 ns/op    0 B/op   0 allocs/op
+```
+
+Sizes: `any` 16 B, `slog.Value` 24 B, `protoreflect.Value` 24 B, a `{Tag uint8; S string}` 24 B, `cty.Value` 32 B, `attribute.Value` 48 B.
+
+A tagged string is roughly 13x slower to read than a packed union and costs the same 24 bytes.
+**At 100 config keys that is 2.7 microseconds, once, at startup.**
+
+Every performance rationale quoted in this section - protobuf's "always incurs an allocation for primitives", slog's "without an allocation", otel's "would decrease the performance" - is for a **per-request hot path**.
+Note also that protobuf's Go-1.11-era claim is now partly outdated: measured, `any(int64)` for small values under 256 hits Go's static cache at 0 allocs; only large values cost one.
+
+ferry's per-request case is HTTP query-param parsing, which is exactly the backend that has **no type information to preserve** (see the premise check above).
+So the performance argument and the losslessness argument point at **disjoint** backends.
+Do not build the value model on a perf rationale borrowed from a logging library.
+
+### The decisive result: Load and Dump are not symmetric
+
+The same logical config emitted through real koanf parsers, once with typed values and once stringified:
+
+```
+--- yaml / TYPED                --- yaml / STRING
+name: svc                       name: svc
+nul: null                       nul: ""
+"on": true                      "on": "true"
+port: 8080                      port: "8080"
+ratio: 3.5                      ratio: "3.5"
+tags:                           tags: a,b
+    - a
+    - b
+
+--- toml / TYPED                --- toml / STRING
+err = cannot convert type       port = "8080"
+      <nil> to Tree             tags = "a,b"
+```
+
+And the round trip:
+
+```
+original          : {"on":true, "port":8080, "tags":["a","b"]}
+typed  dump->load : {"on":true, "port":8080, "tags":["a","b"]}   exact
+string dump->load : {"on":"true","port":"8080","tags":"a,b"}     permanently wrong
+```
+
+**The Load direction survives a string boundary. The Dump direction cannot.**
+
+The reason is structural, not incidental.
+On Load, the destination struct field type tells the mapper how to parse, so a string is sufficient - this is precisely ferry's advantage over koanf and viper, whose untyped accessors have to guess.
+On Dump, the **sink** must choose a representation, and only the struct knows the type; a string-flattened sink emits `port: "8080"`, which is not a round trip, it is a wrong config file.
+
+pgx documents the identical asymmetry in its own domain (`conn.go:672-674`): query modes that know the target type accept an ambiguous Go value, and modes that do not must reject it.
+
+**This is the single strongest argument for typed values, and it is a Dump argument, not a Load argument.**
+It is also why "keep strings for Load, add types only for Dump" is tempting - and why it should still be rejected, per the OTel reversal above.
+
 ### Comparison
 
 | Model | Shape | Type set | Lossless | Cost to new backend | Nesting |
 | --- | --- | --- | --- | --- | --- |
-| `driver.Value` | bare `any`, documented set | closed(ish), 6 types | poor by design | very low | none |
-| `slog.Value` | closed struct union + `Any` arm | closed + escape | good, 3-type carve-out | moderate | `KindGroup` |
-| `cty` | full type system | closed + capsules | excellent, plus unknowns | high, and panics on misuse | native |
-| `protoreflect.Value` | 24B unsafe union | closed, 11 types | only with its descriptor | high, panics on mismatch | via composite kinds |
-| `starlark.Value` | interface + optional interfaces | fully open | good | low to add, high to consume | via interfaces |
-| `map[string]any` | bare `any` | open, unconstrained | poor and backend-dependent | lowest | native but untyped |
-| `json.RawMessage` | opaque bytes | n/a | perfect, deferred | low | deferred |
+| `driver.Value` | bare `any`, documented set | closed(ish), 6 types | poor by design; overflow is an error | 2 methods per type | none |
+| pgx `pgtype` | own codec system | open via `RegisterType` | good natively, `string` through the shim | ~20 methods, ~290 lines per type | native |
+| `slog.Value` | 24 B packed union + `Any` arm | closed 10 kinds + escape | good, 3-type carve-out | 4 methods + 6 prose rules + an external guide | `KindGroup` |
+| `attribute.Value` | 48 B struct | **closed, no escape** | overflow becomes string; enum grew twice | 12-arm switch, silent default | `SLICE`/`MAP` |
+| `cty` | full type system, 32 B | closed + capsules | excellent, plus unknowns; JSON needs the type out of band | ~20k lines; panics on misuse | native |
+| `protoreflect.Value` | 24 B unsafe union | closed, 11 types | **only with its descriptor** | descriptor machinery; panics | composite kinds |
+| `structpb.Value` | closed recursive sum | closed | **int64 precision, bytes to base64, NaN to string** | trivial | native |
+| `starlark.Value` | interface + 18 optional interfaces | fully open | no general serialization; `nil` leaks | 5 methods, no base type | via interfaces |
+| `map[string]any` | bare `any` | open, unconstrained | poor, backend-dependent, corrupted at the accessor | **31-246 lines, median ~120** | native but untyped |
+| **tagged text** (`json.Number`, `yaml.Node`) | string + tag | open by construction | none for scalars; errors deferred to parse | trivial | n/a |
 
 ### Recommendation
 
-**A closed struct-based tagged union in the `slog.Value` shape, with an explicit escape arm, an explicit nested/group arm, and an explicit raw/deferred arm.**
+**A small closed struct union in the `slog.Value` shape, whose scalar leaf stores the source text rather than a machine number, with an explicit escape arm, a group arm, and a raw arm.**
 
-Reasons, in order:
+Concretely, something like `{Kind Kind; text string; ref any}` with kinds `Absent`, `Null`, `Bool`, `Number`, `String`, `Bytes`, `List`, `Map`, `Any`.
 
-1. It is the only model that fixes the reproduced YAML-list bug (5.8) without imposing `cty`-scale cost on backend authors.
-2. `KindGroup` shows that nesting must be a kind, not a convention. xload's flattening is where the information is lost.
-3. `KindAny` shows that a closed set does not have to be a straitjacket. Close the set for the types ferry optimises, leave one honest arm for everything else, and name it (capsule-style) rather than leaving it a bare `any`.
-4. `sql.Null[T]` (Go 1.22) is the stdlib's own post-generics answer to "absent is not a value", and it validates ferry separating presence from content rather than encoding absence as a magic value.
+The reasoning, and note that the "store text" part is a change of position forced by the evidence:
+
+1. **Tagged text is where every lossless design converged**, including `encoding/json/v2` in 2026. A native numeric leaf re-creates the `float64` problem that `structpb` has and that `json.Number` exists to fix.
+2. **The performance case for a packed native union does not apply to ferry.** Measured at 27 ns to read a tagged string, versus 2 ns for a packed union. At 100 keys, once at startup, that is 2.7 microseconds. Every library that packed natively did so for a per-request hot path ferry does not have.
+3. **`KindAny` is why slog's kind set never grew and `attribute.Value`'s grew twice.** Ship the escape arm on day one, and name it (capsule-style) rather than leaving it a bare `any`.
+4. **A group arm is required, not optional.** xload's flattening is exactly where the YAML list is lost (5.8, reproduced).
+5. **The real payoff is Dump, not Load.** Load survives strings because the struct field type drives parsing; Dump cannot, because the sink must choose a representation. That asymmetry is the honest justification for the whole change.
+6. `sql.Null[T]` (Go 1.22) validates separating presence from content rather than encoding absence as a magic value, and it validates doing it generically on day one - the stdlib spent eleven years hand-writing `NullString`, `NullInt64`, `NullByte` before generics collapsed them.
 
 **The costs, stated plainly:**
 
 - ferry owns the value taxonomy forever. Adding a kind later is an API change.
-- A struct union costs more to construct than passing a `string`, and writing a backend gets meaningfully harder than xload's one-method interface. That is a real adoption cost and the main argument against.
-- If ferry copies slog's unsafe-ish packing it inherits slog's contract leak (three Go types unstorable) and non-comparability. **Recommend not copying the packing**: use an explicit `Kind` field. ferry's hot path is dominated by the reflection walk and backend I/O, not by value construction, so the packing buys little here that schema caching does not buy more of.
-- Deferring to `driver.Value`'s "just document the allowed set" would be cheaper for backend authors, but it is precisely what produced the pgx situation, and ferry has no equivalent of a driver ecosystem large enough to route around it.
+- **Backend authoring cost is the main argument against, and the bar is known: koanf's providers are 31-246 lines, median around 120, off a two-method interface.** If ferry's backend interface makes a Consul provider meaningfully longer than 156 lines, the value model has overreached - and remember Consul gains nothing from typing at all.
+- **Do not copy slog's unsafe packing.** It leaks into the public contract (three Go types unstorable) and forces non-comparability, for a speedup that is irrelevant here. Use an explicit `Kind` field.
+- Accessors must return `(T, bool)` or an error. `cty`, `protoreflect`, and `slog` all panic on kind mismatch and all document it as intentional, because their callers type-check first. ferry's callers are third-party backend authors.
+- ferry's `Value` must be **self-describing**. `protoreflect.Value` is uninterpretable without its `FieldDescriptor`; a config sink that receives a value and no schema cannot decide how to write it.
+
+**Two rejected alternatives, with the reason:**
+
+- **"Strings for Load, typed values for Dump."** Tempting, because §"Load and Dump are not symmetric" shows Load genuinely survives strings and this is the smallest change from xload. Reject it: OTel ran exactly this two-value-model shape and reversed it, recording that it would "duplicate API surface, require conversion helpers, and make bridge code choose between two equivalent value models" (`log/DESIGN.md:482-497`).
+- **`driver.Value`-style "document the allowed set" with no escape hatch.** Cheapest for backend authors, but it provably degenerates: pgx routes 93 of its 106 types through `string` when forced back through it (`pgx/stdlib/sql.go:849-855`). All of the constraint, none of the benefit.
+
+**Six things to do regardless of which model wins:**
+
+1. **Three-state presence is non-negotiable.** `absent` is not `null` is not `""`. xload conflates all three at [load.go:147](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L147); viper drops `null` entirely. This is the single most valuable thing the new boundary buys.
+2. **Numbers as source text, parsed at the destination where the target type is known, returning an error.** Never `float64` in the middle.
+3. **One conversion authority.** Viper's `Get*`-versus-`Unmarshal` split produces two different answers for one key, one of them silent. If ferry ships both a struct path and an accessor path, they must share one code path.
+4. **Separate the tree walk from the leaf switch**, as slog does (`handler.go:476-531` resolves `LogValuer` and recurses `KindGroup`, so `appendJSONValue` only ever sees 8 of 10 kinds). This roughly halves what a backend author writes.
+5. **Ship a conformance suite.** slog's `Handler` is 4 methods but carries six unchecked prose rules, and its own doc says "Before implementing your own handler, consult https://go.dev/s/slog-handler-guide". What rescues it is `testing/slogtest`, 17 explained conformance cases. If ferry's sink contract has any obligation the compiler cannot check, ship the tests with it.
+6. **Do not fold key case, and decide the delimiter-collision rule now.** Both are key-space losses independent of value typing, and ferry inherits flat string keys from xload. Measured: viper destroys two of three case-variant keys; koanf's `Flatten` resolves `{"a.b":1}` against `{"a":{"b":2}}` nondeterministically (255/45 over 300 runs).
+
+Worth stealing from slog's `LogValuer` (`value.go:487-516`) if ferry adds lazy values for secret backends: resolution is **iterative not recursive**, bounded at 100 hops, and `recover()`s a panicking implementation into an error value rather than crashing the caller.
+Worth stealing from `cty`'s marks (`marks.go:11-26`) if ferry ever handles secrets: a marked value is deliberately made **unusable** by the normal integration methods, so callers cannot silently drop the mark on a round trip.
 
 Two further rules fall out of the survey, and both are about **not** copying the fast models:
 
 - **ferry's `Value` must be self-describing.** `protoreflect.Value` is only interpretable alongside its `FieldDescriptor`. ferry hands values to third-party backends that do not have the schema, so this is disqualifying.
 - **Accessors must not panic.** `cty` and `protoreflect` both panic on type mismatch and both document it as intentional, because their callers are compilers and runtimes that type-check first. ferry's callers are backend authors. Return `(T, bool)` or an error.
 
-**Verification status.** `driver.Value`, `sql.Null[T]`, and `slog.Value` were read directly from `$(go env GOROOT)/src` on go1.26.5 and are quoted above.
-`cty` (`value.go`, `unknown.go`, `capsule.go`) and `protoreflect` (`value_union.go`, `value_unsafe.go`) were cloned and read in this session; the quoted declarations and doc comments are verbatim.
-The `starlark.Value` and `koanf`/`viper` characterisations are **not** freshly audited here - they rest on those projects' documented designs and prior reading, and the koanf caching claims in section 2 (which were audited) are consistent with them.
-If the `starlark` optional-interface pattern ends up load-bearing in an ADR, re-read `starlark/value.go` first.
+**Verification status.**
+`driver.Value`, `sql.Null[T]`, `slog.Value`, `encoding/json`, and `encoding/json/v2` were read from `$(go env GOROOT)/src` on go1.26.5 and are quoted verbatim.
+`cty`, `protoreflect`, `structpb`, `koanf`, `viper`, `cast`, `pgx`, `yaml.v3`, `go-toml/v2`, `mapstructure`, and `otel` were read from shallow clones taken 2026-07-31; declarations and doc comments above are verbatim.
+Measurements marked as measured were executed on darwin/arm64, go1.26.5.
+
+Known gaps, stated rather than papered over:
+
+- **`starlark.Value`**: interface declarations and package doc only. Nothing verified on its `Int` representation, `Freeze` cost, or serialization. If the optional-interface pattern becomes load-bearing in an ADR, re-read `starlark/value.go` first.
+- **`cty`**: `convert/`, `gocty/`, and `msgpack/` were not read line by line, so the `gocty` ergonomics and msgpack precision claims are structural inference.
+- **`protobuf`**: `types/dynamicpb` not read at all.
+- The otel container-allocation figures are second-hand within this research; the 48-byte size is measured directly.
 
 ## 5. Concrete rewrite candidates in xload's design
 
@@ -1251,15 +1479,30 @@ If ferry keeps a concurrent mode, the walk takes a scheduler, and the equivalenc
 **Cost.** One indirect call per leaf, and a concurrent path that is harder to reason about in isolation.
 Worth it.
 
-### 4. Let values cross the plane boundary typed, and make absence expressible.
+### 4. Let values cross the boundary typed, but store scalars as source text, and justify it on Dump.
 
 The reproduced YAML-list-becomes-empty-string bug (5.8) and the `required` conflation (5.1) are the same root cause.
-Recommend a **closed struct-based tagged union** in the `log/slog.Value` shape, with comma-ok for absence: `Get(ctx, key) (Value, bool, error)`.
+Recommend a **closed struct union in the `slog.Value` shape whose scalar leaf holds the source text**, with an escape arm, a group arm, and comma-ok for absence: `Get(ctx, key) (Value, bool, error)`.
 
-**Cost.** A closed type set means ferry owns the value taxonomy forever, and a backend with a type ferry did not anticipate has to lossily project into it.
-Mitigate with an explicit opaque/foreign arm (the `cty.Capsule` idea) rather than pretending the set is complete.
-A struct union also costs more to construct than a bare `any`.
-See section 4 for the full comparison; this is the decision with the most downstream consequence and it deserves its own ADR.
+Three corrections to the obvious version of this, all forced by evidence in section 4:
+
+- **Store text, not machine numbers.** Every lossless design converged on tagged text, including `encoding/json/v2`, whose 2026 answer to precision is still "quote it as a string". A native numeric leaf recreates `structpb`'s `float64` bug.
+- **Justify it on Dump.** Load survives a string boundary because the struct field type drives parsing; Dump cannot, because the sink must choose a representation. Measured: a typed dump-then-load round trip is exact, a stringified one is permanently wrong. Do not sell this as a Load-side win, because it mostly is not.
+- **Do not sell it on performance.** Measured 27 ns to read a tagged string versus 2 ns for a packed union: 2.7 microseconds at 100 keys, once, at startup. The libraries that packed natively did so for per-request hot paths.
+
+**Cost.** ferry owns the taxonomy forever, and backend authoring gets harder than xload's one-method interface.
+The bar to beat is known: koanf's 20 providers are 31-246 lines, median ~120, off a two-method interface.
+Note also that a typed boundary buys **nothing** for Consul, env vars, or query params, which know only bytes (section 4 premise check) - and query params are xload's pitched hot path.
+This is the decision with the most downstream consequence and it deserves its own ADR.
+
+### 4b. Three-state presence, one conversion authority, and errors that surface.
+
+Independent of which value model wins:
+`absent` is not `null` is not `""`;
+the struct path and any accessor path must share one conversion implementation (viper's two engines give two different answers for one key, one silently);
+and conversion must return errors rather than swallowing them.
+Measured: koanf's `Int64()` turns `18446744073709551615` into `9223372036854775807` with a nil error, while its `String()` is lossless.
+**A typed boundary does not fix a bad accessor**, so do not let the value-model work substitute for this.
 
 ### 5. Aggregate errors, sort them, and use `errors.AsType`.
 
@@ -1295,6 +1538,15 @@ Because ferry knows the entire key set from the compiled schema **before any I/O
 
 **Cost.** Every backend implementor must be able to enumerate or accept a key list, which some (Vault, dynamic secret stores) will not want.
 Recommend the per-key interface as the required one and the batch form as an optional interface upgrade, with in-load memoisation always on.
+Keep the required interface small: koanf gets 20 providers off two methods, and that is the adoption bar.
+
+### 8b. Ship a conformance suite for the backend contract, and fix the flat key space.
+
+Any obligation the compiler cannot check needs a test that can.
+slog's `Handler` is four methods carrying six unchecked prose rules, and what makes it survivable is `testing/slogtest`'s 17 explained conformance cases.
+Separately, flat string keys are lossy on their own terms, before any value-typing question: measured, koanf's `Flatten` resolves a collision between `{"a.b":1}` and `{"a":{"b":2}}` nondeterministically (255/45 over 300 runs), and viper destroys two of three case-variant keys silently.
+ferry inherits flat keys from xload.
+**Decide the collision rule and the case rule explicitly, and never fold case.**
 
 ### 9. Do not build on `encoding/json/v2`, but do track it.
 
