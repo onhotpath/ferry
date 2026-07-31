@@ -3,8 +3,9 @@
 Research ticket: xload was designed before Go had generics.
 What can ferry's API do that xload could not?
 
-All measurements below were taken on this machine (Apple M1 Pro, `go1.26.5 darwin/arm64`) against `github.com/gojekfarm/xtools/xload@latest`.
-Reproduction code for each is described inline.
+All measurements below were taken on this machine (Apple M1 Pro, `go1.26.5 darwin/arm64`) against `github.com/gojekfarm/xtools/xload` at commit [`a90b3aa`](https://github.com/gojekfarm/xtools/commit/a90b3aad2133248cec50f6b4d6e37b0d9e788adb).
+Every source link in this document is a permalink to that same commit, so the quoted line numbers stay correct as xtools moves on.
+Reproduction code for each measurement is described inline.
 
 ## Summary
 
@@ -55,24 +56,24 @@ The only way to remove reflection from the walk is code generation, which is a d
 ### Where type parameters genuinely help
 
 **(a) `Load[T]` deletes an error case.**
-xload's entry point is `Load(ctx context.Context, v any, opts ...Option) error` ([load.go:37](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L37)), which immediately does two runtime kind checks and can return `ErrNotPointer` ([load.go:74-76](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L74-L76)) or `ErrNotStruct` ([load.go:79-81](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L79-L81)).
-A signature of `Load[T any](ctx context.Context, dst *T, opts ...Option) error` makes `ErrNotPointer` structurally impossible: one of xload's three package-level sentinels ([load.go:15-22](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L15-L22)) stops existing.
+xload's entry point is `Load(ctx context.Context, v any, opts ...Option) error` ([load.go:37](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L37)), which immediately does two runtime kind checks and can return `ErrNotPointer` ([load.go:74-76](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L74-L76)) or `ErrNotStruct` ([load.go:79-81](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L79-L81)).
+A signature of `Load[T any](ctx context.Context, dst *T, opts ...Option) error` makes `ErrNotPointer` structurally impossible: one of xload's three package-level sentinels ([load.go:15-22](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L15-L22)) stops existing.
 `ErrNotStruct` survives, per the constraint limitation above.
 This is a small win but it is real and free.
 
 **(b) `reflect.TypeFor[T]()` removes the value-to-type detour and enables value-free compilation.**
-xload can only reach the type through a value: `reflect.ValueOf(obj)` then `.Elem().Type()` ([load.go:72-83](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L72-L83)).
+xload can only reach the type through a value: `reflect.ValueOf(obj)` then `.Elem().Type()` ([load.go:72-83](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L72-L83)).
 `reflect.TypeFor[T]()` ([reflect/type.go:1388](https://cs.opensource.google/go/go/+/refs/tags/go1.26.0:src/reflect/type.go) in go1.26.5, added in Go 1.22) gives the `reflect.Type` from the type parameter with no value at all.
 That matters for more than tidiness: it means a schema can be compiled, validated, and cached at construction time rather than on first load, so a `ferry.New[Config](...)` constructor can return tag-grammar errors *before* any I/O happens.
-xload cannot do this - a malformed tag such as an unknown option is only discovered mid-walk, on the first `Load`, after some fields have already been set ([load.go:100-103](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L100-L103) calling [parseField](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L218)).
+xload cannot do this - a malformed tag such as an unknown option is only discovered mid-walk, on the first `Load`, after some fields have already been set ([load.go:100-103](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L100-L103) calling [parseField](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L218)).
 
 `reflect.Type` values are comparable and canonical (identical types yield identical `Type` values), verified locally: `reflect.TypeFor[S]() == reflect.TypeOf(S{})` is `true`.
 That is what makes them safe map keys for a schema cache, and it means there is no invalidation problem - a `reflect.Type` never changes meaning.
 
 **(c) Typed decoder/encoder registration moves the `any` to registration time.**
-xload's extension point is `Decoder interface { Decode(string) error }` ([load.go:403-406](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L403-L406)), discovered by a five-arm type switch on `field.Interface()` executed **per field, per call** ([load.go:414-439](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L414-L439)), plus a second near-identical switch in `hasDecoder` on the async path ([async.go:222-235](https://github.com/gojekfarm/xtools/blob/main/xload/async.go#L222-L235)).
+xload's extension point is `Decoder interface { Decode(string) error }` ([load.go:403-406](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L403-L406)), discovered by a five-arm type switch on `field.Interface()` executed **per field, per call** ([load.go:414-439](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L414-L439)), plus a second near-identical switch in `hasDecoder` on the async path ([async.go:222-235](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/async.go#L222-L235)).
 The precedence order (`Decoder` > `encoding.TextUnmarshaler` > `json.Unmarshaler` > `encoding.BinaryUnmarshaler` > `gob.GobDecoder`) is hardcoded and not configurable.
-There is no way at all to register a decoder for a type you do not own: `time.Duration` is handled by a **string comparison on the type name**, `if ty.String() == "time.Duration"` ([load.go:301](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L301)).
+There is no way at all to register a decoder for a type you do not own: `time.Duration` is handled by a **string comparison on the type name**, `if ty.String() == "time.Duration"` ([load.go:301](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L301)).
 
 With generics the user-facing API becomes typed and compile-time checked:
 
@@ -258,7 +259,7 @@ This recurs in every high-quality library and it is the single most transferable
 - `validator` stores `cTag.fn FuncCtx` - the validator function pointer resolved at parse time ([cache.go:87-101](https://github.com/go-playground/validator/blob/master/cache.go#L87-L101)).
 - `goccy/go-json` compiles an entire opcode program per type.
 
-This maps directly onto xload's worst hot-path cost: the five-arm interface type switch in `decode` run per field per call ([load.go:424-435](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L424-L435)).
+This maps directly onto xload's worst hot-path cost: the five-arm interface type switch in `decode` run per field per call ([load.go:424-435](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L424-L435)).
 Resolved once at compile time it becomes a stored function pointer and a nil check.
 
 Adjacent precomputation tricks worth stealing from `json/v2`'s `fields.go`:
@@ -671,7 +672,7 @@ The relevant takeaways for ferry are design patterns, not imports:
   Known gap: [#73457](https://go.dev/issue/73457) (register by runtime `reflect.Type` rather than static type parameter) is still open, so json/v2 cannot do dynamic registration. ferry probably needs both.
 - `omitzero` is evaluated *before* the marshaler runs; `omitempty` may require marshalling then unwriting.
   If ferry supports both, copy that asymmetry.
-- The v2 options model is worth studying for ferry's own option plumbing: one `Options` type shared across both packages and both directions, later options override earlier, variadic `...Options` on every entry point, and - the thing v1 structurally could not do - options are **threaded down the call stack and readable inside user methods** via `Encoder.Options()` / `Decoder.Options()`. xload's `options` struct is package-private and invisible to a user's `Decode` method ([options.go:37-42](https://github.com/gojekfarm/xtools/blob/main/xload/options.go#L37-L42)); ferry should decide deliberately whether a user codec can see the load options.
+- The v2 options model is worth studying for ferry's own option plumbing: one `Options` type shared across both packages and both directions, later options override earlier, variadic `...Options` on every entry point, and - the thing v1 structurally could not do - options are **threaded down the call stack and readable inside user methods** via `Encoder.Options()` / `Decoder.Options()`. xload's `options` struct is package-private and invisible to a user's `Decode` method ([options.go:37-42](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/options.go#L37-L42)); ferry should decide deliberately whether a user codec can see the load options.
 
 Design decisions from the [json/v2 discussion document](https://github.com/golang/go/discussions/63397) that transfer directly:
 
@@ -1119,7 +1120,7 @@ The reasoning, and note that the "store text" part is a change of position force
 
 **Six things to do regardless of which model wins:**
 
-1. **Three-state presence is non-negotiable.** `absent` is not `null` is not `""`. xload conflates all three at [load.go:147](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L147); viper drops `null` entirely. This is the single most valuable thing the new boundary buys.
+1. **Three-state presence is non-negotiable.** `absent` is not `null` is not `""`. xload conflates all three at [load.go:147](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L147); viper drops `null` entirely. This is the single most valuable thing the new boundary buys.
 2. **Numbers as source text, parsed at the destination where the target type is known, returning an error.** Never `float64` in the middle.
 3. **One conversion authority.** Viper's `Get*`-versus-`Unmarshal` split produces two different answers for one key, one of them silent. If ferry ships both a struct path and an accessor path, they must share one code path.
 4. **Separate the tree walk from the leaf switch**, as slog does (`handler.go:476-531` resolves `LogValuer` and recurses `KindGroup`, so `appendJSONValue` only ever sees 8 of 10 kinds). This roughly halves what a backend author writes.
@@ -1153,11 +1154,11 @@ Every item cites the xload file and line, and the ones marked **reproduced** wer
 
 ### 5.1 The `Loader` signature cannot express absence
 
-[loader.go:9-11](https://github.com/gojekfarm/xtools/blob/main/xload/loader.go#L9-L11) is `Load(ctx context.Context, key string) (string, error)`.
-`OSLoader` collapses a missing variable to the empty string ([loader.go:27-36](https://github.com/gojekfarm/xtools/blob/main/xload/loader.go#L27-L36)), and so does `MapLoader` ([maps.go:16-23](https://github.com/gojekfarm/xtools/blob/main/xload/maps.go#L16-L23)).
-The consequences propagate everywhere: `required` is implemented as `val == "" && meta.required` ([load.go:147](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L147), [load.go:195](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L195), [async.go:180](https://github.com/gojekfarm/xtools/blob/main/xload/async.go#L180)), `setVal` silently no-ops on empty ([load.go:267-269](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L267-L269)), and `decode` refuses to hand an empty string to a decoder at all ([load.go:415-417](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L415-L417)).
+[loader.go:9-11](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/loader.go#L9-L11) is `Load(ctx context.Context, key string) (string, error)`.
+`OSLoader` collapses a missing variable to the empty string ([loader.go:27-36](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/loader.go#L27-L36)), and so does `MapLoader` ([maps.go:16-23](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/maps.go#L16-L23)).
+The consequences propagate everywhere: `required` is implemented as `val == "" && meta.required` ([load.go:147](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L147), [load.go:195](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L195), [async.go:180](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/async.go#L180)), `setVal` silently no-ops on empty ([load.go:267-269](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L267-L269)), and `decode` refuses to hand an empty string to a decoder at all ([load.go:415-417](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L415-L417)).
 So `FOO=""` cannot satisfy a `required` field, and a custom decoder can never be asked to interpret the empty string.
-The `cached` provider had to invent a *different* interface, `Get(key string) (*string, error)`, precisely to express the third state, and its doc comment says so outright ([providers/cached/cache.go:8-18](https://github.com/gojekfarm/xtools/blob/main/xload/providers/cached/cache.go#L8-L18)).
+The `cached` provider had to invent a *different* interface, `Get(key string) (*string, error)`, precisely to express the third state, and its doc comment says so outright ([providers/cached/cache.go:8-18](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/providers/cached/cache.go#L8-L18)).
 
 **Trade-off for ferry.**
 Any signature that can express absence costs the backend implementor something.
@@ -1168,10 +1169,10 @@ Recommend comma-ok.
 
 ### 5.2 Two walks that have already diverged - **reproduced**
 
-[load.go:71-207](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L71-L207) (`doProcess`) and [async.go:59-161](https://github.com/gojekfarm/xtools/blob/main/xload/async.go#L59-L161) (`processAsync`) are the same walk written twice.
+[load.go:71-207](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L71-L207) (`doProcess`) and [async.go:59-161](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/async.go#L59-L161) (`processAsync`) are the same walk written twice.
 They are not equivalent.
-The sync path enters the struct-with-a-key branch on `meta.key != ""` ([load.go:141](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L141)); the async path additionally requires `hasDecoder(fVal)` ([async.go:122](https://github.com/gojekfarm/xtools/blob/main/xload/async.go#L122)).
-The sync path also has a `val == "" && isNilStructPtr` escape ([load.go:151-153](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L151-L153)) that the async path lacks entirely.
+The sync path enters the struct-with-a-key branch on `meta.key != ""` ([load.go:141](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L141)); the async path additionally requires `hasDecoder(fVal)` ([async.go:122](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/async.go#L122)).
+The sync path also has a `val == "" && isNilStructPtr` escape ([load.go:151-153](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L151-L153)) that the async path lacks entirely.
 The net effect is that when a struct field carries both a key and a `Decode` method and that key resolves to empty, the sync path falls through and recurses into the nested fields while the async path skips them:
 
 ```go
@@ -1197,8 +1198,8 @@ Adding `xload.Concurrency(4)` silently changes the answer and reports no error.
 That is the strongest single argument in this document for writing the walk exactly once.
 
 **And xload does have a test for exactly this, which structurally cannot catch it.**
-[load_test.go:755-777](https://github.com/gojekfarm/xtools/blob/main/xload/load_test.go#L755-L777) runs every table case twice, once serially and once with `Concurrency(5)`, asserting the same `tc.want`.
-But `input` is `any` ([load_test.go:18](https://github.com/gojekfarm/xtools/blob/main/xload/load_test.go#L18)) holding a **pointer** to a struct built once in the table literal, and the same pointer is passed to both subtests.
+[load_test.go:755-777](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load_test.go#L755-L777) runs every table case twice, once serially and once with `Concurrency(5)`, asserting the same `tc.want`.
+But `input` is `any` ([load_test.go:18](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load_test.go#L18)) holding a **pointer** to a struct built once in the table literal, and the same pointer is passed to both subtests.
 The serial subtest populates it; the concurrent subtest then loads into an already-populated struct and asserts against `tc.want`.
 Any field the concurrent path fails to set is still correct, because the serial path set it a moment earlier.
 The equivalence test passes by construction.
@@ -1213,10 +1214,10 @@ Write it once.
 
 ### 5.3 No schema caching - measured
 
-Both walks call `reflect.Type.Field(i)`, `Tag.Get`, and `parseField` for every field on every call ([load.go:85-103](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L85-L103), [async.go:77-95](https://github.com/gojekfarm/xtools/blob/main/xload/async.go#L77-L95)).
-`parseField` does `strings.Split(tag, ",")` per field per call ([load.go:219](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L219)).
-`decode` runs a five-arm interface type switch per field per call ([load.go:424-435](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L424-L435)).
-`PrefixLoader` allocates a fresh closure per nested struct per call ([loader.go:20-24](https://github.com/gojekfarm/xtools/blob/main/xload/loader.go#L20-L24), called at [load.go:172](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L172)).
+Both walks call `reflect.Type.Field(i)`, `Tag.Get`, and `parseField` for every field on every call ([load.go:85-103](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L85-L103), [async.go:77-95](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/async.go#L77-L95)).
+`parseField` does `strings.Split(tag, ",")` per field per call ([load.go:219](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L219)).
+`decode` runs a five-arm interface type switch per field per call ([load.go:424-435](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L424-L435)).
+`PrefixLoader` allocates a fresh closure per nested struct per call ([loader.go:20-24](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/loader.go#L20-L24), called at [load.go:172](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L172)).
 
 Benchmarked against a 12-key struct with two prefixed nested structs, backed by an in-memory `MapLoader` so essentially all cost is the walk:
 
@@ -1234,7 +1235,7 @@ The prototype does not implement the decoder chain, pointer-to-struct initialisa
 Adding those back will cost some of the gap.
 But the expensive ones get *cheaper* under compilation, not more expensive: "does this field have a decoder" is resolved once at compile time into a stored function pointer instead of five interface assertions per call, and prefixes are folded into full keys at compile time instead of a closure per nested struct per call.
 
-Also note that collision detection alone costs 21% of the runtime and 6 allocations ([load.go:52-61](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L52-L61) wraps the loader in a counting closure), and it is *on by default* ([options.go:49](https://github.com/gojekfarm/xtools/blob/main/xload/options.go#L49)).
+Also note that collision detection alone costs 21% of the runtime and 6 allocations ([load.go:52-61](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L52-L61) wraps the loader in a counting closure), and it is *on by default* ([options.go:49](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/options.go#L49)).
 With a compiled schema, key collisions are a property of the schema and can be detected **once at compile time, for free**, rather than by instrumenting every load.
 
 **Trade-off for ferry.**
@@ -1245,7 +1246,7 @@ A program that manufactures types at runtime via `reflect.StructOf` would leak; 
 ### 5.4 First error only, no aggregation - **reproduced**
 
 Every error path in both walks is `return err` on the first failure.
-There is no `errors.Join` anywhere in the package, and no error type implements `Unwrap() []error` ([errors.go](https://github.com/gojekfarm/xtools/blob/main/xload/errors.go) in full).
+There is no `errors.Join` anywhere in the package, and no error type implements `Unwrap() []error` ([errors.go](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/errors.go) in full).
 With three fields that all fail to parse:
 
 ```
@@ -1292,7 +1293,7 @@ That needs to be an explicit, documented policy (ferry should say: on error, the
 
 ### 5.5 Nondeterministic error output - **reproduced**
 
-`collisionMap.err` ranges over a Go map ([collision.go:44](https://github.com/gojekfarm/xtools/blob/main/xload/collision.go#L44)) and `collisionSyncMap.err` ranges over a `sync.Map` ([collision.go:22](https://github.com/gojekfarm/xtools/blob/main/xload/collision.go#L22)); neither sorts.
+`collisionMap.err` ranges over a Go map ([collision.go:44](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/collision.go#L44)) and `collisionSyncMap.err` ranges over a `sync.Map` ([collision.go:22](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/collision.go#L22)); neither sorts.
 40 runs of an identical input produced three different messages:
 
 ```
@@ -1301,13 +1302,13 @@ That needs to be an explicit, documented policy (ferry should say: on error, the
   2 x xload: key collisions detected for keys: [I K J]
 ```
 
-`ErrCollision.Keys()` ([errors.go:74-79](https://github.com/gojekfarm/xtools/blob/main/xload/errors.go#L74-L79)) copies the slice but does not sort it either.
+`ErrCollision.Keys()` ([errors.go:74-79](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/errors.go#L74-L79)) copies the slice but does not sort it either.
 Fix is one `slices.Sort` call.
 Since ferry needs deterministic **dump** output as a first-class property, treat determinism as a package-wide invariant rather than a per-site fix: every map iteration that reaches a user-visible artifact gets sorted.
 
 ### 5.6 Lost-update race in the concurrent collision counter
 
-[collision.go:9-16](https://github.com/gojekfarm/xtools/blob/main/xload/collision.go#L9-L16):
+[collision.go:9-16](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/collision.go#L9-L16):
 
 ```go
 v, loaded := m.LoadOrStore(key, 1)
@@ -1324,13 +1325,13 @@ An `atomic.Int64` per entry, or simply doing collision detection at schema-compi
 
 ### 5.7 `reflect.DeepEqual` used as a "was anything set?" probe
 
-[load.go:107-117](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L107-L117) and its async twin [async.go:163-171](https://github.com/gojekfarm/xtools/blob/main/xload/async.go#L163-L171) allocate a fresh zero value with `reflect.New(...).Interface()` and `reflect.DeepEqual` it against the populated struct to decide whether to write back a nil struct pointer.
+[load.go:107-117](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L107-L117) and its async twin [async.go:163-171](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/async.go#L163-L171) allocate a fresh zero value with `reflect.New(...).Interface()` and `reflect.DeepEqual` it against the populated struct to decide whether to write back a nil struct pointer.
 This is expensive (an allocation plus a recursive deep comparison per nil-struct-pointer field per load) and semantically wrong: a nested struct that was legitimately loaded to all-zero values is indistinguishable from one that was never touched, so the pointer is left nil.
 Threading a `bool` "any leaf was set" through the walk is cheaper and correct.
 
 ### 5.8 Type information destroyed at the boundary - **reproduced**
 
-[maps.go:33-47](https://github.com/gojekfarm/xtools/blob/main/xload/maps.go#L33-L47) flattens `map[string]any` to `map[string]string` with `cast.ToString(value)` in the default arm.
+[maps.go:33-47](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/maps.go#L33-L47) flattens `map[string]any` to `map[string]string` with `cast.ToString(value)` in the default arm.
 `cast.ToString` swallows its error.
 Running `FlattenMap` over a realistic YAML shape:
 
@@ -1344,37 +1345,37 @@ servers    => ""
 
 A YAML list becomes the **empty string**, silently.
 A YAML `null` is indistinguishable from an empty string.
-The YAML provider is built directly on this ([providers/yaml/yaml.go:36-50](https://github.com/gojekfarm/xtools/blob/main/xload/providers/yaml/yaml.go#L36-L50)), so `servers: [a, b]` in a config file loads as nothing with no error.
+The YAML provider is built directly on this ([providers/yaml/yaml.go:36-50](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/providers/yaml/yaml.go#L36-L50)), so `servers: [a, b]` in a config file loads as nothing with no error.
 This is the single strongest argument for typed values at the plane boundary (section 4): the YAML backend already knew it had a sequence and was forced to throw that away.
 
 ### 5.9 The decoder chain is fixed, one-directional, and context-free
 
-[load.go:403-439](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L403-L439).
+[load.go:403-439](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L403-L439).
 Problems, in order of importance to ferry:
 
 - No `Encode` counterpart at all. ferry is bidirectional; this interface has to be designed as a pair from day one.
-  Note that `xloadtype` already grew accidental encoders - `URL.String()`, `Listener.String()`, `Endpoint.String()` ([type/url.go:12](https://github.com/gojekfarm/xtools/blob/main/xload/type/url.go#L12), [type/listener.go:14](https://github.com/gojekfarm/xtools/blob/main/xload/type/listener.go#L14), [type/endpoint.go:15](https://github.com/gojekfarm/xtools/blob/main/xload/type/endpoint.go#L15)) - unspecified, untested as a round trip, and not used by the library.
+  Note that `xloadtype` already grew accidental encoders - `URL.String()`, `Listener.String()`, `Endpoint.String()` ([type/url.go:12](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/type/url.go#L12), [type/listener.go:14](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/type/listener.go#L14), [type/endpoint.go:15](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/type/endpoint.go#L15)) - unspecified, untested as a round trip, and not used by the library.
 - Precedence is hardcoded and undocumented as a policy: `Decoder` > `TextUnmarshaler` > `json.Unmarshaler` > `BinaryUnmarshaler` > `GobDecoder`. A type implementing both `json.Unmarshaler` and `BinaryUnmarshaler` gets JSON, arbitrarily.
-- No way to register a decoder for a type you do not own. `time.Duration` is special-cased by **type name string comparison**, `ty.String() == "time.Duration"` ([load.go:301](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L301)), which also silently misfires for any user type named `Duration` in a package named `time`.
+- No way to register a decoder for a type you do not own. `time.Duration` is special-cased by **type name string comparison**, `ty.String() == "time.Duration"` ([load.go:301](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L301)), which also silently misfires for any user type named `Duration` in a package named `time`.
 - `Decode(string) error` takes no `context.Context` even though the whole walk is context-carrying.
-- Decoders never see an empty input ([load.go:415-417](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L415-L417)).
+- Decoders never see an empty input ([load.go:415-417](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L415-L417)).
 
 **Trade-off for ferry.**
 Typed registration (section 1c) plus a documented, overridable precedence list costs more API surface than "implement this one interface", but it is the difference between a library you can extend and one you have to fork.
 
 ### 5.10 Composite values are string-splitting, and it is not escapable
 
-`setVal` handles maps by `strings.Split(val, meta.delimiter)` then `strings.Split(v, meta.separator)` ([load.go:343-372](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L343-L372)) and slices by a single `strings.Split` ([load.go:374-394](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L374-L394)).
+`setVal` handles maps by `strings.Split(val, meta.delimiter)` then `strings.Split(v, meta.separator)` ([load.go:343-372](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L343-L372)) and slices by a single `strings.Split` ([load.go:374-394](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L374-L394)).
 There is no escaping, so a value containing the delimiter is unrepresentable.
-Nested maps, slices of structs, and arrays are all unsupported and fall to `ErrUnknownFieldType` ([load.go:396-397](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L396-L397)).
-The tag grammar has the same problem: `parseField` splits the tag on `,` ([load.go:219](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L219)), so `env:"K,delimiter=,"` cannot be written.
+Nested maps, slices of structs, and arrays are all unsupported and fall to `ErrUnknownFieldType` ([load.go:396-397](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L396-L397)).
+The tag grammar has the same problem: `parseField` splits the tag on `,` ([load.go:219](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L219)), so `env:"K,delimiter=,"` cannot be written.
 
 If ferry's boundary carries typed values, a backend that natively has a list (YAML, JSON, Consul-with-JSON) hands over a list and none of this arises.
 String splitting stays as the fallback for genuinely flat planes such as environment variables.
 
 ### 5.11 The YAML provider silently discards parse errors - **reproduced**
 
-[providers/yaml/yaml.go:18-29](https://github.com/gojekfarm/xtools/blob/main/xload/providers/yaml/yaml.go#L18-L29):
+[providers/yaml/yaml.go:18-29](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/providers/yaml/yaml.go#L18-L29):
 
 ```go
 func NewFileLoader(path, sep string) (_ xload.MapLoader, err error) {
@@ -1399,7 +1400,7 @@ This is a one-line `errors.Join(err, f.Close())` fix (section 3), and it is wort
 
 ### 5.12 `SerialLoader` precedence is unexpressible
 
-[loader.go:40-57](https://github.com/gojekfarm/xtools/blob/main/xload/loader.go#L40-L57) is "last non-empty value wins".
+[loader.go:40-57](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/loader.go#L40-L57) is "last non-empty value wins".
 It queries **every** loader for **every** key, so N backends means N round trips per key even when the first one answered.
 And because empty means absent (5.1), a later, higher-priority source can never override an earlier value back to empty.
 
@@ -1418,11 +1419,11 @@ SerialLoader over 3 backends, 2 fields:     2 2 2
 ```
 
 Two struct fields tagged with the same key produce two backend calls.
-Wrap three backends in a `SerialLoader` and a 2-field struct produces **6** backend calls, because `SerialLoader` queries every loader for every key with no short-circuit ([loader.go:44-52](https://github.com/gojekfarm/xtools/blob/main/xload/loader.go#L44-L52)).
+Wrap three backends in a `SerialLoader` and a 2-field struct produces **6** backend calls, because `SerialLoader` queries every loader for every key with no short-circuit ([loader.go:44-52](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/loader.go#L44-L52)).
 For an in-process map that is irrelevant.
 For Consul, Vault, or an HTTP config service it is `fields x backends` network round trips per load.
 
-The `cached` provider exists precisely to paper over this ([providers/cached/loader.go:20-42](https://github.com/gojekfarm/xtools/blob/main/xload/providers/cached/loader.go#L20-L42)), but it caches with a **TTL across loads**, which is a different and weaker thing than deduplicating within one load: it trades correctness (stale reads) for a problem that is really a shape problem.
+The `cached` provider exists precisely to paper over this ([providers/cached/loader.go:20-42](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/providers/cached/loader.go#L20-L42)), but it caches with a **TTL across loads**, which is a different and weaker thing than deduplicating within one load: it trades correctness (stale reads) for a problem that is really a shape problem.
 
 **Trade-off for ferry.**
 Three options, and this is a genuine fork in the design:
@@ -1436,10 +1437,10 @@ That is a capability xload structurally cannot have, and it is arguably a bigger
 
 ### 5.14 Minor, but worth not carrying over
 
-- Two ways to set the loader: `WithLoader` ([options.go:20-22](https://github.com/gojekfarm/xtools/blob/main/xload/options.go#L20-L22)) and `LoaderFunc.apply` / `MapLoader.apply` ([loader.go:59](https://github.com/gojekfarm/xtools/blob/main/xload/loader.go#L59), [maps.go:31](https://github.com/gojekfarm/xtools/blob/main/xload/maps.go#L31)) make some loaders directly usable as options and others not.
-- `for fVal.CanAddr() { fVal = fVal.Addr() }` ([load.go:135-137](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L135-L137), [load.go:419-421](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L419-L421), [async.go:223-225](https://github.com/gojekfarm/xtools/blob/main/xload/async.go#L223-L225)) is written as a loop but can only ever execute once, since `Addr()` returns a non-addressable pointer. Harmless, but it signals uncertainty about the reflection model.
-- `doProcessConcurrently` ([async.go:40-56](https://github.com/gojekfarm/xtools/blob/main/xload/async.go#L40-L56)) selects between `ctx.Done()` and a `doneCh` that is already ready by the time the select runs, so on a cancelled context the returned error is chosen non-deterministically between `ctx.Err()` and the pool's error.
-- Errors are declared with **value** receivers on `Error()` ([errors.go:11](https://github.com/gojekfarm/xtools/blob/main/xload/errors.go#L11)) but returned as **pointers** ([load.go:148](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L148)), so both `ErrRequired` and `*ErrRequired` satisfy `error` and only one of them is ever actually returned. Reproduced:
+- Two ways to set the loader: `WithLoader` ([options.go:20-22](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/options.go#L20-L22)) and `LoaderFunc.apply` / `MapLoader.apply` ([loader.go:59](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/loader.go#L59), [maps.go:31](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/maps.go#L31)) make some loaders directly usable as options and others not.
+- `for fVal.CanAddr() { fVal = fVal.Addr() }` ([load.go:135-137](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L135-L137), [load.go:419-421](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L419-L421), [async.go:223-225](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/async.go#L223-L225)) is written as a loop but can only ever execute once, since `Addr()` returns a non-addressable pointer. Harmless, but it signals uncertainty about the reflection model.
+- `doProcessConcurrently` ([async.go:40-56](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/async.go#L40-L56)) selects between `ctx.Done()` and a `doneCh` that is already ready by the time the select runs, so on a cancelled context the returned error is chosen non-deterministically between `ctx.Err()` and the pool's error.
+- Errors are declared with **value** receivers on `Error()` ([errors.go:11](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/errors.go#L11)) but returned as **pointers** ([load.go:148](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L148)), so both `ErrRequired` and `*ErrRequired` satisfy `error` and only one of them is ever actually returned. Reproduced:
 
   ```
   errors.As(err, &pe) where pe *xload.ErrRequired  -> true
@@ -1526,7 +1527,7 @@ Negligible, and worth it for reproducible diffs of dumped config.
 
 Copy `encoding/json/v2`'s `MarshalToFunc[T]` / `UnmarshalFromFunc[T]` / `JoinMarshalers` shape: typed at registration, resolved once, with a `SkipFunc`-style decline-and-fall-through and a **documented, overridable** precedence chain.
 This is where generics genuinely pay (1c).
-Never do what xload does at [load.go:301](https://github.com/gojekfarm/xtools/blob/main/xload/load.go#L301) and identify a type by comparing `Type.String()` to `"time.Duration"`.
+Never do what xload does at [load.go:301](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L301) and identify a type by comparing `Type.String()` to `"time.Duration"`.
 
 **Cost.** More API surface than "implement this one interface".
 Also: json/v2 still cannot register by runtime `reflect.Type` ([#73457](https://go.dev/issue/73457) open), and ferry probably needs both static and dynamic registration, which is more surface again.
