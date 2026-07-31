@@ -791,15 +791,62 @@ Also note `_ [0]func()` deliberately makes `Value` non-comparable, which foreclo
 #### (c) Full type system with a type/value distinction - `cty`
 
 `github.com/zclconf/go-cty`, the value model under HCL and Terraform.
-This is the maximalist end: values carry a `cty.Type`, there is a `cty.Convert` package, and there are first-class **unknown** values (for plan-time evaluation), **marks** (for tainting values as sensitive), and **capsule types** as the escape hatch for arbitrary Go types.
+The maximalist end.
+`cty/value.go:30-33`:
+
+```go
+type Value struct {
+	ty Type
+	v  any
+}
+```
+
+Every value carries its own `cty.Type`.
+Three features distinguish it:
+
+- **Unknown values.** `UnknownVal(t Type)` (`cty/unknown.go:27`) produces a value that is known to be of type `t` but whose content is not yet determined, with optional **refinements** that narrow the possible range. This exists for Terraform's plan phase.
+- **Marks**, for propagating taint such as "this value is sensitive" through operations.
+- **Capsule types** as the escape hatch: `func Capsule(name string, nativeType reflect.Type) Type` (`cty/capsule.go:79`), plus `CapsuleWithOps` so a capsule can participate in cty operations. This is a **named** escape arm, not a bare `any`.
 
 - **Open or closed.** Closed primitives, extensible via capsule types.
-- **Lossless-ness.** Excellent. It is the only model here that can express "I do not know this value yet", which is a real state for a config system backed by a remote store.
-- **Cost to a new backend.** High. A backend author must learn a whole type algebra before writing a line of mapping code.
+- **Lossless-ness.** Excellent, and it is the only model surveyed that can express "I do not know this value yet".
+- **Cost to a new backend.** High, and higher than it first looks. `cty/convert` alone is around 8000 lines. More importantly, the `Value` doc comment states the operating philosophy plainly: operations "panic if any invariants turn out not to be satisfied. These panic errors are not intended to be handled, but rather indicate a bug in the calling application that should be fixed with more checks prior to executing operations."
+  For ferry, whose backends are written by third parties, a value model that panics on misuse pushes a large correctness burden onto exactly the people who will read the least documentation.
 
-For ferry this is almost certainly too much.
-Unknowns and marks solve problems (deferred plan evaluation, sensitivity propagation) that ferry does not have, and the cost lands entirely on backend implementors, who are the people ferry most needs to keep.
-The one idea worth stealing is **capsule types**: a principled, named escape arm rather than an unlabelled `any`.
+For ferry this is too much.
+Unknowns and marks solve problems (deferred plan evaluation, sensitivity propagation) ferry does not have.
+The one idea worth stealing is **capsule types**: a principled, named escape arm.
+
+#### (c2) Closed union that is only meaningful alongside a descriptor - `protoreflect.Value`
+
+`google.golang.org/protobuf/reflect/protoreflect`.
+Instructive because it is the most performance-tuned closed union in wide use.
+`value_unsafe.go:40-62`:
+
+```go
+// value is a union where only one type can be represented at a time.
+// The struct is 24B large on 64-bit systems and requires the minimum storage
+// necessary to represent each possible type.
+//
+// The Go GC needs to be able to scan variables containing pointers.
+// As such, pointers and non-pointers cannot be intermixed.
+type value struct {
+	pragma.DoNotCompare // 0B
+	typ unsafe.Pointer  // 8B - pointer to the Go type
+	ptr unsafe.Pointer  // 8B - data pointer for String, Bytes, or interface
+	num uint64          // 8B - Bool/Int32/Int64/.../Enum, or the String/Bytes length
+}
+```
+
+Note `pragma.DoNotCompare`, the same non-comparability trick as `slog.Value`'s `_ [0]func()`, and that there is **no pure-Go fallback**: `unsafe` unconditionally.
+
+Two properties matter for ferry:
+
+1. **The value is not self-describing.** `value_union.go` documents that the same Go `int64` represents `Int64Kind`, `Sint64Kind`, and `Sfixed64Kind`, distinguished only by the accompanying `FieldDescriptor`. A `protoreflect.Value` handed around without its descriptor has lost information. That is a real cost: it means the value and the schema must travel together, everywhere.
+2. **Type mismatches panic.** "Converting to/from a Value and a concrete Go value panics on type mismatch. For example, `ValueOf("hello").Int()` panics."
+
+ferry should take the compactness lesson and reject both of these.
+A ferry `Value` handed to a backend must be **self-describing** (the backend does not have the schema), and accessors must return `(T, bool)` or an error rather than panicking.
 
 #### (d) Interface with a small required method set plus optional interfaces - `starlark.Value`
 
@@ -837,7 +884,8 @@ It should be one arm of the union, not the whole design, because it reintroduces
 | --- | --- | --- | --- | --- | --- |
 | `driver.Value` | bare `any`, documented set | closed(ish), 6 types | poor by design | very low | none |
 | `slog.Value` | closed struct union + `Any` arm | closed + escape | good, 3-type carve-out | moderate | `KindGroup` |
-| `cty` | full type system | closed + capsules | excellent | high | native |
+| `cty` | full type system | closed + capsules | excellent, plus unknowns | high, and panics on misuse | native |
+| `protoreflect.Value` | 24B unsafe union | closed, 11 types | only with its descriptor | high, panics on mismatch | via composite kinds |
 | `starlark.Value` | interface + optional interfaces | fully open | good | low to add, high to consume | via interfaces |
 | `map[string]any` | bare `any` | open, unconstrained | poor and backend-dependent | lowest | native but untyped |
 | `json.RawMessage` | opaque bytes | n/a | perfect, deferred | low | deferred |
@@ -860,8 +908,15 @@ Reasons, in order:
 - If ferry copies slog's unsafe-ish packing it inherits slog's contract leak (three Go types unstorable) and non-comparability. **Recommend not copying the packing**: use an explicit `Kind` field. ferry's hot path is dominated by the reflection walk and backend I/O, not by value construction, so the packing buys little here that schema caching does not buy more of.
 - Deferring to `driver.Value`'s "just document the allowed set" would be cheaper for backend authors, but it is precisely what produced the pgx situation, and ferry has no equivalent of a driver ecosystem large enough to route around it.
 
-**Verification gap.** The `cty`, `starlark`, protobuf `protoreflect.Value`, and `koanf` characterisations above are based on their documented designs and my prior reading of those sources, not on a fresh line-by-line audit in this session; the `driver.Value`, `sql.Null[T]`, and `slog.Value` claims were read directly from `$(go env GOROOT)/src` on go1.26.5 and are quoted above.
-Before this becomes an ADR, the `cty` capsule-type and `protoreflect.Value` claims in particular should be re-verified against source, since they are the two I would most want to be precise about.
+Two further rules fall out of the survey, and both are about **not** copying the fast models:
+
+- **ferry's `Value` must be self-describing.** `protoreflect.Value` is only interpretable alongside its `FieldDescriptor`. ferry hands values to third-party backends that do not have the schema, so this is disqualifying.
+- **Accessors must not panic.** `cty` and `protoreflect` both panic on type mismatch and both document it as intentional, because their callers are compilers and runtimes that type-check first. ferry's callers are backend authors. Return `(T, bool)` or an error.
+
+**Verification status.** `driver.Value`, `sql.Null[T]`, and `slog.Value` were read directly from `$(go env GOROOT)/src` on go1.26.5 and are quoted above.
+`cty` (`value.go`, `unknown.go`, `capsule.go`) and `protoreflect` (`value_union.go`, `value_unsafe.go`) were cloned and read in this session; the quoted declarations and doc comments are verbatim.
+The `starlark.Value` and `koanf`/`viper` characterisations are **not** freshly audited here - they rest on those projects' documented designs and prior reading, and the koanf caching claims in section 2 (which were audited) are consistent with them.
+If the `starlark` optional-interface pattern ends up load-bearing in an ADR, re-read `starlark/value.go` first.
 
 ## 5. Concrete rewrite candidates in xload's design
 
