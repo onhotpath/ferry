@@ -23,3 +23,4 @@ Core-eligibility check: `cd proto/core126 && GOTOOLCHAIN=local GOEXPERIMENT=nojs
 | P13 | Plane-to-plane: env in, YAML out, no retagging |
 | P14 | May a driver transform a segment, or must it reject? |
 | P15 | METRIC_HTTP_PORT: nesting or a name with an underscore? |
+| P16 | Do the collision rules really run from the type alone? (they do not, fully) |

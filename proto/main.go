@@ -27,5 +27,6 @@ func main() {
 	p13PlaneToPlane()
 	p14Transform()
 	p15Separator()
+	p16Dynamic()
 	fmt.Println()
 }
