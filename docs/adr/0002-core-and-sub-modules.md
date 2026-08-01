@@ -1,6 +1,6 @@
 # 2. What ships in core, and what ships as a sub-module
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-02
 Ticket: [#3](https://github.com/onhotpath/ferry/issues/3)
 
