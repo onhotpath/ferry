@@ -1,6 +1,6 @@
 # 3. How a leaf field addresses a plane
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-02
 Ticket: [#4](https://github.com/onhotpath/ferry/issues/4)
 
