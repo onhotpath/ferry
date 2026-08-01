@@ -109,7 +109,8 @@ Whether the tag grammar offers a per-field case option is [#11](https://github.c
 > A path is a prefix of itself, so this subsumes exact duplicates.
 
 Violation is a schema compilation failure listing every clash.
-It is checked from `reflect.TypeFor[T]()` alone, with no plane reachable, no value in hand, and identically in both directions, which is the same assertability ADR-0001 claims for tag rejection.
+For the part of the address set the type determines, it is checked from `reflect.TypeFor[T]()` alone, with no plane reachable, no value in hand, and identically in both directions, which is the same assertability ADR-0001 claims for tag rejection.
+That qualification is load-bearing and is spelled out in the next section rather than buried here.
 Measured: 300 compiles of a colliding type produced exactly one error string.
 
 **This is where the dump-side question the ticket absorbed actually dies.**
@@ -131,6 +132,42 @@ Plane-to-plane transfer is Enabled in ADR-0001 and falls out of the pluggable de
 The cost is small and worth stating exactly, because it is easy to overstate.
 `DB` and `DB_HOST` as two flat single-segment addresses are prefix-free and remain legal, since the prefix relation only holds at segment boundaries.
 What becomes illegal is a struct that puts a leaf and a nested struct at the same segment, which is a schema nobody writes deliberately.
+
+### Not every address comes from the type, so both rules run in two tiers
+
+A struct field's address is a property of the type.
+A map key's address, and a slice element's index, are properties of the **value**.
+So "checked at schema compile from the type alone" is true of part of the address set and false of the rest, and this ADR says which rather than letting the stronger claim stand unqualified.
+
+Measured on one type with two values, both walked with the same transforming env driver:
+
+```
+/limits/http_port      static
+/limits/extra          DYNAMIC: keys come from the value
+/labels                DYNAMIC: keys come from the value
+
+value 1  ->  /limits/http_port  /limits/extra/burst  /labels/env              accepted
+value 2  ->  /limits/http_port  /limits/extra/http.port  /limits/extra/http_port
+             refused: "LIMITS_EXTRA_HTTP_PORT" <- /limits/extra/http.port and /limits/extra/http_port
+```
+
+Nothing about the type differs between those two runs.
+A user can therefore write a schema that compiles, passes every driver check, and is refused later because of what a map contained.
+
+**Both rules therefore run at two points, and neither point is after a write.**
+
+- **Static addresses**, from struct fields: at schema compile, with no value and no plane, exactly as claimed above.
+- **Dynamic addresses**, from map keys and sequence lengths: as each is minted, before the write it belongs to.
+  This is an insert into the set the static pass already built, not a re-check of everything, so it stays a map insert per address.
+
+ADR-0001's prohibition on silently ignoring anything is honoured either way, because the dynamic tier fails the operation rather than overwriting.
+What is honestly weaker is the promise: a dynamic collision is caught before data is lost but **not** before the program runs, and no amount of design moves a map key into the type.
+
+**On Load this is a genuine constraint on [#5](https://github.com/onhotpath/ferry/issues/5), not a note.**
+Dump knows a map's keys and a slice's length because it holds the value.
+Load does not, so a dynamic address is only reachable if the source can enumerate.
+Two consequences #5 has to take as given rather than decide freely: the source contract has to hand a driver the whole address set before I/O, because the driver-side rule is unrunnable otherwise, and dynamic segments on Load are gated on enumeration existing at all.
+If #5 concludes that sources never enumerate, then map-keyed and indexed addresses are Dump-only, which is a real asymmetry and belongs in #5's ADR rather than being discovered later.
 
 ### The collision rule, driver side: the key function is injective over the address set
 
@@ -308,8 +345,9 @@ ADR-0002 shipped it as the place this decision becomes executable, so this ADR s
 
 ## Consequences
 
-- Dump-side silent data loss over colliding addresses stops being a runtime hazard and becomes a schema that does not compile.
-  It is the strongest guarantee available here, and it is only available because the check needs no plane and no values.
+- Dump-side silent data loss over colliding addresses stops being a runtime hazard and becomes a schema that does not compile, for every address the type determines.
+  For map keys and sequence indices it becomes a failed write instead, because those addresses do not exist until there is a value.
+  Both are loud; only the first is early, and the ADR says so rather than claiming the stronger one twice.
 - Every driver carries an obligation it did not carry under a flat key space, and it is a real one.
   The mitigation is that it is about ten lines, it is checked by the conformance suite, and it runs once per schema rather than per key.
 - Core is strictly less permissive than a flat key space, in exactly one way: a leaf and a subtree may not share a segment.
