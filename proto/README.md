@@ -22,3 +22,4 @@ Core-eligibility check: `cd proto/core126 && GOTOOLCHAIN=local GOEXPERIMENT=nojs
 | P12 | Where each plane draws the line, and that every refusal is named before I/O |
 | P13 | Plane-to-plane: env in, YAML out, no retagging |
 | P14 | May a driver transform a segment, or must it reject? |
+| P15 | METRIC_HTTP_PORT: nesting or a name with an underscore? |

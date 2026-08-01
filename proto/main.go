@@ -26,5 +26,6 @@ func main() {
 	p12Rejections()
 	p13PlaneToPlane()
 	p14Transform()
+	p15Separator()
 	fmt.Println()
 }
