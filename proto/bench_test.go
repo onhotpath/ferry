@@ -52,8 +52,6 @@ func BenchmarkBindAndLoadEveryTime(b *testing.B) {
 	}
 }
 
-
-
 // The floor: no address model at all, a flat string key straight into a map.
 func BenchmarkLoadFlatStringKeys(b *testing.B) {
 	addrs, vals := benchAddrs()
@@ -125,7 +123,6 @@ func BenchmarkLoadShapeB(b *testing.B) {
 		}
 	}
 }
-
 
 // P11's Keys on the static hit path. ADR-0003 priced a precomputed lookup at
 // 10.4 ns / 0 allocs; the question is what supporting a later-minted address

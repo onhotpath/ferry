@@ -65,16 +65,16 @@ type Value struct {
 // the plane does not have this address".
 var Absent = Value{}
 
-func Null() Value            { return Value{kind: VNull} }
-func Bool(b bool) Value      { return Value{kind: VBool, text: strconv.FormatBool(b)} }
-func Number(s string) Value  { return Value{kind: VNumber, text: s} }
-func Int(i int64) Value      { return Value{kind: VNumber, text: strconv.FormatInt(i, 10)} }
-func Uint(u uint64) Value    { return Value{kind: VNumber, text: strconv.FormatUint(u, 10)} }
-func String(s string) Value  { return Value{kind: VString, text: s} }
-func Bytes(b []byte) Value   { return Value{kind: VBytes, text: string(b)} }
-func (v Value) Kind() VKind  { return v.kind }
+func Null() Value             { return Value{kind: VNull} }
+func Bool(b bool) Value       { return Value{kind: VBool, text: strconv.FormatBool(b)} }
+func Number(s string) Value   { return Value{kind: VNumber, text: s} }
+func Int(i int64) Value       { return Value{kind: VNumber, text: strconv.FormatInt(i, 10)} }
+func Uint(u uint64) Value     { return Value{kind: VNumber, text: strconv.FormatUint(u, 10)} }
+func String(s string) Value   { return Value{kind: VString, text: s} }
+func Bytes(b []byte) Value    { return Value{kind: VBytes, text: string(b)} }
+func (v Value) Kind() VKind   { return v.kind }
 func (v Value) Present() bool { return v.kind != VAbsent }
-func (v Value) Text() string { return v.text }
+func (v Value) Text() string  { return v.text }
 
 var errKind = errors.New("value: wrong kind")
 

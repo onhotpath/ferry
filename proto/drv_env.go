@@ -17,7 +17,7 @@ import (
 )
 
 type EnvSource struct {
-	Sep    string                   // segment join, "_" or "__"
+	Sep    string                      // segment join, "_" or "__"
 	Lookup func(string) (string, bool) // nil means os.LookupEnv
 }
 
