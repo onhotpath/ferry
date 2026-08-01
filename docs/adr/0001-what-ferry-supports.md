@@ -1,6 +1,6 @@
 # 1. What ferry supports, and what it explicitly does not
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-02
 Ticket: [#2](https://github.com/onhotpath/ferry/issues/2)
 
