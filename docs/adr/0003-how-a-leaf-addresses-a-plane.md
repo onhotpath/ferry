@@ -143,6 +143,17 @@ It relocates them to the only place that has the information to resolve them, an
 The conformance suite ADR-0002 puts in core checks it, which is what stops it being prose.
 This one rule covers separator collisions, case folding, and any normalization a driver invents, because all three are the same failure: a non-injective map out of the address set.
 
+**A driver is expected to transform segment text, not to reject it, and the injectivity rule is what makes that safe.**
+This is the one place the prototype changed the answer.
+An environment variable name may not contain a hyphen, so a driver that only validates rejects a segment `feature-flags`, which is an ordinary thing to write in a config struct.
+A driver that maps illegal characters to `_` accepts it, and is not thereby less safe: measured, the transforming driver accepts `feature-flags` alone and rejects `feature-flags` alongside `feature_flags`, naming both addresses.
+Transformation is folding, folding is many-to-one, and a many-to-one map out of the address set is precisely what the injectivity check exists to catch.
+A driver that refuses to transform is not safer than one that does, it is only less useful.
+
+So a driver runs **two** checks over the address set before any I/O, and they are different questions.
+Legality asks whether the plane can name this address at all, which no transformation can rescue: an empty segment has no environment variable name, and a segment containing a backslash has no Registry name.
+Injectivity asks whether the transformation it chose collapses two addresses into one.
+
 Measured, over four address sets and three key functions:
 
 | Address set | env, uppercase and `_` | env, no fold and `_` | dotted, no fold |
@@ -165,6 +176,55 @@ Because the address set is known before I/O, a driver's plane keys are computed 
 Measured: a precomputed lookup is 10.4 ns and zero allocations against 8.5 ns and zero allocations for a bare flat-map lookup.
 Computing the key per call instead costs 109 ns with a segment iterator, or 477 ns with a segment slice, against a 476 ns twelve-key cached load in the survey's own prototype, which is what makes caching it a requirement and not an optimisation.
 So the structured address costs roughly two nanoseconds a key against a flat string, and any larger number in this area is an implementation that forgot to precompute.
+
+### What this looks like on four planes
+
+Worked from the prototype rather than by hand.
+The tag spellings are illustrative, because the grammar is [#11](https://github.com/onhotpath/ferry/issues/11)'s; what is being shown is the address set and its renderings.
+
+```go
+type Cred struct {
+    User string `ferry:"user"`
+    Pass string `ferry:"pass"`
+}
+type DBConf struct {
+    Host string `ferry:"host"`
+    Port int    `ferry:"port"`
+    Auth Cred   `ferry:"auth"`
+}
+type AppConf struct {
+    Name    string         `ferry:"name"`
+    DB      DBConf         `ferry:"db"`
+    Tags    []string       `ferry:"tags"`
+    Limits  map[string]int `ferry:"limits"`
+}
+```
+
+| ferry address | env | Windows Registry | query param |
+| --- | --- | --- | --- |
+| `/name` | `NAME` | `HKCU\Software\Acme : name` | `name` |
+| `/db/host` | `DB_HOST` | `HKCU\Software\Acme\db : host` | `db[host]` |
+| `/db/auth/user` | `DB_AUTH_USER` | `HKCU\Software\Acme\db\auth : user` | `db[auth][user]` |
+| `/tags#0` | `TAGS_0` | `HKCU\Software\Acme\tags : 0` | `tags[0]` |
+| `/limits/rps` | `LIMITS_RPS` | `HKCU\Software\Acme\limits : rps` | `limits[rps]` |
+
+The YAML driver never produces a key at all, because it walks the segments as a tree.
+The Registry driver reads the address the way the Registry is actually shaped: every segment but the last is a subkey, and the last is a value name.
+None of those spellings appears in the struct, and no driver knows the others exist.
+
+The same address set gets four different answers to whether it is acceptable, and every one of them lands before any I/O:
+
+| schema | env | registry | yaml | query |
+| --- | --- | --- | --- | --- |
+| a nested `db` plus a flat `db_host` leaf | rejected | ok | ok | ok |
+| two fields differing only in case | rejected | rejected | ok | ok |
+| a map key containing `[` | transformed | ok | ok | rejected |
+| a map key containing `\` | transformed | rejected | ok | ok |
+| a leaf and a subtree at one segment | rejected by core, so no driver sees it | | | |
+
+That table is the plane-agnosticism veto paying for itself.
+Core has no opinion about hyphens, backslashes, brackets or case, because it cannot have one that is right for all four columns.
+Each driver has the opinion that is right for its plane, and states it as an error naming both offending addresses rather than as a silent overwrite.
 
 ### Prefixing prepends a segment, and cannot concatenate text
 
