@@ -177,6 +177,48 @@ Measured: a precomputed lookup is 10.4 ns and zero allocations against 8.5 ns an
 Computing the key per call instead costs 109 ns with a segment iterator, or 477 ns with a segment slice, against a 476 ns twelve-key cached load in the survey's own prototype, which is what makes caching it a requirement and not an optimisation.
 So the structured address costs roughly two nanoseconds a key against a flat string, and any larger number in this area is an implementation that forgot to precompute.
 
+### The separator is a driver option, and no separator is universally safe
+
+`METRIC_HTTP_PORT` is the question this whole ADR has to answer well, so it is answered here in full.
+Is it `metric.http.port`, or `metric.http_port`?
+
+**In core it is not a question**, because ferry never parses a plane key back into a path.
+`/metric/http/port` has three segments and `/metric/http_port` has two, they are distinct addresses under every circumstance, and no option changes that.
+Ambiguity only exists for a design that has to recover structure from a flattened string, and keeping the address structured is what removes the need.
+
+The question survives only as a driver question: does the env driver's join keep them distinct?
+The join is therefore a **driver option**, in keeping with flattening being the driver's, and the injectivity check is what makes choosing it safe:
+
+| env join | `/metric/http/port` | `/metric/http_port` | verdict |
+| --- | --- | --- | --- |
+| `_` | `METRIC_HTTP_PORT` | `METRIC_HTTP_PORT` | rejected, naming both addresses |
+| `__` | `METRIC__HTTP__PORT` | `METRIC__HTTP_PORT` | ok |
+
+That is the same `__` answer xload reaches, arrived at differently, and the difference is the whole point.
+
+**Measured against the prior art**, on the same pair, at `a90b3aa` for xload and at koanf v2 and viper v1.21.0:
+
+| | mechanism | what happens on a collision |
+| --- | --- | --- |
+| xload `FlattenMap` | separator passed by the caller | at `_`, **258/42 nondeterministic** over 300 runs, no error |
+| xload `FlattenMap` at `__` | as above | distinct and stable, until a key contains `__`, then **261/39 nondeterministic** |
+| xload struct side | `prefix=` text concatenation | **detected**: `key collisions detected for keys: [METRIC_HTTP_PORT]`, and `SkipCollisionDetection` turns it off |
+| koanf | delimiter fixed at `koanf.New(delim)` | last load wins, silently, no error |
+| viper | `SetEnvKeyReplacer` | `_` collides, `__` does not, nothing checks either way |
+| ferry | driver-chosen join, checked per schema | refused before any I/O, naming both addresses, 300 of 300 runs |
+
+Two things to take from that table, and the first is a credit rather than a criticism.
+
+**xload already detects this on the struct side, and it is right to.**
+Its collision counter catches `prefix=METRIC_` plus `METRIC_HTTP_PORT` and errors by default.
+What ferry changes is where the check sits and what it covers: xload checks the flattened key at Load time, which conflates the two collision rules this ADR separates, is switchable off, and has no Dump side to protect at all.
+ferry's core-side rule runs at schema compile with no plane in sight, and its driver-side rule runs per driver, so a schema that is fine on YAML and impossible on env is reported as an env problem rather than as a ferry problem.
+
+**A wider separator buys a bigger margin and never a guarantee.**
+Measured on ferry's model with segments that themselves contain `__`: `sep="__"` is refused, naming both addresses, where xload at the same separator is 261/39 nondeterministic and silent.
+This is why the rule is stated over the schema and not over the separator.
+There is no separator a driver can pick that is safe for every schema, because segment text is the user's, so the only honest guarantee is one that is checked against the schema in hand.
+
 ### What this looks like on four planes
 
 Worked from the prototype rather than by hand.
@@ -252,6 +294,11 @@ ADR-0002 shipped it as the place this decision becomes executable, so this ADR s
 ### What this ADR does not decide
 
 - How a tag names a segment, whether prefix and squash exist, and how a segment containing the tag's own punctuation is written: [#11](https://github.com/onhotpath/ferry/issues/11).
+- **Whether the struct tag key is configurable**, as xload's `FieldTagName` makes it, defaulting to `env`.
+  [#11](https://github.com/onhotpath/ferry/issues/11)'s.
+  It is named here because it collides with a decision ADR-0001 already took: tag validation is strict, and unrecognised tag content fails schema compilation.
+  Pointing a configurable key at a tag somebody else owns, `json` being the obvious one, means strict validation rejects that tag's own options.
+  So "configurable" and "strict" are compatible only with a stated answer for what happens then, and #11 owes that answer rather than inheriting the option unexamined.
 - What the address appears in, and whether a source is queried per key or handed the whole set: [#5](https://github.com/onhotpath/ferry/issues/5).
 - Whether any Go type produces an Index segment.
   That is [#7](https://github.com/onhotpath/ferry/issues/7)'s.
