@@ -18,3 +18,7 @@ Core-eligibility check: `cd proto/core126 && GOTOOLCHAIN=local GOEXPERIMENT=nojs
 | P8 | How does prefixing on nested structs express itself? |
 | P9 | A value and a subtree at one address (found by accident in P2) |
 | P10 | Cost of the canonical form on the hot path |
+| P11 | One address set rendered onto env, YAML, Windows Registry, query params |
+| P12 | Where each plane draws the line, and that every refusal is named before I/O |
+| P13 | Plane-to-plane: env in, YAML out, no retagging |
+| P14 | May a driver transform a segment, or must it reject? |

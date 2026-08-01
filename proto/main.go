@@ -22,5 +22,9 @@ func main() {
 	p7Tree()
 	p8Prefix()
 	p9PrefixFree()
+	p11Consumer()
+	p12Rejections()
+	p13PlaneToPlane()
+	p14Transform()
 	fmt.Println()
 }
