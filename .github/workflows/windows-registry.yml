@@ -59,4 +59,5 @@ jobs:
           GOTOOLCHAIN: go1.27rc2
         run: |
           $env:T14='all'; go run .; if ($LASTEXITCODE -ne 0) { exit 1 }
-          $env:T14=''; $env:E16='all'; go run .; if ($LASTEXITCODE -ne 0) { exit 1 }
+          $env:T14=''; $env:C10='all'; go run .; if ($LASTEXITCODE -ne 0) { exit 1 }
+          $env:C10=''; $env:E16='all'; go run .; if ($LASTEXITCODE -ne 0) { exit 1 }

@@ -75,7 +75,20 @@ func (r fYAMLReader) Get(_ context.Context, addr Path) (Value, error) {
 		return Absent, nil
 	}
 	if n.Kind != yaml.ScalarNode {
-		return Absent, fmt.Errorf("yaml: %s is not a scalar", addr)
+		// DEFECT FOUND BY #10, fixed here, and it was reachable only after #15
+		// stopped the walk discarding a Reader's error.
+		//
+		// ADR-0005 measures what a plane must report at a CONTAINER address and
+		// its answer is Absent: "tags: [a] -> Get(/tags) = Absent, Children =
+		// /tags#0". This driver returned a non-nil error there instead. While
+		// the walk swallowed errors it read as Absent and behaved correctly by
+		// accident; with the error propagated it aborts every load of a struct
+		// containing a populated map or slice.
+		//
+		// Two latent defects that cancelled out, which is why neither was
+		// visible: this is what ADR-0001's ban on silently ignoring anything
+		// costs when it is broken in two places at once.
+		return Absent, nil
 	}
 	switch n.Tag {
 	case "!!null":

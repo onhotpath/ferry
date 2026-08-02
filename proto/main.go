@@ -50,6 +50,10 @@ func dumpAddrs(vals map[Path]Value) {
 }
 
 func main() {
+	if p := os.Getenv("C10"); p != "" {
+		run10(p)
+		return
+	}
 	if p := os.Getenv("W15"); p != "" {
 		run15(p)
 		return
