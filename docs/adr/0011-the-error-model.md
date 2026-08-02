@@ -28,8 +28,8 @@ It names the cost: aggregating means continuing past a failed field, so the dest
 
 This ADR is written from a throwaway prototype on branch `proto/9-errors`, which never merges.
 It is built on `proto/11-tag-grammar`, so every measurement runs against a real `Path`, a real `Value`, the real type set, the real tag grammar and the real YAML driver over real files.
-Seventeen probes.
-**One found a defect in a decision this ADR had already made, four more changed a rendering the ADR had already written down, and a review round overturned this ADR's own answer for Dump.**
+Twenty-one probes.
+**One found a defect in a decision this ADR had already made, four more changed a rendering the ADR had already written down, and two review rounds overturned an answer this ADR had already reached: its Dump policy, and the reading of its own Load rule.**
 
 ## Decision
 
@@ -53,9 +53,11 @@ Six questions this ADR had to answer that the ticket did not name.
 | where sorting happens, given that `errors.AsType` reads the tree | [Sorted at construction](#the-aggregate-is-flat-and-sorted-at-construction) |
 | what the sort key is, once a `Close` failure can arrive beside walk errors | [The three-part key](#the-three-part-key-moment-then-location-then-message) |
 | whether ferry may ever call `errors.Join` | [One aggregate constructor](#ferry-has-exactly-one-aggregate-constructor) |
-| what `Load` hands back when it fails | [Load yields no value](#on-failure-load-yields-no-value) |
+| what `Load` hands back when it fails | [ferry yields no value it built](#ferry-yields-no-value-it-built) |
 | what a test asserts against, once message text is not API | [What ferrytest gets](#what-ferrytest-gets-and-what-35-owns) |
 | whether a Dump may write for a failure it could have caught first | [Aggregation](#aggregation-one-rule-at-every-moment) |
+| whether the walk has to know about aggregation, or only the scheduler | [One thing the walk owns](#one-thing-the-walk-owns) |
+| what a memoised compile error may carry | [ferry yields no value it built](#ferry-yields-no-value-it-built) |
 
 **Three things this ADR does not close.**
 
@@ -266,8 +268,31 @@ A caller loses nothing programmatic; only the log loses the secret.
 The observed `Value` kind, the target Go type, whether the failure was syntax or range, and an array's length are all structural and all printed.
 That is the difference between `the plane holds null and int cannot take one` and `parsing "hunter2"`.
 
-**The measured cost is that ferry has to author a message for every failure mode**, because it cannot pass a stdlib error through.
-Five today, and every registered codec adds one that lands on the generic `is not a valid %s`.
+**The measured cost is smaller than "ferry authors a message for every failure mode forever" implies, and it was measured rather than estimated.**
+Over every decode failure reachable in core's type set:
+
+| | |
+| --- | --- |
+| distinct failures | 20 |
+| distinct messages ferry authors | **13** |
+| failures where the stdlib carried a reason ferry's does not | **3** |
+| types those 3 collapse to | **2**, `time.Duration` and `time.Time` |
+
+Every other row loses only the **value**, which the address already locates.
+And where the value is genuinely not visible to the operator, the plane is a secret store, which is exactly where they must not have it.
+
+**So the rule carries a hint for the types that lose a reason, and the hint is better than the message it replaces**, because it states the rule instead of echoing the input:
+
+```
+stdlib   time: missing unit in duration "30"
+ferry    ferry: /timeout: is not a valid time.Duration: a duration needs a unit, as in 30s or 1h30m
+
+stdlib   parsing time "2026-08-02" as "2006-01-02T15:04:05Z07:00": cannot parse "" as "T"
+ferry    ferry: /expires: is not a valid time.Time: a time is RFC 3339, as in 2026-08-02T12:00:00Z
+```
+
+The hint table is two entries, and both are types ADR-0005 already owns in the identity table, so the obligation lands where the representation was already pinned.
+A registered codec adds no entry: it falls into the generic row, and ADR-0009's proof is where its own representation is checked.
 
 **The carve-out, measured rather than assumed.**
 A dynamic address segment comes from the plane too, and it appears in the location:
@@ -417,9 +442,29 @@ Both policies leave a broken plane there - six of eight addresses against one of
 Memory or CPU, and on an ordinary config struct both are noise.
 Which of the two ferry does is an implementation choice this ADR prices and does not fix.
 
-**And it is redundant on a sink that can stage**, which is stated rather than hidden.
-`Commit` runs only on success, so a `Committer` already has the untouched-plane property for **both** kinds of failure.
-Two-phase buys the encode half of it for the sinks that cannot stage, which is two of the five in ADR-0004's table.
+**And ferry pays for the encode phase only where the sink cannot pay for it itself.**
+
+> Dump asks the sink whether it can stage.
+> A `Committer` gets **interleaved aggregation**, because `Commit` runs only on success, so the plane is already untouched on failure.
+> Everything else gets the encode phase.
+
+ADR-0004 already discovers `Committer` by assertion, so this adds no interface and asks nothing of `Writer`.
+It is also not merely an optimisation, which is what the draft assumed: the staging sink gets a **better error set**, because interleaving lets it learn both kinds of failure in one run.
+Measured on a plane that both refuses two addresses and holds two unencodable values:
+
+```
+non-staging sink, Committer=false    two-phase    plane (empty)   2 errors
+staging sink,     Committer=true     interleaved  plane empty     4 errors
+                                                                    /Bucket:  no write ACL
+                                                                    /Expires: cannot be encoded
+                                                                    /Region:  no write ACL
+                                                                    /Started: cannot be encoded
+```
+
+**The cost this exposes, which the draft hid: on a sink that cannot stage, two-phase is a fail-fast *between* phases.**
+Measured, the second run after the two timestamps are fixed is where the ACL refusal finally appears.
+So a flat sink pays for the untouched plane in round trips, and a `Committer` pays nothing for either property.
+That is a reason to implement `Committer`, stated in an ADR rather than left as folklore.
 
 **The alternative considered and refused: let the class decide, so an `ErrPlane` error stops the walk.**
 The appeal is that a downed plane produces N copies of one fact.
@@ -438,6 +483,40 @@ Stopping on the first would make (b) unreportable in bulk to save (a) four dupli
 The survey recommends it "for callers who want the old behaviour", and ferry has no old behaviour.
 It is a public knob whose only job is to make ferry report less, and ADR-0006 established that a **load-affecting** Option is cheap to add later, measured against the compile-affecting kind that lands in the schema cache key.
 So not shipping it costs nothing and shipping it doubles the test matrix on every error path in the design.
+
+### One thing the walk owns
+
+[ADR-0010](0010-the-generic-entry-point.md) measures that aggregation lands in its **scheduler** and not in its walk: the same walk function under a first-error scheduler and an aggregating one gives one error and two on the same plane, byte-identical in between.
+That is right for almost everything this ADR needs, and it is worth confirming rather than assuming, because it means #9 costs #16's walk nothing.
+
+Ordering is not the walk's, because sorting happens when the aggregate is constructed, so the walk may emit in any order.
+There is no cap, so there is no stop-after-N.
+The two-phase Dump is a phase around the walk rather than a change inside it.
+
+**One case is the walk's, and only the walk can see it.**
+This ADR's rule is to report every failure that is not a **consequence** of another, and the runtime instance of that needs the subtree relationship:
+
+```
+a required child that is absent, under a required parent
+
+  ferry: 2 errors:
+    /auth: required, and the plane supplied nothing under it
+    /auth/User: required, and the plane does not have it
+```
+
+Two errors and one remediation: setting `AUTH_USER` clears both.
+The parent's check is the child's summary, so it is ADR-0008's tier rule at the walk, and a composite's `required` failure is suppressed when a child under it already reported.
+
+**The neighbouring case needs nothing**, which is why this is one bit and not a redesign.
+A child that is **present** and fails to decode already sets ADR-0006's presence bit, so the parent's `required` does not fire:
+
+```
+a required subtree whose only present child fails to decode
+
+  ferry: /auth/User: the plane holds null and string cannot take one     1 error
+```
+
+So the answer to #16 is: the scheduler owns aggregation, and the walk owns one suppression bit it already computes.
 
 ### The aggregate is flat, and sorted at construction
 
@@ -536,11 +615,12 @@ A leaf's own `Error()` carries it; inside the aggregate's report the header alre
 The accepted ADRs quote strings like `ferry: /A: main.encOnly implements encoding.TextMarshaler but not ...`, which makes them look canonical, and somebody will write `strings.Contains` against one.
 The stated position is to match on the sentinels and the address, and to get precision from the test helper rather than from string matching.
 
-### On failure, `Load` yields no value
+### ferry yields no value it built
 
-> When `Load` returns an error it yields no value, and the caller's own variables are untouched.
+> When a Load fails, ferry returns no value **it built**.
+> `LoadOver` returns the seed it was given, and `Load[T]` therefore returns the zero value.
 
-Aggregating means the walk continues past a failed field, so the partial exists inside ferry either way.
+Aggregating means the walk continues past a failed field, so a partially populated destination exists inside ferry either way.
 The question is only what crosses the boundary.
 Measured:
 
@@ -556,10 +636,31 @@ The partial is worth nothing to the two consumers ADR-0001 named, because deploy
 **The better argument is that this turns a documentation obligation into a property.**
 The ticket comment says the partial population "needs documenting"; under this rule there is nothing to document, because the state it warns about is not observable.
 
-**This constrains [#16](https://github.com/onhotpath/ferry/issues/16), and that is stated rather than discovered.**
-It rules out a `LoadInto(ctx, src, &cfg)` shape, because "yield no value" under that signature would mean ferry zeroing a struct the caller owns, which is worse than either option.
-So the entry point returns the value it built.
-ADR-0006 already tied the same hands once, requiring that a reload produce a new value rather than mutate a live one, and this is the same screw one turn further.
+**The first draft of this section said "yields no value", and that has two readings once a seed exists.**
+It is recorded because the shape of the miss is the point, and because it is the third time in this design effort that a fixture loading into a fresh zero destination hid a distinction.
+
+[ADR-0010](0010-the-generic-entry-point.md) has `LoadOver(ctx, seed T, src)`, because ADR-0006 partitions defaults into declared ones for leaves and seeded values for composites.
+With a **zero** seed the two readings are byte-identical, and every fixture this ADR built used one.
+With a **live** seed they are not:
+
+```
+                        seed = zero (every fixture here)   seed = the live config
+return the zero value   { 0 0}                             { 0 0}
+return the seed         { 0 0}                             {db1 5432 3}
+```
+
+The zero reading destroys a value ferry never touched, which is this ADR's own worst-outcome argument arriving through the other door and doing more damage, because the caller had a good config.
+So the rule is stated over what ferry **built**, and `Load[T]` returning the zero value falls out rather than being a second rule, because `Load` is `LoadOver` with the zero seed.
+One rule instead of two, and the seeded case stops being a hole.
+
+**A compile-moment error carries no per-call context at all.**
+ADR-0010 memoises the compile behind `sync.OnceValues`, which memoises the **error object**, so every later caller receives the first caller's error value forever.
+Verified: two callers receive the same pointer.
+Nothing in the four carried things is per-call - the location comes from `reflect.TypeFor[T]()`, the moment is a constant, the class is a package-level sentinel - and the tag key, which **is** per-call, is part of ADR-0010's cache key, so two keys are two entries.
+The rule stated positively: **a compile-moment error is a property of the cache key, not of the call.**
+
+That also makes it shared across goroutines, and sorting at construction is what makes reading it safe: nothing is computed on first print, so there is no lazy state to race on.
+Measured at 64 goroutines formatting one memoised error, **1 distinct rendering**.
 
 ### ferry has exactly one aggregate constructor
 
@@ -648,15 +749,27 @@ This ADR fixes the semantics, exact-set over `(address, class)` with no message 
   Measured at three distinct `AsType` picks over 300 runs when the order is applied only in `Format`, while the printed form stays at one.
 - The sort key is three parts because a `Close` failure has no location and explains nothing, and the message tiebreak is what keeps the order deterministic if #20 makes the walk concurrent.
   The cost is that two errors at one address are ordered alphabetically rather than in check order.
-- **`Load` yielding no value turns the ticket's stated cost into a property**, and it constrains #16 to an entry point that returns the value it built.
+- **ferry yielding no value it built turns the ticket's stated cost into a property.**
+  The rule is stated over what ferry built rather than over the return value, because a seeded `LoadOver` has two readings and the wrong one destroys a config ferry never touched.
+  `Load[T]` returning the zero value then falls out instead of being a second rule.
+- **A compile-moment error is a property of the cache key, not of the call**, because ADR-0010 memoises the compile and therefore the error object.
+  Sorting at construction is what makes the shared value safe to format concurrently, measured at one rendering across 64 goroutines.
+- **Dump asks the sink whether it can stage.**
+  A `Committer` gets interleaved aggregation and a better error set, both failure kinds in one run with the plane untouched; everything else gets the encode phase and pays for the untouched plane in round trips.
+  That is an argument for implementing `Committer`, recorded rather than left as folklore.
+- The redaction rule costs 13 authored messages over 20 reachable failures, and a two-entry hint table for the two types that lose a reason.
+  The hinted message states the rule where the stdlib echoed the input, so it is better than what it replaces.
+- **Aggregation is the scheduler's and the walk owns one suppression bit**, which #16's walk already computes as ADR-0006's presence bit.
 - **ferry never calls `errors.Join`**, and that rule exists because breaking it was silent: the prototype's own probes were parsing the newline dump as an iterator.
 - The error set is now a user-visible artefact under ADR-0001's determinism invariant, which it was not before, because nothing had made it orderable.
 - `ferrytest` gains an exact-set assertion, and the reason it is exact is that ADR-0008's suppression rules will fail by over-reporting and a contains-assertion cannot see that.
 
 ## What this ADR does not decide
 
-- **The entry point's signature**: [#16](https://github.com/onhotpath/ferry/issues/16), which is being written in parallel.
-  This ADR hands it one constraint, that `Load` returns the value it built and never writes a partial into a caller's struct, and it inherits ADR-0006's separate constraint that a reload produces a new value.
+- **The entry point's signature**: [#16](https://github.com/onhotpath/ferry/issues/16), and the two ADRs were written in parallel and are **reconciled** rather than merely compatible.
+  ADR-0010 adopted the yield-nothing rule and sharpened it at `LoadOver`, this ADR adopted the sharpening, and ADR-0010 independently rules out `LoadInto` on ADR-0006's leak and on a name scan.
+  What this ADR hands it: one aggregate constructor and never `errors.Join`, a compile error that carries no per-call context, and one suppression bit in the walk.
+  What it hands back: aggregation lives in the scheduler.
 - **What `ferrytest` exports**: [#35](https://github.com/onhotpath/ferry/issues/35).
   This ADR fixes the semantics of the error assertion and not the package's surface.
 - **Whether the walk checks the context per leaf, per subtree or not at all, and what happens when a cancellation races a driver error**: [#20](https://github.com/onhotpath/ferry/issues/20).
