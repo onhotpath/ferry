@@ -338,7 +338,7 @@ So a `Stringer` fallback implemented the obvious way silently produces a struct 
 That is survey item **5.14**'s value-receiver-versus-pointer-receiver defect in another costume, and it is a second independent reason to refuse.
 
 `encoding.TextMarshaler` and `TextUnmarshaler` are the pair a codec chain should consult, and which interfaces are consulted in what order is [#12](https://github.com/onhotpath/ferry/issues/12)'s.
-This ADR decides only that `fmt.Stringer` is not among them, and that a type implementing a decoder with no matching encoder is a schema compile error rather than a one-way trip.
+This ADR decides only that `fmt.Stringer` is not among them.
 
 ### The pinned `encoding/json/v2` option set
 
@@ -495,7 +495,10 @@ Core's test iterates the identity table and the admitted kind list and asserts t
 - The error types every refusal here produces: [#9](https://github.com/onhotpath/ferry/issues/9)'s convention, applied rather than invented.
 - How a field is named, whether a composite's element naming is configurable, and whether embedding is spelled `embed`: [#11](https://github.com/onhotpath/ferry/issues/11).
 - Which interfaces the codec chain consults and in what order: [#12](https://github.com/onhotpath/ferry/issues/12).
-  This ADR removes exactly one candidate, `fmt.Stringer`, and states that a decoder with no matching encoder does not compile.
+  This ADR removes exactly one candidate, `fmt.Stringer`, and leaves the rest of the chain alone.
+  #12 also asks what happens to a type implementing a decoder with no matching encoder.
+  The only part of that answer this ADR owns is the consequence: such a type cannot round-trip, so it cannot be in the guaranteed set, and admitting it would be admitting a member whose proof cannot be written.
+  Where that is detected, and whether it is a refusal or a narrower guarantee, is #12's.
 - The registration API, including how a named type over `time.Duration` is rescued: [#19](https://github.com/onhotpath/ferry/issues/19).
 - Where the compiled schema is cached and what the generic entry point looks like: [#16](https://github.com/onhotpath/ferry/issues/16).
 - Whether the walk may run concurrently: [#20](https://github.com/onhotpath/ferry/issues/20).
