@@ -33,6 +33,7 @@ accepted. Everything else here is a shell over it.
 | `e_probe1.go` | E2-E4 |
 | `e_probe2.go` | E5-E8 |
 | `e_probe3.go` | E9-E15 |
+| `e_probe4.go` | E16, E16b: E7 reopened after review |
 | `e_tui.go` | the interactive shell, for the one question a table answers badly |
 
 `d_load.go`, `d_schema.go` and `t_compile.go` are patched to route their errors
@@ -63,6 +64,33 @@ well at three errors and at forty" is a feel question a table answers badly.
 | E13 | the audit: the fixture shapes the other probes do not contain | **found a defect**, see below |
 | E14 | what `Load` hands back when it fails | the partial exists inside the walk and does not cross the boundary |
 | E15 | a driver holding an opinion about the class | it can declare `Value` where core would have said `Plane`, and cannot forge provenance or an address |
+| E16 | **E7 reopened**: four policies against four failure shapes | **E7 measured the wrong thing.** Only a `Set` failure can amplify writes; an encode failure costs the plane nothing |
+| E16b | what two-phase costs if it refuses to buffer | 523 ms and ~546 KB held, against 1.044 s and nothing held, on 10,000 addresses |
+
+## E7 reopened, and what it changed
+
+E7 used a sink that could only refuse a write, so it measured **`Set`**
+failures and reported the number as though it were the cost of aggregating in
+general. It is not. An **encode** failure is deterministic, per field, and
+happens before the write for that address, so aggregating it costs the plane
+nothing. E16 separates them and adds the two policies E7 never had:
+
+```
+S3 two fields cannot be encoded, plane healthy
+  fail-fast      3 attempts  3 written  1 error
+  aggregate      6 attempts  6 written  2 errors     <- six writes for a failure
+  two-phase      0 attempts  0 written  2 errors        ferry could have caught first
+```
+
+So the rule ADR-0011 now carries is two-phase then aggregate, which buys a
+property worth stating: **if a Dump fails for a reason ferry could have known
+without touching the plane, the plane is untouched.** That is ADR-0004's own
+argument for `ErrReadOnly` at `OpenWriter` rather than at the first `Set`,
+applied one layer in.
+
+The `Set` half stays aggregating, because S2's partial ACL is the Vault case
+E8 argued Load must serve, and taking it away on Dump alone would be an
+asymmetry between the directions on the same fact.
 
 ## What running it changed
 
