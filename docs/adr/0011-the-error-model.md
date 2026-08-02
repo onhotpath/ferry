@@ -28,8 +28,8 @@ It names the cost: aggregating means continuing past a failed field, so the dest
 
 This ADR is written from a throwaway prototype on branch `proto/9-errors`, which never merges.
 It is built on `proto/11-tag-grammar`, so every measurement runs against a real `Path`, a real `Value`, the real type set, the real tag grammar and the real YAML driver over real files.
-Fifteen probes.
-**One found a defect in a decision this ADR had already made, and four more changed a rendering the ADR had already written down.**
+Seventeen probes.
+**One found a defect in a decision this ADR had already made, four more changed a rendering the ADR had already written down, and a review round overturned this ADR's own answer for Dump.**
 
 ## Decision
 
@@ -41,7 +41,7 @@ The ticket asked for five things by name.
 | --- | --- | --- |
 | what the type system carries, and what is left for errors to report | **yes**, and the census is the answer | [One model](#one-model-and-the-census-that-checks-it) |
 | how an implementor adds plane-specific detail without losing ferry's context | **yes**: core owns three fields, the driver owns the class and the cause | [Extension](#extension-a-driver-holds-an-opinion-about-the-class-and-about-nothing-else) |
-| aggregated or first-one-fatal | **yes**, aggregated, in both directions | [Aggregation](#aggregation-one-rule-at-every-moment) |
+| aggregated or first-one-fatal | **yes**, aggregated; on Dump encoding is a phase first | [Aggregation](#aggregation-one-rule-at-every-moment) |
 | what context an error carries: key, path, raw value, field name, direction | **yes**, four things, and **never the raw value** | [What an error carries](#what-an-error-carries-and-the-one-accessor) |
 | how a caller matches a kind without depending on concrete types | **yes**: there is no concrete type to depend on | [The vocabulary](#the-vocabulary-four-classes-and-a-provenance-marker) |
 
@@ -55,6 +55,7 @@ Six questions this ADR had to answer that the ticket did not name.
 | whether ferry may ever call `errors.Join` | [One aggregate constructor](#ferry-has-exactly-one-aggregate-constructor) |
 | what `Load` hands back when it fails | [Load yields no value](#on-failure-load-yields-no-value) |
 | what a test asserts against, once message text is not API | [What ferrytest gets](#what-ferrytest-gets-and-what-35-owns) |
+| whether a Dump may write for a failure it could have caught first | [Aggregation](#aggregation-one-rule-at-every-moment) |
 
 **Three things this ADR does not close.**
 
@@ -361,24 +362,64 @@ fail-fast   errors=1
 aggregating errors=5
 ```
 
-**On Dump, aggregate too, and the cost is real.**
-Load's failures cost nothing outside the process and Dump's cost writes.
-Measured on a twelve-address struct with a sink refusing two addresses:
+**On Dump, encoding is a separate phase, and only then does the walk aggregate.**
 
-| non-staging sink | attempts | written | errors |
-| --- | --- | --- | --- |
-| fail-fast | 3 | 2 | 1 |
-| aggregating | 12 | 10 | 2 |
+> Dump encodes every address before it writes any of them.
+> If anything fails to encode, every such failure is reported and **nothing is written**.
+> Otherwise ferry writes, and aggregates the refusals.
 
-| staging sink, a `Committer` | attempts | staged | reaches the plane |
-| --- | --- | --- | --- |
-| fail-fast | 3 | 2 | **0** |
-| aggregating | 12 | 10 | **0** |
+The first draft of this ADR said "aggregate, symmetrically" and priced it at eight extra writes of twelve.
+**That measurement conflated two failures that cost the plane different things**, and separating them changed the answer.
 
-Eight extra addresses of twelve is a bigger number than "a difference of degree" suggests, and the ADR records it rather than the framing.
-Two things decide it anyway.
-`Commit` runs only on success (ADR-0004), so on a sink that can stage, aggregation costs **nothing at all**.
-And on a sink that cannot, fail-fast had **already written two** of them, so it does not protect the plane, it only writes less of it, on a sink whose model already accepts partial writes and where ADR-0006 already established that an omission is not a deletion.
+An **encode** failure is deterministic, per field, and happens before the write for that address, so aggregating it costs the plane nothing.
+A **`Set`** failure is the plane refusing, and it is the only one that can amplify writes.
+The first probe used a sink that could only refuse, so it measured the second and reported the number as though it were the cost of aggregating in general.
+
+Measured over four failure shapes on an eight-address struct, attempts / written / errors:
+
+| policy | whole plane refuses | two addresses refuse | two cannot encode | both |
+| --- | --- | --- | --- | --- |
+| fail-fast | 1 / 0 / 1 | 2 / 1 / 1 | 3 / **3** / 1 | 2 / 1 / 1 |
+| aggregate, interleaved | 8 / 0 / 8 | 8 / 6 / 2 | 6 / **6** / 2 | 6 / 4 / 4 |
+| **two-phase, then aggregate** | 8 / 0 / 8 | 8 / 6 / 2 | 0 / **0** / 2 | 0 / **0** / 2 |
+
+The third column is the case the first probe never built, shown as what the plane actually holds:
+
+```
+two time.Time fields outside RFC 3339's year range, plane perfectly healthy
+
+fail-fast   plane: /Name /Region /Replicas                                  1 error
+aggregate   plane: /Bucket /Endpoint /Name /Region /Replicas /Retries       2 errors
+two-phase   plane: (empty)                                                  2 errors
+```
+
+Two-phase gets both diagnostics and writes nothing, where interleaved aggregation writes six addresses for a failure ferry could have known about before touching the plane.
+
+**The property this buys is worth stating on its own:**
+
+> If a Dump fails for a reason ferry could have known without touching the plane, the plane is untouched.
+
+That is ADR-0004's own argument applied one layer in.
+It put `ErrReadOnly` at `OpenWriter` rather than at the first `Set` on the reasoning that "failing at open costs nothing, and failing at the first `Set` has already half-written the plane".
+Encoding is the last thing ferry can check without the plane, so it belongs on the same side of that line.
+
+**The `Set` half still aggregates**, and the case that decides it is the same one Load's rule turns on.
+A token with write access to some paths and not others reports both refused addresses under aggregation and one under fail-fast, and taking that away on Dump alone would be an asymmetry between the directions about the same fact.
+Both policies leave a broken plane there - six of eight addresses against one of eight - and under ADR-0006 an omission is not a deletion, so on a patching sink the unwritten addresses keep their old values either way.
+
+**What two-phase costs, measured on 10,000 addresses**, because it must know every encoded value before writing any:
+
+| | time | held before the first write |
+| --- | --- | --- |
+| one pass, buffering | 523 ms | ~546 KB of `Path` and `Value` headers, plus the text |
+| two passes, holding nothing | 1.044 s | nothing |
+
+Memory or CPU, and on an ordinary config struct both are noise.
+Which of the two ferry does is an implementation choice this ADR prices and does not fix.
+
+**And it is redundant on a sink that can stage**, which is stated rather than hidden.
+`Commit` runs only on success, so a `Committer` already has the untouched-plane property for **both** kinds of failure.
+Two-phase buys the encode half of it for the sinks that cannot stage, which is two of the five in ADR-0004's table.
 
 **The alternative considered and refused: let the class decide, so an `ErrPlane` error stops the walk.**
 The appeal is that a downed plane produces N copies of one fact.
@@ -596,9 +637,13 @@ This ADR fixes the semantics, exact-set over `(address, class)` with no message 
 - **ferry's own error text carries no plane value, on every plane, always.**
   Measured at four leaks in five naive messages, on values a Vault or Consul plane makes secret by default.
   The cost is that ferry authors a message for every decode failure mode instead of passing one through, and the carve-out is that a dynamic address segment is plane-supplied and is printed.
-- Aggregating fixes 5.4 at one error against five on the same plane, and it costs a non-staging sink eight extra writes of twelve.
-  It costs a `Committer` nothing, because `Commit` never runs.
+- Aggregating fixes 5.4 at one error against five on the same plane.
+  On Dump it is preceded by an encode phase, so a failure ferry could have caught without the plane writes nothing at all, measured at zero addresses against six.
+  What that costs is one buffered pass or one extra pass, measured at 546 KB or 521 ms over ten thousand addresses, and it is redundant on a sink that can stage.
   No `StopOnFirstError` ships, and adding one later is a load-affecting Option, which ADR-0006 already priced as the cheap kind.
+- **The first draft priced Dump aggregation on the wrong measurement.**
+  It used a sink that could only refuse a write, so it measured `Set` failures and reported the number as the cost of aggregating in general.
+  Encode failures and `Set` failures cost the plane different things, and separating them produced a policy better than either of the two the draft weighed.
 - **Sorting at construction rather than at print time is what makes 5.5's fix cover the programmatic reader.**
   Measured at three distinct `AsType` picks over 300 runs when the order is applied only in `Format`, while the printed form stays at one.
 - The sort key is three parts because a `Close` failure has no location and explains nothing, and the message tiebreak is what keeps the order deterministic if #20 makes the walk concurrent.
@@ -624,6 +669,9 @@ This ADR fixes the semantics, exact-set over `(address, class)` with no message 
 - **Whether `Elements` is ever spelled as an `iter.Seq[error]`.**
   A slice is one allocation and is what everybody will range.
   The survey's warning is about `Seq2[T, error]` and does not apply to a sequence that cannot fail, so this is an open spelling rather than a settled one.
+- **Whether Dump's encode phase buffers its values or re-walks to produce them.**
+  Measured at 546 KB held against 521 ms spent over ten thousand addresses, so both are affordable and neither is free.
+  The ADR fixes the property and leaves the mechanism to whoever writes the walk.
 - **Whether a cap on the element count is ever wanted.**
   Measured at ten thousand elements and 6.2 ms, so nothing forces one today; if one arrives it is an Option and it states what it dropped.
 
@@ -636,6 +684,7 @@ Addressed, and this ADR owns it outright.
 Reproduced in ferry's own shape rather than only in xload's: the walk this ADR inherited was first-error-wins, and on five bad fields it reported one where the aggregating walk reports five.
 The second half of 5.4 is the more interesting one and it is fixed by construction: xload's serial path fails fast and its concurrent path aggregates, so `Concurrency(4)` changes how many errors exist.
 ferry has one collection rule at every moment and in both directions, so the two cannot disagree, and the pairwise tree the survey warns about is unrepresentable because ferry never nests its own aggregates.
+Dump adds a phase rather than a second rule: everything ferry can decide without the plane is decided before the plane is touched, and what survives is aggregated exactly as Load's is.
 The survey's recommended mitigation, a `StopOnFirstError` option, is **declined**, with the reason stated.
 
 **5.5, nondeterministic error output.**
