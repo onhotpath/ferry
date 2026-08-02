@@ -50,6 +50,10 @@ func dumpAddrs(vals map[Path]Value) {
 }
 
 func main() {
+	if p := os.Getenv("P12"); p != "" {
+		run12(p)
+		return
+	}
 	ctx := context.Background()
 
 	hdr("P1  the static address set, from the type alone")

@@ -87,6 +87,13 @@ func validMapKey(k reflect.Type) bool {
 	if _, ok := byIdentity[k]; ok {
 		return true
 	}
+	// The key lookup has to consult the same chain the leaf lookup does, or a
+	// type the chain admits as a leaf is still refused as a key. Two lookups
+	// answering the same question differently is what identity-before-kind
+	// exists to stop.
+	if c, ok := activeChainCodec(k); ok && c.kind == VString {
+		return true
+	}
 	switch k.Kind() {
 	case reflect.String,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -100,6 +107,33 @@ func classify(t reflect.Type) shape {
 	if _, ok := byIdentity[t]; ok {
 		return shapeLeaf
 	}
+	// Pointer indirection is STRUCTURAL and is resolved before the chain is
+	// asked anything. Measured, without this line: *big.Int satisfies the
+	// text pair in its own right, so a *big.Int field becomes a leaf, the
+	// nil-pointer rule is bypassed, a nil dumps as string("<nil>") and the
+	// load panics inside big.Int.UnmarshalText on a nil receiver.
+	if t.Kind() == reflect.Pointer {
+		if _, ok := byIdentity[t]; !ok {
+			return shapePointer
+		}
+	}
+	// #12's seam. Before kind, the chain's declaration beats ferry's
+	// inference; after kind, the chain is only a rescue for what kind
+	// refuses outright, and never reaches a struct that maps no address.
+	if chainBeforeKind {
+		if _, ok := chainCodec(t); ok {
+			return shapeLeaf
+		}
+	}
+	if !chainBeforeKind && len(chainOrder) > 0 && kindWouldRefuse(t) {
+		if _, ok := chainCodec(t); ok {
+			return shapeLeaf
+		}
+	}
+	return kindClassify(t)
+}
+
+func kindClassify(t reflect.Type) shape {
 	switch t.Kind() {
 	case reflect.Bool, reflect.String,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -129,6 +163,9 @@ func classify(t reflect.Type) shape {
 func encLeaf(v reflect.Value) (Value, error) {
 	t := v.Type()
 	if c, ok := byIdentity[t]; ok {
+		return c.enc(v)
+	}
+	if c, ok := activeChainCodec(t); ok {
 		return c.enc(v)
 	}
 	switch t.Kind() {
@@ -174,6 +211,14 @@ func decLeaf(val Value, dst reflect.Value) error {
 	t := dst.Type()
 	if c, ok := byIdentity[t]; ok {
 		return c.dec(val, dst)
+	}
+	if c, ok := activeChainCodec(t); ok {
+		// The donor rule is core's and applies to a codec unchanged: the
+		// codec declares the kind it produces, and String is donated to it.
+		// A codec that re-implemented this would get G2 wrong for its own
+		// users on exactly the three planes that report String for
+		// everything.
+		return c.dec(asDonor(val, c.kind), dst)
 	}
 	switch t.Kind() {
 	case reflect.Bool:

@@ -190,6 +190,9 @@ func decMapKey(text string, dst reflect.Value) error {
 	if c, ok := byIdentity[dst.Type()]; ok {
 		return c.dec(String(text), dst)
 	}
+	if c, ok := activeChainCodec(dst.Type()); ok {
+		return c.dec(String(text), dst)
+	}
 	switch dst.Kind() {
 	case reflect.String:
 		dst.SetString(text)
@@ -203,6 +206,11 @@ func decMapKey(text string, dst reflect.Value) error {
 
 func mapKeyText(k reflect.Value) string {
 	if c, ok := byIdentity[k.Type()]; ok {
+		if v, err := c.enc(k); err == nil && v.Kind() == VString {
+			return v.Text()
+		}
+	}
+	if c, ok := activeChainCodec(k.Type()); ok {
 		if v, err := c.enc(k); err == nil && v.Kind() == VString {
 			return v.Text()
 		}
