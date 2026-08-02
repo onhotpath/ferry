@@ -109,6 +109,10 @@ func BQueryContext(ctx context.Context, v url.Values) context.Context {
 // is where ADR-0004 already puts "the plane is not reachable".
 var ErrNoPlane = errors.New("query: no values in the context")
 
+// ErrNoStore is the sink's spelling of the same refusal, so B8e is not reading
+// the source driver's message.
+var ErrNoStore = errors.New("kv: no store in the context")
+
 type BQueryCtx struct{ Sep string }
 
 func (s BQueryCtx) sep() string {

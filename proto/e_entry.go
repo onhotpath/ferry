@@ -93,29 +93,19 @@ func LoadOver[T any](ctx context.Context, seed T, src FSource, options ...Option
 }
 
 // Dump writes v out to a sink. T is inferred, so no call site names it.
+//
+// It is BindSink followed by the method with the handle discarded, for the
+// same reason LoadOver is Bind followed by its method.
+//
+// The sink is bound with the STATIC address set, which is ADR-0004's own rule
+// and not this prototype's earlier shortcut of binding with the realised one.
+// A dynamic address is minted by the driver at the Set it belongs to.
 func Dump[T any](ctx context.Context, v T, sink FSink, options ...Option) error {
-	o := defaultOpts()
-	for _, op := range options {
-		op.apply(&o)
-	}
-	s, err := schemaFor(reflect.TypeFor[T](), o)
+	b, err := BindSink[T](sink, options...)
 	if err != nil {
 		return err
 	}
-	done := o.reg.install()
-	defer done()
-
-	out := map[Path]Value{}
-	w := &walker{dir: dumpDir(out), sch: serial, ctx: ctx}
-	if _, err := w.walk(s.root, reflect.ValueOf(v), Path{}); err != nil {
-		return err
-	}
-	addrs := NewAddressSet(sortedAddrs(out))
-	open, err := sink.Bind(addrs)
-	if err != nil {
-		return err
-	}
-	return fDump(ctx, open, out, addrs)
+	return b.Dump(ctx, v)
 }
 
 // Compile compiles the schema for T and reports whether it compiled.

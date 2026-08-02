@@ -24,6 +24,8 @@ var b25 = []struct {
 	{"B5", "the presence observation: callback, recorder, or neither", runB5},
 	{"B6", "a held binding under concurrent requests", runB6},
 	{"B7", "the audit: what the fixtures above do not contain", runB7},
+	{"B8", "the same question on the Dump side, which B7a got wrong", runB8},
+	{"B9", "three worked programs, and the additive check", runB9},
 }
 
 func run25(which string) {

@@ -72,3 +72,6 @@ func bKeysHeap(as *AddressSet, n int) int64 {
 	runtime.KeepAlive(k)
 	return after - before
 }
+
+func valueOf[T any](v T) reflect.Value { return reflect.ValueOf(v) }
+
