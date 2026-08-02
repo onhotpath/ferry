@@ -50,6 +50,10 @@ func dumpAddrs(vals map[Path]Value) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "d" {
+		runD8()
+		return
+	}
 	ctx := context.Background()
 
 	hdr("P1  the static address set, from the type alone")
@@ -271,3 +275,27 @@ func init() { timeHook = runTimeCost }
 func init() { refusalHook = runRefusals }
 
 func init() { chainHook = runChainOrder }
+
+// #8's probes. `go run . d` runs these; `go run .` runs #7's.
+func runD8() {
+	d1()
+	d2()
+	d3()
+	d4()
+	d5()
+	d6()
+	d7()
+	d8()
+	d9()
+	d10()
+	d11()
+	d12()
+	d13()
+	d14()
+	d15()
+	d16()
+	d17()
+	d18()
+	d19()
+	d20()
+}

@@ -96,5 +96,5 @@ func dashes(n int) string {
 	return string(b)
 }
 
-func mustU(s string) url.URL   { u, _ := url.Parse(s); return *u }
+func mustU(s string) url.URL       { u, _ := url.Parse(s); return *u }
 func mustIPNet(s string) net.IPNet { _, n, _ := net.ParseCIDR(s); return *n }
