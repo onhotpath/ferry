@@ -71,35 +71,45 @@ func Load[T any](ctx context.Context, src FSource, options ...Option) (T, error)
 // is taken BY VALUE and a new value is returned, so `cfg, err = LoadOver(ctx,
 // cfg, src)` is expressible and is visibly the caller asking for the carry-over
 // rather than ferry doing it behind a pointer.
+//
+// ON FAILURE IT RETURNS THE SEED, which is ADR-0011's rule read as "ferry
+// yields no value IT BUILT". Returning the zero value instead would destroy a
+// value ferry never touched: measured in E12, a failed reload whose error is
+// ignored turns the caller's live config into zeroes, which is the outcome
+// ADR-0011 rules out a partial for, doing more damage. Load[T] returning the
+// zero value then falls out of this rather than being a second rule, because
+// Load is LoadOver with the zero seed.
 func LoadOver[T any](ctx context.Context, seed T, src FSource, options ...Option) (T, error) {
 	o := defaultOpts()
 	for _, op := range options {
 		op.apply(&o)
 	}
-	var zero T
 	s, err := schemaFor(reflect.TypeFor[T](), o)
 	if err != nil {
-		return zero, err
+		return seed, err
 	}
 	done := o.reg.install()
 	defer done()
 
 	open, err := src.Bind(NewAddressSet(s.addrs))
 	if err != nil {
-		return zero, err
+		return seed, err
 	}
 	rd, err := open(ctx)
 	if err != nil {
-		return zero, err
+		return seed, err
 	}
 	if rel, ok := rd.(FReleaser); ok {
 		defer rel.Close()
 	}
+	// The walk builds into a copy, so the partial it builds is unreachable
+	// from the caller whatever happens. That is ADR-0011's rule as a property
+	// rather than as a documented promise.
 	out := seed
 	rv := reflect.ValueOf(&out).Elem()
 	w := &walker{dir: loadDir(rd, ctx, o), sch: serial, ctx: ctx}
 	if _, err := w.walk(s.root, rv, Path{}); err != nil {
-		return zero, err
+		return seed, err
 	}
 	return out, nil
 }
@@ -189,10 +199,9 @@ func loadFrom[T any](ctx context.Context, seed T, vals map[Path]Value, options .
 	for _, op := range options {
 		op.apply(&o)
 	}
-	var zero T
 	s, err := schemaFor(reflect.TypeFor[T](), o)
 	if err != nil {
-		return zero, err
+		return seed, err
 	}
 	done := o.reg.install()
 	defer done()
@@ -200,7 +209,7 @@ func loadFrom[T any](ctx context.Context, seed T, vals map[Path]Value, options .
 	rv := reflect.ValueOf(&out).Elem()
 	w := &walker{dir: loadDir(mapReader{vals}, ctx, o), sch: serial, ctx: ctx}
 	if _, err := w.walk(s.root, rv, Path{}); err != nil {
-		return zero, err
+		return seed, err
 	}
 	return out, nil
 }

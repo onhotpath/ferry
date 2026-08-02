@@ -27,6 +27,7 @@ var e16 = []struct {
 	{"E9", "parse-don't-validate: what Compile[T] actually asks", runE9},
 	{"E10", "auditing the Compile-freezes-the-registry call", runE10},
 	{"E11", "auditing the root map/slice permission", runE11},
+	{"E12", "the seam with #9: yield nothing, and where aggregation lands", runE12},
 	{"E8", "the audit: the cases the other probes do not cover", runE8},
 }
 
