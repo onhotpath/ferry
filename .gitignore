@@ -1,7 +1,23 @@
-# Prototypes are scratch-only and never merge (AGENTS.md, issue #1).
-# They live on proto/* branches; nothing under proto/ belongs on main.
-/proto/
+# During the design effort only docs/ merges to main, and prototypes are
+# scratch-only and never merge (AGENTS.md, issue #1). So this file denies the
+# repository root by default and allows back what belongs there.
+#
+# The reason it is an allowlist and not a list of binary patterns: a Go test
+# binary is named after its module and carries no extension, so `ferryproto5`
+# matches no pattern anyone would think to write. A 4.3 MB one reached main in
+# PR #24 and had to be purged by history rewrite.
+/*
+!/.gitignore
+!/AGENTS.md
+!/CLAUDE.md
+!/docs/
 
-# Go build and test artefacts, which a `git add -A` will otherwise sweep in.
+# Belt and braces, for anyone working in a subdirectory or on a proto branch.
+/proto/
 *.test
 *.out
+*.exe
+*.so
+*.dylib
+*.a
+*.prof
