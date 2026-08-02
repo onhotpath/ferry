@@ -1,6 +1,6 @@
 # 4. The source and sink contract
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-02
 Ticket: [#5](https://github.com/onhotpath/ferry/issues/5)
 
@@ -530,7 +530,7 @@ For a **per-request plane it does not work**, because a query-parameter source i
 The plane instance has to be suppliable at load time rather than at bind time, and none of the three available answers is obviously right: put it in the `context.Context`, add a caller-facing `LoadFrom` taking a `Reader` the caller already holds, or make the plane a parameter of `OpenFunc` and change what `Source` means.
 
 This is not decided here, because deciding it inline would settle the caller-facing API as a side effect of a driver-facing ADR.
-**Proposed as a new ticket on [#1](https://github.com/onhotpath/ferry/issues/1): "How a caller holds a binding, and where a per-request plane is supplied."**
+**Filed as [#25](https://github.com/onhotpath/ferry/issues/25), "How a caller holds a binding, and where a per-request plane is supplied."**
 It blocks nothing in this ADR; the contract above is the same either way.
 
 ## Consequences
