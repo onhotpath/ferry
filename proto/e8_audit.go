@@ -157,6 +157,29 @@ func runE8() {
 	fmt.Println("  ADR-0003's two tiers - and the ADR says so rather than claiming the")
 	fmt.Println("  stronger version.")
 
+	fmt.Println("\n--- E8f: is the compile refusal deterministic (ADR-0001's invariant) ---")
+	type E8Bad struct {
+		A string `ferry:"a,requird"`
+		B int    `ferry:"b,default=abc"`
+		C string
+		D []int `ferry:"d,required"`
+	}
+	distinct := map[string]int{}
+	for range 300 {
+		o := defaultOpts()
+		o.reg = NewRegistry()
+		dd := o.reg.install()
+		_, e := compileSchema2(reflect.TypeFor[E8Bad](), o)
+		dd()
+		distinct[fmt.Sprint(e)]++
+	}
+	fmt.Printf("  300 compiles of a type with four bad fields -> %d distinct error string(s)\n", len(distinct))
+	for k := range distinct {
+		for _, l := range splitL(k) {
+			fmt.Printf("    %s\n", l)
+		}
+	}
+
 	fmt.Println("\n--- E8e: the presence-bit race, which is what #20 actually inherits ---")
 	fmt.Println("  Run under -race. The walk ORs a subtree's presence bit into a captured")
 	fmt.Println("  variable, so a non-serial scheduler races on it:")
