@@ -135,6 +135,7 @@ func WithRegistry(*Registry) Option  // ADR-0009's
 
 Four functions and two Options.
 `ferry.Load` is literally `LoadOver` with the zero value, so nothing is expressible through one and not the other.
+On failure both return without a value ferry built: `LoadOver` returns the seed, and `Load` therefore returns the zero value.
 
 **`LoadOver` is ADR-0006's seeded value, and it is also its reload.**
 The two are one operation:
@@ -224,6 +225,33 @@ That is ADR-0009's own answer to 5.14's first item reused: a default registry is
 **D is not refused here, because it is not this ticket's to refuse.**
 A `Schema[T]` value the caller holds is a caller-facing bind-then-load split, which is [#25](https://github.com/onhotpath/ferry/issues/25)'s question by name.
 What this ADR removes is one of its two motivations, measured below.
+
+#### On failure it yields the seed, which is [#9](https://github.com/onhotpath/ferry/issues/9)'s constraint read once rather than twice
+
+[ADR-0011](0011-the-error-model.md) ([#9](https://github.com/onhotpath/ferry/issues/9)) imposes a constraint on this signature from a ticket that does not own it, and says so: **when a Load fails, ferry yields no value.**
+Aggregating means the walk continues past a failed field, so a partially populated destination exists inside ferry either way; ADR-0011 rules that it does not cross the boundary, on the grounds that a process which starts with `/db/host` set and `/db/port` zero is the worst available outcome because it runs and is wrong.
+
+This ADR agrees, and the rule is honoured **as a property rather than as a promise**: the walk builds into a copy of the seed, so the partial is unreachable from the caller whatever happens.
+
+**The rule has two readings at `LoadOver`, and ADR-0011 could not have seen the second**, because it was written against a signature with no seed in it.
+Measured, a good reload followed by a bad plane, with the error ignored:
+
+| on failure `LoadOver` returns | the caller's live config becomes |
+| --- | --- |
+| the zero value | `{Host: Port:0 Retries:0}` |
+| **the seed** | `{Host:db1 Port:5432 Retries:3}` |
+
+The zero reading **destroys a value ferry never touched**.
+It is the outcome ADR-0011 rules out a partial for, reached through the other door and doing more damage, because the caller had a good value a moment earlier and now does not.
+
+> `LoadOver` returns the **seed** on failure.
+> ADR-0011's rule is read as *ferry yields no value it built*.
+
+`Load[T]` returning the zero value then falls out rather than being a second rule, because `Load` is `LoadOver` with the zero seed, and the result is byte-identical to ADR-0011's own measurement.
+
+**And the cost ADR-0011 names is already paid.**
+It records that yielding nothing rules out a `LoadInto(ctx, src, &cfg)` shape, because "yield no value" there would mean ferry zeroing a struct the caller owns.
+This ADR rules that shape out one section earlier on ADR-0006's reload leak, so the two constraints point the same way and neither is doing the other's work.
 
 #### On the name, which was scanned rather than argued
 
@@ -503,6 +531,11 @@ Measured, the same walk under a `sched` value and under the identical loop inlin
 
 **That refines the cost the owner's comment priced.**
 It is one indirect call per **container**, not per leaf, because the scheduler is handed siblings as a batch.
+
+**And it turns out to serve [#9](https://github.com/onhotpath/ferry/issues/9) as well as [#20](https://github.com/onhotpath/ferry/issues/20), which neither ticket asked for.**
+ADR-0011 aggregates, which means the walk continues past a failed field.
+That is a property of the scheduler and not of the walk: measured, the same walk function under a first-error scheduler and under an aggregating one, over a plane with two unparseable leaves, gives 1 error and 2 errors respectively, with the walk byte-identical between the rows.
+So "a concurrent mode is a scheduler and never a second walk" is the same seam that keeps #9's aggregation out of the walk.
 
 And one thing #20 inherits that is a real hazard rather than a note.
 ADR-0006 made the walk return a presence bit per subtree, and flagged that "a concurrent walk would have to combine those bits rather than only its errors".
@@ -805,8 +838,18 @@ ADR-0006 constrained #13 and #16 jointly to define reload as producing a new val
 Whether a watcher hands a caller a channel of `T` or something else is #13's.
 
 **[#9](https://github.com/onhotpath/ferry/issues/9), errors.**
-This ADR produces refusals at schema compile, joined and sorted, and defers every type.
-One shape #9 should know: a compile error is memoised by `sync.OnceValues` and replayed identically to every later caller, so an error convention that carries per-call context in the error value would be wrong here.
+This ADR produces refusals at schema compile, aggregated and sorted, and defers every type.
+Three things are reconciled with [ADR-0011](0011-the-error-model.md), which was written in parallel and which neither ADR had seen when it was drafted.
+
+- **Yield nothing** is adopted, and refined at `LoadOver` above.
+- **ferry has exactly one aggregate constructor and never calls `errors.Join`.**
+  Adopted rather than negotiated: where this ADR says a compile's refusals are "aggregated and sorted", the aggregate is ferry's, so that `Elements()` can range it and the sort key applies.
+  ADR-0011 found the alternative as a live defect, where `Elements` reported one element while two errors printed.
+- **A compile error and a walk error never share an aggregate**, because a compile failure means no walk runs.
+  That falls out of this ADR's control flow rather than needing a rule: `schemaFor` returns before `Bind` is called.
+
+And one shape #9 inherits from the cache rather than the other way round: **a compile error is memoised by `sync.OnceValues` and replayed identically to every later caller**, so an error convention that carries per-call context in the error value would be wrong here.
+ADR-0011's point that a replayed compile error is still a compile-moment error and sorts as one is exactly right, and it is the cache that makes it replayed.
 
 **[#35](https://github.com/onhotpath/ferry/issues/35), what `ferrytest` exports.**
 Nothing is added to that package, and one thing is handed to it: the equivalence-test rule above is a `ferrytest` obligation, because "a fresh destination per subtest" is a property of the suite rather than of core.
@@ -831,6 +874,9 @@ Nothing is added to that package, and one thing is handed to it: the equivalence
 - **`Load` returns a value, so ferry cannot be handed a destination that already holds a previous load's results without the caller writing it.**
   That is ADR-0006's erasure defect made hard to reach rather than documented, and it is the deciding argument for the generic entry point - a bigger one than `ErrNotPointer` disappearing.
   The cost is that a caller wanting the carry-over writes `LoadOver`, and that ferry ships two load verbs where xload ships one.
+- **On failure `LoadOver` yields the seed and `Load` yields the zero value**, which is [ADR-0011](0011-the-error-model.md)'s "ferry yields no value" read as *no value it built*.
+  ADR-0011 imposed the rule from a ticket that does not own this surface and named that as the call it was least sure of; it is adopted, and the one reading it could not have seen is the one where returning the zero value would destroy a live config ferry never touched.
+  ferry therefore has one rule here rather than two, and the partial the walk builds is unreachable from the caller as a property rather than as a documented promise.
 - `ErrNotPointer` stops existing and `ErrNotStruct` survives, because Go has no constraint meaning "any struct".
   A root non-struct is refused at schema compile, so the two failures land in different places under ferry than under xload.
 - **The cache key has three components and #16 chose none of them.**
