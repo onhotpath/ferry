@@ -50,6 +50,10 @@ func dumpAddrs(vals map[Path]Value) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "t" {
+		runT11()
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "d" {
 		runD8()
 		return

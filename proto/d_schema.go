@@ -64,7 +64,21 @@ func parseTag(tag string) (name string, o fieldOpts, err error) {
 	return name, o, err
 }
 
+// t11Mode routes the walkers through #11's grammar instead of #8's
+// placeholder, so an end-to-end probe exercises the real names.
+var t11Mode bool
+
 func fieldTag(f reflect.StructField) (string, fieldOpts, error) {
+	if t11Mode {
+		plan, errs := planField(f)
+		if len(errs) > 0 {
+			return "", fieldOpts{}, errs[0]
+		}
+		if plan.skip || plan.promote {
+			return "", fieldOpts{}, nil
+		}
+		return plan.decl.name, toFieldOpts(plan.decl), nil
+	}
 	tag := f.Tag.Get("ferry")
 	if tag == "" {
 		return f.Name, fieldOpts{}, nil
