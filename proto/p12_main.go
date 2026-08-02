@@ -77,7 +77,19 @@ func run12(which string) {
 		h12("P15", "the seam with #8: defaults through the chain")
 		runDefaults()
 	}
-	if !all && !strings.Contains("1 2 3 4 5 6 7 8 9 10 11 12 13 14 15", which) {
+	if run("16") {
+		h12("P16", "the dependency-upgrade exposure, and url.URL")
+		runUpgrade()
+	}
+	if run("17") {
+		h12("P17", "how common the normalisation hazard really is")
+		runNormalise()
+	}
+	if run("18") {
+		h12("P18", "the registration shape #12 forces on #19")
+		runRegistration()
+	}
+	if !all && !strings.Contains("1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18", which) {
 		fmt.Fprintln(os.Stderr, "unknown probe", which)
 		os.Exit(1)
 	}

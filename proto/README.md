@@ -30,6 +30,9 @@ The source scan is separate: `python3 ../scan_halfpairs.py "label" <root>`.
 | `p12_halfpair.go` | the three answers for an incomplete pair, and the blast radius of the strict one |
 | `p13_mapkey.go` | a chain-admitted type as a map key, and the injectivity obligation |
 | `p14_audit.go` | the cases the other thirteen probes do not cover |
+| `p16_upgrade.go` | the dependency-upgrade exposure, and what `url.URL` does under each option |
+| `p17_normalise.go` | how common the normalisation hazard really is |
+| `p18_registration.go` | the registration shape #12's decisions force, exercised so the obligations handed to #19 are dischargeable |
 | `p15_defaults.go` | the seam with #8: a declared default reaching a codec |
 | `../scan_halfpairs.py` | half-pair census by declaration scan over a whole source tree |
 
@@ -60,10 +63,14 @@ Changes to inherited files, all load-bearing:
 | P13 | a chain type as a map key | works once `validMapKey` consults the chain. **And `map[time.Time]string` silently collapses two distinct keys into one address today**, in core's own set |
 | P14 | the audit | zero values, every composite position, the flattening plane, real YAML, and the root all pass; `regexp.Regexp`'s zero does not round-trip under `DeepEqual`; the completeness check structurally cannot see a chain-admitted type; core's 11/11 and 10/10 are unaffected |
 | P15 | the seam with #8 | a declared default is a `String` `Value` at the address, so a codec gets defaults with no default-awareness. `default=aGk=` on a `[]byte` field lands as the four bytes `aGk=`, not as decoded base64 |
+| P16 | does before-kind drift too | **yes.** A dependency adding a text pair changes the address set and every stored artefact with no consumer change. After-kind does not. Both orders drift; they differ in whether the triggering edit looks like a serialization change |
+| P17 | how common is the normalisation hazard | 3 of 14 non-canonical values do not return identical under `DeepEqual` - `net.IP` 4-byte, `decimal` `1.2500`, `regexp` zero - and **all three are equal under the type's own relation**. Zero types in the corpus lose information under their own relation |
+| P18 | are #19's obligations dischargeable | yes, over `url.URL`, a named `time.Duration`, a `big.Int` declaring `Number`, and the `net.Addr` interface. **Found the third defect** |
 
-## Two defects this found in inherited code
+## Three defects this found
 
-Both were found by running rather than by reading, and both are fixed on this branch only.
+All found by running rather than by reading, and all fixed on this branch only.
+The third is #12's own rule not implemented where the rule says it lives.
 
 - **A pointer type can satisfy an arm in its own right.**
   `*big.Int` implements the whole text pair, so with the chain consulted before the pointer shape, a `*big.Int` field became a leaf, ADR-0005's nil-pointer rule never ran, a nil dumped as `string("<nil>")` and the load segfaulted inside `big.Int.UnmarshalText`.
@@ -72,3 +79,7 @@ Both were found by running rather than by reading, and both are fixed on this br
   `validMapKey` admits anything in the identity table, and `time.Time`'s RFC 3339 text is not injective over the type: a `time.UTC` value and a `FixedZone("GMT", 0)` value are distinct under `==` and produce identical text.
   Two Go keys, one address, no error.
   This is ADR-0005's stated injectivity hazard occurring inside core's own set rather than in a registered codec, and no probe in #7 reached it because none used a composite map key.
+- **The declared kind lived beside the identity table instead of inside it.**
+  The chain's codec carried its kind and the table's did not, so `decLeaf` donated for a chain codec and not for a table one.
+  A registered `big.Int` codec correctly declaring `Number` loaded from a typed plane and failed with `value: wrong kind` on a flat one - the codec was right and the lookup was wrong, and the failure appeared only on env, query params and Consul.
+  `kind` is now a field of `leafCodec`, resolved by the same lookup that finds the codec.

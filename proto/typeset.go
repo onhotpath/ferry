@@ -19,6 +19,11 @@ import (
 
 type leafCodec struct {
 	name string
+	// kind is the boundary Value kind this codec produces. It lives HERE
+	// rather than beside the table, because the donor rule needs it at the
+	// same lookup that finds the codec. Keeping them apart is how the
+	// prototype ended up donating for a chain codec and not for a table one.
+	kind VKind
 	enc  func(reflect.Value) (Value, error)
 	dec  func(Value, reflect.Value) error
 }
@@ -26,6 +31,7 @@ type leafCodec struct {
 var byIdentity = map[reflect.Type]leafCodec{
 	reflect.TypeFor[time.Duration](): {
 		name: "time.Duration",
+		kind: VString,
 		enc: func(v reflect.Value) (Value, error) {
 			return String(time.Duration(v.Int()).String()), nil
 		},
@@ -44,6 +50,7 @@ var byIdentity = map[reflect.Type]leafCodec{
 	},
 	reflect.TypeFor[time.Time](): {
 		name: "time.Time",
+		kind: VString,
 		enc: func(v reflect.Value) (Value, error) {
 			b, err := v.Interface().(time.Time).MarshalText()
 			if err != nil {
@@ -210,7 +217,9 @@ func asDonor(val Value, want VKind) Value {
 func decLeaf(val Value, dst reflect.Value) error {
 	t := dst.Type()
 	if c, ok := byIdentity[t]; ok {
-		return c.dec(val, dst)
+		// The donor rule is core's and applies to EVERY codec, whether it
+		// came from the identity table or from the chain.
+		return c.dec(asDonor(val, c.kind), dst)
 	}
 	if c, ok := activeChainCodec(t); ok {
 		// The donor rule is core's and applies to a codec unchanged: the
