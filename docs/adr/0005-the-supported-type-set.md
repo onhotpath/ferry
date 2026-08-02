@@ -203,6 +203,49 @@ struct{ mu sync.Mutex; Name string }   compiles, 1 address
 
 The error names registration ([#19](https://github.com/onhotpath/ferry/issues/19)) as the fix, which is what registration is for: `netip.Addr` is a type ferry does not own, its `MarshalText` is the obvious codec, and the guarantee transfers to whoever registers it.
 
+### There are three outcomes for a type, not two
+
+The framing so far is binary: a type is in the set or it is refused.
+Checked against fifteen types people actually reach for, that is false, and the third outcome is the one with the trade-off in it.
+
+| type | outcome | what lands on the plane |
+| --- | --- | --- |
+| `net.Addr` | refused, interface kind | |
+| `netip.Addr`, `netip.AddrPort`, `netip.Prefix` | refused, maps no address | |
+| `big.Int` | refused, maps no address | |
+| `url.URL` | refused, **via a nested `url.Userinfo`** | |
+| `net.IP` | **admitted, round-trips** | `bytes("\x00...\xff\xff\xc0\x00\x02\x01")` |
+| `UUID` as `[16]byte` | **admitted, round-trips** | sixteen raw bytes |
+| `net.IPNet` | **admitted, round-trips** | `/IP` and `/Mask`, two byte blobs |
+| `net.TCPAddr` | **admitted, round-trips** | a byte blob and a number |
+| `sql.NullString` | **admitted, round-trips** | `/String` and `/Valid` |
+| `json.RawMessage` | **admitted, round-trips** | `bytes("{\"a\":1}")` |
+| `type Port int` | **admitted, round-trips** | `number("8080")` |
+| `time.Duration`, `time.Time` | admitted, pinned representation | `string("1h30m0s")`, RFC 3339 |
+
+So:
+
+1. **In the set with a pinned representation.** Core's table, checked by the golden column.
+2. **Refused at schema compile.** Loud, from the type alone.
+3. **In the set by kind, with an unpinned representation nobody chose.**
+
+Category 3 is the honest cost of admitting types by `reflect.Kind`.
+The same rule that makes `type Port int` work for free writes an IP address into a YAML file as sixteen raw bytes, because `net.IP` is `[]byte` and `[]byte` is `Bytes`.
+Value fidelity is **not** violated: every one of those round-trips exactly.
+What is violated is legibility, and ADR-0001 put legibility of the plane on the driver's side of the line, so nothing in core's guarantee catches it.
+
+This is the representation blindness stated earlier, applied to types core has no golden row for.
+For core's own types the golden column pins the answer; for a type admitted by kind there is no golden row, because there is no table entry.
+
+**It is accepted rather than fixed**, and the alternatives are worse.
+Refusing named types over admitted kinds would kill `type Port int`, which is the main thing kind admission buys.
+Special-casing named `[]byte` types is arbitrary and would still miss `net.IPNet`.
+The mitigation is registration ([#19](https://github.com/onhotpath/ferry/issues/19)) plus documentation, and the documentation obligation is specific: **the set's documentation names category 3 and lists the common members**, because a user who sees `net.IP` "work" has no reason to look further until they read the file.
+
+`url.URL` is worth its own line, because it is the case that will be reported as a bug.
+It is refused not for itself but because its `User *url.Userinfo` field maps no address, so the rule propagates out of a nested type the user did not choose.
+The error names `/V/User` and `url.Userinfo`, which is the right diagnosis, and it is still a type that "obviously should work" and does not.
+
 ### A recursive type does not compile
 
 A recursive type has an unbounded static address set, so schema compile refuses it rather than recursing.
@@ -426,7 +469,31 @@ after   2026-08-02 12:00:00 -0400       Location ""
 
 RFC 3339 carries the offset and not the zone identity, so the zone name cannot survive.
 `encoding/json/v2` produces exactly the same result on the same input, measured side by side, so ferry is not worse than the stdlib here; it is identical to it, and it says so rather than implying the round trip is total.
+
+**What that loss actually costs, because "the zone name is lost" understates it.**
+The instant, the wall-clock reading, the nanoseconds and the offset all survive.
+What is destroyed is the zone's *rules*, so the loaded value is a fixed-offset zone that does not know DST exists.
+Measured on a January value in `America/New_York`, then adding six months to cross into EDT:
+
+```
+orig.AddDate(0, 6, 0)   2026-07-15 12:00:00 -0400 EDT
+back.AddDate(0, 6, 0)   2026-07-15 12:00:00 -0500
+same instant?           false
+```
+
+So a stored timestamp is unaffected and a stored "when to run next" is wrong by an hour, half the year.
+`time.UTC` costs nothing: it round-trips under `==`, Location included.
+The practical guidance that falls out is that a `time.Time` crossing a ferry plane should be UTC, and this is a property of RFC 3339 rather than of ferry.
+
 `time.Time` also has values with no text form at all: `MarshalText` errors with `year outside of range [0,9999]`, so the representation is partial over the type and the error surfaces rather than being swallowed.
+
+**And the relation is doing more work than it looks.**
+Choosing `.Equal` as `time.Time`'s relation is not only a statement about how to compare; it is a statement about what the harness is permitted not to notice.
+Measured, replacing `time.Time`'s codec with one that discards the zone entirely and stores a Unix nanosecond count, the zoned value passes with **zero failures**, because `.Equal` compares instants and a discarded zone preserves the instant exactly.
+The full core value list does catch that codec, at two failures, but for an unrelated reason: `time.Time{}` is year 1 and overflows `UnixNano`.
+
+That is the sharpest available statement of why a proof is a triple.
+A weaker relation admits more, so the relation is where a type's carve-out is declared, and the golden column is the only one of the three that pins the representation on purpose rather than by luck.
 
 **Map ordering.**
 Resolved by ADR-0001's determinism invariant, applied rather than re-decided: every map iteration reaching a user-visible artefact sorts its keys.
@@ -691,7 +758,16 @@ Core's test iterates the identity table and the admitted kind list and asserts t
 ## Consequences
 
 - Core's supported set is small and enumerable, and a contributor can read it off one table rather than off the walk.
-  The cost is that ordinary types people expect to work, `netip.Addr` and `uuid.UUID` among them, do not until somebody registers them, and the compile error is the only thing standing between that and a silent empty field.
+  The cost is that ordinary types people expect to work, `netip.Addr` and `url.URL` among them, do not until somebody registers them, and the compile error is the only thing standing between that and a silent empty field.
+- There are three outcomes and not two, and the third is the one to watch: a type admitted by kind gets an unpinned representation nobody chose.
+  `net.IP` and a `[16]byte` UUID both round-trip exactly and both write raw bytes into the plane.
+  Value fidelity holds, legibility does not, and core's guarantee is silent about it by construction.
+  This is the price of the same rule that makes `type Port int` work for free, and the documentation obligation it creates is real rather than a formality.
+- A `time.Time` that is not UTC loses its zone's DST rules, which is worse than losing its name: arithmetic across a transition gives a different instant.
+  ferry is identical to `encoding/json/v2` here, and the guidance is that a time crossing a plane should be UTC.
+- The equality relation in each proof is also the specification of what the harness may not notice.
+  `.Equal` cannot see `time.Time`'s zone being discarded, measured at zero failures against a codec that throws it away.
+  That is the argument for the golden column stated at its strongest, and it means a contributor choosing a loose relation quietly widens what ferry tolerates.
 - Identity-before-kind gives ferry `time.Duration` and `time.Time` with no string comparison anywhere, and leaves one hole: a named type over `time.Duration` dumps nanoseconds.
   That hole is documented, is narrower than xload's, and has registration as its answer.
 - The maps-no-address rule turns four stdlib types from silent total losses into compile errors, and it is the single highest-value line in this ADR.
