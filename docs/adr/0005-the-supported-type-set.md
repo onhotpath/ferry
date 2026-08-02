@@ -20,10 +20,50 @@ This ADR is written from a throwaway prototype on branch `proto/7-type-set`, whi
 It is built on `proto/5-source-sink`, so every measurement below runs against a real `Path`, a real `Value` and a real YAML plane over real files rather than against a mock.
 Every number is from that prototype unless it cites the survey.
 
-**Four of the twelve probes overturned an answer this ADR had already reached in draft**, and all four were found by testing a case the earlier fixtures did not contain.
+**Seven of the fourteen probes overturned an answer this ADR had already reached in draft**, and every one was found by testing a case the earlier fixtures did not contain.
 That is recorded because the shape of each miss is the argument for the harness design in the second half.
 
 ## Decision
+
+### What this closes, and what it does not
+
+The ticket asked for four things by name.
+This table is the answer to each, so a reader can check the ADR against the ask without reading the rest of it.
+
+| The ticket asked | Closed | Where |
+| --- | --- | --- |
+| the enumerated set of Go types core supports | **yes** | [The enumerated set](#the-enumerated-set) |
+| what happens to a type outside it, at what point it is detected | **yes**, at schema compile from `reflect.TypeFor[T]()` alone | [A type outside the set](#a-type-outside-the-set-is-refused-at-schema-compile-and-every-violation-is-reported) |
+| how round-trip is enforced in CI | **yes**, one table run against three planes plus a completeness check | [How round-trip is enforced](#how-round-trip-is-enforced) |
+| what "adding a type means adding its proof" looks like concretely | **yes**, a proof is a triple and none of the three is derivable from the others | [A proof is a triple](#a-proof-is-a-triple-because-the-property-alone-is-blind-to-representation) |
+| the pinned `encoding/json/v2` option set | **yes**, all 37 options enumerated from source | [The pinned option set](#the-pinned-encodingjsonv2-option-set) |
+| float precision | **yes** | [The named hazards](#the-named-hazards-each-resolved) |
+| `time.Time` and its monotonic clock | **yes**, with two losses stated rather than implied | as above |
+| map ordering | **yes** | as above |
+| `[]byte` | **yes**, and the answer is forced rather than chosen | as above |
+| `time.Duration` | **yes**, and ferry departs from json/v2 deliberately | as above |
+| whether a `fmt.Stringer` fallback is ever safe | **yes: never**, for two independent measured reasons | as above |
+
+Four questions this ADR had to answer that the ticket did not name, all of which came out of the prototype:
+
+| Not asked for, answered anyway | Where |
+| --- | --- |
+| which `Value` kinds a Go type accepts on **Load**, which decides whether env, query and kv work at all | [String is the universal donor](#on-load-string-is-the-universal-donor-and-nothing-else-coerces) |
+| what stops a struct admitted by kind from being a silent total loss | [A struct that maps no address](#a-struct-that-maps-no-address-does-not-compile) |
+| whether a recursive type has a finite address set | [A recursive type](#a-recursive-type-does-not-compile) |
+| whether an array is a static or a dynamic composite | [The enumerated set](#the-enumerated-set) |
+
+**Three things this ADR does not close, stated here rather than left to the reader to notice.**
+
+- **A nil pointer cannot round-trip through a plane with no null.**
+  Measured: the composites pass 10 of 10 through the memory plane and the YAML driver, and 8 of 10 through a plane that reports `String` for everything, the two failures being `*int` and `*Cred` at nil.
+  This is driver fidelity rather than value fidelity, so ADR-0001 already puts it on the other side of the line, but it means core's guarantee is stated over the memory plane and a driver honours as much of it as its plane can carry.
+  The consequence for the conformance suite is in [How round-trip is enforced](#how-round-trip-is-enforced) and it is new work that ADR-0004 did not anticipate.
+- **The nil-versus-empty distinction for a composite is not expressible at all**, by any type.
+  An earlier draft of this ADR claimed `*[]T` expressed it.
+  That claim was false and the probe that killed it is recorded below, because the shape of the mistake is the point.
+- **A named type over `time.Duration` still dumps nanoseconds.**
+  Narrower than xload's hole, and registration is the answer, and it is not closed.
 
 ### The set is resolved by type identity first, and by `reflect.Kind` second
 
@@ -78,12 +118,31 @@ ferry owns the representation, in both directions.
 A composite is never itself a value except in the one case below.
 It contributes addresses, and its elements are the leaves.
 
-| Go kind | segments minted | note |
-| --- | --- | --- |
-| `struct` | one `Name` per exported field | the field's name is [#11](https://github.com/onhotpath/ferry/issues/11)'s |
-| `*T` | none of its own | `Null` when nil, otherwise `T`'s addresses |
-| `[]T`, `[N]T` | one `Index` per element | **this is the type that produces ADR-0003's `Index` segment** |
-| `map[K]V` | one `Name` per key | `K` restricted below |
+| Go kind | segments minted | tier | note |
+| --- | --- | --- | --- |
+| `struct` | one `Name` per exported field | static | the field's name is [#11](https://github.com/onhotpath/ferry/issues/11)'s |
+| `*T` | none of its own | static | `Null` when nil, otherwise `T`'s addresses |
+| `[N]T` | one `Index` per element, exactly `N` | **static** | the length is part of the type |
+| `[]T` | one `Index` per element | dynamic | the length is a property of the value |
+| `map[K]V` | one `Name` per key | dynamic | `K` restricted below |
+
+**An array is a static composite and a slice is a dynamic one, and the difference is not cosmetic.**
+ADR-0003 split both collision rules into a static tier checked from the type and a dynamic tier checked as each address is minted, and ADR-0004 made Load of a dynamic address conditional on the source implementing `Enumerator`.
+An array's element addresses are known from `reflect.TypeFor[T]()` with no value in hand, so **an array is loadable from a source that cannot enumerate and a slice is not**.
+Measured:
+
+```
+struct{ Arr [3]string; Sl []string; M map[string]int }  compiles to
+  /Arr#0  /Arr#1  /Arr#2      static, from the type
+  /Sl/*   /M/*                dynamic, from the value
+```
+
+That is a real capability difference between two types a user might pick interchangeably, and it belongs in the documentation of the set rather than being discovered against a Vault token with no `LIST`.
+It also means an array needs no empty-container marker and has no nil form, so none of the nil-versus-empty reasoning below applies to it.
+An absent array element leaves the element at its zero value, exactly as an absent struct field does; an index the array cannot hold is loud.
+Measured: `[3]string` given only index 0 loads `["a", "", ""]`, and given index 7 returns `ferry: /V: plane has index 7, [3]string holds 3`.
+`encoding/json/v2` is stricter here, refusing a short array outright with `too few array elements` and offering `UnmarshalArrayFromAnyLength` as the v1-legacy escape.
+ferry does not follow it, because an absent address leaving a zero value is the rule ferry applies everywhere else and an array element is a static address like any other.
 
 **`Index` segments are used, which answers the question ADR-0003 reserved.**
 ADR-0003 said that if this ticket admitted no indexed composite, the kind would simply go unused.
@@ -213,10 +272,24 @@ ferry normalises in the opposite direction, onto nil, which is the zero value an
 The two are not symmetric: one manufactures a value, the other collapses onto the identity Go already gives an unset composite.
 The pinned option set below keeps the JSON route pointed the same way, so the two routes cannot disagree.
 
-**What this costs, plainly.**
-A user who genuinely needs to distinguish "no tags configured" from "tags explicitly cleared" cannot express it with `[]string`.
-The expressible form is `*[]string`, where the pointer carries presence and the slice carries content, and that works because a nil pointer writes `Null` at a leaf address rather than at a container address.
-That is the same answer `sql.Null[T]` gives, and it is one type away rather than unavailable.
+**What this costs, plainly, and the draft got this wrong.**
+A user who needs to distinguish "no tags configured" from "tags explicitly cleared" cannot express it with `[]string`.
+
+An earlier draft of this ADR said the expressible form was `*[]string`, with the pointer carrying presence and the slice carrying content, on the reasoning that a nil pointer writes `Null` at a leaf address rather than at a container address.
+**That was asserted without being measured, and it is false.**
+
+```
+*[]string  nil pointer            mints  /P=null   loads back  nil pointer
+*[]string  pointer to []string{}  mints  /P=null   loads back  nil pointer
+*[]string  pointer to {"a"}       mints  /P#0      loads back  &{"a"}
+```
+
+A nil pointer and a pointer to an empty slice are one address carrying one value, because the pointer dereferences to a composite whose emptiness is written at the same address the nil pointer would use.
+Adding a pointer adds no bit.
+
+So the honest statement is that **the distinction is not expressible by any type in the set**, and a user who needs it models it explicitly, as `struct{ Set bool; Items []string }`, or registers a codec.
+That is a worse answer than the draft's and it is the true one.
+It is recorded at this length because it is the clearest instance in this ticket of the rule the prior four sessions all arrived at: an assertion that was never run is not a finding, and this one survived two drafts before a probe took ten lines to kill it.
 
 **One structural consequence for ADR-0003, recorded because it is subtle.**
 Measured, the same field under two values:
@@ -229,6 +302,68 @@ Tags []string, {"a","b"}    mints  /Tags#0  /Tags#1
 `/Tags` is a prefix of `/Tags#0`, so one type has two address shapes that are never simultaneously realised.
 ADR-0003's prefix-free rule holds per realised address set and is not violated by either shape, but the static tier cannot treat a composite's own address and its element addresses as a static prefix clash.
 This is a constraint on how the static check is written, not a change to the rule, and it is named here so it is not rediscovered as a bug.
+
+### On Load, `String` is the universal donor, and nothing else coerces
+
+The tables above say which `Value` kind a Go type **produces** on Dump.
+They do not say which kinds it **accepts** on Load, and the draft of this ADR simply omitted the question.
+Omitting it is not neutral: the strict reading, that a Go `int` accepts only `Number`, was what the prototype implemented, and it means ferry cannot load an integer from environment variables.
+
+Measured, before the rule existed, loading a five-field struct from a plane that reports `String` for everything:
+
+```
+err = value: wrong kind
+got = {Port:0 Ratio:0 On:false Timeout:0s Name:}
+```
+
+ADR-0004 records that "a typed boundary buys YAML and TOML something real, JSON something partial, and Consul, environment variables and query parameters nothing at all", and that three of its four first-party drivers are in the last group.
+A plane in that group can only ever report `String`.
+So the strict reading disables three of four first-party drivers for every non-string field, and the harness did not catch it because every proof fed `dump`'s own output back into `load`, where the kinds match by construction.
+
+The rule:
+
+> Every leaf accepts its own kind.
+> Every leaf additionally accepts `String`, whose text is parsed by exactly the parser that leaf's own kind uses.
+> Nothing else coerces.
+
+`String` is the universal donor because `String` is what a plane says when it has nothing to say: it means untyped text, parse it yourself.
+`Number`, `Bool` and `Bytes` are assertions, and a plane that makes one is respected rather than second-guessed.
+So a `Number` is **not** accepted for a Go `string` field, measured as `value: wrong kind`, because accepting it would be ferry overriding a plane's own type information and would destroy the quoting distinction ADR-0004 preserved on purpose.
+
+This is section 4's asymmetry stated as a rule rather than as an observation.
+Load survives a string boundary because the destination field type drives the parse; Dump does not, which is why the boundary is typed at all.
+The donor rule costs value fidelity nothing, because Dump still writes the precise kind and Load still accepts it.
+
+**The parser is the leaf's own, and that is what separates this from `cast`.**
+The survey measures `spf13/cast`, which xload depends on, corrupting five ordinary values.
+Measured side by side on the same inputs, all through `String`:
+
+| input | ferry | `cast` |
+| --- | --- | --- |
+| `"0080"` | `80` | `0`, invalid octal with the error swallowed |
+| `"010"` | `10` | `8`, base 0 reads it as octal |
+| `"0x10"` | refused | `16` |
+| `"1.9"` into an `int` | refused | `1`, truncated |
+| `""` into an `int` | refused | `0`, indistinguishable from a real zero |
+| `"yes"` into a `bool` | refused | `false`, silently |
+| `"30"` into a `time.Duration` | refused, `missing unit in duration "30"` | `30ns` |
+
+Every row is a refusal or an exact answer, and none is a guess.
+`"0080"` is the case the survey singles out, a zero-padded port silently becoming zero, and it is the difference between `strconv.ParseInt(s, 10, bits)` and `cast`'s base-0 inference.
+`"yes"` is the survey's other named asymmetry, where `enabled: yes` from YAML is `true` and `ENABLED=yes` from env is `false`; ferry refuses both rather than making them agree on a guess.
+
+**A leaf that does not parse is loud**, which is the same rule stated from the other side.
+Measured into an `int8`:
+
+```
+Number("abc")    strconv.ParseInt: parsing "abc": invalid syntax
+Number("99999")  strconv.ParseInt: parsing "99999": value out of range
+Bool(true)       value: wrong kind
+Number("")       strconv.ParseInt: parsing "": invalid syntax
+```
+
+Overflow is an error rather than a truncation, which is the koanf defect the survey measured, where `Int64()` turns `18446744073709551615` into `9223372036854775807` with a nil error.
+The error types are [#9](https://github.com/onhotpath/ferry/issues/9)'s; that they exist at all is this ADR's.
 
 ### The named hazards, each resolved
 
@@ -381,7 +516,7 @@ The option surface was enumerated from `go1.27rc2`'s source rather than sampled:
 | `MatchCaseInsensitiveNames` | **false** | ADR-0003: core never folds. |
 | `RejectUnknownMembers` | **false** | ferry maps a subset of a plane, and ADR-0001 requires keys ferry does not map to survive. |
 | `WithMarshalers`, `WithUnmarshalers` | not pinned | the codec chain is [#12](https://github.com/onhotpath/ferry/issues/12)'s and [#19](https://github.com/onhotpath/ferry/issues/19)'s, not a global. |
-| all thirteen `encoding/json` legacy switches | **never set** | they exist to restore v1 semantics. `FormatDurationAsNano` and `FormatByteArrayAsArray` are the two that would silently contradict decisions above. |
+| all thirteen `encoding/json` legacy switches | **never set** | they exist to restore v1 semantics. `FormatDurationAsNano` and `FormatByteArrayAsArray` are the two that would silently contradict decisions above, and `UnmarshalArrayFromAnyLength` is the one whose v2 default ferry knowingly does not follow. |
 | the remaining `jsontext` options | driver's | indentation, escaping, spacing, byte and depth limits change bytes or resource use, not meaning. |
 
 **Why this belongs in the type-set ADR rather than in a JSON driver's.**
@@ -471,18 +606,49 @@ A table is only as good as its values, which is the honest cost of ADR-0002's ru
 The mitigation is that the value list for each core type is part of this decision rather than left to whoever writes the test: every core entry carries its zero value, its extremes, and the values that historically break it.
 For floats that is `0`, `-0`, `0.1`, `1.0/3.0`, `MaxFloat64`, `SmallestNonzeroFloat64`, `+Inf`, `-Inf` and `NaN`; for integers the zero and both bounds of the width; for strings the empty string, an embedded NUL, non-UTF-8 bytes, and text containing a separator; for composites nil, empty, and one containing an empty element.
 
-#### CI runs the same table against every plane
+#### CI runs the same table against three planes, and the third one is the point
 
 ```go
-func CoreTypes() []Proof                                 // core's set, one row per type
-func RoundTrip(t *testing.T, plane Plane, proofs ...Proof)
+func CoreTypes() []Proof   // core's set, one row per type
+
+// A Source and a Sink over the same plane, which is what a round trip needs.
+// Named rather than a pair of parameters because a driver supplying two
+// unrelated planes is the mistake it exists to prevent.
+type Plane struct {
+    Source ferry.Source
+    Sink   ferry.Sink
+    Kinds  []ferry.VKind // the kinds this plane can carry, see below
+}
+
+func RoundTrip(t *testing.T, p Plane, proofs ...Proof)
 ```
 
-- **Core's own test** runs `CoreTypes()` against `ferrytest`'s memory plane.
-- **Every driver module** runs the same `CoreTypes()` against its own plane, as part of the conformance suite ADR-0001 obliges.
-  ADR-0002 made `driver/*` a CI glob, so a driver gets this whether its author thought about it or not.
-  This is what makes the harness bite: measured, the core set passes 11 of 11 against the memory plane and 11 of 11 through the real YAML driver, and the composites pass 10 of 10 through both.
-  The memory plane alone would have proven nothing about base64, and it is the YAML driver that surfaced the `!!binary` defect.
+Three planes, because each catches a class the others cannot.
+
+- **The memory plane**, which preserves kinds exactly.
+  This is where core's value-fidelity guarantee is stated, because it is the only plane that adds nothing of its own.
+  Measured: 11 of 11 core types, 10 of 10 composites.
+- **A real driver**, which has a format and I/O.
+  Measured through the YAML driver: 11 of 11 and 10 of 10, and a fifteen-address struct with 0 of 15 addresses differing.
+  The memory plane alone would have proven nothing about base64, and it was the YAML driver's emitter that surfaced the `!!binary` defect.
+- **A flattening plane**, which reports `String` for everything and has no null.
+  This is the plane whose absence hid the donor rule for two drafts, and it is not an exotic case: it is env, query and Consul, which is three of ADR-0004's four first-party drivers.
+  Measured: 11 of 11 core types, and **8 of 10 composites**.
+
+**The two failures on the flattening plane are the finding, and they are not a bug.**
+`*int` and `*Cred` at nil fail, because a nil pointer writes `Null` and a plane with no null cannot carry it.
+ADR-0004's own table says which planes those are: YAML and JSON can produce `Null`, and TOML, env, query params and opaque KV cannot.
+
+So the suite cannot simply demand that every plane pass every proof, and this is new work ADR-0004 did not anticipate:
+
+> A driver declares the `Value` kinds its plane can carry.
+> The conformance suite runs the proofs that plane can express, and asserts that the ones it cannot are **refused loudly** rather than silently mangled.
+
+That is ADR-0001's split doing its job at the point it actually bites.
+Value fidelity is core's and is measured on the memory plane.
+Driver fidelity is the driver's, and "this plane cannot carry a null, so a nil pointer is refused rather than loaded as a zero" is a declared property rather than a failure.
+Without the declaration the suite has only two options, both wrong: fail every flat driver, or skip the check and let a nil pointer silently become a zero value.
+
 - **A registrant** runs their own proofs against the memory plane, which is how ADR-0001's "registration carries the proof" is discharged in the registrant's own tests.
 
 **A completeness check closes the loop**, because a table that can be added to without adding a row is a table that drifts.
@@ -515,14 +681,21 @@ Core's test iterates the identity table and the admitted kind list and asserts t
   That hole is documented, is narrower than xload's, and has registration as its answer.
 - The maps-no-address rule turns four stdlib types from silent total losses into compile errors, and it is the single highest-value line in this ADR.
   It also means a struct with no exported fields can never be mapped, which is correct and will surprise somebody.
-- `nil` and empty composites are one value, so ferry's guarantee over `[]T` and `map[K]V` is stated with a normalisation rather than as an identity.
-  The distinction is available one type away, as `*[]T`.
+- `nil` and empty composites are one value, so ferry's guarantee over `[]T` and `map[K]V` is stated with a normalisation rather than as an identity, and the distinction is **not** recoverable by any type in the set.
   This is a knowing departure from the direction #18 argued from, and the argument is that the collision is forced by ADR-0003 and ADR-0004 rather than chosen, and that ferry collapses onto the zero value where v2 manufactures a non-zero one.
+- An array and a slice are not interchangeable: an array's addresses are static, so it loads from a source that cannot enumerate, and a slice's are dynamic, so it does not.
+  That is a capability difference between two types a user will reasonably treat as the same, and it has to be documented rather than left in the address model.
+- On Load `String` is accepted everywhere, which is what makes env, query and Consul usable at all, and it is the one coercion in the design.
+  It is bounded by using the leaf's own parser, so ferry refuses seven inputs `cast` silently corrupts, but it is still a coercion and it is the place to look first if ferry ever appears to have guessed.
+- Core's value fidelity is guaranteed **over the memory plane**, and a driver honours as much of it as its plane can carry.
+  A plane with no null cannot round-trip a nil pointer, measured, and the conformance suite therefore needs each driver to declare its carryable kinds.
+  That is a new obligation on ADR-0004's contract, discovered here rather than there.
 - The harness is three columns rather than one, and the third exists because the first is blind to representation.
   A contributor adding a type cannot avoid stating what it looks like on a plane.
-- Because the harness is a table and not a generator, its coverage is exactly its value lists, and a bad list gives a green harness that proves little.
-  Measured at one failure caught in four values against a knowingly lossy codec.
+- Because the harness is a table and not a generator, its coverage is exactly its value lists **and its plane list**, and a gap in either gives a green harness that proves little.
+  Measured at one failure caught in four values against a knowingly lossy codec, and at two drafts of this ADR shipping a type set that could not load an integer from an environment variable because every proof ran against a plane that preserved kinds.
   This is ADR-0002's zero-dependency rule being paid for, and it is the weakest part of this ADR.
+  The mitigation is that the three planes are named here as a requirement rather than left to whoever writes the test, and that the third one exists because its absence was caught rather than anticipated.
 - The pinned json/v2 option set governs no module that exists today, and its present function is to be the specification core imitates.
   That is a real risk of drift: a table nothing executes is prose again, and the mitigation is only that core's own behaviour is checked against the same column.
 - ferry's `float64` is wider than JSON's number, so a JSON driver must refuse `±Inf` and `NaN`.
