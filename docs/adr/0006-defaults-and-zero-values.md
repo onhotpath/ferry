@@ -1,6 +1,6 @@
 # 6. Defaults, zero values, and what absence means to a Go field
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-02
 Ticket: [#8](https://github.com/onhotpath/ferry/issues/8)
 
