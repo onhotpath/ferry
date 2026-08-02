@@ -334,13 +334,16 @@ func planField(f reflect.StructField) (fieldPlan, []error) {
 		return fieldPlan{skip: true}, []error{fmt.Errorf(
 			"field %s carries no ferry tag: every exported field must name the segment it addresses, or be marked ferry:\"-\"", f.Name)}
 	}
-	if !f.IsExported() {
-		return fieldPlan{skip: true}, []error{fmt.Errorf(
-			"field %s is unexported and carries a ferry tag; reflect cannot set an unexported field, so the tag can never do anything", f.Name)}
-	}
 	d, errs := parseFerryTag(*raw)
 	if d.skip {
 		return fieldPlan{skip: true}, errs
+	}
+	// An unexported field is skipped either way (ADR-0005), so ferry:"-" on
+	// one is redundant and harmless. Anything else is a tag that can never do
+	// anything, which is the same reading encoding/json/v2 takes.
+	if !f.IsExported() {
+		return fieldPlan{skip: true}, []error{fmt.Errorf(
+			"field %s is unexported and carries a ferry tag; reflect cannot set an unexported field, so the tag can never do anything (write ferry:%q if the intent is only to say so)", f.Name, "-")}
 	}
 	return fieldPlan{decl: d}, errs
 }
