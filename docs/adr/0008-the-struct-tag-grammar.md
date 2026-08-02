@@ -702,6 +702,9 @@ The error types are [#9](https://github.com/onhotpath/ferry/issues/9)'s conventi
 
 > `func Validate[T any]() error` compiles the schema for `T` and discards it.
 
+**Amended by [ADR-0010](0010-the-entry-point-and-the-schema-cache.md): this function is renamed `Compile[T]()`**, because ADR-0001 spends the word "validation" on a capability ferry rules out by architecture.
+Everything this section decides about it is unchanged - it is the same compiler as `Load`, it takes the same Options, and it exists for the two failures the toolchain does not catch.
+
 Two entry points that could disagree about whether a type is legal would be the viper defect at ferry's own front door, so there is one compiler and this is it.
 
 Exercised from a real `go test`, with no value in hand and no plane reachable:

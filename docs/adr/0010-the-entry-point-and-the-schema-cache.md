@@ -17,6 +17,7 @@ Three ADRs handed this ticket something by name, and two of them did it independ
 
 [ADR-0008](0008-the-struct-tag-grammar.md) made the struct tag key a caller-supplied Option and measured that one `reflect.Type` under two keys yields two different address sets, so **the tag key is compile-affecting and is in the cache key**.
 It also named `Validate[T]()` and required that it and `Load` share one compiler.
+This ADR keeps the requirement and renames the function, which is an amendment to an Accepted ADR and is argued rather than done quietly.
 
 [ADR-0009](0009-typed-codec-registration.md) made the codec registry a value that freezes at its first use and measured that a schema cache keyed by `reflect.Type` alone hands one registry another registry's codec, silently.
 So **the registry is in the cache key too**, and the obligation is one sentence: *once a type has been resolved against a registry, that registry's answer for that type must never change.*
@@ -49,7 +50,7 @@ The ticket asked for five things by name, and the owner's comment added a sixth.
 | `Load[T]` / `Dump[T]`, or `Load(ctx, &v)` in xload's style | **yes**: `Load[T]`, and the deciding argument is ADR-0006's reload leak rather than ergonomics | [The entry point](#the-entry-point-returns-a-value-and-that-is-adr-0006s-decision-not-a-taste-one) |
 | the cache architecture | **yes**: a `sync.Map` per registry, keyed by `{reflect.Type, tagKey}`, with the compile behind a per-entry `sync.OnceValues` | [The cache](#the-cache-is-a-two-level-one-per-registry) |
 | what is compiled into a leaf: data, or resolved behaviour | **yes**: resolved behaviour, and the three things it holds are priced separately because only one of them is large | [What a leaf holds](#a-leaf-holds-resolved-behaviour-and-the-three-things-it-holds-do-not-cost-the-same) |
-| whether there is a public validation entry point | **yes**: `Validate[T]()`, which is `Load`'s compiler with the schema discarded, and it **freezes the registry** | [Validate](#validatet-is-the-compiler-and-it-is-a-use-of-the-registry) |
+| whether there is a public validation entry point | **yes**, and it is renamed: `Compile[T]()` is `Load`'s compiler reporting whether the schema compiled, and it **freezes the registry** | [Compile](#compilet-is-the-compiler-and-it-is-a-use-of-the-registry) |
 | what the cache key actually is | **yes**, plus the rule for what may ever join it and a one-line mechanism that enforces it at build time | [The cache key](#the-cache-key-is-three-components-and-the-rule-is-what-outlives-them) |
 | **the walk architecture** (the owner's comment) | **yes**, and there are three axes it can be duplicated on rather than one | [The walk](#the-walk-is-written-once-on-three-axes-and-not-one) |
 
@@ -66,7 +67,7 @@ Four questions this ADR had to answer that nobody asked:
 | --- | --- |
 | where ADR-0006's **seeded value** goes, given a signature with no destination | [The entry point](#the-entry-point-returns-a-value-and-that-is-adr-0006s-decision-not-a-taste-one) |
 | whether `json/v1`'s recursive-type placeholder is live for ferry at all | [The cache](#the-cache-is-a-two-level-one-per-registry) |
-| what `Validate` does to ADR-0009's freeze, and where it may therefore be called | [Validate](#validatet-is-the-compiler-and-it-is-a-use-of-the-registry) |
+| what the compile entry point does to ADR-0009's freeze, and where it may therefore be called | [Compile](#compilet-is-the-compiler-and-it-is-a-use-of-the-registry) |
 | what the schema cache does to [#25](https://github.com/onhotpath/ferry/issues/25)'s motivating measurement | [What this hands the tickets that were waiting](#what-this-hands-the-tickets-that-were-waiting) |
 
 **Three things this ADR does not close.**
@@ -126,7 +127,7 @@ The rest of the surface, in full:
 func Load[T any](ctx context.Context, src Source, opts ...Option) (T, error)
 func LoadOver[T any](ctx context.Context, seed T, src Source, opts ...Option) (T, error)
 func Dump[T any](ctx context.Context, v T, sink Sink, opts ...Option) error
-func Validate[T any](opts ...Option) error
+func Compile[T any](opts ...Option) error
 
 func TagKey(string) Option        // ADR-0008's
 func WithRegistry(*Registry) Option  // ADR-0009's
@@ -150,7 +151,7 @@ cfg, err = ferry.LoadOver(ctx, cfg, src)
 
 ```go
 func TestSchema(t *testing.T) {
-    if err := ferry.Validate[Config](); err != nil {
+    if err := ferry.Compile[Config](); err != nil {
         t.Fatal(err)
     }
 }
@@ -226,7 +227,7 @@ What this ADR removes is one of its two motivations, measured below.
 
 **On the name.**
 ADR-0001 left the exported verb names open and this ADR spends two of them.
-`Load`, `Dump` and `Validate` are the working assumptions confirmed; `LoadOver` is new and is the one spelling in this ADR taken on how it reads rather than on a measurement.
+`Load` and `Dump` are the working assumptions confirmed; `Compile` replaces ADR-0008's `Validate`, on ADR-0001's own words rather than on taste; `LoadOver` is new and is the one spelling in this ADR taken on how it reads rather than on a measurement.
 It has to say "the plane is applied over this value and the result is a new value", and `LoadInto` is wrong because nothing is loaded *into* anything.
 
 ### The cache key is three components, and the rule is what outlives them
@@ -518,66 +519,131 @@ FRESH destination,  walk 2 (broken) -> {Common:{Name: Env:} Port:0}       equal=
 That is a rule about ferry's tests rather than about its API, and it belongs here because it is half of the constraint the owner's comment set and the half that is easy to lose.
 It is also cheaper to honour than it was for xload: `Load` returns a value, so a subtest that wants a shared destination has to write one.
 
-### `Validate[T]()` is the compiler, and it is a use of the registry
+### `Compile[T]()` is the compiler, and it is a use of the registry
 
-ADR-0008 named `Validate[T]()` and required that it and `Load` share one compiler, because two entry points that could disagree about whether a type is legal would be viper's two-engines defect at ferry's own front door.
+ADR-0008 named this entry point `Validate[T]()` and required that it and `Load` share one compiler, because two entry points that could disagree about whether a type is legal would be viper's two-engines defect at ferry's own front door.
+That requirement is kept in full.
+**The name is not**, and the amendment is argued below rather than done quietly.
 
-> `Validate[T](opts ...Option) error` is `schemaFor(reflect.TypeFor[T](), opts)` with the schema discarded.
+> `Compile[T](opts ...Option) error` is `schemaFor(reflect.TypeFor[T](), opts)`, reporting whether the schema compiled.
 > Not a second compiler with the same rules - the same function.
 
-It takes the same Options, and ADR-0008 already forced half of that:
+#### Why it is not called `Validate`
+
+ADR-0001 rules out **a validation constraint language in struct tags** by architecture, and gives the reason as a rule rather than a preference: *validation follows parse-don't-validate: the type is the validation.*
+A package that rules out validation and then exports `Validate` is telling a reader something untrue about itself, and the godoc is where that will actually be read.
+
+The function does not breach the rule, and it is worth being exact about why, because "it is called Validate but it is fine" is not an argument.
+ADR-0001's rule is about **values**: do not accept an untyped value and check it, make the invalid state unrepresentable in the type.
+This entry point never sees a value.
+It has no `Source` parameter, so no plane is reachable, and no value of `T` is constructed at any point.
+What it asks is whether the **program's own annotation** is well-formed, from `reflect.TypeFor[T]()` alone, which is the assertability property ADR-0001 claims for tag rejection in the first place.
+
+So the rule is not breached and the word is still wrong, and the word is the part a user meets.
+
+#### What it is actually for, which is narrower than ADR-0008 asked for
+
+ADR-0008 asked for "a validation entry point a user can call from a test".
+Measured, against the obvious alternative of calling `Load` against an empty memory plane:
 
 ```
-Validate[Lib]()                -> ferry: /Host: field Host carries no ferry tag ...
-Validate[Lib](TagKey("mylib")) -> <nil>
+Compile[Conf]()                    -> <nil>
+Load[Conf] from an EMPTY plane     -> ferry: /host: required, and the plane supplied nothing
+
+Compile[Bad]()                     -> ferry: /Host: unknown option "requird"
+Load[Bad] from an EMPTY plane      -> ferry: /Host: unknown option "requird"
+```
+
+**For a malformed annotation the two return the same error**, so the entry point adds nothing there.
+It earns its place on one row only: it separates *"your annotation is wrong"* from *"your plane is missing something"*, which a `Load` against an empty plane conflates because `required` fires.
+ADR-0006 already recorded the same fact from the other end, that a defaulted zero value is not reachable by `Load` alone.
+
+That is the whole justification, and it is smaller than the one ADR-0008 wrote.
+It is also sufficient, because the two questions have different answers and a user testing a config struct's annotation is asking the first one.
+
+#### Why it discards the schema, which is not this ADR's choice
+
+Parse-don't-validate, applied to this function, says do not return an error from a check - return the parsed artefact:
+
+```go
+func Compile[T any](opts ...Option) (*Schema[T], error)   // the parse
+func Compile[T any](opts ...Option) error                 // the parse, discarded
+```
+
+The first is what the principle actually asks for, and it is not available here.
+ADR-0001 leaves "whether core ever exports a read-only schema view" open and says to reopen it only if a concrete need survives the dump-into-a-recording-sink pattern; and a caller-held handle is [#25](https://github.com/onhotpath/ferry/issues/25)'s bind-then-load question by name.
+So there is nothing for a parse to hand back.
+
+> The discard is a consequence of ADR-0001 keeping the compiled schema unexported, not a choice #16 made.
+
+Two things follow and are stated rather than left.
+`regexp.Compile` returns its artefact, so `Compile[T]() error` diverges from the shape a Go reader expects of that verb, and this ADR takes the divergence knowingly because the alternative is exporting a schema ADR-0001 has not agreed to export.
+And if [#25](https://github.com/onhotpath/ferry/issues/25) later concludes that a caller may hold a compiled schema, **this function is where it lands** and its signature becomes `(*Schema[T], error)`, which is a breaking change and is affordable for exactly the reason ADR-0002 keeps ferry at v0.
+
+#### It takes the same Options, and ADR-0008 already forced half of that
+
+```
+Compile[Lib]()                -> ferry: /Host: field Host carries no ferry tag ...
+Compile[Lib](TagKey("mylib")) -> <nil>
 ```
 
 ADR-0008 left the other half open by name - "whether they also see the same **codec registry** is #19's, and it is the other thing that could make them disagree".
 The answer is yes, and it is forced by ADR-0007 making a codec collapse a type to a leaf, so a registration decides whether a type compiles at all:
 
 ```
-Validate[Conf]()                  -> ferry: /listen: main.Opaque maps no address ...
-Validate[Conf](WithRegistry(reg)) -> <nil>
+Compile[Conf]()                  -> ferry: /listen: main.Opaque maps no address ...
+Compile[Conf](WithRegistry(reg)) -> <nil>
 ```
 
-**And here is what nobody has looked at.**
+#### And here is what nobody has looked at
+
 ADR-0009 made a registry freeze at its **first use**, which is the first schema compiled against it, and its soundness argument runs through where that falls.
-`Validate` compiles a schema.
+This entry point compiles a schema.
 Measured:
 
 ```
 a new registry, frozen=false
-after Validate[Conf](WithRegistry(fresh)), frozen=true
+after Compile[Conf](WithRegistry(fresh)), frozen=true
 a registration after that -> ferry: main.Opaque: the registry is frozen; every
                              registration must happen before the first schema
                              is compiled
 ```
 
-**So `Validate` freezes, and that is not a free choice.**
-The alternative - `Validate` compiles without caching and without marking a use - was implemented and run:
+**So `Compile` freezes, and that is not a free choice.**
+The alternative - it compiles without caching and without marking a use - was implemented and run:
 
 ```
-Validate before the registration -> ferry: /listen: main.Opaque maps no address ...
-the Load that follows            -> <nil>
+Compile before the registration -> ferry: /listen: main.Opaque maps no address ...
+the Load that follows           -> <nil>
 ```
 
-A `Validate` that does not freeze reports a failure that never happens, about a registry state no `Load` will ever see.
+A `Compile` that does not freeze reports a failure that never happens, about a registry state no `Load` will ever see.
 Both readings are loud, and only one of them keeps ADR-0008's "one compiler" true.
 
-**Where `Validate` may therefore be called.**
+**Where `Compile` may therefore be called.**
 ADR-0009 priced exactly one broken shape, a `Load` during `init()`, and gave the reason the ordinary shape is safe: Go initialises imported packages before the importer, and every package-level variable and every `init` in the program runs to completion before `main.main`.
-`Validate` is a second and more likely route into that shape, because it is pitched as the thing you call to check a schema early.
+`Compile` is a second and more likely route into that shape, because it is the thing you call to check a schema early.
 
 ```go
-func init()   { ferry.Register(...) }        // every init completes before
-func TestX(t) { ferry.Validate[Config]() }   // a test runs: always safe
+func init()   { ferry.Register(...) }       // every init completes before
+func TestX(t) { ferry.Compile[Config]() }   // a test runs: always safe
 
-var _ = must(ferry.Validate[Config]())       // runs DURING init, and freezes
-                                             // the default registry mid-graph
+var _ = must(ferry.Compile[Config]())       // runs DURING init, and freezes
+                                            // the default registry mid-graph
 ```
 
-A test function is not an `init`, so `Validate` from a test - which is where ADR-0008 pitched it - is always after every `Register`.
-`Validate` from a package-level variable is ADR-0009's broken shape with a different verb on it, and it is named here rather than left to be found.
+A test function is not an `init`, so `Compile` from a test - which is where ADR-0008 pitched it - is always after every `Register`.
+`Compile` from a package-level variable is ADR-0009's broken shape with a different verb on it, and it is named here rather than left to be found.
+
+#### The amendment to ADR-0008, stated plainly
+
+ADR-0008 is Accepted and merged, and it spent the name.
+This ADR changes it, on the grounds above, and the change is:
+
+> **`Validate[T]()` in ADR-0008 is renamed `Compile[T]()`.**
+> Nothing else about ADR-0008's decision changes: it is still the same compiler as `Load`, it still takes the same Options, and it still exists because the toolchain catches neither a tag `reflect.StructTag.Get` truncates nor a field carrying two ferry tags.
+
+A one-line pointer is added to ADR-0008 at the point where the name is decided, so a reader arriving there is not left with a name that no longer exists.
 
 ### A root leaf is refused, and the rule is not about the Go kind
 
@@ -671,7 +737,8 @@ Nothing is added to that package, and one thing is handed to it: the equivalence
 - **What `ferrytest` exports**: [#35](https://github.com/onhotpath/ferry/issues/35).
 - **Whether core ever exports a read-only schema view.**
   ADR-0001 left it open and said to reopen it only if a concrete need survives the dump-into-a-recording-sink pattern.
-  Nothing here produces one: the compiled schema is internal, `Validate` returns an error rather than a description, and template generation reaches the defaults through a recording sink.
+  Nothing here produces one: the compiled schema is internal, `Compile` returns an error rather than a description, and template generation reaches the defaults through a recording sink.
+  This ADR does record where the pressure to reopen it will come from, which is parse-don't-validate asking `Compile` to return the thing it parsed.
   It stays closed.
 - **Whether `Load` ever grows an `Option` that is compile-affecting and unhashable.**
   The rule above says what happens if one is proposed; it does not say that none ever will be.
@@ -695,11 +762,17 @@ Nothing is added to that package, and one thing is handed to it: the equivalence
   Roughly half the walk is shared and none of the shared half exists twice.
 - A concurrent mode is a scheduler and never a second walk, and #20 inherits a seam plus a data race on the presence bit.
   Saying the seam exists without saying the race does would have handed #20 something that looks like a drop-in.
-- **`Validate` freezes the registry**, so a `Validate` in a package-level variable is ADR-0009's one broken shape reached by a new route.
+- **`Compile` freezes the registry**, so a `Compile` in a package-level variable is ADR-0009's one broken shape reached by a new route.
   From a test it is always safe, and that is a property of Go's initialisation order rather than of ferry's design.
 - The compile is the whole cost the cache saves, and resolving the codec into the leaf is a modest separate win.
   Neither is the argument for compiling behaviour into the schema; ADR-0009's staleness result is.
 - ferry inherits the unbounded-cache limitation every surveyed library documents, plus one door of its own: a per-call registry leaks for ordinary types, not only for generated ones.
+- **The compile entry point is renamed from ADR-0008's `Validate[T]()` to `Compile[T]()`**, which is an amendment to an Accepted ADR and the only one this ticket makes.
+  Nothing about ADR-0008's decision changes except the word, and the word matters because ADR-0001 rules validation out by architecture and a package that does that cannot export `Validate` honestly.
+  Measured, its justification is also narrower than ADR-0008 wrote: for a malformed annotation it and `Load` return the same error, and it earns its place only by separating an annotation fault from a plane fault.
+- **It returns an error rather than the schema it parsed, and that is ADR-0001's decision showing through rather than this one's.**
+  Parse-don't-validate asks for the artefact; ADR-0001 keeps the compiled schema unexported and [#25](https://github.com/onhotpath/ferry/issues/25) owns whether a caller may hold one.
+  So `Compile[T]() error` diverges from `regexp.Compile`'s shape knowingly, and if #25 ever exports a handle this is the function whose signature changes - a break ferry can afford only because ADR-0002 keeps it at v0.
 - The caller-facing surface is four functions and two Options.
   Every Option that exists today is compile-affecting, which is a coincidence of the order the tickets landed in and not a design property, and the rule above is what stops it being read as one.
 
