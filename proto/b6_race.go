@@ -89,7 +89,10 @@ func runB6() {
 	fmt.Println("  its job either way. What differs is what the value RETAINS, which is")
 	fmt.Println("  B2's question and not this one.")
 
-	fmt.Println("\n--- B6c: what the lock-free static tier is worth under contention ---")
+	fmt.Println("\n--- B6c: the same two shapes under contention ---")
+	fmt.Println("    Read the allocation columns. On this machine the ns/op column moves")
+	fmt.Println("    by 2x between runs of the identical binary, so it says nothing; the")
+	fmt.Println("    allocation columns are byte-identical run to run.")
 	rows := []struct {
 		name string
 		fn   func(*testing.PB)

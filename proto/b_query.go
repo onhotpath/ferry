@@ -156,3 +156,101 @@ func (s BQueryOpen) Bind(a *AddressSet) (FOpenFunc, error) {
 		return bQueryReader{bound.Session().Key, v}, nil
 	}, nil
 }
+
+// --- the env-shaped key function, which is where injectivity actually bites --
+
+// bEnvKey is ADR-0004's env driver transform: upper-case, and every
+// non-alphanumeric character becomes an underscore. It is not injective, which
+// is exactly why ADR-0003 makes injectivity a driver obligation and ADR-0004
+// puts the check in core.
+func bEnvKey(p Path) (string, error) {
+	var b strings.Builder
+	for i, seg := range p.Segments() {
+		if i > 0 {
+			b.WriteByte('_')
+		}
+		for _, r := range seg.Text {
+			switch {
+			case r >= 'a' && r <= 'z':
+				b.WriteRune(r - 32)
+			case (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'):
+				b.WriteRune(r)
+			default:
+				b.WriteByte('_')
+			}
+		}
+	}
+	return b.String(), nil
+}
+
+// BEnvCtx and BEnvOpen are the same driver over bEnvKey, so B2d runs the
+// dynamic tier through the whole entry point rather than through the helper.
+// They read their plane from the same context key, because a probe comparing
+// two BINDINGS must not also change the plane.
+type BEnvCtx struct{ Seen *[]*Keys }
+
+func (s BEnvCtx) Bind(a *AddressSet) (FOpenFunc, error) {
+	keys, err := NewKeys(a, "env", bEnvKey)
+	if err != nil {
+		return nil, err
+	}
+	if s.Seen != nil {
+		*s.Seen = append(*s.Seen, keys)
+	}
+	return func(ctx context.Context) (FReader, error) {
+		v, ok := ctx.Value(bQueryCtxKey{}).(url.Values)
+		if !ok {
+			return nil, ErrNoPlane
+		}
+		return bEnvReader{keys.Key, v}, nil
+	}, nil
+}
+
+type BEnvOpen struct{}
+
+func (BEnvOpen) Bind(a *AddressSet) (FOpenFunc, error) {
+	bound, err := NewBoundKeys(a, "env", bEnvKey)
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context) (FReader, error) {
+		v, ok := ctx.Value(bQueryCtxKey{}).(url.Values)
+		if !ok {
+			return nil, ErrNoPlane
+		}
+		return bEnvReader{bound.Session().Key, v}, nil
+	}, nil
+}
+
+type bEnvReader struct {
+	key func(Path) (string, error)
+	v   url.Values
+}
+
+func (r bEnvReader) Get(_ context.Context, p Path) (Value, error) {
+	k, err := r.key(p)
+	if err != nil {
+		return Absent, err
+	}
+	if vs, ok := r.v[k]; ok && len(vs) > 0 {
+		return String(vs[0]), nil
+	}
+	return Absent, nil
+}
+
+// Children enumerates by undoing the transform the only way a flat plane can:
+// it reports the raw remainder as a name segment, and the key function is then
+// asked to name it again. That round trip is where the collision is minted.
+func (r bEnvReader) Children(_ context.Context, prefix Path) ([]Path, error) {
+	pk, err := r.key(prefix)
+	if err != nil {
+		return nil, err
+	}
+	var out []Path
+	for k := range r.v {
+		if rest, ok := strings.CutPrefix(k, pk+"_"); ok {
+			out = append(out, prefix.Name(rest))
+		}
+	}
+	return sortedPaths(out), nil
+}

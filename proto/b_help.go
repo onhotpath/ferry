@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"path/filepath"
 	"reflect"
+	"runtime"
 )
 
 func typeOf[T any]() reflect.Type { return reflect.TypeFor[T]() }
@@ -45,3 +47,28 @@ func b1ReadRequest() {
 }
 
 func valueOfPtr[T any](p *T) reflect.Value { return reflect.ValueOf(p).Elem() }
+
+func bHeapAlloc() int64 {
+	runtime.GC()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return int64(m.HeapAlloc)
+}
+
+// bKeysHeap is the live-heap cost of a Keys value holding n minted addresses,
+// measured with the value still reachable so the GC cannot take it back.
+func bKeysHeap(as *AddressSet, n int) int64 {
+	before := bHeapAlloc()
+	k, err := NewKeys(as, "env", bEnvKey)
+	if err != nil {
+		panic(err)
+	}
+	for i := range n {
+		if _, err := k.Key(Path{}.Name("limits").Name(fmt.Sprintf("tenant%d", i))); err != nil {
+			panic(err)
+		}
+	}
+	after := bHeapAlloc()
+	runtime.KeepAlive(k)
+	return after - before
+}

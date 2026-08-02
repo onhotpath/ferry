@@ -30,15 +30,13 @@ func runB2() {
 	fmt.Println("  every /limits/<key> is minted by the walk, from the value (ADR-0003's")
 	fmt.Println("  two tiers), so it is never in that set.")
 
-	// Two requests, each a legal map on its own. The key function joins on ".",
-	// so a key containing a "." is refused as illegal, and two DIFFERENT keys
-	// that join to one plane key are refused as non-injective. Neither request
-	// contains a collision on its own.
-	req1 := url.Values{"limits.rps": {"10"}}
-	req2 := url.Values{"limits.burst": {"20"}}
+	// The key function is ADR-0004's env transform: upper-case, and every
+	// other character becomes an underscore. It is not injective over map
+	// keys, which is the case ADR-0003 makes a driver obligation and ADR-0004
+	// checks in core. No single request below contains a collision.
 
 	fmt.Println("\n--- B2a: two dumps through ONE held binding ---")
-	bound, err := NewKeys(as, "query", bQueryKey("."))
+	bound, err := NewKeys(as, "env", bEnvKey)
 	if err != nil {
 		fmt.Println("  bind:", err)
 		return
@@ -58,40 +56,43 @@ func runB2() {
 	fmt.Println("\n  Nothing failed, and that is the point: the minted set only ever grows.")
 	fmt.Println("  10k requests with distinct map keys is 10k entries in a value the")
 	fmt.Println("  caller holds for the life of the process, none of them evictable.")
-	big, _ := NewKeys(as, "query", bQueryKey("."))
+	big, _ := NewKeys(as, "env", bEnvKey)
 	for i := range 10000 {
 		_, _ = big.Key(Path{}.Name("limits").Name(fmt.Sprintf("tenant-%d", i)))
 	}
 	st, dyn := big.held()
 	fmt.Printf("  10000 requests, one distinct map key each -> %d static + %d minted, none evictable\n", st, dyn)
+	fmt.Printf("  and what that costs, measured on the live heap: %d KiB for the 10000\n", bKeysHeap(as, 10000)/1024)
 
-	fmt.Println("\n--- B2b: and it is not only memory. A LEGAL write is refused. ---")
-	fmt.Println("    The key function is the flat join ADR-0004's env driver has, so a")
-	fmt.Println("    key containing the separator collides with one that does not.")
-	shared, _ := NewKeys(as, "query", bQueryKey("."))
+	fmt.Println("\n--- B2b: and where a retained set is not only memory ---")
+	fmt.Println("    A minted address comes from the VALUE on Dump and from the PLANE on")
+	fmt.Println("    Load (ADR-0004's enumeration asymmetry), so this case is Dump's:")
+	fmt.Println("    ADR-0004's env transform maps \"http-port\" and \"http_port\" onto one")
+	fmt.Println("    plane key. Two dumps, each holding ONE of them:")
+	shared, _ := NewKeys(as, "env", bEnvKey)
 	seq := []struct {
 		req  string
 		addr Path
 	}{
-		{"request 1: limits = {\"http.port\": 1}", Path{}.Name("limits").Name("http.port")},
-		{"request 2: limits = {\"http\": {...}}", Path{}.Name("limits").Name("http").Name("port")},
+		{"request 1: limits = {\"http-port\": 1}", Path{}.Name("limits").Name("http-port")},
+		{"request 2: limits = {\"http_port\": 2}", Path{}.Name("limits").Name("http_port")},
 	}
 	for _, r := range seq {
 		k, err := shared.Key(r.addr)
 		fmt.Printf("    %-38s -> key=%-16q err=%v\n", r.req, k, err)
 	}
-	fmt.Println("    Request 2 is refused for colliding with an address that belongs to a")
-	fmt.Println("    request that finished. On its own it is a perfectly legal write.")
+	fmt.Println("    Write 2 is refused for colliding with an address that belongs to a")
+	fmt.Println("    write that finished. On its own it is a perfectly legal dump.")
 
 	fmt.Println("\n    The same two through a binding-per-load, which is what ferry.Load does:")
 	for _, r := range seq {
-		fresh, _ := NewKeys(as, "query", bQueryKey("."))
+		fresh, _ := NewKeys(as, "env", bEnvKey)
 		k, err := fresh.Key(r.addr)
 		fmt.Printf("    %-38s -> key=%-16q err=%v\n", r.req, k, err)
 	}
 
 	fmt.Println("\n--- B2c: the amendment. The static tier is the bind's; the minted set is the open's. ---")
-	bk, _ := NewBoundKeys(as, "query", bQueryKey("."))
+	bk, _ := NewBoundKeys(as, "env", bEnvKey)
 	for _, r := range seq {
 		sess := bk.Session() // one per open, which is one per load
 		k, err := sess.Key(r.addr)
@@ -101,24 +102,46 @@ func runB2() {
 	fmt.Println("    different times are not required to be mutually injective, and")
 	fmt.Println("    requiring it is what produced the refusal above.")
 
-	fmt.Println("\n--- B2d: through the whole entry point, so it is not a helper-level claim ---")
+	fmt.Println("\n--- B2d: what the LOAD side actually inherits, which is narrower ---")
+	fmt.Println("    On Load a dynamic address is enumerated FROM the plane, so two loads'")
+	fmt.Println("    minted addresses come out of one key space and a well-behaved driver")
+	fmt.Println("    cannot produce the refusal above. What Load does inherit is the")
+	fmt.Println("    growth, and it inherits all of it. 20000 requests, one tenant each,")
+	fmt.Println("    through ONE binding and through ferry.Load:")
+	var seen []*Keys
 	for _, tc := range []struct {
 		name string
 		src  FSource
 	}{
-		{"BQueryCtx : minted set on the binding", BQueryCtx{}},
-		{"BQueryOpen: minted set on the open", BQueryOpen{}},
+		{"minted set on the binding", BEnvCtx{Seen: &seen}},
+		{"minted set on the open", BEnvOpen{}},
 	} {
 		b, err := BindTo[B2Conf](tc.src)
 		if err != nil {
-			fmt.Printf("  %-38s bind err=%v\n", tc.name, err)
+			fmt.Printf("  %-28s bind err=%v\n", tc.name, err)
 			continue
 		}
-		var out []string
-		for _, vals := range []url.Values{req1, req2, {"limits.http.port": {"1"}}} {
-			cfg, err := b.Load(BQueryContext(ctx, vals))
-			out = append(out, fmt.Sprintf("%v/%v", cfg.Limits, err != nil))
+		var got int
+		for i := range 20000 {
+			v := url.Values{fmt.Sprintf("LIMITS_TENANT%d", i): {"1"}}
+			cfg, err := b.Load(BQueryContext(ctx, v))
+			if err != nil {
+				fmt.Printf("  %-28s load %d: %v\n", tc.name, i, err)
+				break
+			}
+			got += len(cfg.Limits)
 		}
-		fmt.Printf("  %-38s %v\n", tc.name, out)
+		retained := 0
+		for _, k := range seen {
+			_, d := k.held()
+			retained += d
+		}
+		seen = nil
+		fmt.Printf("  %-28s %d tenants loaded, %d addresses retained by the binding\n",
+			tc.name, got, retained)
 	}
+	fmt.Println("    One binding, one process, and the retained set is bounded only by the")
+	fmt.Println("    number of distinct map keys the process has ever seen. That is the")
+	fmt.Println("    same class ADR-0009 measured for a per-call registry and ADR-0010")
+	fmt.Println("    restated as a property of the cache, arriving in a third place.")
 }

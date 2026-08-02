@@ -100,12 +100,14 @@ func runB7() {
 	fmt.Println("    which is ADR-0004's \"Bind must succeed against an unreachable")
 	fmt.Println("    plane, and Open is where it fails\", holding across loads too.")
 
-	fmt.Println("\n--- B7d: what B6c's parallel number is and is not ---")
-	fmt.Printf("    GOMAXPROCS=%d, and the benchmark loop contains nothing but the load.\n", runtime.GOMAXPROCS(0))
-	fmt.Println("    A handler that also parses a request, hits a database and encodes a")
-	fmt.Println("    response is not 4.8x faster. What the figure says is that the")
-	fmt.Println("    difference is allocation and not lock contention, because the two")
-	fmt.Println("    rows differ by 40 allocations and by no lock at all.")
+	fmt.Println("\n--- B7d: auditing this ADR's own timings ---")
+	fmt.Printf("    GOMAXPROCS=%d, and every benchmark loop here contains nothing but the\n", runtime.GOMAXPROCS(0))
+	fmt.Println("    operation. Run three times, B1b's ns/op moved 4399 / 5596 / 5393 for")
+	fmt.Println("    one row and B6c's parallel rows crossed over entirely, while every")
+	fmt.Println("    allocation column was identical to the byte.")
+	fmt.Println("    So the ADR quotes allocations as measurements and times as a scale.")
+	fmt.Println("    An earlier draft of this probe claimed a 4.8x under contention; it")
+	fmt.Println("    does not reproduce and it is withdrawn.")
 
 	fmt.Println("\n--- B7d2: one row of ADR-0010's own table, re-run ---")
 	fmt.Println("    Auditing an inherited claim rather than my own: ADR-0010 prints a")
@@ -121,6 +123,17 @@ func runB7() {
 	fmt.Printf("    the zero reading -> %+v\n", zeroRet)
 	fmt.Println("    ADR-0010's conclusion is unaffected and its published row is what a")
 	fmt.Println("    correct probe produces; what was not measured is the row itself.")
+
+	fmt.Println("\n--- B7d3: does holding a binding change ADR-0009's freeze? ---")
+	r1, r2 := NewRegistry(), NewRegistry()
+	_ = Compile[B4Conf](WithRegistry(r1))
+	bb, _ := Bind[B4Conf](FYAMLSource{Path: "nope.yaml"}, WithRegistry(r2))
+	_ = bb
+	fmt.Printf("    after Compile[T](WithRegistry(r1)) -> frozen=%v\n", r1.frozen.Load())
+	fmt.Printf("    after Bind[T](src, WithRegistry(r2)) -> frozen=%v\n", r2.frozen.Load())
+	fmt.Println("    Bind RETAINS a compiled schema, so it freezes; Compile discards one,")
+	fmt.Println("    so it does not. That is ADR-0010's rule with a new caller and no new")
+	fmt.Println("    wording: caching and freezing are one decision.")
 
 	fmt.Println("\n--- B7e: and the case the ticket is actually about, end to end ---")
 	fmt.Println("    A handler, written both ways, against the same request.")
