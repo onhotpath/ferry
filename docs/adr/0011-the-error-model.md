@@ -1,6 +1,6 @@
 # 11. The error model
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-02
 Ticket: [#9](https://github.com/onhotpath/ferry/issues/9)
 
