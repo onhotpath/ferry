@@ -319,4 +319,5 @@ func runD8() {
 	rs1()
 	rs2()
 	rs3()
+	rlift()
 }
