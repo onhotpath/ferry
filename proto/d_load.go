@@ -17,7 +17,6 @@ package main
 //     address is not in the schema.
 
 import (
-	"fmt"
 	"reflect"
 	"strconv"
 )
@@ -35,6 +34,12 @@ type loadOpts struct {
 	nullMeansZero   bool
 	nullMeansAbsent bool
 	observe         func(Path, Value)
+	// get replaces the map with a driver that may fail per address. #9's E8.
+	get func(Path) (Value, error)
+	// sink turns the walk from first-error-wins into aggregating. nil keeps the
+	// base prototype's behaviour, which is 5.4 live, so the two are measurable
+	// against each other rather than argued. #9.
+	sink *errSink
 	// byRealisedAddress: look declarations up by the realised address rather
 	// than by the static shape. On is the bug D15 measures.
 	byRealisedAddress bool
@@ -43,6 +48,22 @@ type loadOpts struct {
 // planeAt reads the boundary observation at p. A map miss IS Absent, which is
 // ADR-0004's "Absent is kind zero" property being used rather than restated.
 func planeAt(vals map[Path]Value, p Path) Value { return vals[p] }
+
+// readAt is planeAt plus a driver that can FAIL, which the map form cannot
+// express. A failed Get is not an absence: it is a driver error at that
+// address, so it is recorded and the field is left alone rather than taking a
+// default. #9's E8 is what needs it.
+func (o loadOpts) readAt(vals map[Path]Value, p Path) (Value, bool) {
+	if o.get == nil {
+		return planeAt(vals, p), true
+	}
+	v, err := o.get(p)
+	if err != nil {
+		_ = o.emit(fromDriver(mWalk, p, true, err))
+		return Absent, false
+	}
+	return v, true
+}
 
 func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool, error) {
 	// sp is the STATIC path (the schema's), p is the REALISED one (the plane's).
@@ -59,13 +80,13 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 
 		absentAt := func() (bool, error) {
 			if opts.required {
-				return false, fmt.Errorf("ferry: %s: required, and the plane does not have it", p)
+				return false, o.miss(p, "required, and the plane does not have it")
 			}
 			if opts.hasDef {
 				// A default IS a plane value at this address: same kind, same
 				// parser, same errors, decoded fresh on every load.
 				if err := decLeaf(*opts.def, v); err != nil {
-					return false, fmt.Errorf("ferry: %s: %v", p, err)
+					return false, o.decErr(p, *opts.def, v.Type(), err)
 				}
 				return o.defaultsCountAsPresence, nil
 			}
@@ -77,7 +98,10 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 
 		switch sh {
 		case shapeLeaf:
-			val := planeAt(vals, p)
+			val, ok := o.readAt(vals, p)
+			if !ok {
+				return false, nil
+			}
 			if o.observe != nil {
 				o.observe(p, val)
 			}
@@ -95,12 +119,15 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 			// a wrong kind, which is ADR-0005's existing rule with nothing
 			// added for #8.
 			if err := decLeaf(val, v); err != nil {
-				return true, fmt.Errorf("ferry: %s: %v", p, err)
+				return true, o.decErr(p, val, v.Type(), err)
 			}
 			return true, nil
 
 		case shapePointer:
-			val := planeAt(vals, p)
+			val, ok := o.readAt(vals, p)
+			if !ok {
+				return false, nil
+			}
 			if classify(v.Type().Elem()) == shapeLeaf {
 				// A pointer to a LEAF has its own address, and this is where
 				// *T earns its keep: nil and &zero are two observations.
@@ -110,12 +137,12 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 				switch val.Kind() {
 				case VAbsent:
 					if opts.required {
-						return false, fmt.Errorf("ferry: %s: required, and the plane does not have it", p)
+						return false, o.miss(p, "required, and the plane does not have it")
 					}
 					if opts.hasDef {
 						nv := reflect.New(v.Type().Elem())
 						if err := decLeaf(*opts.def, nv.Elem()); err != nil {
-							return false, fmt.Errorf("ferry: %s: %v", p, err)
+							return false, o.decErr(p, *opts.def, v.Type().Elem(), err)
 						}
 						v.Set(nv)
 						return o.defaultsCountAsPresence, nil
@@ -127,7 +154,7 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 				}
 				nv := reflect.New(v.Type().Elem())
 				if err := decLeaf(val, nv.Elem()); err != nil {
-					return true, fmt.Errorf("ferry: %s: %v", p, err)
+					return true, o.decErr(p, val, v.Type().Elem(), err)
 				}
 				v.Set(nv)
 				return true, nil
@@ -140,7 +167,7 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 				return true, nil
 			}
 			if opts.required && val.Kind() == VAbsent && len(children(vals, p)) == 0 {
-				return false, fmt.Errorf("ferry: %s: required, and the plane does not have it", p)
+				return false, o.miss(p, "required, and the plane does not have it")
 			}
 			// A pointer to a COMPOSITE. Materialise it exactly when something
 			// under it was present. This is 5.7, and it is a walk decision
@@ -199,12 +226,15 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 				return any, err
 			}
 			if opts.required && !any {
-				return false, fmt.Errorf("ferry: %s: required, and the plane supplied nothing under it", p)
+				return false, o.miss(p, "required, and the plane supplied nothing under it")
 			}
 			return any, nil
 
 		case shapeSlice:
-			val := planeAt(vals, p)
+			val, ok := o.readAt(vals, p)
+			if !ok {
+				return false, nil
+			}
 			if o.observe != nil {
 				o.observe(p, val)
 			}
@@ -213,7 +243,7 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 				// address. It cannot be present-and-empty, because no plane can
 				// report that (ADR-0005), so a required composite cannot be
 				// satisfied by an empty one.
-				return false, fmt.Errorf("ferry: %s: required, and the plane does not have it", p)
+				return false, o.miss(p, "required, and the plane does not have it")
 			}
 			if val.Kind() == VNull {
 				v.Set(reflect.Zero(v.Type()))
@@ -231,11 +261,11 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 				segs := k.Segments()
 				last := segs[len(segs)-1]
 				if last.Kind != Index {
-					return true, fmt.Errorf("ferry: %s: sequence child %s is not an index", p, k)
+					return true, o.planef(p, "the enumerator returned a name child under a sequence")
 				}
 				i, err := strconv.Atoi(last.Text)
 				if err != nil {
-					return true, fmt.Errorf("ferry: %s: bad index %q", p, last.Text)
+					return true, o.planef(p, "the enumerator returned a sequence child whose index is not a number")
 				}
 				if i+1 > n {
 					n = i + 1
@@ -243,7 +273,7 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 			}
 			if v.Kind() == reflect.Array {
 				if n > v.Len() {
-					return true, fmt.Errorf("ferry: %s: plane has index %d, %s holds %d", p, n-1, v.Type(), v.Len())
+					return true, o.valf(p, "the plane has index %d and %s holds %d", n-1, v.Type(), v.Len())
 				}
 				// An ARRAY's element addresses are static, so every element is
 				// walked whether or not the plane has anything under it, exactly
@@ -259,7 +289,7 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 					}
 				}
 				if opts.required && len(kids) == 0 {
-					return false, fmt.Errorf("ferry: %s: required, and the plane supplied nothing under it", p)
+					return false, o.miss(p, "required, and the plane supplied nothing under it")
 				}
 				return any, nil
 			}
@@ -274,7 +304,10 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 			return true, nil
 
 		case shapeMap:
-			val := planeAt(vals, p)
+			val, ok := o.readAt(vals, p)
+			if !ok {
+				return false, nil
+			}
 			if o.observe != nil {
 				o.observe(p, val)
 			}
@@ -283,7 +316,7 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 				// address. It cannot be present-and-empty, because no plane can
 				// report that (ADR-0005), so a required composite cannot be
 				// satisfied by an empty one.
-				return false, fmt.Errorf("ferry: %s: required, and the plane does not have it", p)
+				return false, o.miss(p, "required, and the plane does not have it")
 			}
 			if val.Kind() == VNull {
 				v.Set(reflect.Zero(v.Type()))

@@ -58,6 +58,14 @@ func main() {
 		runD8()
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "e" {
+		runIssue9()
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "etui" {
+		runE9TUI()
+		return
+	}
 	ctx := context.Background()
 
 	hdr("P1  the static address set, from the type alone")

@@ -8,7 +8,6 @@ package main
 // What is new here is only where the declarations come from.
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -44,7 +43,7 @@ func compileT(t reflect.Type) (*schema, error) {
 		sh := classify(t)
 		s.shapes[p] = sh
 		if sh != shapeLeaf && stack[t] {
-			errs = append(errs, fmt.Errorf("ferry: %s: %s is recursive", pathOrRoot(p), t))
+			errs = append(errs, errAt(mCompile, ErrSchema, p, "%s is recursive", t))
 			return
 		}
 		if sh != shapeLeaf {
@@ -64,14 +63,14 @@ func compileT(t reflect.Type) (*schema, error) {
 			case shapeLeaf:
 				probe := reflect.New(t).Elem()
 				if err := decLeaf(*o.def, probe); err != nil {
-					errs = append(errs, fmt.Errorf("ferry: %s: default %q is not a valid %s: %v", pathOrRoot(p), o.defText, t, err))
+					errs = append(errs, errAt(mCompile, ErrSchema, p, "default %q is not a valid %s: %v", o.defText, t, err))
 					defOK = false
 				}
 			case shapePointer:
 				if classify(t.Elem()) == shapeLeaf {
 					probe := reflect.New(t.Elem()).Elem()
 					if err := decLeaf(*o.def, probe); err != nil {
-						errs = append(errs, fmt.Errorf("ferry: %s: default %q is not a valid %s: %v", pathOrRoot(p), o.defText, t.Elem(), err))
+						errs = append(errs, errAt(mCompile, ErrSchema, p, "default %q is not a valid %s: %v", o.defText, t.Elem(), err))
 						defOK = false
 					}
 				} else {
@@ -83,13 +82,13 @@ func compileT(t reflect.Type) (*schema, error) {
 				defOK = false
 			}
 			if reqOK && defOK {
-				errs = append(errs, fmt.Errorf("ferry: %s: required and default contradict: a default answers absence and required forbids it", pathOrRoot(p)))
+				errs = append(errs, errAt(mCompile, ErrSchema, p, "required and default contradict: a default answers absence and required forbids it"))
 			}
 			if defOK && o.omitzero && sh == shapeLeaf {
 				probe := reflect.New(t).Elem()
 				if err := decLeaf(*o.def, probe); err == nil && !probe.IsZero() {
-					errs = append(errs, fmt.Errorf("ferry: %s: omitzero and default=%s contradict: an explicit zero would be omitted and would load back as %s",
-						pathOrRoot(p), o.defText, o.defText))
+					errs = append(errs, errAt(mCompile, ErrSchema, p, "omitzero and default=%s contradict: an explicit zero would be omitted and would load back as %s",
+						o.defText, o.defText))
 				}
 			}
 		}
@@ -116,7 +115,7 @@ func compileT(t reflect.Type) (*schema, error) {
 			// address BECAUSE of that, and reporting both makes one mistake
 			// read as two.
 			if len(s.addrs) == before && !bad {
-				errs = append(errs, fmt.Errorf("ferry: %s: %s maps no address", pathOrRoot(p), t))
+				errs = append(errs, errAt(mCompile, ErrSchema, p, "%s maps no address", t))
 			}
 			if o.required {
 				s.opts[p] = o
@@ -134,7 +133,7 @@ func compileT(t reflect.Type) (*schema, error) {
 			s.opts[p] = o
 			rec(t.Elem(), p.Name("*"), fieldOpts{})
 		default:
-			errs = append(errs, unsupportedTypeError{p, t})
+			errs = append(errs, errAt(mCompile, ErrSchema, p, "unsupported type %s (kind %s)", t, t.Kind()))
 		}
 	}
 	rec(t, Path{}, fieldOpts{})
@@ -142,7 +141,7 @@ func compileT(t reflect.Type) (*schema, error) {
 	// static address set is prefix-free, and a path is a prefix of itself.
 	errs = append(errs, prefixFree(s.addrs)...)
 	if len(errs) > 0 {
-		return nil, errors.Join(errs...)
+		return nil, join(errs...)
 	}
 	return s, nil
 }
@@ -157,7 +156,7 @@ func walkStructFields(t reflect.Type, p Path, errs *[]error, rec func(reflect.Ty
 		plan, ferrs := planField(f)
 		for _, e := range ferrs {
 			bad = true
-			*errs = append(*errs, fmt.Errorf("ferry: %s: %v", pathOrRoot(p.Name(f.Name)), e))
+			*errs = append(*errs, errAt(mCompile, ErrSchema, p.Name(f.Name), "%v", e))
 		}
 		if plan.skip {
 			continue
@@ -170,14 +169,12 @@ func walkStructFields(t reflect.Type, p Path, errs *[]error, rec func(reflect.Ty
 			// refusal existed: a promoted embedded *T compiled clean, loaded
 			// into a nil pointer with a nil error, and dumped through one.
 			if et.Kind() == reflect.Pointer {
-				*errs = append(*errs, fmt.Errorf("ferry: %s: %s is an embedded pointer with no ferry tag, and a promoted field has no address of its own for the pointer to be optional at; give it a ferry tag to nest it, or ferry:\"-\"",
-					pathOrRoot(p.Name(f.Name)), f.Type))
+				*errs = append(*errs, errAt(mCompile, ErrSchema, p.Name(f.Name), "%s is an embedded pointer with no ferry tag, and a promoted field has no address of its own for the pointer to be optional at; give it a ferry tag to nest it, or ferry:\"-\"", f.Type))
 				bad = true
 				continue
 			}
 			if et.Kind() != reflect.Struct || classify(et) != shapeStruct {
-				*errs = append(*errs, fmt.Errorf("ferry: %s: %s is embedded and is not a struct ferry walks, so its fields cannot be promoted; give it a ferry tag to nest it, or ferry:\"-\"",
-					pathOrRoot(p.Name(f.Name)), f.Type))
+				*errs = append(*errs, errAt(mCompile, ErrSchema, p.Name(f.Name), "%s is embedded and is not a struct ferry walks, so its fields cannot be promoted; give it a ferry tag to nest it, or ferry:\"-\"", f.Type))
 				continue
 			}
 			if walkStructFields(et, p, errs, rec) {
@@ -198,10 +195,8 @@ func errLines(err error) []string {
 		return nil
 	}
 	var out []string
-	for _, l := range strings.Split(err.Error(), "\n") {
-		if l != "" {
-			out = append(out, l)
-		}
+	for _, e := range Elements(err) {
+		out = append(out, e.Error())
 	}
 	return out
 }
@@ -226,14 +221,15 @@ func prefixFree(ps []Path) []error {
 			if i >= j {
 				continue
 			}
-			a, b := ps[i].String(), ps[j].String()
+			pa, pb := ps[i], ps[j]
+			a, b := pa.String(), pb.String()
 			switch {
 			case a == b:
-				errs = append(errs, fmt.Errorf("ferry: two fields address %s", a))
+				errs = append(errs, errAt(mCompile, ErrSchema, pa, "two fields address this path"))
 			case strings.HasPrefix(b, a) && (b[len(a)] == '/' || b[len(a)] == '#'):
-				errs = append(errs, fmt.Errorf("ferry: %s is a prefix of %s", a, b))
+				errs = append(errs, errAt(mCompile, ErrSchema, pa, "is a prefix of %s", b))
 			case strings.HasPrefix(a, b) && (a[len(b)] == '/' || a[len(b)] == '#'):
-				errs = append(errs, fmt.Errorf("ferry: %s is a prefix of %s", b, a))
+				errs = append(errs, errAt(mCompile, ErrSchema, pb, "is a prefix of %s", a))
 			}
 		}
 	}

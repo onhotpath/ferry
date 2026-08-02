@@ -12,7 +12,6 @@ package main
 // under test is the mechanism and where it lives.
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -104,7 +103,7 @@ func compileD(t reflect.Type) (*schema, error) {
 		sh := classify(t)
 		s.shapes[p] = sh
 		if sh != shapeLeaf && stack[t] {
-			errs = append(errs, fmt.Errorf("ferry: %s: %s is recursive", pathOrRoot(p), t))
+			errs = append(errs, errAt(mCompile, ErrSchema, p, "%s is recursive", t))
 			return
 		}
 		if sh != shapeLeaf {
@@ -134,16 +133,16 @@ func compileD(t reflect.Type) (*schema, error) {
 				// with exactly the parser that leaf's own kind uses.
 				probe := reflect.New(t).Elem()
 				if err := decLeaf(*o.def, probe); err != nil {
-					errs = append(errs, fmt.Errorf(
-						"ferry: %s: default %q is not a valid %s: %v", pathOrRoot(p), o.defText, t, err))
+					errs = append(errs, errAt(mCompile, ErrSchema, p,
+						"default %q is not a valid %s: %v", o.defText, t, err))
 					defOK = false
 				}
 			case shapePointer:
 				if classify(t.Elem()) == shapeLeaf {
 					probe := reflect.New(t.Elem()).Elem()
 					if err := decLeaf(*o.def, probe); err != nil {
-						errs = append(errs, fmt.Errorf(
-							"ferry: %s: default %q is not a valid %s: %v", pathOrRoot(p), o.defText, t.Elem(), err))
+						errs = append(errs, errAt(mCompile, ErrSchema, p,
+							"default %q is not a valid %s: %v", o.defText, t.Elem(), err))
 					}
 				} else {
 					errs = append(errs, defOnCompositeErr(p, t))
@@ -158,8 +157,8 @@ func compileD(t reflect.Type) (*schema, error) {
 				defOK = false
 			}
 			if reqOK && defOK {
-				errs = append(errs, fmt.Errorf(
-					"ferry: %s: required and default contradict: a default answers absence and required forbids it", pathOrRoot(p)))
+				errs = append(errs, errAt(mCompile, ErrSchema, p,
+					"required and default contradict: a default answers absence and required forbids it"))
 			}
 			// omitzero + a default that is not the Go zero value is a
 			// round-trip violation, and it is checkable here because the
@@ -167,9 +166,9 @@ func compileD(t reflect.Type) (*schema, error) {
 			if defOK && o.omitzero && sh == shapeLeaf {
 				probe := reflect.New(t).Elem()
 				if err := decLeaf(*o.def, probe); err == nil && !probe.IsZero() {
-					errs = append(errs, fmt.Errorf(
-						"ferry: %s: omitzero and default=%s contradict: an explicit zero would be omitted and would load back as %s",
-						pathOrRoot(p), o.defText, o.defText))
+					errs = append(errs, errAt(mCompile, ErrSchema, p,
+						"omitzero and default=%s contradict: an explicit zero would be omitted and would load back as %s",
+						o.defText, o.defText))
 				}
 			}
 		}
@@ -196,12 +195,12 @@ func compileD(t reflect.Type) (*schema, error) {
 				}
 				n, fo, err := fieldTag(f)
 				if err != nil {
-					errs = append(errs, fmt.Errorf("ferry: %s: %v", pathOrRoot(p.Name(n)), err))
+					errs = append(errs, errAt(mCompile, ErrSchema, p.Name(n), "%v", err))
 				}
 				rec(f.Type, p.Name(n), fo)
 			}
 			if len(s.addrs) == before {
-				errs = append(errs, fmt.Errorf("ferry: %s: %s maps no address", pathOrRoot(p), t))
+				errs = append(errs, errAt(mCompile, ErrSchema, p, "%s maps no address", t))
 			}
 			if o.required {
 				s.opts[p] = o
@@ -219,20 +218,19 @@ func compileD(t reflect.Type) (*schema, error) {
 			s.opts[p] = o
 			rec(t.Elem(), p.Name("*"), fieldOpts{})
 		default:
-			errs = append(errs, unsupportedTypeError{p, t})
+			errs = append(errs, errAt(mCompile, ErrSchema, p, "unsupported type %s (kind %s)", t, t.Kind()))
 		}
 	}
 	rec(t, Path{}, fieldOpts{})
 	if len(errs) > 0 {
-		return nil, errors.Join(errs...)
+		return nil, join(errs...)
 	}
 	return s, nil
 }
 
 func defOnCompositeErr(p Path, t reflect.Type) error {
-	return fmt.Errorf(
-		"ferry: %s: %s is a composite, so it has no single address a default could sit at; seed the value instead",
-		pathOrRoot(p), t)
+	return errAt(mCompile, ErrSchema, p,
+		"%s is a composite, so it has no single address a default could sit at; seed the value instead", t)
 }
 
 // requiredAdmissible: `required` asserts the plane supplied this address, and
@@ -265,7 +263,6 @@ func requiredAdmissible(t reflect.Type) bool {
 // the plane has an address, and this address is not always there to have.
 func requiredOnCompositeErr(p Path, t reflect.Type, sh shape) error {
 	_ = sh
-	return fmt.Errorf(
-		"ferry: %s: required is not available on %s: a plane cannot report \"present and empty\" at a container address, so required could only mean \"at least one element\", which is a constraint on the value; model the distinction as a struct with a set flag, or check len() after Load",
-		pathOrRoot(p), t)
+	return errAt(mCompile, ErrSchema, p,
+		"required is not available on %s: a plane cannot report \"present and empty\" at a container address, so required could only mean \"at least one element\", which is a constraint on the value; model the distinction as a struct with a set flag, or check len() after Load", t)
 }
