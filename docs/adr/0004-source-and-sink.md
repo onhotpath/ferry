@@ -212,6 +212,49 @@ Comparability is what lets the round-trip harness and the conformance suite asse
 
 **Quoting survives**, which is the one thing section 4 identifies that a string boundary genuinely destroys: `port: 8080` arrives as `Number("8080")` and `port: "8080"` as `String("8080")`, and both round-trip back to their own spelling.
 
+#### `Absent` and `Null` are different observations, and the difference is the plane's
+
+They are the first two kinds and they are easy to conflate, so the boundary states them:
+
+- **`Absent`** means the plane does not have this address. Nothing was found at it.
+- **`Null`** means the plane **has** this address, and the value stored there is that plane's own null.
+
+Measured through a real YAML file, four distinct observations at four addresses:
+
+```
+nul: null      ->  Null
+empty: ""      ->  String("")
+value: 8080    ->  Number("8080")
+(no such key)  ->  Absent
+```
+
+This is section 4's "absent is not null is not `""`" made representable rather than promised.
+xload conflates all three: `FlattenMap` runs `cast.ToString` so a YAML null becomes `""` (5.8, reproduced), and a missing key already was `""` (5.1).
+viper is worse in a different direction, measured in the survey: `nul: null` makes `IsSet` false and vanishes from `AllSettings()` entirely.
+
+**Only a plane whose type system contains a null can produce `Null`.**
+
+| plane | can produce `Null` | |
+| --- | --- | --- |
+| YAML | yes | `!!null` is a resolved tag |
+| JSON | yes | `null` is a token |
+| TOML | no | the grammar has no null |
+| env | no | `FOO=` is a zero-length string, not a null |
+| query params | no | `?x=` is a zero-length string |
+| KV, bytes | no | a zero-length value is `Bytes`, not `Null` |
+
+So `Null` rides the same axis as plane-side type information, and on a flat plane the distinction never arises: such a driver returns `Absent` or a `String`, and never a `Null`.
+That is a driver-fidelity obligation rather than a core rule, and it is a conformance case.
+
+**A prototype defect, recorded rather than smoothed over.**
+The distinction holds in full on Load, and the prototype does not hold it on Dump: its YAML sink maps `Absent` to `!!null`, so an absent address is written as an explicit null and reads back as `Null`.
+Measured: `Null` and `String("")` round-trip exactly, `Absent` does not.
+That is precisely the conflation this ADR criticises xload for, committed by the prototype on the write path.
+
+It is a prototype shortcut and not a decision, and it is left as one, because what a sink should do with an absent value - write the plane's null, or write nothing and leave the address unset - is [#8](https://github.com/onhotpath/ferry/issues/8)'s.
+What this ADR does decide is only that the contract *can* carry the distinction in both directions.
+The likely answer, flagged for #8 rather than taken here, is that ferry should never hand a sink an `Absent` at all, and that an omitted address is one that gets no `Set` call.
+
 #### There is no group arm, and this reverses a survey recommendation
 
 Section 4 says a group arm is "required, not optional", because xload's flattening is where the YAML list is lost (5.8, reproduced).
