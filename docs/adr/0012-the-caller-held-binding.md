@@ -45,7 +45,7 @@ So allocations are quoted as measurements, times as a scale, and one claim an ea
 | --- | --- | --- |
 | where a per-request plane instance is supplied | **yes**: in the `context.Context`, by the driver, and core supplies no mechanism | [The plane](#the-plane-arrives-in-the-context-because-it-is-the-only-per-load-channel-there-is) |
 | whether that is part of the `Source` contract or an escape hatch | **neither**: it is a rule about the driver's own public shape, and `Source` is untouched | [One shape per driver](#a-driver-with-a-per-request-plane-has-one-public-shape-and-that-is-514s-first-item) |
-| whether ferry exposes a caller-facing bind-then-load split | **yes**: `Bind[T]`, Load-side only, and `Load[T]` is literally it with the handle discarded | [The binding](#a-caller-may-hold-a-binding-and-the-one-shot-verb-is-that-binding-with-the-handle-dropped) |
+| whether ferry exposes a caller-facing bind-then-load split | **yes**: `Bind[T]` and `BindSink[T]`, in both directions, and `Load[T]` and `Dump[T]` are literally them with the handle discarded | [The binding](#a-caller-may-hold-a-binding-and-the-one-shot-verb-is-that-binding-with-the-handle-dropped) |
 | whether it amends ADR-0004's signatures | **no signature, one helper**: the static table is the bind's and the minted set is the open's | [The two tiers](#adr-0004s-key-helper-is-amended-the-minted-set-belongs-to-the-open) |
 
 Two more this ticket inherited:
@@ -59,23 +59,52 @@ Two more this ticket inherited:
 
 - **Whether the walk may run concurrently** is [#20](https://github.com/onhotpath/ferry/issues/20)'s, unchanged.
   What this ADR adds to #20 is that a binding is now a value reached by many goroutines at once, which under `Load[T]` alone it never was.
-- **Whether a sink ever gains a binding.**
-  Dump's address set comes from the value, so there is nothing to hoist; the measurement is below and the door is left open rather than shut.
+- **Whether ferry ever grows a third binding shape**, for a plane that is neither a `Source` nor a `Sink`.
+  Nothing asks for one; ADR-0004's two interfaces are what these two functions mirror.
 - **Whether core ever ships the observing `Source`.**
   The mechanism is decided; whether a combinator ships is ADR-0001's bucket rule, exactly as ADR-0004 left `FirstOf`.
 
 ### What a consumer writes
 
 This section is first, because ADR-0009 was sent back for arguing from measurements without showing the API a consumer meets, and this ticket owns a caller-facing shape.
-The whole of it was run.
+Three programs, chosen because one of them wants no binding at all, and every one of them was run.
 
-The ordinary case does not change at all:
+The surface this ADR adds, in full:
 
 ```go
-cfg, err := ferry.Load[Config](ctx, yaml.Source{Path: "app.yaml"})
+func Bind[T any](src Source, opts ...Option) (*Binding[T], error)
+func BindSink[T any](sink Sink, opts ...Option) (*SinkBinding[T], error)
+
+func (b *Binding[T])     Load(ctx context.Context) (T, error)
+func (b *Binding[T])     LoadOver(ctx context.Context, seed T) (T, error)
+func (b *SinkBinding[T]) Dump(ctx context.Context, v T) error
 ```
 
-**A request handler, which is what this ticket is about:**
+Two functions, two types, three methods, no new Option and no new interface.
+Neither type has any other method or any exported field, so both are handles and neither is a schema view.
+
+#### Program 1: startup configuration, which wants no binding
+
+```go
+func load(ctx context.Context, path string) (Config, error) {
+    cfg, err := ferry.Load[Config](ctx, yaml.Source{Path: path})
+    if err != nil {
+        return cfg, err
+    }
+    return cfg, ferry.Dump(ctx, cfg, yaml.Sink{Path: path})
+}
+```
+
+Nothing changes here and nothing should.
+Each phase happens exactly once, so a binding would be a value constructed, used and dropped, which is what `Load` and `Dump` already do internally.
+Run: `{Name:svc DB:{Host:db1 Port:5432}}`, with the default applied and the file rewritten.
+
+Two independent reasons a binding buys this program nothing, and the second is the interesting one.
+There is nothing to reuse.
+And even if there were, a tree driver pays nothing at `Bind`: it walks segments and builds no plane key, so the phase a binding hoists is already free.
+Measured, the same YAML load with and without a held binding: ~16000 ns and 142 allocations against ~16000 ns and 138.
+
+#### Program 2: a request handler, which is what this ticket was filed for
 
 ```go
 type Filter struct {
@@ -103,13 +132,20 @@ func NewHandler() (http.Handler, error) {
 }
 ```
 
-**The same driver with no binding held**, which is the one-shot form and is the same `query.Source{}`:
+**The same handler with no binding**, which is the same driver value and the same context constructor:
 
 ```go
-f, err := ferry.Load[Filter](query.WithValues(ctx, r.URL.Query()), query.Source{})
+func NewHandler() http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        f, err := ferry.Load[Filter](query.WithValues(r.Context(), r.URL.Query()), query.Source{})
+        ...
+    })
+}
 ```
 
-**And a caller who forgets**, measured:
+Run side by side against one request, the two produce the identical value, and the difference is 85 allocations against 45.
+
+**And a caller who forgets the plane**, measured:
 
 ```
 err = query: no values in the context
@@ -118,27 +154,91 @@ err = query: no values in the context
 The refusal lands at open, which is where ADR-0004 already puts "the plane is not reachable", and it is per load rather than at bind.
 Its class is [ADR-0011](0011-the-error-model.md)'s `ErrPlane` with the driver's provenance marker, which is a decision this ADR takes rather than a line the prototype printed: the prototype predates the error model and returns a bare sentinel.
 
-The surface this adds, in full:
+#### Program 3: an exporter, which is the same shape on the write side
 
 ```go
-func Bind[T any](src Source, opts ...Option) (*Binding[T], error)
+type Stats struct {
+    Uptime  int            `ferry:"uptime"`
+    Queues  map[string]int `ferry:"queues"`
+    Version string         `ferry:"version"`
+}
 
-func (b *Binding[T]) Load(ctx context.Context) (T, error)
-func (b *Binding[T]) LoadOver(ctx context.Context, seed T) (T, error)
+func NewExporter(kv *consul.Client) (*Exporter, error) {
+    b, err := ferry.BindSink[Stats](consul.Sink{Client: kv, Prefix: "svc/"})
+    if err != nil {
+        return nil, err
+    }
+    return &Exporter{b: b}, nil
+}
+
+func (e *Exporter) Tick(ctx context.Context, s Stats) error {
+    return e.b.Dump(ctx, s)   // every tick, and the map's shape changes between them
+}
 ```
 
-One function, one type, two methods, no new Option.
-`Binding[T]` has no other method and no exported field, so it is a handle and not a schema view.
-
-**And the observation, which needs nothing from core at all:**
+**The same exporter with no binding:**
 
 ```go
-rec := query.NewRecorder()               // or the caller's own fifteen lines
+func (e *Exporter) Tick(ctx context.Context, s Stats) error {
+    return ferry.Dump(ctx, s, consul.Sink{Client: e.kv, Prefix: "svc/"})
+}
+```
+
+Run, both write the same four keys, `[QUEUES_IN QUEUES_OUT UPTIME VERSION]`, and the difference is 171 allocations against 133.
+
+`Queues` is a map, so each tick realises a different address set, and the binding is held across all of them.
+That is the section below on why the sink binding works at all.
+
+#### The observation, which needs nothing from core
+
+```go
+rec := ferry.NewRecord()                       // or the caller's own fifteen lines
 cfg, err := ferry.Load[Config](ctx, ferry.Observing(src, rec))
 
-rec.At(addr)   // number("0") where the plane holds a zero
-               // absent      where the plane holds nothing
+rec.At(addr)   // number("0")  the plane holds a zero
+               // absent       the plane holds nothing
 ```
+
+`Observing` is a `Source` wrapping a `Source`, so it composes where any other source does, and it is the caller's if core never ships one.
+Put on a child of a `FirstOf` it answers which layer supplied a value, measured:
+
+```go
+q, f := ferry.NewRecord(), ferry.NewRecord()
+cfg, err := ferry.Load[Config](ctx, ferry.FirstOf(
+    ferry.Observing(query.Source{}, q),
+    ferry.Observing(yaml.Source{Path: p}, f),
+))
+```
+
+```
+q.At(/name)  ->  string("from-query")
+f.At(/name)  ->  absent
+```
+
+### The whole of this ADR is additive, and the compiler is what says so
+
+The claim is stronger than "the binding is optional", and it is the one a reader should be able to check:
+
+> Delete `Bind`, `BindSink`, `Binding[T]` and `SinkBinding[T]` from ferry and all three programs above still compile and still produce the same values.
+
+Prose cannot establish that, so the prototype compiles the no-binding versions of all three programs against a generated `ferry` package that exports **`Load`, `LoadOver`, `Dump`, `Compile` and nothing else**, with ADR-0004's four interfaces behind them and no binding API at any point.
+
+```
+go build ./...   ->  ok
+```
+
+And the negative control, the same module with one line added that does use it:
+
+```
+./main.go:58:35: undefined: ferry.Bind
+```
+
+So the check is a real one rather than a build that would have passed regardless.
+
+**One thing is not additive, and it is not the ferry API.**
+The rule below that a per-request driver takes its plane from the context and never from a field is a *driver* convention, and a ferry with no binding would not have chosen it: a `query.Source{Values: v}` field reads better and serves the only call site such a ferry has.
+So the surface is additive and the convention is a decision, and the cost of the convention is a call site that reads worse for a caller who never holds a binding.
+That is stated again in the consequences rather than left here.
 
 ### A caller may hold a binding, and the one-shot verb is that binding with the handle dropped
 
@@ -195,26 +295,60 @@ after Bind[T](src, WithRegistry(r2))  -> frozen=true
 ADR-0010 states the rule as *a call that retains a compiled schema freezes the registry; a call that discards one does not*.
 `Bind` retains one for the life of the binding, so it freezes, and ADR-0009's one broken shape, a load during `init`, is unchanged.
 
-#### It is Load-side only, and that is measured rather than asserted
+#### It applies to Dump too, and an earlier draft of this ADR said the opposite
 
-> There is no `Bind` for a `Sink`.
+> `BindSink[T](sink, opts...) (*SinkBinding[T], error)` is the same split on the write side, and `Dump[T]` is it with the handle discarded.
 
-Dump binds the sink **after** the walk, because the address set it hands over is the realised one.
-One type, three values:
+**This reverses a finding that was in this ADR when it was first opened for review, and the reversal is the more instructive half.**
+
+The draft's audit probe observed that the prototype's `Dump` binds the sink **after** the walk, with the realised address set, and measured one type producing three of them:
 
 ```
-Limits=map[]                    Tags=[]     ->  [/limits /name /tags]
-Limits=map[rps:1]               Tags=[]     ->  [/limits/rps /name /tags]
-Limits=map[burst:2 rps:1]       Tags=[x]    ->  [/limits/burst /limits/rps /name /tags#0]
+Limits=map[]                  Tags=[]    ->  [/limits /name /tags]
+Limits=map[rps:1]             Tags=[]    ->  [/limits/rps /name /tags]
+Limits=map[burst:2 rps:1]     Tags=[x]   ->  [/limits/burst /limits/rps /name /tags#0]
 ```
 
-Three address sets for one type, so a sink binding is not hoistable out of the call at all.
-That is ADR-0010's `members` operation and ADR-0004's enumeration asymmetry arriving on this surface: Dump reads a map's keys off the value, Load enumerates the plane, and only the second is a function of the type.
+From that it concluded that a sink binding is not hoistable, and named `members` and ADR-0004's enumeration asymmetry as the reason.
 
-A Dump binding would therefore be reusable only for a `T` with no dynamic tier, which is a property of `T` the caller would have to know and the compiler would not check.
-It is refused, and lifting the refusal later for the static case is additive.
+The measurement is right about the prototype and the conclusion does not follow, because **the prototype was not doing what ADR-0004 says.**
+ADR-0004's own section is titled "The address set handed to `Bind` is the static set, and core hands back a key function", and its worked example for that rule is a **dump**:
 
-Load's bind is hoistable for the opposite reason and it is ADR-0004's own sentence: "the address set handed to `Bind` is the **static** set".
+> Measured with a static set of `{/name}`, dumping a `map[string]string` field to the KV driver: `Set(/labels/env)` returned `kv: address not in the opened set: /labels/env`.
+
+Its fix is that the driver **mints** the dynamic address at the write it belongs to, not that core binds later.
+Binding the sink with the realised set was a prototype shortcut that quietly made ADR-0004's dynamic tier unreachable on the write path, and the draft read that shortcut as a property of Dump.
+
+Corrected, and the prototype's `Dump` rewired to bind with the static set: one sink binding, three dumps of three different shapes, all three written.
+
+```
+Name=a  Limits=map[]                  ->  [LIMITS NAME]
+Name=b  Limits=map[rps:1]             ->  [LIMITS_RPS NAME]
+Name=c  Limits=map[rps:2 burst:3]     ->  [LIMITS_BURST LIMITS_RPS NAME]
+```
+
+The static table holds `/name` and `/limits`; every `LIMITS_<key>` is minted at its own `Set`.
+The rewiring is behaviour-preserving: ADR-0010's eleven probes and ADR-0009's seventeen produce identical output afterwards, apart from timings and one line of [#31](https://github.com/onhotpath/ferry/issues/31)'s known map-key collision, which flips run to run on the same binary either way.
+
+**So both directions bind with a set that is a pure function of the schema**, and both bindings are hoistable for one reason rather than two.
+What stays asymmetric is what ADR-0004 already said is asymmetric: Load reads dynamic addresses out of the plane through `Enumerator`, and Dump reads them off the value.
+That is a fact about where a dynamic address comes from, not about when the sink is bound.
+
+Measured, the same six-field struct written to a flat KV sink:
+
+| | ns/op | B/op | allocs/op |
+| --- | --- | --- | --- |
+| `ferry.Dump`, binding per call | ~7300 | 4298 | **171** |
+| `b.Dump(ctx, v)`, binding held | ~5200 | 3054 | **133** |
+
+**And the context rule is not Load-only either.**
+A sink whose plane is per request, a response buffer or a per-request recorder, reads it from the context exactly as a source does, and refuses at open when it is absent.
+Run, with the same sink bound once:
+
+```
+with a store in the context  ->  [LIMITS NAME]
+with none                    ->  err = kv: no store in the context
+```
 
 ### The plane arrives in the context, because it is the only per-load channel there is
 
@@ -377,11 +511,22 @@ minted set per write:     write 1 -> "LIMITS_HTTP_PORT"
                           write 2 -> "LIMITS_HTTP_PORT"
 ```
 
-**This case is Dump's, and the ADR says so rather than claiming the wider version.**
-A minted address comes from the value on Dump and from the plane on Load, so on Load two loads' minted addresses come out of one plane's key space, and a driver whose enumeration round-trips cannot produce the refusal above.
+**The case is Dump's, and now that `BindSink[T]` exists it is reachable through the public API rather than only through the helper.**
+Two dumps through one held sink binding, each value holding one of the two map keys, and neither colliding with itself:
+
+```
+minted set on the binding   [LIMITS_HTTP_PORT NAME]   REFUSED
+minted set on the open      [LIMITS_HTTP_PORT NAME]   [LIMITS_HTTP_PORT NAME]
+```
+
+A caller who holds a sink binding and dumps a map twice gets a refusal naming an address no plane still holds.
+That is the amendment's whole justification, and it was a helper-level curiosity until the draft's Dump finding was reversed.
+
+**Load inherits the growth rather than the refusal, and the ADR does not claim the wider version.**
+A minted address comes from the value on Dump and from the plane on Load, so on Load two loads' minted addresses come out of one plane's key space and a driver whose enumeration round-trips cannot produce the refusal above.
 An earlier version of this probe claimed it on Load, on a fixture that refused for a different reason entirely, and the claim did not survive being run.
 
-**What Load inherits is the growth, and it inherits all of it.**
+What Load does inherit is all of the growth.
 Measured through the entry point, 20000 requests each carrying one distinct map key, through one binding:
 
 ```
@@ -480,12 +625,14 @@ The bind-once/open-many shape #13 wants is `Binding[T]`, and `LoadOver` on it is
 The key-helper amendment is owed to #13 whether or not this ADR had exported anything, because a watcher binds once by construction.
 
 **[#35](https://github.com/onhotpath/ferry/issues/35), what `ferrytest` exports.**
-Two obligations, both new.
+Three obligations, all new.
 A conformance case that a driver reading its plane from the context refuses at open when it is absent, and refuses with `ErrPlane`.
-And a case that a driver's key function retains nothing across opens, which is the amendment stated as a test rather than as prose.
+A case that a driver's key function retains nothing across opens, which is the amendment stated as a test rather than as prose, and it has to run on the **write** side, because that is where the retention refuses a legal write.
+And a case that a sink accepts a dynamic address its static table never held, which is ADR-0004's own `Set(/labels/env)` example promoted from a paragraph to a test - the prototype's `Dump` silently made it unreachable for as long as it bound with the realised set, and nothing caught that.
 
 **[#5](https://github.com/onhotpath/ferry/issues/5) and ADR-0004.**
 The sentence ADR-0004 closed on is discharged: the per-request use case has a worked answer, and `query`'s claim on the first-party list is stronger than ADR-0004 left it, because it is now the only driver exercising the context-supplied plane axis as well as the per-request one.
+ADR-0004's driver table gains a row, "supplies its plane at open rather than at construction", which `query` owns and no other first-party driver has.
 
 ### An inherited claim that did not reproduce
 
@@ -509,8 +656,6 @@ What was not measured is the row itself, and it is recorded here because the eff
 - **The watch and reload API**: [#13](https://github.com/onhotpath/ferry/issues/13).
 - **What `ferrytest` exports**: [#35](https://github.com/onhotpath/ferry/issues/35).
 - **Whether any combinator ships in core**, including the observing one: ADR-0001's bucket rule, when one is proposed.
-- **Whether a sink ever gains a binding for the static-only case.**
-  Refused today on the measurement above; lifting it is additive.
 - **Whether `BindPlane[T, P]` ever ships.**
   It works, it is type-safe, and it does not compose. Refusing it is the reversible direction and it stays available.
 - **Whether core ever exports a read-only schema view.**
@@ -522,27 +667,34 @@ What was not measured is the row itself, and it is recorded here because the eff
 - **ferry ships a caller-held binding, and the deciding argument is the ancestor.**
   Binding per load, ferry allocates 85 times per request against xload's 22 on the use case xload was pitched at; a held binding brings it to 45.
   The ergonomic argument was not decisive in either direction and the compile-cost argument was already gone, removed by ADR-0010 before this ticket opened.
-- **`Load[T]` is `Bind[T]` with the handle discarded, in the implementation and not only in the prose.**
-  That is what keeps 5.14's first item closed on the load verb: nothing is expressible through one and not the other, and the two cannot drift because there is one code path.
-- **The binding is Load-side only**, because Dump's address set is minted from the value and one type produces three of them.
-  ferry therefore has an asymmetry a reader will notice, and it is ADR-0004's enumeration asymmetry rather than a new one.
+- **`Load[T]` is `Bind[T]` with the handle discarded and `Dump[T]` is `BindSink[T]` with the handle discarded, in the implementation and not only in the prose.**
+  That is what keeps 5.14's first item closed on the verbs: nothing is expressible through one and not the other, and the two cannot drift because there is one code path.
+- **The whole surface is additive, and the compiler says so rather than the ADR.**
+  The three worked programs, written without any binding, compile against a generated ferry that exports `Load`, `LoadOver`, `Dump` and `Compile` and nothing else, and a negative control using one binding call fails with `undefined: ferry.Bind`.
+  A user who never holds a binding writes exactly what they wrote before this ADR.
+  **One thing is not additive and it is not the ferry API**: the driver convention below would not have been chosen by a ferry with no binding, so the surface is additive and the convention is a decision.
+- **The split exists in both directions**, `Bind[T]` over a `Source` and `BindSink[T]` over a `Sink`, because ADR-0004 hands a **static** address set to both and a driver mints the dynamic ones at the write they belong to.
+  An earlier draft of this ADR refused the sink half, on a probe that measured this prototype binding the sink with the realised set - a shortcut that made ADR-0004's own dynamic tier unreachable on the write path.
+  Correcting the prototype reversed the finding, and the reversal is recorded in full because the draft had read a prototype shortcut as a property of Dump.
+  Two functions rather than one, because `Source` and `Sink` are separate types and Go has no overloading, which is the visible cost of ADR-0004's compile-time read-only refusal reaching this surface too.
 - **A per-request plane travels in the `context.Context`, and core supplies no mechanism for it.**
   ADR-0004's contract has exactly one per-load channel, so every alternative either changes its signatures or manufactures a second key path.
   The cost is that a mandatory input is not in a signature, and the mitigation is that its absence is loud, per load, at the moment the contract already reserves for an unreachable plane.
 - **A driver with a per-request plane has one public shape and it is the context one.**
-  This is the ADR's least comfortable decision, because it makes the simplest query-parameter call site read worse than it would with a `Values` field.
+  This is the ADR's least comfortable decision, because it makes the simplest query-parameter call site read worse than it would with a `Values` field, and because it is the one place the binding's existence reaches back into code this ADR does not own.
   It is taken because the two-shape alternative is the survey's first item verbatim, and because the context shape serves both call sites while the field shape serves one.
+  It applies to a sink with a per-request plane in exactly the same way, verified.
 - **One context key is one plane instance per driver package per load.**
   Two query-parameter planes in one load need a keyed constructor from the driver, and core will not grow one.
 - **ADR-0004's key helper is amended, and no interface changes.**
   The static table is the bind's and the minted set is the open's, because injectivity is a property of one write.
-  Without it a held binding retains one address per distinct map key ever seen, measured at 20000 retained through one binding and 1812 KiB per 10000, and refuses a legal dump against an address no plane still holds.
+  Without it a held sink binding refuses the second of two dumps that each hold one of two map keys the plane's transform folds together, through the public API; and a held source binding retains one address per distinct map key ever seen, measured at 20000 retained and 1812 KiB per 10000.
   The amendment is owed to [#13](https://github.com/onhotpath/ferry/issues/13) independently of anything this ADR exports.
 - **The presence observation is a `Source` wrapping a `Source`, so ADR-0006's three candidate spellings are all declined and core exports nothing for it.**
   It is strictly more expressive than an Option, because it can be put on a child of a combinator and answer which layer supplied a value, which is the question ADR-0001 milestones drift detection on.
   The cost is that ADR-0010's Option rule loses its only load-affecting example, so every Option ferry has is now compile-affecting, and the ADR says that is a coincidence rather than a property.
 - **`Compile[T]() error` stands and the v0 break ADR-0010 priced is not spent**, because a binding is a handle on a schema bound to a plane and answers no question about the type.
-- **A binding is shared across goroutines and a driver's `OpenFunc` must be safe for concurrent calls**, which is a new driver obligation and a new conformance case.
+- **A binding is shared across goroutines and a driver's `OpenFunc` and `OpenWriterFunc` must be safe for concurrent calls**, which is a new driver obligation and a new conformance case.
   It is clean under `-race` in the prototype for the drivers there, and [#20](https://github.com/onhotpath/ferry/issues/20) inherits the fact rather than a design.
 - **Core stops rebuilding the address set on every load**, taking a per-request load from 125 allocations to 85 with no API attached, found while separating the bind's cost from the load's.
 - **The timings in this ADR move by up to 40 per cent between runs of the same binary and the allocation counts do not move at all**, so the allocation columns are the measurements and one single-run claim about parallel throughput was withdrawn rather than published.
@@ -557,7 +709,8 @@ The first is this ticket's most likely defect and it is answered in three places
 - *Two ways to set the loader.*
   **This ADR's, on three surfaces, and it is the reason two of its decisions read the way they do.**
   On the **source**: unchanged from ADR-0004, one way, a positional argument of an interface type, and no driver type doubles as an Option.
-  On the **load verb**: `Load[T]` is `Bind[T]` plus the method with the handle discarded, in the implementation, so there is one code path and nothing is expressible through one and not the other.
+  On the **verbs**: `Load[T]` is `Bind[T]` plus the method with the handle discarded and `Dump[T]` is `BindSink[T]` plus the method, in the implementation, so each direction has one code path and nothing is expressible through one spelling and not the other.
+  The compiler check above is the same item from the other side: a program that uses neither binding compiles against a ferry that has neither, so the second way is not a second way a user has to choose between, it is a value they may keep.
   On the **driver**: this is where the exposure is new, because a per-request driver could carry its plane in a field *and* read it from the context.
   It is closed by a rule that a driver has one of the two and it is the context, argued on the context form serving both call sites and the field form serving one.
   The ticket predicted this defect against option (b) specifically, and B3 found that option (b) never gets far enough to commit it: it needs the compiled schema's address set exported, which ADR-0001 keeps closed.
