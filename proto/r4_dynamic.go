@@ -76,35 +76,35 @@ func runR4() {
 	fmt.Println("    Everything the typed form makes unrepresentable becomes a runtime")
 	fmt.Println("    question again. Three of them, run:")
 
+	// MOVED BY #41 (D4). Both panics below used to surface at Dump and at Load,
+	// because Register never ran the codec. With ADR-0009's zero-value check
+	// wired into Register, both surface AT THE REGISTRATION CALL instead, which
+	// is R16b's own claim made literal: "in Register the panic propagates from
+	// the first registration, at startup". The probe's finding is unchanged -
+	// the dynamic form defers to runtime what the typed form makes a build
+	// error - and what moved is how early runtime notices.
 	bad := NewRegistry()
 	// (i) the codec's idea of the type and the registered type disagree.
-	_ = bad.RegisterType(reflect.TypeFor[netip.Addr](), VString,
-		func(v reflect.Value) (Value, error) {
-			return String(v.Interface().(time.Time).String()), nil // wrong type
-		},
-		func(val Value, dst reflect.Value) error { return nil })
-	withRegistry(bad, func() {
-		func() {
-			defer func() { fmt.Printf("    (i)   wrong type inside enc -> PANIC: %v\n", recover()) }()
-			_, _ = dump(reflect.ValueOf(struct{ A netip.Addr }{netip.MustParseAddr("10.0.0.1")}))
-		}()
-	})
+	fmt.Printf("    (i)   wrong type inside enc -> PANIC: %v\n", r4Panic(func() {
+		_ = bad.RegisterType(reflect.TypeFor[netip.Addr](), VString,
+			func(v reflect.Value) (Value, error) {
+				return String(v.Interface().(time.Time).String()), nil // wrong type
+			},
+			func(val Value, dst reflect.Value) error { return nil })
+	}))
 
 	// (ii) the decode half writes to the wrong field, or the wrong width.
 	bad2 := NewRegistry()
-	_ = bad2.RegisterType(reflect.TypeFor[R4Millis](), VNumber,
-		func(v reflect.Value) (Value, error) { return Number("1"), nil },
-		func(val Value, dst reflect.Value) error {
-			dst.SetString("nope") // an int64 destination
-			return nil
-		})
-	withRegistry(bad2, func() {
-		func() {
-			defer func() { fmt.Printf("    (ii)  wrong Set on dst    -> PANIC: %v\n", recover()) }()
-			var out struct{ M R4Millis }
-			_ = load(map[Path]Value{Path{}.Name("M"): Number("1")}, reflect.ValueOf(&out).Elem())
-		}()
-	})
+	fmt.Printf("    (ii)  wrong Set on dst    -> PANIC: %v\n", r4Panic(func() {
+		_ = bad2.RegisterType(reflect.TypeFor[R4Millis](), VNumber,
+			func(v reflect.Value) (Value, error) { return Number("1"), nil },
+			func(val Value, dst reflect.Value) error {
+				dst.SetString("nope") // an int64 destination
+				return nil
+			})
+	}))
+	fmt.Println("          ^ both now at the registration call rather than at Dump and at")
+	fmt.Println("            Load, because Register runs dec(enc(zero)) (ADR-0009, #41 D4).")
 
 	// (iii) nothing forces the two halves to be about one type at all.
 	fmt.Println("    (iii) the two halves need not agree with each other or with t; the")
@@ -161,4 +161,11 @@ func DurationLike[T ~int64]() Reg {
 			d, err := time.ParseDuration(s)
 			return T(d), err
 		})
+}
+
+// r4Panic runs f and returns whatever it panicked with, or nil.
+func r4Panic(f func()) (out any) {
+	defer func() { out = recover() }()
+	f()
+	return nil
 }

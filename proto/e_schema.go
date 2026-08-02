@@ -160,9 +160,14 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 		fieldErr := false
 		for i := range t.NumField() {
 			f := t.Field(i)
-			tg, err := parseTag(f, c.o.tagKey)
-			if err != nil {
-				c.errs = append(c.errs, fmt.Errorf("ferry: %s: %w", pathOrRoot(p.Name(f.Name)), err))
+			tg, terrs := parseTag(f, c.o.tagKey)
+			if len(terrs) > 0 {
+				// ADR-0008: "A tier fires only for a field that cleared the tier
+				// above it." This is tier 1, so a field that fails it is not
+				// offered to applyOptions, which is tiers 2 and 3.
+				for _, e := range terrs {
+					c.errs = append(c.errs, fmt.Errorf("ferry: %s: %w", pathOrRoot(p.Name(f.Name)), e))
+				}
 				fieldErr = true
 				continue
 			}
@@ -170,7 +175,40 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 				continue
 			}
 			at := p
-			if !tg.promote {
+			if tg.promote {
+				// DEFECT FOUND BY #41 (D11). ADR-0008's field rule: "embedded
+				// POINTER, with no ferry tag: schema compile error", because
+				// "promotion walks the pointed-to struct at the parent address,
+				// so the pointer has no address subtree of its own, and
+				// ADR-0006's presence bit has nothing to materialise it from".
+				//
+				// The tip compiled it, and the audit found a consequence
+				// ADR-0008 did not have: a promoted embedded pointer's OWN
+				// address is the empty path, so a nil one dumps Null at the
+				// address ADR-0003 says may not exist. That is ADR-0010's root
+				// rule reached through a door the root rule does not cover.
+				if f.Type.Kind() == reflect.Pointer {
+					c.errs = append(c.errs, fmt.Errorf(
+						"ferry: %s: %s is an embedded pointer with no %s tag, and a promoted field has "+
+							"no address of its own for the pointer to be optional at; give it a %s tag "+
+							"to nest it, or %s:\"-\"",
+						pathOrRoot(p.Name(f.Name)), f.Type, c.o.tagKey, c.o.tagKey, c.o.tagKey))
+					fieldErr = true
+					continue
+				}
+				// The other half of the same sentence: "An embedded field that
+				// is not a struct ferry walks is refused, naming both remedies."
+				// Without it an embedded time.Duration promotes to a LEAF at the
+				// parent address, which at the root is the empty path again.
+				if classify(f.Type) != shapeStruct {
+					c.errs = append(c.errs, fmt.Errorf(
+						"ferry: %s: %s is embedded and is not a struct ferry walks, so its fields cannot "+
+							"be promoted; give it a %s tag to nest it, or %s:\"-\"",
+						pathOrRoot(p.Name(f.Name)), f.Type, c.o.tagKey, c.o.tagKey))
+					fieldErr = true
+					continue
+				}
+			} else {
 				at = p.Name(tg.name)
 			}
 			child := c.rec(f.Type, at)
@@ -212,7 +250,7 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 		return &node{kind: nSlice, typ: t, shape: p, elem: e}
 	case reflect.Map:
 		if !validMapKey(t.Key()) {
-			c.errs = append(c.errs, fmt.Errorf("ferry: %s: unsupported map key type %s", pathOrRoot(p), t.Key()))
+			c.errs = append(c.errs, mapKeyRefusal(p, t.Key()))
 			return nil
 		}
 		c.container(p)
@@ -406,18 +444,12 @@ func resolveLeaf(t reflect.Type) (leafCodec, bool) {
 	return leafCodec{}, false
 }
 
-func kindLeaf(t reflect.Type) bool {
-	switch t.Kind() {
-	case reflect.Bool, reflect.String,
-		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64,
-		reflect.Float32, reflect.Float64:
-		return true
-	case reflect.Slice, reflect.Array:
-		return t.Elem().Kind() == reflect.Uint8
-	}
-	return false
-}
+// kindLeaf is ADR-0005's kind admission, and it is now a call rather than a
+// copy. DEFECT FOUND BY #41 (D2): this switch omitted reflect.Uint8 where
+// typeset.go's kindClassify had it, so `struct{ V uint8 }` did not compile and
+// `struct{ V uint16 }` did. The list is data in x1_kinds.go and both readers
+// go through it, so the two cannot disagree again.
+func kindLeaf(t reflect.Type) bool { return kindAdmitsLeaf(t) }
 
 func kindOf(t reflect.Type) VKind {
 	switch t.Kind() {
@@ -437,10 +469,21 @@ func decLeafWith(c leafCodec, v Value, dst reflect.Value) error {
 
 func encLeafWith(c leafCodec, v reflect.Value) (Value, error) { return c.enc(v) }
 
-// --- the tag, ADR-0008's grammar in the small -------------------------------
+// --- the tag: ADR-0008's grammar, ported ------------------------------------
+//
+// This was "ADR-0008's grammar in the small" - four tag words, one option
+// parser, five refusals - and #41 measured what the small version dropped:
+// D9 (core read the tag with reflect.StructTag.Lookup, so all three of
+// ADR-0008's measured failure modes were invisible) and D17 (one generic
+// `unknown option %q` where ADR-0008 specifies three tiers). Both are now in
+// x1_tag.go, ported from proto/11-tag-grammar rather than rewritten.
+//
+// What stayed here is the FIELD rule - exported, anonymous, promote - because
+// the audit did not find it wrong and it is the half that talks to the walk.
 
 type tag struct {
 	name       string
+	hasName    bool
 	skip       bool
 	promote    bool
 	required   bool
@@ -449,14 +492,24 @@ type tag struct {
 	def        string
 }
 
-func parseTag(f reflect.StructField, key string) (tag, error) {
-	raw, ok := f.Tag.Lookup(key)
+// parseTag is tier 1: well-formedness. It returns EVERY error the text
+// carries, because ADR-0008's tiers are between fields' passes and not
+// between one field's mistakes - `ferry:"=x,requird"` is two tier-1 errors.
+// A field that fails here does not reach tiers 2 and 3, which is the caller's
+// `continue`.
+func parseTag(f reflect.StructField, key string) (tag, []error) {
+	// D9: not f.Tag.Lookup. rawFerryTag scans the raw tag with the error paths
+	// kept, so a bare double quote, an invalid Go escape and a duplicate ferry
+	// key are three diagnoses rather than three silent empty strings.
+	raw, err := rawFerryTag(f.Tag, key)
+	if err != nil {
+		return tag{skip: true}, []error{err}
+	}
+	ok := raw != nil
 	if !f.IsExported() {
-		if f.Anonymous {
+		if f.Anonymous && !ok {
 			// an embedded field of unexported TYPE is still promoted
-			if !ok {
-				return tag{promote: true}, nil
-			}
+			return tag{promote: true}, nil
 		}
 		return tag{skip: true}, nil
 	}
@@ -464,31 +517,11 @@ func parseTag(f reflect.StructField, key string) (tag, error) {
 		if f.Anonymous {
 			return tag{promote: true}, nil
 		}
-		return tag{}, fmt.Errorf("field %s carries no %s tag: every exported field must name the segment "+
-			"it addresses, or be marked %s:\"-\"", f.Name, key, key)
+		return tag{}, []error{fmt.Errorf(
+			"field %s carries no %s tag: every exported field must name the segment "+
+				"it addresses, or be marked %s:\"-\"", f.Name, key, key)}
 	}
-	if raw == "-" {
-		return tag{skip: true}, nil
-	}
-	parts := splitTag(raw)
-	t := tag{name: unquoteTok(parts[0])}
-	if t.name == "" {
-		return t, fmt.Errorf("the %s tag names no segment", key)
-	}
-	for _, o := range parts[1:] {
-		switch {
-		case o == "required":
-			t.required = true
-		case o == "omitzero":
-			t.omitzero = true
-		case strings.HasPrefix(o, "default="):
-			t.hasDefault = true
-			t.def = unquoteTok(strings.TrimPrefix(o, "default="))
-		default:
-			return t, fmt.Errorf("unknown option %q", o)
-		}
-	}
-	return t, nil
+	return parseFerryTag(*raw, key)
 }
 
 // splitTag honours ADR-0008's single-quoted token: a comma inside quotes does

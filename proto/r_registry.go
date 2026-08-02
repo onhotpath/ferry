@@ -195,6 +195,20 @@ func (r *Registry) Register(regs ...Reg) error {
 		case r.byType[g.t].enc != nil:
 			errs = append(errs, fmt.Sprintf("ferry: %s is already registered", g.name))
 		default:
+			// ADR-0009: "Register encodes the zero value of T, donates String to
+			// the declared kind, decodes it back, and refuses the registration
+			// if either half errors."
+			//
+			// DEFECT FOUND BY #41 (D4): zeroCheck was written as a free function
+			// in r16_zerocheck.go and Register never called it, so ADR-0009's
+			// headline defect - "registering it makes the type worse than not
+			// registering it" - was fully available through the tip's own API.
+			// That is ADR-0007's third defect in a new place: a rule implemented
+			// somewhere other than where the rule says it lives.
+			if err := zeroCheck(g); err != nil {
+				errs = append(errs, err.Error())
+				continue
+			}
 			r.byType[g.t] = g.c
 			if g.asKey {
 				r.keys[g.t] = true

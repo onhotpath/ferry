@@ -77,8 +77,19 @@ var byIdentity = map[reflect.Type]leafCodec{
 
 var byteSlice = reflect.TypeFor[[]byte]()
 
-// keyOptIn switches validMapKey between R11's two candidate rules.
-var keyOptIn bool
+// keyOptIn was R11's seam between its two candidate rules, and ADR-0009 closed
+// it: "A registration is usable as a map key only if it says so:
+// StringCodec(...).AsMapKey(). A map[T]V whose key type is registered without it
+// is a schema compile error."
+//
+// DEFECT FOUND BY #41 (D5): it was a package-level bool defaulting to FALSE, so
+// the tip shipped the rule ADR-0009 refused, and every measurement not taken by
+// a probe that set it by hand was taken in the world the ADR rejected.
+// validMapKey no longer consults it - the decided rule is the behaviour rather
+// than a switch. It survives as a variable only because walk.go, r11, r15, r17
+// and a41 still read or write it, and its value is now the decided one so those
+// reads report the decision rather than the seam.
+var keyOptIn = true
 
 type shape int
 
@@ -95,10 +106,10 @@ const (
 // codec extends the set exactly as it extends the leaf set.
 func validMapKey(k reflect.Type) bool {
 	if c, ok := identityLookup(k); ok {
-		// R11's seam. Under the implied rule any identity-table entry may key
-		// a map; under the opt-in rule a REGISTERED type has to say so, which
-		// is where the injectivity obligation is communicated.
-		if keyOptIn && activeReg != nil {
+		// ADR-0009's opt-in, unconditionally. Core's own entries key a map on
+		// core's proof; a REGISTERED type has to say so, which is where the
+		// injectivity obligation is communicated.
+		if activeReg != nil {
 			if _, own := activeReg.lookup(k); own {
 				return registeredKeys[k] && c.kind == VString
 			}
@@ -119,6 +130,28 @@ func validMapKey(k reflect.Type) bool {
 		return true
 	}
 	return false
+}
+
+// mapKeyRefusal is the diagnostic half of ADR-0009's opt-in, and the ADR is
+// explicit that the diagnostic IS the mechanism: "the diagnostic is where the
+// obligation gets communicated, which is the point: it is the only moment a
+// registrant is guaranteed to read".
+//
+// DEFECT FOUND BY #41 (D5): the compiler said `unsupported map key type
+// netip.Addr`, which communicates no obligation at all and names no remedy. The
+// message below is ADR-0009's own, and it already existed - in walk.go, on the
+// engine the tip no longer uses.
+func mapKeyRefusal(p Path, k reflect.Type) error {
+	if _, ok := identityLookup(k); ok && activeReg != nil {
+		if _, own := activeReg.lookup(k); own && !registeredKeys[k] {
+			return fmt.Errorf(
+				"ferry: %s: %s has a registered codec but is not declared usable as a map key; "+
+					"a key codec's text must be injective over the key type, or two keys collapse "+
+					"into one address; add .AsMapKey() to the registration if it is",
+				pathOrRoot(p), k)
+		}
+	}
+	return fmt.Errorf("ferry: %s: unsupported map key type %s", pathOrRoot(p), k)
 }
 
 func classify(t reflect.Type) shape {
@@ -152,16 +185,14 @@ func classify(t reflect.Type) shape {
 }
 
 func kindClassify(t reflect.Type) shape {
-	switch t.Kind() {
-	case reflect.Bool, reflect.String,
-		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
-		reflect.Float32, reflect.Float64:
+	// The admitted kind list is data, in x1_kinds.go, and e_schema.go's
+	// kindLeaf reads the same one. #41 D2: it used to be a `case` clause here
+	// and a second `case` clause there, and they disagreed about uint8.
+	if kindAdmitsLeaf(t) {
 		return shapeLeaf
+	}
+	switch t.Kind() {
 	case reflect.Slice, reflect.Array:
-		if t.Elem().Kind() == reflect.Uint8 {
-			return shapeLeaf // []byte and [N]byte are Bytes, never an indexed composite
-		}
 		return shapeSlice
 	case reflect.Struct:
 		return shapeStruct
