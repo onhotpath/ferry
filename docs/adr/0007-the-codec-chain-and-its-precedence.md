@@ -31,8 +31,8 @@ This ADR is written from a throwaway prototype on branch `proto/12-codec-chain`,
 It is built on `proto/7-type-set`, so every measurement runs against the type set ADR-0005 actually landed, a real `Path`, a real `Value` and a real YAML plane over real files.
 Every number is from that prototype unless it cites the survey.
 
-**Two of the fifteen probes found defects in inherited code, and one of them is in a decision ADR-0005 already took.**
-Both are recorded below rather than quietly fixed.
+**Three of the eighteen probes found defects: two in inherited code, one in this ADR's own rule.**
+All three are recorded below rather than quietly fixed, and one of the inherited two is in a decision ADR-0005 already took.
 
 ## Decision
 
@@ -60,7 +60,7 @@ Four questions this ADR had to answer that the ticket did not name:
 | which arms exist at all, given that xload has five and this ADR keeps one | [Only the text pair is recognised](#only-the-text-pair-is-recognised) |
 | whether a chain-admitted type may key a map, and who carries injectivity | [A chain-admitted type may key a map](#a-chain-admitted-type-may-key-a-map-and-core-cannot-check-the-obligation) |
 | what the chain does to ADR-0005's completeness check | [What the chain costs the harness](#what-the-chain-costs-the-harness) |
-| what a pointer type does when it satisfies an arm in its own right | [Two defects found](#two-defects-found-in-inherited-code) |
+| what a pointer type does when it satisfies an arm in its own right | [Three defects found](#three-defects-found-by-running-the-decisions) |
 
 **Three things this ADR does not close.**
 
@@ -209,7 +209,27 @@ before kind   no exported field:  /V     -> string("g7")
 
 Under after-kind an edit nobody would review as a serialization change rewrites every stored artefact of that type.
 That is [#28](https://github.com/onhotpath/ferry/issues/28)'s breaking change, triggered from outside the encoding surface entirely.
-Under before-kind the representation changes when and only when the text methods change.
+
+**Before-kind has the mirror exposure, and it is stated here rather than left implied, because an earlier draft of this section read as though only after-kind drifted.**
+Under before-kind the representation changes when the text methods change, and those methods can be added by a **dependency**, in a release the consumer did not read, to a type the consumer embeds.
+Measured, the same type before and after an upstream release adds the pair, with no change on the consumer's side:
+
+```
+chain BEFORE kind
+  dep v1 (no text pair)     addresses=[/backend/Host /backend/Port]   Host=string("h") Port=number("80")
+  dep v2 (text pair added)  addresses=[/backend]                      /backend=string("h:80")
+
+chain AFTER kind
+  dep v1                    addresses=[/backend/Host /backend/Port]   unchanged
+  dep v2                    addresses=[/backend/Host /backend/Port]   unchanged
+```
+
+So **both orders drift**, and the honest distinction is which edit triggers it.
+Before-kind drifts on an edit that is visibly about serialization, and a reviewer seeing `func (T) MarshalText` added has been told what it is for.
+After-kind drifts on exporting a field, which is not a serialization change in any reviewer's reading.
+The mirror case is benign under both: a type that was **refused** acquiring a text pair goes from a compile error to a working field.
+
+That is the argument for before-kind at its true strength, which is narrower than "after-kind drifts and before-kind does not".
 
 **Under after-kind, ferry disagrees with `encoding/json` about a type whose author declared one text form.**
 A `type Level string` whose `MarshalText` normalises to upper case writes `INFO` through `encoding/json` and would write `info` through a ferry that ignored the declaration.
@@ -224,6 +244,26 @@ Two conversion authorities disagreeing about one type is the viper defect the su
 - **A `MarshalText` that is not an inverse breaks a type that kind admission would have round-tripped.**
   Measured, and measured again through `encoding/json`, where the same type is **already** broken.
   So ferry inherits the hazard rather than inventing it, and the honest framing is the next paragraph.
+
+  **How common that is was measured rather than left as a class**, by building values in deliberately non-canonical forms and running them through the text pair.
+  **Three of fourteen do not come back identical under `DeepEqual`:**
+
+  ```
+  net.IP           net.IP{192,0,2,1}, 4 bytes    -> string("192.0.2.1")   NO
+  decimal.Decimal  1.2500, trailing zeros        -> string("1.25")        NO
+  regexp.Regexp    the zero value                -> string("")            NO
+
+  netip.Addr v4-in-v6 and zoned, netip.Prefix with host bits set, big.Int -0,
+  uuid.UUID from upper case and from the urn: form, language.Tag from EN-gb
+  and from en-Latn-GB, decimal 1.25e2, regexp ^a.*z$        ... all yes
+  ```
+
+  **And all three are equal under the type's own equality relation**: `net.IP.Equal` is true across the four- and sixteen-byte forms, `decimal.Equal` is true across exponents -4 and -2, and `regexp`'s zero and `Compile("")` have the same `String()`.
+  So the hazard is not that the text form is lossy.
+  It is that `DeepEqual` is the wrong relation, which is survey item **5.7** and the thing ADR-0005 already made per-type.
+  **Zero types in the measured corpus lose information under their own relation.**
+  A type that canonicalises on construction, as `uuid.UUID` and `language.Tag` do, is not in the hazard class at all, because there is no non-canonical value to lose.
+  The synthetic `"info"` to `"INFO"` type that does lose information has no counterpart in the corpus.
 - **The address set of a type depends on the chain**, so template generation emits differently and a driver's key function is checked over a different set.
   Named here so it is not rediscovered as a bug.
 
@@ -400,9 +440,11 @@ So the probe is "`T` or `*T` implements the encoder" and "`*T` implements the de
 ADR-0005 made `String` the universal donor for kind-admitted leaves and left this question here by name.
 The two halves entangle, and picking either alone gives a wrong answer.
 
-> A codec declares the boundary `Value` kind it produces.
+> A codec declares the boundary `Value` kind it produces, and **the kind is a field of the codec**, resolved by the same lookup that finds the codec.
 > Core applies ADR-0005's donor rule unchanged before calling the codec: `String` is normalised to the declared kind, and nothing else coerces.
 > The text arm's declared kind is `String`, always, because `encoding.TextMarshaler` produces text and says nothing about kind.
+
+The "field of the codec" clause reads like an implementation note and is not one; keeping the kind in a second map next to the table is the third defect this prototype found, and it is recorded below.
 
 **Why the codec must declare a kind.**
 Measured, a `big.Int` codec whose text form is a run of digits:
@@ -526,7 +568,7 @@ Measured: without that one line, `map[netip.Addr]string` is refused as a key typ
 With it, `map[netip.Addr]string` compiles to `/V/*`, dumps `/V/10.0.0.1` and `/V/10.0.0.2`, and loads back exactly.
 
 **And the injectivity obligation is not hypothetical, which is the second defect this prototype found.**
-See [Two defects found](#two-defects-found-in-inherited-code).
+See [Three defects found](#three-defects-found-by-running-the-decisions).
 
 Injectivity is not checkable in general, so the position this ADR takes is the only honest one:
 
@@ -612,9 +654,10 @@ So `default=aGk=` on a `[]byte` field lands as the four bytes `aGk=` and **not**
 Measured.
 That belongs in [#11](https://github.com/onhotpath/ferry/issues/11)'s documentation of how a default is written, and it is not a case for a second coercion.
 
-### Two defects found in inherited code
+### Three defects found by running the decisions
 
-Both were found by running rather than by reading, and both are fixed on the prototype branch only.
+All three were found by running rather than by reading, and all three are fixed on the prototype branch only.
+The third is this ADR's own rule not being implemented where the rule says it lives, which is the more instructive kind.
 
 **A pointer type can satisfy an arm in its own right, and that bypasses ADR-0005's nil-pointer rule.**
 `*big.Int` implements the whole text pair, because `big.Int`'s text methods are on the pointer receiver.
@@ -644,6 +687,20 @@ Two Go keys, one address, no error.
 This is exactly the hazard ADR-0005 states for a **registered** key codec, occurring inside **core's own set**, and no probe in #7 reached it because none used a composite map key.
 It is not fixed here, because the fix - dropping `time.Time` from the admissible key set, or attaching a proof obligation to it - amends ADR-0005's decision rather than this one.
 **Proposed as a ticket** in the resolution comment.
+
+**The declared kind must live inside the identity-table entry, not beside it.**
+This ADR says core applies the donor rule before calling any codec.
+The prototype implemented that for a chain codec and not for a table one, because the chain's codec carried its kind and the table's did not, so the kind lived in a second map.
+Measured, a registered `big.Int` codec correctly declaring `Number`:
+
+```
+typed plane (says Number)          -> loads
+flat plane (says String)           -> value: wrong kind
+```
+
+The codec was right and the lookup was wrong, and the failure appeared only on env, query parameters and Consul, which is the same shape as ADR-0005's G2.
+The rule this produced: **the kind is a field of the codec, resolved by the same lookup that finds the codec.**
+Two lookups for one decision is how a chain drifts, which is the third time that pattern has bitten in this prototype.
 
 ### What this ADR does not decide
 
@@ -687,8 +744,12 @@ It is not fixed here, because the fix - dropping `time.Time` from the admissible
   It also means the `nojsonv2` escape hatch's eventual removal does not reopen this: the reason is the boundary shape, not the import.
 - A codec is a pure conversion with no context and no options, which is what keeps the round-trip proof runnable offline and keeps [#20](https://github.com/onhotpath/ferry/issues/20)'s problem bounded.
   The cost is that a codec doing I/O is unrepresentable, and the answer is a wrapping `Source`, which nobody has written yet.
-- Two defects were found in code three ADRs deep: a pointer type satisfying an arm in its own right, and a non-injective key type inside core's own set.
+- Three defects were found by running the decisions rather than reading them: a pointer type satisfying an arm in its own right, a non-injective key type inside core's own set, and this ADR's own donor rule applied at one of the two lookups that needed it.
   The second is unfixed here, and it means ADR-0005's admissible key set is wrong today.
+  The third is the reason the declared kind is specified as a field of the codec rather than as a parallel table.
+- **Both chain orders drift under an unrelated edit**, and the ADR says so rather than claiming the property for one.
+  Before-kind drifts when a dependency adds a text pair; after-kind drifts when someone exports a field.
+  The case for before-kind rests on the first being a visibly serialization-shaped edit and the second not being one, which is a weaker claim than an earlier draft made.
 
 ## Items from the xload survey
 
