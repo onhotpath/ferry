@@ -29,5 +29,6 @@ func main() {
 	p11Dynamic()
 	p12Lifetimes()
 	p13Slim()
+	p14Closer()
 	fmt.Println()
 }
