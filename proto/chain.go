@@ -344,13 +344,28 @@ func forceBinary(t reflect.Type) (codec, bool, string) {
 
 // --- wiring the chain into classify() ---------------------------------------
 
-// chainOrder is the arm list under test. Setting it to nil turns the chain
-// off, which is the "after kind" arm of the ordering question.
-var chainOrder []string
+// chainOrder is the arm list. ADR-0007 decides it and decides that it has
+// exactly one member:
+//
+//	"json.Marshaler/Unmarshaler, encoding.BinaryMarshaler/BinaryUnmarshaler and
+//	 gob.GobEncoder/GobDecoder are NOT arms."
+//
+// so the chain is step 2 of three, "the text pair: encoding.TextAppender or
+// encoding.TextMarshaler, together with encoding.TextUnmarshaler". The other
+// three arms stay in this file because P5 and P16 measure them; they are not
+// in the default list.
+//
+// DEFECT FOUND BY #41 (D3): this was `var chainOrder []string`, so the chain
+// was OFF, and chainBeforeKind was false, so the ordering was the one ADR-0007
+// rejected. Every P12 and R probe that measures the chain sets both in its own
+// body and reverts them in a defer; no E16 or B25 probe sets either, so
+// ADR-0010's eleven probes and ADR-0012's thirteen were all taken with
+// ADR-0007's decision switched off.
+var chainOrder = []string{"text"}
 
-// chainBeforeKind decides whether the chain is consulted before reflect.Kind
-// admission or only as a rescue for types kind refuses.
-var chainBeforeKind = false
+// chainBeforeKind is ADR-0007's headline: "The text pair is consulted BEFORE
+// reflect.Kind admission. A declaration beats an inference."
+var chainBeforeKind = true
 
 // chainCodec is the seam classify() consults. It returns the codec the chain
 // selected for t, if any. Core's identity table is consulted first and is not
