@@ -1,6 +1,6 @@
 # 10. The generic entry point, and how a compiled schema is cached
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-02
 Ticket: [#16](https://github.com/onhotpath/ferry/issues/16)
 
