@@ -1,6 +1,6 @@
 # 5. The supported type set, and how round-trip is enforced
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-02
 Ticket: [#7](https://github.com/onhotpath/ferry/issues/7)
 
