@@ -36,6 +36,8 @@ var audit2Hook = func() {}
 var audit3Hook = func() {}
 var gapsHook = func() {}
 var flatHook = func() {}
+var edgesHook = func() {}
+var timeHook = func() {}
 
 func hdr(s string) { fmt.Printf("\n=== %s ===\n", s) }
 
@@ -232,6 +234,12 @@ func main() {
 
 	hdr("P14 the flattening plane")
 	flatHook()
+
+	hdr("P15 what actually happens to the types people reach for")
+	edgesHook()
+
+	hdr("P16 what the time.Time losses cost")
+	timeHook()
 }
 
 func init() { runAtEnd = runHarness }
@@ -247,3 +255,7 @@ func init() { audit3Hook = runAudit3 }
 func init() { gapsHook = runGaps }
 
 func init() { flatHook = runFlat }
+
+func init() { edgesHook = runEdges }
+
+func init() { timeHook = runTimeCost }

@@ -20,6 +20,8 @@ Run: `GOTOOLCHAIN=go1.27rc2 go run .`
 | `audit3.go` | the struct admitted by kind that maps nothing |
 | `gaps.go` | the audit against the ticket's literal asks, after a review challenge |
 | `flat.go` | a plane with no type information, which is what hid G2 |
+| `edges.go` | what actually happens to fifteen types people reach for |
+| `timecost.go` | what the `time.Time` losses cost, and what the relation buys |
 
 ## Probes
 
@@ -39,6 +41,8 @@ Run: `GOTOOLCHAIN=go1.27rc2 go run .`
 | P12 | a struct whose fields are all unexported | `netip.Addr`, `big.Int`, `netip.AddrPort`, `time.Location` compile clean and dump nothing, silently |
 | P13 | the gap audit, run after a review challenge | five gaps, two of them severe. See below |
 | P14 | the core table through a plane with no type information | 11/11 scalars, and nil pointers do not survive |
+| P15 | what happens to fifteen real-world types | **three outcomes, not two.** Five refused, nine admitted, and several admitted with a surprising representation |
+| P16 | what the `time.Time` losses cost | the zone loss is invisible to `.Equal`, and it breaks DST arithmetic |
 
 ## The gap audit (P13), which a review challenge forced
 
