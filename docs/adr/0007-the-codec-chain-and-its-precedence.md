@@ -24,7 +24,7 @@ Four constraints bind before anything is decided.
 [ADR-0004](0004-source-and-sink.md): the boundary value is a comparable `{kind, text}` with kinds `Absent`, `Null`, `Bool`, `Number`, `String`, `Bytes`.
 ADR-0005: `fmt.Stringer` is never consulted, a codec collapses a type to a leaf, a key codec must be injective, and on Load `String` is the universal donor.
 
-[ADR-0006](0006-defaults-and-zero-values.md) ([#8](https://github.com/onhotpath/ferry/issues/8)) ran in parallel with this one and its PR opened first, still unmerged at the time of writing.
+[ADR-0006](0006-defaults-and-zero-values.md) ([#8](https://github.com/onhotpath/ferry/issues/8)) ran in parallel with this one and landed first.
 Its definitions are applied here rather than re-derived, and the three shared seams are reconciled explicitly in [What #8 decided and this ADR applies](#what-8-decided-and-this-adr-applies).
 
 This ADR is written from a throwaway prototype on branch `proto/12-codec-chain`, which never merges.
@@ -627,9 +627,9 @@ Five more:
 
 ### What #8 decided and this ADR applies
 
-[ADR-0006](0006-defaults-and-zero-values.md) was drafted in parallel and its PR opened first.
+[ADR-0006](0006-defaults-and-zero-values.md) was drafted in parallel and landed first.
 Its definitions are applied here rather than re-derived, and the three seams the two tickets share are reconciled rather than assumed.
-If the two merge in the other order, nothing below changes: every reconciliation is stated as applying #8's rule, not as depending on it having merged.
+Every reconciliation below is stated as applying #8's rule rather than as depending on the merge order, and all four statements quoted here were re-checked against ADR-0006 as merged, after its review round.
 
 - **Does a codec run for `Absent` or a zero value?**
   ADR-0006: "`Absent` means ferry does not write to the field. Every other observation, `Null` and the empty string included, is a value the plane holds, and it is applied."
@@ -639,6 +639,11 @@ If the two merge in the other order, nothing below changes: every reconciliation
 - **Does a codec see the raw boundary `Value` or the donated one?**
   This ADR's, and the answer is the donated one.
   ADR-0006 assumed nothing about it, correctly.
+
+**And ADR-0006's final round leans on this ADR's invocation rule, which is worth recording because it makes the two load-bearing on each other.**
+ADR-0006 refuses `Null` at every leaf whose Go type has no null, and gives as its argument that "strictness can be relaxed per type by a registered codec, and leniency cannot be tightened at all, because the zeroing would precede the codec chain".
+That argument only holds because `Null` reaches the codec rather than being intercepted by core, which is this ADR's rule and the reason it is stated as "whatever kind a codec emits it must accept".
+Had this ADR intercepted `Null`, ADR-0006's escape hatch would not exist and its choice between refusing and zeroing would have been forced the other way.
 
 One thing ADR-0006 states in a sentence and had no codec to exercise it against, now measured: a declared default is a `String` `Value` at the field's address, so a chain-admitted or registered codec gets defaults for free with no default-awareness of its own.
 Measured, a struct of `netip.Addr` and `big.Int` with declared defaults, against an empty plane and against a plane supplying one of them:
