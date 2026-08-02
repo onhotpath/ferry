@@ -359,7 +359,7 @@ func chainCodec(t reflect.Type) (codec, bool) {
 	if len(chainOrder) == 0 {
 		return codec{}, false
 	}
-	if _, ok := byIdentity[t]; ok {
+	if _, ok := identityLookup(t); ok {
 		return codec{}, false
 	}
 	c, _, ok := selectPaired(t, chainOrder)
@@ -389,7 +389,7 @@ func kindWouldRefuse(t reflect.Type) bool {
 }
 
 func kindRefuses(t reflect.Type, stack map[reflect.Type]bool) bool {
-	if _, ok := byIdentity[t]; ok {
+	if _, ok := identityLookup(t); ok {
 		return false
 	}
 	if stack[t] {

@@ -32,7 +32,7 @@ func halfCompile(t reflect.Type) error {
 			return
 		}
 		seen[t] = true
-		if _, ok := byIdentity[t]; ok {
+		if _, ok := identityLookup(t); ok {
 			return
 		}
 		if _, halves, ok := selectPaired(t, chainOrder); !ok && len(halves) > 0 {

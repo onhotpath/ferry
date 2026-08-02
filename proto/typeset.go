@@ -77,6 +77,9 @@ var byIdentity = map[reflect.Type]leafCodec{
 
 var byteSlice = reflect.TypeFor[[]byte]()
 
+// keyOptIn switches validMapKey between R11's two candidate rules.
+var keyOptIn bool
+
 type shape int
 
 const (
@@ -91,7 +94,15 @@ const (
 // validMapKey: core ships string and the integer kinds, and a registered
 // codec extends the set exactly as it extends the leaf set.
 func validMapKey(k reflect.Type) bool {
-	if _, ok := byIdentity[k]; ok {
+	if c, ok := identityLookup(k); ok {
+		// R11's seam. Under the implied rule any identity-table entry may key
+		// a map; under the opt-in rule a REGISTERED type has to say so, which
+		// is where the injectivity obligation is communicated.
+		if keyOptIn && activeReg != nil {
+			if _, own := activeReg.lookup(k); own {
+				return registeredKeys[k] && c.kind == VString
+			}
+		}
 		return true
 	}
 	// The key lookup has to consult the same chain the leaf lookup does, or a
@@ -111,7 +122,7 @@ func validMapKey(k reflect.Type) bool {
 }
 
 func classify(t reflect.Type) shape {
-	if _, ok := byIdentity[t]; ok {
+	if _, ok := identityLookup(t); ok {
 		return shapeLeaf
 	}
 	// Pointer indirection is STRUCTURAL and is resolved before the chain is
@@ -120,7 +131,7 @@ func classify(t reflect.Type) shape {
 	// nil-pointer rule is bypassed, a nil dumps as string("<nil>") and the
 	// load panics inside big.Int.UnmarshalText on a nil receiver.
 	if t.Kind() == reflect.Pointer {
-		if _, ok := byIdentity[t]; !ok {
+		if _, ok := identityLookup(t); !ok {
 			return shapePointer
 		}
 	}
@@ -169,7 +180,7 @@ func kindClassify(t reflect.Type) shape {
 
 func encLeaf(v reflect.Value) (Value, error) {
 	t := v.Type()
-	if c, ok := byIdentity[t]; ok {
+	if c, ok := identityLookup(t); ok {
 		return c.enc(v)
 	}
 	if c, ok := activeChainCodec(t); ok {
@@ -216,7 +227,7 @@ func asDonor(val Value, want VKind) Value {
 
 func decLeaf(val Value, dst reflect.Value) error {
 	t := dst.Type()
-	if c, ok := byIdentity[t]; ok {
+	if c, ok := identityLookup(t); ok {
 		// The donor rule is core's and applies to EVERY codec, whether it
 		// came from the identity table or from the chain.
 		return c.dec(asDonor(val, c.kind), dst)

@@ -51,7 +51,7 @@ func runChainOrder() {
 		tp := hasTextPair(r.t)
 		// what happens today
 		today := "leaf, pinned"
-		if _, owned := byIdentity[r.t]; !owned {
+		if _, owned := identityLookup(r.t); !owned {
 			h := reflect.New(reflect.StructOf([]reflect.StructField{{Name: "V", Type: r.t}})).Elem()
 			if _, err := compile(h.Type()); err != nil {
 				today = "REFUSED"

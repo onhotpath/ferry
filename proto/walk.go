@@ -187,7 +187,7 @@ func decMapKey(text string, dst reflect.Value) error {
 	// key is only ever segment text. The obligation it carries is stronger
 	// than a leaf codec's: the text must be INJECTIVE over the key type, or
 	// two distinct keys collapse into one address.
-	if c, ok := byIdentity[dst.Type()]; ok {
+	if c, ok := identityLookup(dst.Type()); ok {
 		return c.dec(String(text), dst)
 	}
 	if c, ok := activeChainCodec(dst.Type()); ok {
@@ -205,7 +205,7 @@ func decMapKey(text string, dst reflect.Value) error {
 }
 
 func mapKeyText(k reflect.Value) string {
-	if c, ok := byIdentity[k.Type()]; ok {
+	if c, ok := identityLookup(k.Type()); ok {
 		if v, err := c.enc(k); err == nil && v.Kind() == VString {
 			return v.Text()
 		}

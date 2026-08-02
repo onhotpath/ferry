@@ -28,133 +28,21 @@ import (
 	"time"
 )
 
-// --- the forced shape -------------------------------------------------------
-
-// Reg is an opaque registration. The only way to make one is TypeCodec, which
-// is what makes "a codec is a pair" unrepresentable-otherwise rather than a
-// documented rule.
-type Reg struct {
-	t    reflect.Type
-	name string
-	kind VKind
-	c    leafCodec
-}
-
-// TypeCodec builds a registration for T.
-//
-// kind is required rather than defaulted. That is the single most consequential
-// line in this shape: a codec whose text is a run of digits must say Number, or
-// it works on env and fails on YAML (P9).
-func TypeCodec[T any](kind VKind, enc func(T) (Value, error), dec func(Value) (T, error)) Reg {
-	t := reflect.TypeFor[T]()
-	return Reg{
-		t:    t,
-		name: t.String(),
-		kind: kind,
-		c: leafCodec{
-			name: t.String(),
-			kind: kind,
-			enc: func(v reflect.Value) (Value, error) {
-				out, err := enc(v.Interface().(T))
-				if err != nil {
-					return Value{}, err
-				}
-				if out.Kind() != kind && out.Kind() != VNull {
-					return Value{}, fmt.Errorf(
-						"ferry: codec for %s declared kind %v but produced %v", t, kind, out.Kind())
-				}
-				return out, nil
-			},
-			dec: func(val Value, dst reflect.Value) error {
-				out, err := dec(val)
-				if err != nil {
-					return err
-				}
-				dst.Set(reflect.ValueOf(out))
-				return nil
-			},
-		},
-	}
-}
-
-// StringCodec is the ergonomic case, and it is the one that will be used most.
-// It exists because the 90% codec is "format to text, parse from text", and
-// making that six lines instead of two is how a registration API stops being
-// used at all.
-func StringCodec[T any](format func(T) string, parse func(string) (T, error)) Reg {
-	return TypeCodec[T](VString,
-		func(v T) (Value, error) { return String(format(v)), nil },
-		func(v Value) (T, error) {
-			var zero T
-			s, err := v.AsString()
-			if err != nil {
-				return zero, err
-			}
-			return parse(s)
-		})
-}
-
-// coreOwned is the pre-seeded part of the identity table. Registration adds to
-// the same table and may not replace an entry in it.
-var coreOwned = map[reflect.Type]bool{
-	reflect.TypeFor[time.Duration](): true,
-	reflect.TypeFor[time.Time]():     true,
-}
-
-func Register(regs ...Reg) error {
-	var errs []string
-	for _, r := range regs {
-		if coreOwned[r.t] {
-			errs = append(errs, fmt.Sprintf(
-				"ferry: %s is in core's own set and its representation is pinned; "+
-					"define a named type over it and register that", r.name))
-			continue
-		}
-		if _, dup := byIdentity[r.t]; dup {
-			errs = append(errs, fmt.Sprintf("ferry: %s is already registered", r.name))
-			continue
-		}
-		byIdentity[r.t] = r.c
-		registeredKind[r.t] = r.kind
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("%s", joinLines(errs))
-	}
-	return nil
-}
-
-var registeredKind = map[reflect.Type]VKind{}
-
-func joinLines(ss []string) string {
-	out := ""
-	for i, s := range ss {
-		if i > 0 {
-			out += "\n"
-		}
-		out += s
-	}
-	return out
-}
-
-func unregisterAll() {
-	for t := range registeredKind {
-		delete(byIdentity, t)
-		delete(registeredKind, t)
-	}
-}
+// The forced shape now lives in r_registry.go, shared with #19's probes.
 
 // --- the probe --------------------------------------------------------------
 
 type Timeout time.Duration
 
 func runRegistration() {
-	defer unregisterAll()
-	chainOrder, chainBeforeKind = []string{"text"}, true
+		chainOrder, chainBeforeKind = []string{"text"}, true
 	defer func() { chainOrder, chainBeforeKind = nil, false }()
 
 	fmt.Println("\n--- P18a: the five registrations a real user actually writes ---")
 
-	err := Register(
+	reg := NewRegistry()
+	defer reg.install()()
+	err := reg.Register(
 		// 1. The gap this ADR leaves open by dropping the binary arm.
 		StringCodec(
 			func(u url.URL) string { return u.String() },
@@ -259,15 +147,15 @@ func runRegistration() {
 	fmt.Println("      first. That is why kind is a required argument.")
 
 	fmt.Println("\n--- P18c: the two registrations that must fail ---")
-	fmt.Printf("    %v\n", Register(StringCodec(
+	fmt.Printf("    %v\n", reg.Register(StringCodec(
 		func(d time.Duration) string { return fmt.Sprint(int64(d)) },
 		func(s string) (time.Duration, error) { return 0, nil })))
-	fmt.Printf("    %v\n", Register(StringCodec(
+	fmt.Printf("    %v\n", reg.Register(StringCodec(
 		func(u url.URL) string { return "" },
 		func(s string) (url.URL, error) { return url.URL{}, nil })))
 
 	fmt.Println("\n--- P18d: a codec that lies about its declared kind is caught ---")
-	_ = Register(TypeCodec(VNumber,
+	_ = reg.Register(TypeCodec(VNumber,
 		func(s liar) (Value, error) { return String("not a number"), nil },
 		func(v Value) (liar, error) { return "", nil }))
 	_, lerr := dump(reflect.ValueOf(struct{ V liar }{"x"}))
