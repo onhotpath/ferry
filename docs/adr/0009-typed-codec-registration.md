@@ -1208,8 +1208,10 @@ That is the accepted-set rule doing real work rather than being a principle: the
 - **How a default is spelled, and how a field is named**: [#11](https://github.com/onhotpath/ferry/issues/11).
 - **Whether the walk may run concurrently**: [#20](https://github.com/onhotpath/ferry/issues/20).
   This ADR decides only that the registry is immutable for the life of every schema compiled against it.
-- **Whether `ferrytest`'s `Complete` check ships**, and what the harness's exact surface is.
-  This ADR establishes that it is possible because a registry is enumerable, and that it needs nothing from a `Reg`.
+- **What `ferrytest` exports, and what the conformance suites contain**: [#35](https://github.com/onhotpath/ferry/issues/35), filed from this ADR.
+  This ADR adds three things to a package that seven ADRs now assign obligations to and no ticket owned: `RoundTrip` taking a `*Registry`, `Complete` over a registry, and `Injective` over a key codec's value list.
+  It establishes that each is possible, and that none of them needs anything from a `Reg`, which is the constraint the package's design inherits.
+  It does not decide their spelling, and it names two collisions it created rather than leaving them to be found: ADR-0005's `RoundTrip` and this one's are the same function with different signatures, and ADR-0005's completeness check over core's table and this one's over a registry are the same check over two tables.
 - **The exported verb names**, which ADR-0001 left open.
   `Register`, `Registry`, `TextCodec`, `StringCodec`, `ValueCodec`, `DurationLike` and `AsMapKey` are the working spellings, and the trio's naming is argued rather than assumed.
 
@@ -1240,6 +1242,8 @@ That is the accepted-set rule doing real work rather than being a principle: the
   The old name `TypeCodec` did not distinguish itself from either sibling, and this is the one place the ADR changes a spelling on a readability argument rather than a measurement.
 - **Registration is enumerable where the text arm is not**, so ADR-0005's completeness check ports to a user's registry.
   ADR-0007's weakest point does not get better, but registration does not join it.
+- Surfaced and filed rather than decided inline: **`ferrytest` has seven ADRs' worth of assigned obligation and had no owner**, now [#35](https://github.com/onhotpath/ferry/issues/35).
+  This ADR is the fourth to add to that package and the first to add three things at once, which is what made the gap visible.
 - The generic wrapper is the one piece of reflection this API owns, and two defects in it would have been defects in every registered codec.
   Both are one token wide and neither is catchable by a registrant's proof, which makes the codec conformance suite ADR-0007 asks for load-bearing rather than optional.
 - ADR-0005's named-duration hole is closed by `DurationLike[T ~int64]()`, at one line per named type.
