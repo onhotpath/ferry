@@ -64,6 +64,47 @@ Two more this ticket inherited:
 - **Whether core ever ships the observing `Source`.**
   The mechanism is decided; whether a combinator ships is ADR-0001's bucket rule, exactly as ADR-0004 left `FirstOf`.
 
+### The surface is decided and it does not ship yet
+
+> Everything below is decided.
+> `Bind[T]`, `BindSink[T]`, `Binding[T]` and `SinkBinding[T]` are **not added to core until the first consumer that needs them is written**, which is the first driver with a per-request plane.
+
+The reason is the surface count, and it is worth stating as a number rather than leaving in prose.
+[ADR-0010](0010-the-entry-point-and-the-schema-cache.md) closed with "four functions and two Options".
+Shipping this ADR's surface immediately would make that six functions, two exported types and three methods, a **fifty per cent growth in the caller-facing surface**, bought with a performance property, in a library that has no consumer yet and therefore no evidence that anybody is on the path being made faster.
+
+The measurement stands and so does the design.
+What does not follow from a measurement is that the surface has to exist before anything is on the other side of it.
+
+**This is not one of ADR-0001's four buckets, and forcing it into one would be wrong.**
+It is not **Enabled**, because a caller cannot build it outside core: it needs the compiled schema, which ADR-0001 keeps unexported.
+It is not **Milestoned**, because no missing mechanism blocks it - ADR-0004's phase boundary is already there and the prototype builds the whole thing on top of it unchanged.
+The nearest thing in ADR-0001 is what it commits for delta and partial dump: *the commitment is that the contract does not preclude it, so it can arrive later*.
+That is the commitment here, with the difference that the shape it will arrive in is written down rather than left open.
+
+**The trigger is named, so this is a deferral and not an indefinite one.**
+
+> The binding lands with the **first driver whose plane is per request**.
+
+That is the right trigger rather than a convenient one, because of the next section but one: such a driver has to choose between carrying its plane in a field and taking it from the context, the two are mutually exclusive, and which one is correct depends entirely on whether a binding exists.
+It cannot be designed without this answer, and this answer costs nothing until it is.
+ADR-0004 lists `query` as "a candidate rather than a commitment", so no such driver exists today and nothing is currently blocked.
+
+**What lands now, because none of it is the binding:**
+
+| | why it does not wait |
+| --- | --- |
+| ADR-0004's key helper amended, so the minted set belongs to the open | a correctness rule, and [#13](https://github.com/onhotpath/ferry/issues/13) reaches it by binding once inside a watcher whether or not a caller ever holds one |
+| the `*AddressSet` held on the compiled schema | 40 allocations per load, no API attached to it at all |
+| the presence observation as a `Source` wrapping a `Source` | it adds no surface, so there is nothing to defer |
+| `Compile[T]() error` stands | a decision not to change something |
+| the driver rule in [One shape per driver](#a-driver-with-a-per-request-plane-has-one-public-shape-and-that-is-514s-first-item) | it binds the driver that triggers the rest, so it has to be settled before that driver is written rather than with it |
+
+**And what the deferral costs, stated rather than sold.**
+Until it lands, the per-request use case pays what ADR-0004 measured and this ADR priced: 85 allocations per request against a held binding's 45, and against xload's 22.
+A reader of the accepted ADR set will find a decision with no code behind it, which is a thing to keep honest: if the first per-request driver is never written, this ADR describes a surface ferry never grows, and that is a legitimate outcome rather than a failure of the decision.
+The prototype on `proto/25-binding` stays as the documentation of the shape, which is the one place the whole thing is written out and run.
+
 ### What a consumer writes
 
 This section is first, because ADR-0009 was sent back for arguing from measurements without showing the API a consumer meets, and this ticket owns a caller-facing shape.
@@ -481,6 +522,11 @@ That is the same shape of argument ADR-0010 used for `Load` against `LoadOver` a
 A caller who never holds a binding pays a call-site wart for a saving they do not collect.
 That is the price of one shape, and it is judged worth paying because the alternative is the defect the survey names first.
 
+**This rule is the one part of this ADR that cannot wait for the binding**, and the reason is that it constrains code the binding does not.
+A per-request driver that ships with a `Values` field and grows the context form when the binding arrives has, at that moment, exactly the two shapes this rule exists to prevent, and the first one is already in somebody's `go.mod`.
+The two are mutually exclusive and the choice is not reversible once a driver is published, so it has to be made before the first per-request driver is written rather than with the binding.
+That is also why the first such driver is the binding's trigger: it is the first piece of code that cannot be designed without knowing the answer.
+
 **One limitation, because it is a consequence and not an oversight.**
 One context key is one plane instance per driver package per load, so two query-parameter planes in one load are not expressible without the driver exporting a keyed constructor.
 Two of them in one load is exotic, the remedy is the driver's, and it is recorded here rather than discovered later.
@@ -650,6 +696,13 @@ the zero reading -> {Name:}
 **ADR-0010's decision is unaffected and its published row is exactly what a correct probe produces.**
 What was not measured is the row itself, and it is recorded here because the effort's own standard is that an assertion that was never run is not a finding.
 
+**And one defect in the evidence base for this ADR, which a reader should know about.**
+The walk this ADR loads through **deletes the error `Reader.Get` returns** and substitutes `Absent`, so a plane failing every read is indistinguishable from an empty one.
+Measured: a total backend outage loads as an all-zero struct with a nil error, and with a `required` field the driver's failure is reported as a missing key, which inverts ADR-0011's `ErrMissing`/`ErrPlane` split rather than merely omitting it.
+It changes nothing this ADR measured, because no probe here depends on a driver refusing a `Get`; it is recorded because it is the second inherited deviation this ticket found and the reason [#41](https://github.com/onhotpath/ferry/issues/41) now exists.
+
+**Three deviations between prototype and Accepted ADR were found in one session, none of them by looking**, which is [#41](https://github.com/onhotpath/ferry/issues/41)'s whole argument: the Dump one had already reached a drafted decision in this ADR before anything caught it.
+
 ### What this ADR does not decide
 
 - **Whether the walk may run concurrently, and what a scheduler may assume**: [#20](https://github.com/onhotpath/ferry/issues/20).
@@ -658,12 +711,19 @@ What was not measured is the row itself, and it is recorded here because the eff
 - **Whether any combinator ships in core**, including the observing one: ADR-0001's bucket rule, when one is proposed.
 - **Whether `BindPlane[T, P]` ever ships.**
   It works, it is type-safe, and it does not compose. Refusing it is the reversible direction and it stays available.
+- **When the binding is added to core**, beyond the named trigger above.
+  If the first per-request driver arrives with other requirements, the shape here is what it is measured against rather than a fresh question.
+- **Whether the prototype chain still implements the rules the earlier ADRs landed**: [#41](https://github.com/onhotpath/ferry/issues/41), filed by this ticket after it found three places where it does not.
 - **Whether core ever exports a read-only schema view.**
   ADR-0001 left it open, ADR-0010 declined to reopen it, and this ADR is the ticket ADR-0010 named as the one that might.
   It does not: a binding is not a schema.
 
 ## Consequences
 
+- **The surface is decided and does not ship until the first driver with a per-request plane is written.**
+  Adding it immediately would take ferry from ADR-0010's four functions and two Options to six functions, two exported types and three methods, which is a fifty per cent growth in the caller-facing surface bought with a performance property, in a library with no consumer on the path being made faster.
+  The trigger is named rather than open-ended, and it is the right one because such a driver cannot choose its own shape without this answer.
+  The cost is that the accepted ADR set now contains a decision with no code behind it, and that if no per-request driver is ever written this ADR describes a surface ferry never grows.
 - **ferry ships a caller-held binding, and the deciding argument is the ancestor.**
   Binding per load, ferry allocates 85 times per request against xload's 22 on the use case xload was pitched at; a held binding brings it to 45.
   The ergonomic argument was not decisive in either direction and the compile-cost argument was already gone, removed by ADR-0010 before this ticket opened.
@@ -671,7 +731,7 @@ What was not measured is the row itself, and it is recorded here because the eff
   That is what keeps 5.14's first item closed on the verbs: nothing is expressible through one and not the other, and the two cannot drift because there is one code path.
 - **The whole surface is additive, and the compiler says so rather than the ADR.**
   The three worked programs, written without any binding, compile against a generated ferry that exports `Load`, `LoadOver`, `Dump` and `Compile` and nothing else, and a negative control using one binding call fails with `undefined: ferry.Bind`.
-  A user who never holds a binding writes exactly what they wrote before this ADR.
+  A user who never holds a binding writes exactly what they wrote before this ADR, which is also what makes deferring the surface cost nothing.
   **One thing is not additive and it is not the ferry API**: the driver convention below would not have been chosen by a ferry with no binding, so the surface is additive and the convention is a decision.
 - **The split exists in both directions**, `Bind[T]` over a `Source` and `BindSink[T]` over a `Sink`, because ADR-0004 hands a **static** address set to both and a driver mints the dynamic ones at the write they belong to.
   An earlier draft of this ADR refused the sink half, on a probe that measured this prototype binding the sink with the realised set - a shortcut that made ADR-0004's own dynamic tier unreachable on the write path.
