@@ -18,7 +18,7 @@ func runAudit2() {
 	fmt.Println("\n--- the audit set through the REAL yaml plane ---")
 	ok, bad := 0, 0
 	for _, pr := range auditSet() {
-		if f := pr.run(yp); len(f) > 0 {
+		if f := failsOn(pr, yp); len(f) > 0 {
 			bad++
 			fmt.Printf("  FAIL %-22s %v\n", pr.Name(), f)
 		} else {
@@ -43,7 +43,7 @@ func runAudit2() {
 		},
 	}
 	pr := Type("time.Duration", Eq[time.Duration], time.Second, 90*time.Minute, 0)
-	fails := pr.run(identityPlane)
+	fails := failsOn(pr, memoryPlane())
 	v, _ := dump(reflect.ValueOf(struct{ D time.Duration }{30 * time.Second}))
 	fmt.Printf("  representation now: %s\n", v[Path{}.Name("D")].GoString())
 	fmt.Printf("  round-trip failures: %d   <- the property is BLIND to this\n", len(fails))

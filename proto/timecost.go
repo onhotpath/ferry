@@ -72,7 +72,7 @@ func runTimeCost() {
 			time.Date(2026, 8, 2, 12, 0, 0, 0, ny),
 			time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC)}},
 	} {
-		f := Type("time.Time", time.Time.Equal, c.vals...).run(identityPlane)
+		f := failsOn(Type("time.Time", time.Time.Equal, c.vals...), memoryPlane())
 		fmt.Printf("  %s -> %d failures", c.label, len(f))
 		if len(f) > 0 {
 			fmt.Printf("  first: %s", shorten(f[0]))

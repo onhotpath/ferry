@@ -36,7 +36,13 @@ type opts struct {
 	sch sched
 }
 
-func defaultOpts() opts { return opts{tagKey: "ferry", reg: defaultRegistry, sch: serial} }
+// The default is AGGREGATING, per ADR-0011: "ferry reports every failure that
+// is not a consequence of another failure it is already reporting", and "No
+// StopOnFirstError: it is a public knob whose only job is to make ferry report
+// less". #41 D6 found the tip defaulting to `serial`, which is that knob
+// reached by defaulting rather than by deciding. `serial` stays reachable
+// through WithSched so the two are still measurable against each other.
+func defaultOpts() opts { return opts{tagKey: "ferry", reg: defaultRegistry, sch: aggregating} }
 
 type optFn func(*opts)
 

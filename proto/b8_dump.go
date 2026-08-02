@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -126,30 +127,125 @@ func BindSink[T any](sink FSink, options ...Option) (*SinkBinding[T], error) {
 	return &SinkBinding[T]{s: s, o: o, open: open}, nil
 }
 
-func (b *SinkBinding[T]) Dump(ctx context.Context, v T) error {
+// Dump is ADR-0011's two-phase rule, and the Committer branch that exempts a
+// staging sink from it. #41 item 8.
+//
+//	Dump encodes every address before it writes any of them. If anything fails
+//	to encode, every such failure is reported and nothing is written.
+//
+// and
+//
+//	Dump asks the sink whether it can stage. A `Committer` gets interleaved
+//	aggregation, because `Commit` runs only on success, so the plane is already
+//	untouched on failure. Everything else gets the encode phase.
+//
+// The tip HAPPENED to encode-all-then-write, so the untouched-plane property
+// held by accident of the map buffer rather than by decision - and the accident
+// did not extend to aggregating the encode failures, because `serial` abandoned
+// the walk at the first one. The Committer branch was not implemented at all.
+//
+// What the Committer branch buys is not an optimisation, which is what the
+// ADR's own draft assumed: the staging sink gets a BETTER ERROR SET, because
+// interleaving lets it learn both failure kinds in one run. On a sink that
+// cannot stage, two-phase is a fail-fast BETWEEN phases, so a flat sink pays
+// for the untouched plane in round trips and a Committer pays for neither.
+func (b *SinkBinding[T]) Dump(ctx context.Context, v T) (err error) {
+	// The open is first in both branches, because the sink cannot be asked
+	// whether it can stage until there is a Writer to ask.
+	wr, oerr := b.open(ctx)
+	if oerr != nil {
+		return fromDriver(mOpen, Path{}, false, oerr)
+	}
+	// #41 D14. `defer rel.Close()` dropped the result outright; ADR-0011 makes
+	// it an element with the moment first in the sort key.
+	if rel, ok := wr.(FReleaser); ok {
+		defer func() {
+			if e := rel.Close(); e != nil {
+				err = join(err, fromDriver(mClose, Path{}, false, e))
+			}
+		}()
+	}
+	c, staging := wr.(FCommitter)
+
+	if staging {
+		// Interleaved: one walk, encoding and writing at each leaf, both
+		// failure kinds aggregated by the one scheduler.
+		w := &walker{dir: writeDir(ctx, wr, b.o.sch), sch: b.o.sch, ctx: ctx}
+		if _, werr := w.walk(b.s.root, valueOf(v), Path{}); werr != nil {
+			return werr
+		}
+		// Commit runs ONLY on success, which is what makes the plane untouched
+		// on failure without an encode phase.
+		if cerr := c.Commit(ctx); cerr != nil {
+			return fromDriver(mCommit, Path{}, false, cerr)
+		}
+		return nil
+	}
+
+	// Phase one: encode every address, writing nothing. This walk touches no
+	// plane, so aggregating its failures costs the plane exactly nothing -
+	// which is the distinction the ADR's first draft missed by measuring a sink
+	// that could only refuse a write.
 	out := map[Path]Value{}
 	w := &walker{dir: dumpDir(out), sch: b.o.sch, ctx: ctx}
-	if _, err := w.walk(b.s.root, valueOf(v), Path{}); err != nil {
-		return err
+	if _, werr := w.walk(b.s.root, valueOf(v), Path{}); werr != nil {
+		return werr
 	}
-	wr, err := b.open(ctx)
-	if err != nil {
-		return err
+	// Phase two. The realised set is iterated here, and the driver mints what
+	// the static table does not hold: ADR-0004's two tiers on the write path.
+	// The Set half aggregates, because a token with write access to some paths
+	// and not others must report both refused addresses, and taking that away
+	// on Dump alone would be an asymmetry between the directions about the
+	// same fact.
+	addrs := sortedAddrs(out)
+	tasks := make([]func() error, 0, len(addrs))
+	for _, p := range addrs {
+		tasks = append(tasks, func() error {
+			if serr := wr.Set(ctx, p, out[p]); serr != nil {
+				return fromDriver(mWalk, p, true, serr)
+			}
+			return nil
+		})
 	}
-	if rel, ok := wr.(FReleaser); ok {
-		defer rel.Close()
-	}
-	// The realised set is iterated here, and the driver mints what the static
-	// table does not hold. That is ADR-0004's two tiers on the write path.
-	for _, p := range sortedAddrs(out) {
-		if err := wr.Set(ctx, p, out[p]); err != nil {
-			return err
+	return b.o.sch(tasks)
+}
+
+// writeDir is dumpDir with the Set folded into the leaf, which is the whole of
+// the interleaved branch. It is not a second walk: it is a third `direction`
+// over the one walk in e_walk.go, which is what #16's "write the walk exactly
+// once" constraint is for.
+func writeDir(ctx context.Context, wr FWriter, _ sched) direction {
+	set := func(at Path, val Value) error {
+		if err := wr.Set(ctx, at, val); err != nil {
+			return fromDriver(mWalk, at, true, err)
 		}
+		return nil
 	}
-	if c, ok := wr.(FCommitter); ok {
-		return c.Commit(ctx)
+	d := dumpDir(nil)
+	d.name = "dump/staged"
+	d.leaf = func(n *node, v reflect.Value, at Path) (bool, error) {
+		if n.omitzero && v.IsZero() {
+			return false, nil
+		}
+		val, err := encLeafWith(n.codec, v)
+		if err != nil {
+			return false, errAt(mWalk, ErrValue, at, "%s", safeEncodeMsg(n.typ)).withCause(err)
+		}
+		return true, set(at, val)
 	}
-	return nil
+	d.container = func(n *node, v reflect.Value, at Path) (bool, bool, error) {
+		if n.kind == nPtr {
+			if v.IsNil() {
+				return true, true, set(at, Null())
+			}
+			return false, false, nil
+		}
+		if v.Len() == 0 {
+			return true, true, set(at, Null())
+		}
+		return false, false, nil
+	}
+	return d
 }
 
 // --- the probe ---------------------------------------------------------------

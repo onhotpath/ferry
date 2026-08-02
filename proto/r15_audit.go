@@ -118,7 +118,7 @@ func runR15() {
 				fn   func(map[Path]Value) (map[Path]Value, error)
 			}{
 				{"memory", identityPlane},
-				{"yaml, real files", yamlPlane(dir)},
+				{"yaml, real files", yamlCross(dir)},
 				{"flattening (String for everything)", flatten},
 			} {
 				crossed, perr := plane.fn(d)

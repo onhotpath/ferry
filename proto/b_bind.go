@@ -47,19 +47,34 @@ func (b *Binding[T]) Load(ctx context.Context) (T, error) {
 	return b.LoadOver(ctx, seed)
 }
 
-func (b *Binding[T]) LoadOver(ctx context.Context, seed T) (T, error) {
-	rd, err := b.open(ctx)
-	if err != nil {
-		return seed, err
+func (b *Binding[T]) LoadOver(ctx context.Context, seed T) (res T, err error) {
+	rd, oerr := b.open(ctx)
+	if oerr != nil {
+		// ADR-0011's moment ordering exists for exactly this: an Open failure
+		// precedes the walk errors it caused, and here there are none, because
+		// the walk never ran.
+		return seed, fromDriver(mOpen, Path{}, false, oerr)
 	}
+	// #41 D14 on the Load side. ADR-0004 runs Close unconditionally; ADR-0011
+	// then makes a Close failure an ELEMENT of the aggregate, because
+	// discarding it is silently ignoring something and ADR-0001 forbids that.
+	// It has no location and explains nothing, which is why the sort key's
+	// first term is the moment: it sorts AFTER the walk errors it did not cause
+	// rather than at the head of a report it had nothing to do with.
 	if rel, ok := rd.(FReleaser); ok {
-		defer rel.Close()
+		defer func() {
+			if e := rel.Close(); e != nil {
+				err = join(err, fromDriver(mClose, Path{}, false, e))
+				// And once the load has failed, ferry yields no value it built.
+				res = seed
+			}
+		}()
 	}
 	out := seed
 	rv := reflect.ValueOf(&out).Elem()
 	w := &walker{dir: loadDir(rd, ctx, b.o), sch: b.o.sch, ctx: ctx}
-	if _, err := w.walk(b.s.root, rv, Path{}); err != nil {
-		return seed, err
+	if _, werr := w.walk(b.s.root, rv, Path{}); werr != nil {
+		return seed, werr
 	}
 	return out, nil
 }
