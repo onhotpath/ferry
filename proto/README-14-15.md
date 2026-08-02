@@ -1,5 +1,8 @@
 # proto/14-15-10-enabled
 
+The findings document is [`docs/research/the-enabled-bucket.md`](../docs/research/the-enabled-bucket.md).
+This README is the probe index.
+
 Prototype for the three `wayfinder:prototype` tickets:
 [#14](https://github.com/onhotpath/ferry/issues/14) template generation,
 [#15](https://github.com/onhotpath/ferry/issues/15) the Windows Registry, and
@@ -90,3 +93,28 @@ It matters because ADR-0004's central claim about `Value` is that it is comparab
 Searched rather than filed: no upstream issue matches the `type:.eqfunc.*` form.
 The nearest is [golang/go#69787](https://github.com/golang/go/issues/69787), the same `R_USEIFACE ... which is not a type or itab` deadcode panic on a function symbol at Go 1.22.7, so this looks like the same family with a different referent.
 Filing it is somebody's, and it is not this ticket's.
+
+## #15, the Windows Registry
+
+`W15=<n|all>`. Everything touching a real hive is behind `//go:build windows` and runs on GitHub's `windows-latest`.
+
+| # | question | result |
+| --- | --- | --- |
+| W0 | reconnaissance: what the runner can do | **elevated and an administrator**, so `HKLM` is writable and the permission probe this ticket planned would have measured nothing. `HKLM\SECURITY` is denied even to admins, and a `QUERY_VALUE` handle gives a deterministic `Access is denied` |
+| W1 | does ADR-0003's address model express a Registry path | **yes**, 5 of 5 on its worked example and 4 of 4 on its schema predictions, off a nine-line key function. Two things it did not anticipate: two namespaces per key, and a plane that folds case AND preserves spelling |
+| W2 | what an Enumerator can say about a plane with no list type | **core never reads the kind it returns**, so ADR-0004's stated reason for returning addresses is not the mechanism ferry uses |
+| W3 | do natively typed values fit | the **values** fit and the **types** do not. A Go `bool` cannot round-trip; `Number` carries no width so a `REG_QWORD` becomes a `REG_DWORD`; `REG_MULTI_SZ` has no kind at all |
+| W4 | the same driver against a real hive | all of W3 confirmed on the runner, plus the `ErrReadOnly` refusal, case preservation, and a value and a subkey coexisting |
+| W5 | the second data point #25 asked for | the conflation is **general**, for a second and independent cause; ADR-0012's context rule generalises to a per-tenant hive unchanged |
+
+## #10, cross-cutting concerns
+
+`C10=<n|all>`. Held until ADR-0012 was accepted.
+
+| # | question | result |
+| --- | --- | --- |
+| C1 | the mechanism | a `Source` wrapping a `Source` and a `Sink` wrapping a `Sink`, symmetric, needing nothing new |
+| C2 | what a wrapper silently drops | **a naive wrapper over the real YAML sink writes nothing, with a nil error.** Go embedding does not rescue it |
+| C3 | redaction on dump | guarantees the **sink** and not the **plane**, and has to be told which addresses are secret by a source that does not exist |
+| C4 | what dump needs that load does not | one optional interface against two, and the two are the silent ones |
+| C5 | the alternatives | a tag option is refused by ADR-0008; a redacting **codec is permitted**, which is the opposite of what the probe predicted |
