@@ -29,7 +29,7 @@ This ADR is written from a throwaway prototype on branch `proto/19-registration`
 It is built on `proto/12-codec-chain`, so every measurement runs against a real `Path`, a real `Value`, the type set ADR-0005 landed, the chain ADR-0007 landed, and a real YAML plane over real files.
 Every number is from that prototype unless it cites the survey.
 
-**Three of the fifteen probes found defects, and all three are in code this ADR proposes rather than in code it inherited.**
+**Three of the eighteen probes found defects, and all three are in code this ADR proposes rather than in code it inherited.**
 One is in this ADR's own headline example.
 The other two are in the single piece of reflection the registration API owns, so they would have been defects in every codec anyone ever registered.
 All three are recorded in full rather than quietly fixed.
@@ -289,10 +289,9 @@ That is a property of the standard library's receivers, and it is the difference
 
 `PT` is inferred from `T` by constraint type inference, verified by compiling, so `TextCodec` names one type argument and not two: `TextCodec[netip.Addr](String)`.
 
-**One naming decision is left open rather than taken silently.**
-`ValueCodec` is a proposal, not a measurement.
+**The naming is a readability decision and the ADR marks it as one.**
 `TypeCodec` was the name #12's prototype used, and the only argument for changing it is the one above: the trio has to be distinguishable by name, and String and Text are near-synonyms in English while meaning "the boundary kind" and "`encoding.TextMarshaler`" here.
-If a better trio exists, this is the section to change and nothing else moves.
+No measurement decides it, and it is the one spelling in this ADR taken on how it reads.
 
 ### The declared kind is a donation target, and the accepted set is the codec's
 
@@ -615,6 +614,71 @@ That is ADR-0004's `EnvSource{Sep}` defect one layer up, and it is not visible f
 ADR-0008 already wrote half of this handoff, in #16's own words: "whether the codec registry belongs there depends on [#19](https://github.com/onhotpath/ferry/issues/19) making it process-wide or per-instance".
 This ADR's answer is per-instance, with a default instance, and frozen.
 So yes, it belongs in the key.
+
+#### What freezes: the registry, not each type
+
+Freezing each type as it is resolved is strictly more permissive, and it is **sound for the cache**: a schema for `A` resolved only the types `A` reaches, so registering a type `A` never mentioned cannot make `A`'s schema stale.
+It admits a case whole-registry freeze refuses:
+
+```go
+ferry.Load[A](ctx, src)              // A mentions no netip.Addr
+ferry.Register(codecForNetipAddr)    // a lazily-imported plugin
+ferry.Load[B](ctx, src)              // B does mention it
+```
+
+It is refused anyway, and the first reason is this ADR's own argument turned on itself.
+
+**Whether a registration succeeds would depend on which schemas were compiled first.**
+Measured, the same two operations in two orders:
+
+```
+Load[B] (mentions netip.Addr) first  ->  Register(netip.Addr) REFUSED
+Load[A] (does not) first             ->  Register(netip.Addr) accepted
+```
+
+That is import-graph order deciding an outcome, which is the exact ground on which this ADR refuses a predicate arm and refuses the global-frozen model.
+Whole-registry freeze is not that: "after any Load, no registrations" is decided by program order alone.
+A principle applied twice and abandoned on the third case was not a principle.
+
+**It also puts a growing mutable set on the lookup path**, because marking a type resolved is a write, so the read path takes a lock.
+Measured at 16 ns/op for a frozen registry's plain map read against 57 ns/op for a mutex plus map write.
+That is **not** the argument, and the ADR says so: #16 resolves per type per registry rather than per leaf, so this is off any hot path.
+
+**And the diagnostic gets worse.**
+"The registry is frozen; every registration must happen before the first schema is compiled" tells a user what to do.
+"`netip.Addr`: already resolved by an earlier schema compile" makes them work out which compile, about a type they may not have written.
+
+#### The default registry, and the init-order question it has to answer
+
+The global-frozen model is refused above partly because "the freeze point is decided by `init()` order".
+This ADR then ships a default registry that freezes at its first use, which is the same shape, so it has to answer the same objection or it is refusing a model and adopting it on the default path.
+
+**The Go spec answers it, and the answer is structural rather than a convention.**
+Imported packages are initialised before the importer, and every package-level variable and every `init` in the whole program runs to completion **before `main.main` is called**.
+So for the shape every consumer writes:
+
+```go
+func init() { ferry.Register(...) }   // any package, any order
+func main() { ferry.Load(...) }
+```
+
+every registration in the program strictly precedes the first Load, whatever the import graph is.
+The freeze point is not order-dependent because there is only one edge and the language guarantees it.
+Verified by running exactly that layout, with two package `init`s writing to one default registry:
+
+```
+at main(), the default registry holds 2 registrations from 2 init()s, frozen=false
+first Load succeeds, and now frozen=true
+a registration after that -> ferry: netip.Prefix: the registry is frozen; every
+                             registration must happen before the first schema is compiled
+```
+
+**The one shape it does break, stated rather than hidden**: a `Load` **during** `init`.
+Then whether a later package's `init` can still register does depend on the import graph, and it is the global-frozen objection in full.
+Two things make it affordable here where it was not affordable there.
+It is loud, at startup, with the freeze point named, rather than a silently stale schema.
+And the escape is one line, `ferry.NewRegistry()`, which the global model by definition does not have.
+That is the whole difference between a default registry and a global one, and it is why the objection lands on one and not the other.
 
 #### Global and mutable is unsound, three ways
 
@@ -965,6 +1029,16 @@ The reason to resolve at compile is that #16 wants a schema that is a plan rathe
 The staleness measurements above are what happens without it.
 So "resolve the codec into the schema" and "freeze the registry at its first use" are one decision, and #19 cannot take the first half and leave the second to #16.
 
+**The two tickets nonetheless stay separate, because the freeze has no unanswered question.**
+That was checked rather than assumed, and the two things it could have been blocked on are both settled above without reference to #16's signature:
+
+- **what freezes** is the registry rather than each type, decided on import-graph determinism, which is a property of the freeze and not of the entry point
+- **the default registry's freeze point** is fixed by Go's own initialisation order for the shape consumers write, which is a property of the language and not of the entry point
+
+What #16 still supplies is a way to hand a registry over and a place to put the cache.
+Neither changes an answer here, and both would have to be re-derived if #19 stayed silent.
+So the split is a split rather than a deferral: this ADR answers everything it can answer without #16, and #16 inherits a stated obligation instead of an open question.
+
 **Three further constraints #16 inherits**, each measured here rather than asserted:
 
 - **The schema cache key must include the registry.**
@@ -1064,6 +1138,24 @@ It belongs in the codec conformance cases ADR-0007 already asks for, and this AD
 
 Both were found by the audit fixture, which is the first in three prototypes to dump a registered interface at its zero value.
 
+### What ADR-0008 decided and this ADR applies
+
+[ADR-0008](0008-the-struct-tag-grammar.md) landed while this ADR was in review, and its three seams with registration are reconciled rather than assumed.
+
+- **No tag option names a codec, in either direction.**
+  ADR-0008 states it and gives the reason: ADR-0007 put selection in the identity table and the text pair, so a per-field override would be a second selection authority for one type.
+  This ADR adds nothing to the tag grammar and needs nothing from it.
+  A registration is a call site, and there is exactly one way to supply a codec.
+- **A registered type is a leaf, so it takes `default=`, `required` and `omitzero` with no codec-side awareness.**
+  ADR-0007 measured that against a chain codec; the audit below measures it against a registered one, which is the case ADR-0006's sentence was written for.
+- **The tag key is part of whatever keys the schema cache**, which ADR-0008 hands #16 as a measured obligation.
+  This ADR adds the registry to the same key, and ADR-0008 anticipated it in #16's words: "whether the codec registry belongs there depends on [#19](https://github.com/onhotpath/ferry/issues/19) making it process-wide or per-instance".
+  The answer is per-instance, so it belongs there.
+  ADR-0008's own measurement is the cheap end of that question, a `string` in the key at 28 ns against 18 ns; a registry pointer is the same shape, and [What this hands #16](#what-this-hands-16) records the cheaper nesting available to it.
+
+One consequence of ADR-0008 that this ADR did not have when it was drafted, and which makes its worked example honest rather than illustrative: every exported field must carry a `ferry` tag or schema compile fails.
+So the consumer file above is a complete file rather than a sketch with the annotations elided.
+
 ### The audit
 
 Every prior session's worst defect was a case the fixtures did not contain, and #12's recorded one was that every fixture put the codec at a leaf in a one-field struct at a non-zero value.
@@ -1131,6 +1223,8 @@ That is the accepted-set rule doing real work rather than being a principle: the
   The other three classes are ADR-0005's triple's, and they still only help a registrant who writes a proof.
 - Registration beats the text pair, which is what makes it the remedy for the dependency-drift exposure ADR-0007 recorded against before-kind ordering, and also what makes the defect above worse than it would otherwise be.
   Both follow from the same rule and the ADR states both.
+- **The freeze is answered in full here, so #19 and #16 stay separate tickets.**
+  The two questions that could have blocked it, what freezes and where the default registry's freeze point falls, are both decided by properties of the freeze and of the Go language rather than of #16's signature.
 - **The registry is a value that freezes at its first use, so nothing in ferry can be registered late.**
   A user who registers after their first Load gets a loud error rather than a silently stale schema, and the error names the freeze point.
   This is a real ergonomic constraint and it is the price of every soundness result in this ADR.
