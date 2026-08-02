@@ -17,7 +17,7 @@ import (
 	"testing"
 )
 
-func init() { t11Hooks = append(t11Hooks, runRound3) }
+func init() { t11Hooks = append(t11Hooks, runRound3); t11Hooks = append(t11Hooks, runQuotedEdges); t11Hooks = append(t11Hooks, runQuotedEndToEnd) }
 
 // A struct annotated for a library built ON ferry, which is the case that
 // decides the Option.
@@ -176,6 +176,8 @@ func escapeComparison() {
 		{"a percent in a default", "cpu", []string{"default=80%"}},
 		{"a home-dir path default", "cache", []string{"default=~/.cache/app"}},
 		{"a name that is exactly -", "-", nil},
+		{"an apostrophe in a default", "greeting", []string{"default=it's here"}},
+		{"a broker list default", "brokers", []string{"default=h1:9092,h2:9092"}},
 	}
 
 	models := []escModel{
@@ -183,10 +185,11 @@ func escapeComparison() {
 		{"B  ,, doubling", renderDouble, parseDouble},
 		{"C  no escape, ~ reserved", renderNone, parseNone},
 		{"D  ~ lenient", renderLenient, parseLenient},
+		{"F  bare or 'quoted'", renderQuoted, parseQuoted},
 	}
 
 	fmt.Println("  how each intent is WRITTEN in each model")
-	fmt.Printf("  %-24s %-32s %-30s %-26s %s\n", "intent", models[0].name, models[1].name, models[2].name, models[3].name)
+	fmt.Printf("  %-24s %-38s %s\n", "intent", models[0].name, models[4].name)
 	for _, in := range intents {
 		row := make([]string, len(models))
 		for i, m := range models {
@@ -197,7 +200,7 @@ func escapeComparison() {
 				row[i] = `ferry:"` + r + `"`
 			}
 		}
-		fmt.Printf("  %-24s %-32s %-30s %-26s %s\n", in.what, row[0], row[1], row[2], row[3])
+		fmt.Printf("  %-24s %-38s %s\n", in.what, row[0], row[4])
 	}
 
 	fmt.Println()

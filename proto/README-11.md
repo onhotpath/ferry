@@ -57,7 +57,9 @@ the new grammar when `t11Mode` is set, so the end-to-end probe uses real names.
 | T30 | the key pointed at `json` | still refused, now with a diagnosis naming the cause |
 | T31 | the key itself | validated where the Option is supplied |
 | T32 | what a configurable key costs #16 | one type, two keys, two schemas; 18 ns against 28 ns, both hashable |
-| T33 | the escape character, four models | written out on nine intents, plus where `~` already appears |
+| T33 | the escape character, five models | written out on eleven intents, plus where `~` already appears |
+| T34 | model F's failure modes | every one loud, each with a remedy |
+| T35 | model F end to end through the real YAML driver | 9 hostile names exact, 3 defaults including a comma and a tilde |
 
 ## What overturned a draft answer
 

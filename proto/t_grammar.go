@@ -37,6 +37,10 @@ type tagDecl struct {
 
 const tagPunct = "~,=-"
 
+// quotedMode swaps the escape model for model F, so the two can be run
+// against the same probes rather than compared on paper.
+var quotedMode bool
+
 // ---------- escaping ----------
 
 // splitFields splits on unescaped commas. It returns the raw (still escaped)
@@ -202,7 +206,12 @@ func parseFerryTag(value string) (tagDecl, []error) {
 		return d, nil
 	}
 
-	fields := splitFields(value)
+	split, unesc := splitFields, unescape
+	if quotedMode {
+		split = splitFieldsQ
+		unesc = func(s string) (string, error) { return unquoteQ(s, "token") }
+	}
+	fields := split(value)
 
 	// --- the name ---
 	rawName := fields[0]
@@ -211,15 +220,19 @@ func parseFerryTag(value string) (tagDecl, []error) {
 		errs = append(errs, fmt.Errorf("a ferry tag must name the segment this field addresses; write ferry:\"<name>\", or ferry:\"-\" to leave the field unmapped"))
 	case rawName == "-":
 		errs = append(errs, fmt.Errorf("`-` names no segment: write ferry:\"-\" on its own to leave the field unmapped, or ferry:\"~-,...\" to name the segment `-`"))
-	case hasUnescaped(rawName, '='):
+	case !quotedMode && hasUnescaped(rawName, '='), quotedMode && !strings.HasPrefix(rawName, "'") && strings.Contains(rawName, "="):
 		before, _, _ := strings.Cut(rawName, "=")
 		if _, ok := lookupOpt(before); ok {
-			errs = append(errs, fmt.Errorf("a name may not contain `=`, and %q looks like the %s option with no name in front of it; write ferry:\"<name>,%s\"", rawName, before, rawName))
+			errs = append(errs, fmt.Errorf("a name may not contain `=`, and %q looks like the %s option with no name in front of it; write %s:\"<name>,%s\"", rawName, before, tagKeyName, rawName))
 		} else {
-			errs = append(errs, fmt.Errorf("a name may not contain `=`; write `~=` for a literal one"))
+			hint := "write `~=` for a literal one"
+			if quotedMode {
+				hint = fmt.Sprintf("quote the name if it really contains one, as '%s'", rawName)
+			}
+			errs = append(errs, fmt.Errorf("a name may not contain `=`; %s", hint))
 		}
 	default:
-		n, err := unescape(rawName)
+		n, err := unesc(rawName)
 		if err != nil {
 			errs = append(errs, err)
 		} else {
@@ -267,7 +280,7 @@ func parseFerryTag(value string) (tagDecl, []error) {
 		case spec.name == "omitzero":
 			d.omitzero = true
 		case spec.name == "default":
-			t, err := unescape(text)
+			t, err := unesc(text)
 			if err != nil {
 				errs = append(errs, err)
 				continue
