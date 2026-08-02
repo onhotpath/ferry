@@ -266,6 +266,21 @@ So the decision is the other way round:
 Nothing vanishes, the rule is total, and the normalisation lands on the Go zero value rather than on a manufactured non-zero one.
 Measured after the change: 21 of 21 proofs pass, on the memory plane and through the real YAML driver alike, including `[][]string` and `map[string][]string`.
 
+**The obvious repair does not work, and checking it is what makes the collision forced rather than merely inconvenient.**
+The repair is to have both states write something distinguishable: `Null` for nil and, say, an empty `String` for empty, since ferry knows the Go type at that address even though the driver does not.
+Two things kill it.
+Measured, a plane with no null flattens `Null` to an empty `String` anyway, so the two collide again on exactly the planes that most need them apart.
+And ADR-0004's own table records that TOML, env, query params and opaque KV cannot produce `Null` at all, so the distinction would exist on YAML and JSON and vanish on the other four.
+
+That is the deciding argument, and it is stronger than counting states:
+
+> A guarantee that holds on some planes and not others is not a guarantee.
+
+Value fidelity is a property of the type set, so it has to be uniform across planes or it is not the thing ADR-0001 promised.
+This is not in tension with the nil-pointer limitation recorded above, and the line between them is worth stating: there, ferry emits the right value and a plane that cannot carry it refuses loudly, which is a driver limitation.
+Here, ferry would be inventing a second marker in order to build a guarantee on a capability three of the four first-party planes lack.
+The first is honest; the second is a feature that would work in the demo and fail in production.
+
 **The contrast with json/v2 is worth stating precisely, because it is easy to read this as conceding the point #18 made.**
 v2's default marshals a nil slice to `[]`, which unmarshals to an empty non-nil slice, so `Load(Dump(x)) != x` and the result is a value the user never had.
 ferry normalises in the opposite direction, onto nil, which is the zero value and the thing an unset field already is.
@@ -696,8 +711,11 @@ Core's test iterates the identity table and the admitted kind list and asserts t
   Measured at one failure caught in four values against a knowingly lossy codec, and at two drafts of this ADR shipping a type set that could not load an integer from an environment variable because every proof ran against a plane that preserved kinds.
   This is ADR-0002's zero-dependency rule being paid for, and it is the weakest part of this ADR.
   The mitigation is that the three planes are named here as a requirement rather than left to whoever writes the test, and that the third one exists because its absence was caught rather than anticipated.
-- The pinned json/v2 option set governs no module that exists today, and its present function is to be the specification core imitates.
-  That is a real risk of drift: a table nothing executes is prose again, and the mitigation is only that core's own behaviour is checked against the same column.
+- The pinned json/v2 option set has two halves and only one of them is enforced today, which is worth separating rather than claiming cover for both.
+  Half one, the Go-defined semantics core imitates, is executed by core's own tests: determinism, case sensitivity, the nil rule and `time.Duration`'s representation are all in the harness table.
+  Half two, the option list a module passes to `encoding/json/v2`, is executed by nothing, because no ferry module imports v2.
+  It is a specification awaiting an implementor, and a table nothing executes is prose again within two releases.
+  The only honest mitigations are that #18 put it here rather than in a module that does not exist, and that the first module to import v2 inherits a written answer instead of inventing one under deadline.
 - ferry's `float64` is wider than JSON's number, so a JSON driver must refuse `±Inf` and `NaN`.
   ferry's `time.Time` loses the zone name, identically to the stdlib.
   Both are documented properties rather than bugs, and both are conformance cases.
