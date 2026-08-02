@@ -19,10 +19,10 @@ It also milestoned drift detection by plane inspection on this ticket, on the gr
 
 This ADR is written from a throwaway prototype on branch `proto/8-defaults`, which never merges.
 It is built on `proto/7-type-set`, which is built on `proto/5-source-sink`, so every number below runs against a real `Path`, a real `Value`, the real type set, and a real YAML plane over real files.
-Twenty-two probes, of which **four overturned an answer this ADR had already reached in draft**, and one survey claim did not reproduce.
-The last two were run against this ADR's own strongest claim after it was drafted, and both found something it had not said.
+Forty-two probes across two rounds.
+**Four overturned an answer this ADR had already reached in draft, and a review round overturned four more, including this ADR's own deciding argument for one of its calls.**
+One survey claim did not reproduce.
 Every rule with a live alternative is a switch in the prototype, so the two candidates are measured against each other rather than argued.
-
 xload has no defaults mechanism at all.
 Its tag options are `prefix`, `delimiter`, `separator` and `required` ([load.go:219-249](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L219-L249)), so there is nothing inherited here, only 5.1's consequences to avoid.
 
@@ -41,7 +41,7 @@ This table is the answer to each, so a reader can check the ADR against the ask 
 | what happens when the plane holds an explicit empty and the struct holds a non-zero default | **yes**, the plane wins | [One rule under all of it](#one-rule-under-all-of-it-absent-does-not-write) |
 | what `Absent` and `Null` each mean to a Go field, per kind | **yes**, one table | [Absent and Null, per kind](#absent-and-null-per-kind) |
 | whether ferry ever hands a sink an `Absent` | **yes: never**, and it is a contract rule | [ferry never hands a sink an Absent](#ferry-never-hands-a-sink-an-absent) |
-| whether present-and-empty satisfies `required` | **yes**, it does | [required is a presence test](#required-is-a-presence-test-and-nothing-else) |
+| whether present-and-empty satisfies `required` | **yes**, it does, and `required` is admissible only on the static tier | [required is a presence test](#required-is-a-presence-test-and-nothing-else) |
 | observable presence, and what the milestoned mechanism actually is | **yes**, a per-address observation of one Load | [Observable presence](#observable-presence-is-an-observation-of-a-load-not-a-property-of-a-field) |
 
 Five questions this ADR had to answer that the ticket did not name, all of which came out of the prototype:
@@ -54,7 +54,9 @@ Five questions this ADR had to answer that the ticket did not name, all of which
 | whether an array element with a declaration behaves like a struct field or like a slice element | as above |
 | whether presence is a route to an indexed composite's length, which ADR-0003 asked | [Presence is not a route to a length](#presence-is-not-a-route-to-an-indexed-composites-length) |
 | what partial presence does to a seeded value, which is not the same question at every kind | [A struct merges and a composite replaces](#a-struct-merges-and-a-composite-replaces) |
-| what `required` means at a container address | [required is a presence test](#required-is-a-presence-test-and-nothing-else) |
+| what `required` means at a container address, and where it is admissible at all | [Where required is admissible](#where-required-is-admissible-the-static-tier-and-only-it) |
+| how one field's several mistakes are reported | [One mistake should not report as three errors](#one-mistake-should-not-report-as-three-errors) |
+| which refusals are liftable later, and by what | [Refusing is the reversible direction](#refusing-is-the-reversible-direction) |
 
 **Two things this ADR does not close, stated here rather than left to the reader to notice.**
 
@@ -67,7 +69,7 @@ Five questions this ADR had to answer that the ticket did not name, all of which
 ### One rule under all of it: Absent does not write
 
 > **`Absent` means ferry does not write to the field.**
-> Every other observation, `Null` and the empty string included, is a value the plane holds, and it is applied.
+> Every other observation, `Null` and the empty string included, is a value the plane holds, and it is handed to the type set, which either accepts it or refuses it loudly.
 
 That single sentence answers the ticket's fourth ask directly.
 An explicit empty on the plane beats a non-zero default, because present beats absent and empty is present.
@@ -180,25 +182,60 @@ Measured on `go1.27rc2`, and this is a change from v1 rather than an inherited c
 {"st":null}                           v1: "seed"  v2: ""
 ```
 
-It is not taken, for a reason specific to ferry: plane-to-plane transfer is Enabled in ADR-0001, and under this reading a YAML `port: null` becomes `PORT=0` on the way out, permanently and silently.
-ferry would be manufacturing a value the plane never held, which is what ADR-0001 rules out by name.
-
 *`Null` means absent*, which is v1's behaviour and which would let `port: null` take the default.
-It is not taken because it throws away ADR-0004's central result at the exact point that result was built for.
-Absence and null would be one thing to a Go field, having been made two at the boundary one ADR earlier.
+It throws away ADR-0004's central result at the exact point that result was built for: absence and null would be one thing to a Go field, having been made two at the boundary one ADR earlier.
+It is also, plainly, silently ignoring a value the plane holds, which ADR-0001 rules out by architecture.
 
-**The cost of the rule taken is real and is a YAML spelling.**
-Measured through the real YAML driver:
+**The reading taken wins on recoverability, and the two are not symmetric.**
+Measured, the same `Null` at two fields:
+
+| core rule | can a user get the other behaviour? |
+| --- | --- |
+| refuse | **yes.** A registered codec for its own type accepts `Null` and returns 0. That is ADR-0005's stated escape hatch used for what it is for. |
+| zero | **no.** The zeroing happens in the walk before any codec is consulted, so nothing recovers strictness for a plain `int`. |
+
+Strictness is recoverable by a mechanism ferry already ships, and it fails loudly while a user finds out they need it.
+Leniency is unrecoverable and fails silently.
+That asymmetry is the argument, and it does not depend on any feature outside core.
+
+**An earlier draft decided this on plane-to-plane transfer, and that argument is wrong.**
+It is recorded because the shape of the mistake matters more than its fix.
+The draft argued that under the zeroing reading a YAML `port: null` becomes `PORT=0` during transfer, silently.
+Measured, there are two shapes of transfer and the argument was about the wrong one:
 
 ```
-port:            reports null at /port
-loading it   ->  ferry: /port: value: wrong kind
+source YAML:  host: h    port:        (a blank key is !!null)
+
+(a) address-to-address    /host string("h")   /port null      preserves it exactly
+(b) struct-mediated       Load into T, Dump out
 ```
 
-A blank key and a commented-out value are both `!!null` in YAML, so the natural way to "turn a setting off" is a loud refusal rather than the default.
-Deleting the key takes the default.
-That will be reported as a bug, and the answer has to be the transfer argument above rather than a preference.
-The error message is where this is survivable, and it should say what to do; the error type is [#9](https://github.com/onhotpath/ferry/issues/9)'s.
+(a) is a loop from `Reader.Get` into `Writer.Set`, builds no Go value, and **never runs this ADR's rules at all**.
+It is also the transfer ADR-0001 makes Enabled, so it ships outside core and is not core's to protect this way.
+And (b) already rewrites the plane in a way ADR-0005 accepted: measured, `Tags: []` loads to nil and dumps as `/Tags=null`.
+So the draft's argument proved too much, since applied consistently it would have rejected ADR-0005's own nil-and-empty normalisation.
+
+**The cost of the rule taken is narrower than the draft claimed.**
+Measured through the real YAML driver, on a field declaring `default=8080`:
+
+| document | plane reports | refuse | zero | absent |
+| --- | --- | --- | --- | --- |
+| key deleted | `absent` | **8080** | **8080** | **8080** |
+| `# port: 9090` commented out | `absent` | **8080** | **8080** | **8080** |
+| `port:` blank | `null` | refused | **0** | **8080** |
+| `port: null` | `null` | refused | **0** | **8080** |
+| `port: ""` | `string("")` | refused | refused | refused |
+
+Commenting a line out removes the key, so it is `Absent` and takes the default under every rule.
+The cost is confined to a blank key and an explicit `null`, and there the zeroing reading gives `0`, which is the one answer nobody wants.
+So this is not correctness bought with ergonomics: the rejected reading is worse on both.
+The error message is where the remaining cost is survivable, and it should name the remedy; the error type is [#9](https://github.com/onhotpath/ferry/issues/9)'s.
+
+**If a knob is ever wanted here it is a load Option and never a tag option.**
+The reason is an asymmetry that governs three calls in this ADR and is worth stating once.
+ADR-0001 freezes the tag vocabulary on publication, so a tag option is expensive to add later and must be decided now.
+Nothing freezes Options, and this one would be load-time: measured, one compiled schema serves both policies, so it never touches whatever keys the schema cache.
+Deciding the core rule now and leaving the Option available is therefore the cheap path, and this ADR takes it and ships no knob.
 
 **One consequence worth stating because it looks like a gap.**
 Nothing ferry dumps ever writes a `Null` at an address whose Go type refuses one: `Null` is emitted only for a nil pointer, a nil or empty composite, and a nil `[]byte`, all of which accept it back.
@@ -254,6 +291,17 @@ tags,default=a  ([]string)        ferry: /tags: []string is a composite, so it h
 
 A composite's value lives at many addresses and a tag holds one text, so expressing `{a, b}` would need a list syntax inside the tag.
 That is survey item **5.10** exactly, the string-splitting defect ADR-0003 removed structurally with `Index` segments, and reintroducing it inside the tag grammar would be a strange place to put it back.
+
+**And the JSON-ish spelling a user would reach for is not writable in a struct tag at all**, which is a separate fact from 5.10 and was measured rather than assumed.
+A struct tag's value is delimited by double quotes and a Go raw string literal cannot escape one, so:
+
+```
+`ferry:"origins,default=["value"]"`   reflect.StructTag.Get returns   origins,default=[
+```
+
+The rest of the tag is gone with no runtime diagnostic.
+`go vet` does catch it, and `go test` does not: verified on a real module, where `go test ./...` passes clean and `go vet ./...` reports `not compatible with reflect.StructTag.Get`.
+That is ADR-0001's claim about the vet gap confirmed for a `ferry` tag specifically rather than inferred from the analyzer's documentation.
 A pointer to a leaf is not a composite and does take a default, because it has an address of its own.
 
 **A default is a Load-side rule.**
@@ -429,7 +477,7 @@ A driver on the second list declares the kinds it can carry and refuses `Null` l
 
 > `required` is satisfied by any observation other than `Absent`.
 
-Measured:
+Measured at a leaf:
 
 | plane | `required` |
 | --- | --- |
@@ -442,22 +490,130 @@ This is 5.1's most-cited consequence fixed.
 xload implements `required` as `val == "" && meta.required` ([load.go:147](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L147)), so `FOO=` cannot satisfy it there, and ADR-0005 made `FOO=` arrive as `String("")` and never as `Absent` precisely so that this is a live question rather than a hypothetical.
 
 The rule is narrow on purpose.
-`required` asserts that the plane has the address, not that the value is useful, because "not empty" is a validation constraint and ADR-0001 ruled a validation constraint language out by architecture.
-A user who needs "present and non-empty" expresses it in the type, which is what parse-don't-validate means.
+`required` asserts that the plane spoke about the address, not that the value is useful, because "not empty" is a constraint on the value and ADR-0001 ruled a validation constraint language out by architecture.
+That is also why `required` never means "non-nil": `Null` at a `*T` satisfies it and yields `nil`, which is the user getting exactly what their type asked for.
 
-`Null` at a type that cannot hold one is refused, but as a wrong kind and not as a `required` failure, and the two errors say different things.
+#### Where `required` is admissible: the static tier, and only it
 
-**At a container address, presence is children or a `Null`**, and this case reached no probe until the ADR was audited against its own claim.
+> `required` names an address, so it is admissible exactly where that address's children come from the **type** rather than from the value.
 
-| plane | `required` on `[]string`, `map[K]V` or `*T` |
-| --- | --- |
-| nothing at all | refused |
-| explicit `Null` at the address | **satisfied** |
-| one child under the address | satisfied |
+That is ADR-0003's static tier reused, not a new distinction:
 
-The consequence is inherited rather than chosen: `tags: []` reads as `Absent` at `/tags`, measured by ADR-0005 through a real YAML plane, so **an empty composite cannot satisfy `required`**.
-Three states into two signals means the plane cannot say "I have this and it is empty", and no rule here can invent the missing signal.
-A user who needs "configured, possibly empty" writes `tags: null`, which is present and loads as nil.
+| field | `required` | why |
+| --- | --- | --- |
+| `string`, `int`, `time.Duration`, `[]byte`, `[N]byte` | **admissible** | the address is itself static |
+| `*T` where `T` is a leaf | **admissible** | as above |
+| `struct`, `*struct` | **admissible** | one `Name` per exported field, from the type |
+| `[N]T` | **admissible** | exactly `N` `Index` segments, from the type |
+| `[]T`, `map[K]V`, `*[]T` | **refused at schema compile** | the elements come from the value |
+
+At a composite it means **the plane supplied at least one of the address's static children.**
+Measured, `Auth *Cred` with `required`, through the real YAML driver and then through a flat plane:
+
+| document | | |
+| --- | --- | --- |
+| key absent | refused | `Auth=nil` |
+| `auth: {}` | refused | `Auth=nil` |
+| `auth: {user: u}` | satisfied | `&{User:u}` |
+| `auth: {pass: p}` | satisfied | `&{Pass:p}` |
+| `auth: null` | satisfied | `Auth=nil` |
+| `AUTH_USER` unset, on env | refused | `Auth=nil` |
+| `AUTH_USER=u`, on env | satisfied | `&{User:u}` |
+
+One meaning on both.
+The only row where the two could differ is `auth: null`, which a flat plane cannot express, so the divergence cannot arise.
+
+This also repairs a defect the earlier draft shipped: `required` on a **non-pointer struct** was accepted at schema compile and enforced by nothing, because such a struct has no address of its own to be absent at.
+It now means the same thing it means on `*struct`, measured: `ferry: /auth: required, and the plane supplied nothing under it`.
+
+#### Why a slice and a map are refused, and what a user does instead
+
+On a dynamic composite `required` could only mean "at least one element", which is a length constraint on the value rather than an assertion about the plane.
+The tell is that it would make one word mean two different guarantees: `required string` is satisfied by `FOO=` and implies nothing about length, while `required []string` would imply `len >= 1`.
+
+**The reading a user actually wants is not writable at all**, and this is the sharpest result in the section.
+The wanted reading is that an explicit `[]` satisfies `required` while a missing key and a `null` do not.
+Measured through the real YAML driver, at a container address:
+
+| document | `Get(/origins)` | `Children` |
+| --- | --- | --- |
+| key missing | `absent` | 0 |
+| `origins: []` | `absent` | 0 |
+| `origins: {}` | `absent` | 0 |
+| `origins: null` | `null` | 0 |
+| `origins: [a]` | `absent` | 1 |
+
+Five documents, **three distinct observations**.
+A missing key and `origins: []` are one observation, so a rule that answers them differently is not a rule that can be written.
+This is ADR-0005's forced collision, and it is the same fact that made nil and empty one value.
+
+**A seventh `Value` kind would not rescue it either**, which is worth recording because it is the obvious next idea.
+ADR-0004 closed the model at six kinds with no group arm and no escape arm, so the reading needs a new "present and empty".
+But env, query parameters and opaque KV cannot express an empty list at all: `ORIGINS_0` exists or it does not.
+So the rule would hold on three plane classes of six, which is the shape ADR-0005 refused by name:
+
+> A guarantee that holds on some planes and not others is not a guarantee.
+
+The refusal therefore carries the remedy, because the user reaching for it has a legitimate intent:
+
+```
+ferry: /origins: required is not available on []string: a plane cannot report
+"present and empty" at a container address, so required could only mean "at
+least one element", which is a constraint on the value; model the distinction
+as a struct with a set flag, or check len() after Load
+```
+
+ADR-0005 already reached the identical distinction and gave the identical answer, to model it in the type.
+Measured, and it is uniform across planes because `required` then sits on a leaf:
+
+```
+Origins struct { Set bool `required`; Items []string }
+
+nothing              ->  refused at /origins/set
+set=true, no items   ->  {Set:true Items:[]}
+set=true, one item   ->  {Set:true Items:[a]}
+```
+
+#### Refusing is the reversible direction
+
+This ADR refuses in three places where a permission was arguable: `Null` at a leaf that cannot hold one, `required` on a dynamic composite, and spending a tag word on either.
+They share one reason, stated once:
+
+> A refusal is liftable later with no break, because nothing depended on it failing.
+> A permission is not retractable.
+
+So where a rule is genuinely undecided, refusing is the direction that keeps the decision open.
+**Both refusals above can later be lifted by a load Option**, and neither can be lifted by a tag option, because ADR-0001 freezes the tag vocabulary on publication and does not freeze Options.
+
+The two Options are not equally cheap, and [#16](https://github.com/onhotpath/ferry/issues/16) needs the difference now rather than when it writes the cache.
+Measured:
+
+| Option | effect | cost |
+| --- | --- | --- |
+| a `Null` policy | changes decode at load time | one compiled schema serves both, so nothing touches the cache key |
+| lifting `required` on a collection | changes **what compiles** | one `reflect.Type` yields two different schemas, so the Option becomes part of whatever keys the schema cache |
+
+And that key is awkward for a reason ADR-0004 already measured against drivers.
+Reproduced here against an option value: `runtime error: hash of unhashable type main.LoadOption`, the same panic as its `hash of unhashable type main.EnvSource`, because an option list is funcs.
+So a compile-affecting Option is a heavier thing than a load-affecting one, and #16 inherits that rather than discovering it.
+
+#### One mistake should not report as three errors
+
+A field carrying `required` and a default on a `[]string` trips three separate rules.
+Reporting all three invites a user to fix one and get two more, so the diagnostics follow one rule:
+
+> Check each option's admissibility at this type first.
+> Check contradictions only among the options that survived.
+
+A contradiction between two options is only meaningful if both are individually legal there.
+Measured:
+
+```
+[]string  required,default=value   2 errors: required inadmissible, default inadmissible
+string    required,default=x       1 error:  the contradiction, since both are admissible here
+int       omitzero,default=abc     1 error:  the bad default, since a default that does not
+                                             parse has no value to compare against zero
+```
 
 ### ferry never hands a sink an `Absent`
 
@@ -590,12 +746,16 @@ The correctness half of 5.7 reproduces exactly, and it is the whole argument.
 - One meaning "fail if the plane reports `Absent`".
 - One meaning "do not write this address when the Go value is its zero value", which is ADR-0005's already-adopted `omitzero` model.
 
-**Four refusals belong at schema compile.**
+**Five refusals belong at schema compile.**
 
 - A default whose text does not parse into the field's type, by the leaf's own parser.
 - A default on a composite.
+- `required` on a dynamic composite, which is a slice, a map, or a pointer to either.
 - `required` together with a default.
 - `omitzero` together with a default that is not the field's zero value.
+
+**And one diagnostic rule**, because these stack: admissibility is checked first, and a contradiction between two options is reported only if both survived it.
+Otherwise one field's single mistake reports as three errors.
 
 **One grammar property this ADR requires.**
 An empty default must be expressible and must be distinguishable from no default at all, because `""` is a legitimate default value and "leave the field alone" is a different instruction.
@@ -618,7 +778,12 @@ Where a declaration attaches is decided here, not there: it attaches to the stat
   This ADR decides that omission is evaluated against the Go value before anything converts it, which is `omitzero`'s shape in `encoding/json/v2` and not `omitempty`'s.
   What converts it, and whether an encoder can change the answer, is [#12](https://github.com/onhotpath/ferry/issues/12)'s.
 - **The entry point, and whether a caller supplies a seed value**: [#16](https://github.com/onhotpath/ferry/issues/16).
-  This ADR gives it one constraint: a Load must not be offered as an in-place refresh of a value a previous Load populated, or the leak measured above ships.
+  This ADR gives it two constraints.
+  A Load must not be offered as an in-place refresh of a value a previous Load populated, or the leak measured above ships.
+  And if either refusal above is ever lifted by an Option, a compile-affecting Option becomes part of the schema cache key, where an option value is unhashable for the reason ADR-0004 measured.
+- **Whether either refusal is ever lifted, and by what.**
+  Both are liftable by a load Option and neither by a tag option.
+  This ADR ships no Option and records the route so that adding one later is a decision rather than a discovery.
 - **The watch and reload API**: [#13](https://github.com/onhotpath/ferry/issues/13), which inherits the same constraint.
 - **How a registered codec declares a default**, if it ever should: [#19](https://github.com/onhotpath/ferry/issues/19).
   The mechanism here needs nothing from it, because a codec's type is a leaf and a leaf takes a text default like any other.
@@ -636,8 +801,8 @@ Where a declaration attaches is decided here, not there: it attaches to the stat
 - Two default mechanisms coexist and they partition by expressiveness: declared defaults are inspectable and leaf-only, seeded values are arbitrary and invisible.
   Where both apply the declared one wins, because ferry cannot tell a seeded value from a zero one.
 - `Null` is refused at every leaf that has no null, which is ADR-0005's existing rule with `Null` included rather than a new one.
-  The visible cost is a YAML spelling: a blank key or a commented-out value is a `!!null`, so the natural way to turn a setting off is a loud refusal rather than the default.
-  This will be reported as a bug and the answer is that the alternative silently manufactures a value during plane-to-plane transfer.
+  The visible cost is confined to a blank YAML key and an explicit `null`, measured; a commented-out line removes the key, so it is `Absent` and takes the default.
+  The argument is recoverability rather than transfer: strictness can be relaxed per type by a registered codec, and leniency cannot be tightened at all, because the zeroing would precede the codec chain.
 - `encoding/json/v2` disagrees, measured: `null` into a Go `int` gives 0 there and a refusal here, and that is a change v2 made from v1.
   ferry departs from it knowingly, for the second time after `time.Duration`, and for a ferry-specific reason rather than a preference.
 - A field at its default is dumped, so a ferry-written artefact is self-describing and changing a default does not change what a stored plane means.
@@ -653,8 +818,15 @@ Where a declaration attaches is decided here, not there: it attaches to the stat
   ferry has no delete verb and this ADR does not add one.
 - Presence survives the walk, which is the mechanism ADR-0001's plane-inspection milestone commits to, and it costs nothing measurable.
   It is an observation of a Load rather than a property of a field, so it adds no type to the closed set and no schema view.
-- `required` is a presence assertion and nothing more, so `FOO=` satisfies it.
+- `required` is a presence assertion and nothing more, so `FOO=` satisfies it and `Null` at a `*T` satisfies it while yielding nil.
   Someone will want "present and non-empty" and the answer has to be ADR-0001's parse-don't-validate position rather than a new option.
+- `required` is admissible only where an address's children come from the type, so it works on leaves, structs, pointers and arrays and is a schema-compile error on a slice or a map.
+  That reuses ADR-0003's static tier rather than inventing a line, gives one meaning on every plane class, and repairs a draft defect where `required` on a non-pointer struct was accepted and enforced by nothing.
+  The cost is that "this list must be configured" has no ferry spelling, and the honest reason is that the reading users want is not writable: a missing key and `origins: []` are one observation, and a seventh `Value` kind would not fix it because three of six plane classes cannot express an empty list at all.
+- Three refusals in this ADR are liftable later by a load Option and by no tag option, because ADR-0001 freezes the tag vocabulary and does not freeze Options.
+  Refusing is therefore the direction that keeps a decision open, and this ADR ships no Option.
+  A compile-affecting Option would become part of #16's schema cache key, and an option value is unhashable for the reason ADR-0004 measured, so the two routes are not equally cheap.
+- Diagnostics check admissibility before contradictions, so one field's mistake reports as the mistakes that are real rather than as every rule it happens to trip.
 - An in-place reload leaks the previous load's values for addresses the plane has lost, under every rule considered.
   This ADR cannot fix it and instead constrains #16 and #13 to define reload as producing a new value.
   Until one of them lands, that hazard exists in whatever the working entry point is.
@@ -685,6 +857,7 @@ And `decode`'s refusal to hand an empty string to a decoder is #12's to fix, wit
 **5.10, composite values are string-splitting.**
 Bears on this ADR in one place and points the same way ADR-0003 did.
 A composite default in a tag would have to spell a list inside the tag, which reintroduces the defect at the grammar rather than at the value, so a composite default does not compile.
+Measured separately, the JSON-ish spelling is not even writable: `reflect.StructTag.Get` truncates `default=["value"]` at the embedded quote and returns `origins,default=[`, which `go vet` catches and `go test` does not.
 5.10's second half, that xload's grammar splits on `,` so `env:"K,delimiter=,"` is unwritable, is #11's and is named above as a constraint default text inherits.
 
 **5.12, `SerialLoader` precedence is unexpressible.**
