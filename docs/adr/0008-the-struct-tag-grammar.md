@@ -33,8 +33,9 @@ A clean break from it is decided, so it is a comparison and not a starting point
 
 This ADR is written from a throwaway prototype on branch `proto/11-tag-grammar`, which never merges.
 It is built on `proto/8-defaults`, so every measurement runs against a real `Path`, a real `Value`, the real type set, #8's real compiled schema, and the real YAML driver over real files.
-Thirty probes.
-**Four overturned an answer this ADR had already reached in draft**, and one of the four was a probe that passed while measuring nothing.
+Thirty-two probes across two rounds.
+**Seven overturned an answer this ADR had already reached in draft**, and three of the seven came from one audit round aimed at the case the earlier fixtures did not contain.
+One of the seven was a probe that passed while measuring nothing.
 
 ## Decision
 
@@ -80,7 +81,7 @@ This is the union, so a reader can check it rather than rediscover it.
 | ADR-0007 | how omission and defaults are spelled | as above |
 | ADR-0007 | documenting `default=aGk=` on `[]byte` | [What a declared default is not](#what-a-declared-default-is-not) |
 
-Six questions this ADR had to answer that nobody asked.
+Seven questions this ADR had to answer that nobody asked.
 
 | Not asked for, answered anyway | Where |
 | --- | --- |
@@ -90,6 +91,7 @@ Six questions this ADR had to answer that nobody asked.
 | what a diagnostic tier above ADR-0006's two looks like | [Diagnostics](#diagnostics-three-tiers-and-the-vocabulary-of-the-neighbourhood) |
 | what the grammar's own blind spot is | [The one mistake the grammar cannot see](#the-one-mistake-the-grammar-cannot-see) |
 | whether the escape rule the address rendering uses can serve both | [The escape is `~`](#the-escape-is--and-it-follows-the-character) |
+| whether the walk and the schema compiler may have separate field rules | [`-` skips, and embedding needs no word](#--skips-and-embedding-needs-no-word) |
 
 **Three things this ADR does not close.**
 
@@ -128,6 +130,7 @@ The field rule, which is the other half of the grammar and is where most of the 
 | exported and named, **with no ferry tag** | **schema compile error** |
 | embedded, with no ferry tag | its fields are promoted to the parent address |
 | embedded, with a ferry tag | nested under that name |
+| embedded **pointer**, with no ferry tag | **schema compile error**, see below |
 
 ### What a struct tag can carry, and what it cannot
 
@@ -389,6 +392,10 @@ struct{ Common `ferry:"-"`;      Port int `ferry:"port"` }   ->  /port
 An embedded field with no ferry tag is walked at the **parent** address, so its fields are promoted.
 That is what Go's own field namespace already means by embedding, and it is why `embed`, `inline` and `squash` are all absent from the vocabulary.
 
+`ferry:",required"` on an embedded field, meaning "promote and require", is refused for the same reason the pointer is: a promoted field has no address of its own for `required` to assert about.
+
+
+
 **json/v2 needs the word because it also inlines a named field, and ferry refuses that.**
 Verified on `go1.27rc2`:
 
@@ -417,6 +424,43 @@ struct{ Common; Name string `ferry:"name"`; Port int `ferry:"port"` }
 
 That is ADR-0003's prefix-free rule, applied rather than extended.
 An embedded field that is not a struct ferry walks is refused, naming both remedies.
+
+**An embedded pointer may not be promoted, and this was found by auditing rather than by designing.**
+
+The T9 fixtures above tested one level of embedding, on a value receiver, with an exported embedded type.
+Every one of them passed.
+Three cases outside that shape each turned out to be a silent loss.
+
+*A promoted embedded pointer erases the pointer.*
+Promotion walks the pointed-to struct **at the parent address**, so the pointer has no address subtree of its own, and ADR-0006's presence bit has nothing to materialise it from.
+Measured before the refusal existed:
+
+```
+struct{ *Common; Port int `ferry:"port"` }   compiled clean to [/env /name /port]
+load /name=string("n")   ->  the pointer is still nil, the value went nowhere, err=nil
+dump one whose pointer is nil  ->  2 Set calls
+```
+
+A silent total loss, of exactly ADR-0005's maps-no-address class.
+The refusal names the remedy, and nesting the pointer works normally: `ferry:"common"` gives `/common/env`, `/common/name`, `/port`, and the pointer is optional at its own address again.
+
+*An embedded field whose type is unexported is promoted, not skipped.*
+Go's own field namespace promotes it, and `reflect` can set through it.
+Measured:
+
+```
+anonymous field "inner": IsExported=false Anonymous=true PkgPath="main"
+the embedded value CanSet=false
+its promoted exported field Name CanSet=true, and setting it works
+```
+
+So the rule is that an **anonymous** field is considered whether or not its own type is exported, which is the same test `encoding/json/v2` applies.
+Skipping it would have dropped a mapped field in silence.
+
+*And the walk must share the compiler's field rule.*
+With the rule in the compiler alone, the schema for the case above promised `/name` and the walk never visited it, so a load returned a nil error and a zero field.
+Two field rules is the two-conversion-authorities defect the survey measured in viper, moved one layer down.
+Measured after the walk was made to share it, on a two-level promotion through a real dump and load: 4 addresses, round trip equal.
 
 **A composite's element naming is not configurable, and there is nothing for a tag to configure.**
 Under ADR-0003 a slice element mints an `Index` segment whose text is its position, and a map key mints a `Name` segment whose text comes from the key type's own representation, which ADR-0005 restricts and ADR-0007 extends.
@@ -575,7 +619,8 @@ The last two are the point.
 `go vet` catches the sixth and misses the seventh, and `go test` runs neither.
 
 It takes no arguments, and that is a consequence of the tag key not being configurable rather than a separate decision.
-Nothing about a schema depends on the call site, so `Validate[T]()` and a later `Load[T]` compile the same schema and can share whatever cache #16 builds.
+No tag content depends on the call site, so `Validate[T]()` and a later `Load[T]` see the same tags and can share whatever cache #16 builds.
+Whether they see the same **codec registry** is [#19](https://github.com/onhotpath/ferry/issues/19)'s, and it is the one thing that could make them disagree.
 
 ### What a declared default is not
 
@@ -638,7 +683,9 @@ The bare-word case is left, named, and visible in the artefact: a segment called
 
 **[#16](https://github.com/onhotpath/ferry/issues/16), the generic entry point and the schema cache.**
 The ticket's own comment says the tag-key question determines the cache design and should be resolved jointly, so this is the answer stated as an obligation.
-The tag key is fixed, no tag option affects what compiles, and `Validate[T]()` is the compiler, so **a compiled schema is a function of `reflect.Type` alone** and the cache key is `reflect.Type`.
+The tag key is fixed, no tag option affects what compiles, and `Validate[T]()` is the compiler, so **nothing in this ADR makes a compiled schema depend on anything but `reflect.Type`**.
+That is narrower than "the cache key is `reflect.Type`", and the difference is not this ADR's to close: ADR-0007 makes a registered codec change whether a type compiles at all, so whether the codec registry is part of the key depends on [#19](https://github.com/onhotpath/ferry/issues/19) making it process-wide or per-instance.
+What this ADR guarantees is that the **tag** contributes nothing to that key.
 If a tag-key Option ever lands it becomes part of that key, at a measured 12 ns against 18 ns and no allocations either way, which is the cheap end of the question ADR-0006 opened.
 The expensive end, a compile-affecting Option whose value is unhashable, is untouched by this ADR because no tag option is one.
 
@@ -696,6 +743,8 @@ It does hand #9 one shape it should not have to invent: the three tiers are a su
   The measured cost of a configurable key is six nanoseconds and the measured cost of strictness under one is three refusals in four fields, and the second is what decided it.
 - Diagnostics have three tiers rather than ADR-0006's two, and the suppression rule extends to ADR-0005's "maps no address" check.
   One field's single mistake reports once.
+- The three embedding defects the audit found were all outside the shape of the original fixtures, and all three were silent.
+  The one that generalises is that **the walk and the schema compiler must share one field rule**, or the schema promises an address the walk never visits.
 - **The grammar has one blind spot and it is not closable**: a bare option word in the name position is a name.
   It follows from ADR-0003's decision that core has no opinion about segment text, and the alternative would make a legal name unwritable.
 - `Validate[T]()` takes no arguments, which is a consequence of two other decisions rather than a design choice, and it is the same compiler `Load` will use.
