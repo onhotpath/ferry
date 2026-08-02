@@ -161,6 +161,12 @@ type Registry struct {
 	byType map[reflect.Type]leafCodec
 	keys   map[reflect.Type]bool
 	frozen atomic.Bool
+
+	// #16's schema cache, hung off the registry. ADR-0009 measured the
+	// alternative - a {reflect.Type, *Registry} pair key in one sync.Map - at
+	// 32 ns/op against 9 ns/op, and this nesting at 10 ns/op. E2 re-measures
+	// it on ferry's real three-component key.
+	schemas sync.Map // schemaKey -> *cacheEntry
 }
 
 func NewRegistry() *Registry {
