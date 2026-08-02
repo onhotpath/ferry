@@ -1,0 +1,7 @@
+# Prototypes are scratch-only and never merge (AGENTS.md, issue #1).
+# They live on proto/* branches; nothing under proto/ belongs on main.
+/proto/
+
+# Go build and test artefacts, which a `git add -A` will otherwise sweep in.
+*.test
+*.out
