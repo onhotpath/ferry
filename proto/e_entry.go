@@ -79,39 +79,17 @@ func Load[T any](ctx context.Context, src FSource, options ...Option) (T, error)
 // ADR-0011 rules out a partial for, doing more damage. Load[T] returning the
 // zero value then falls out of this rather than being a second rule, because
 // Load is LoadOver with the zero seed.
+// It is LITERALLY Bind followed by LoadOver with the handle discarded, and
+// that is not a description: #25 requires the one-shot verb to be the held one
+// with the handle dropped, because two entry points that could disagree about
+// what a load does are 5.14's "two ways to set the loader" at ferry's own
+// front door.
 func LoadOver[T any](ctx context.Context, seed T, src FSource, options ...Option) (T, error) {
-	o := defaultOpts()
-	for _, op := range options {
-		op.apply(&o)
-	}
-	s, err := schemaFor(reflect.TypeFor[T](), o)
+	b, err := Bind[T](src, options...)
 	if err != nil {
 		return seed, err
 	}
-	done := o.reg.install()
-	defer done()
-
-	open, err := src.Bind(NewAddressSet(s.addrs))
-	if err != nil {
-		return seed, err
-	}
-	rd, err := open(ctx)
-	if err != nil {
-		return seed, err
-	}
-	if rel, ok := rd.(FReleaser); ok {
-		defer rel.Close()
-	}
-	// The walk builds into a copy, so the partial it builds is unreachable
-	// from the caller whatever happens. That is ADR-0011's rule as a property
-	// rather than as a documented promise.
-	out := seed
-	rv := reflect.ValueOf(&out).Elem()
-	w := &walker{dir: loadDir(rd, ctx, o), sch: serial, ctx: ctx}
-	if _, err := w.walk(s.root, rv, Path{}); err != nil {
-		return seed, err
-	}
-	return out, nil
+	return b.LoadOver(ctx, seed)
 }
 
 // Dump writes v out to a sink. T is inferred, so no call site names it.

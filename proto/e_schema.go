@@ -70,6 +70,11 @@ type schema struct {
 	addrs     []Path
 	leafAddrs []Path
 	leaves    int
+	// as is the *AddressSet handed to Bind. It is a pure function of addrs,
+	// so it is built once at compile rather than rebuilt on every load: B1
+	// measured core rebuilding it at 1230 ns and 39 allocations per load,
+	// which is a cost with no API attached to it at all.
+	as *AddressSet
 }
 
 // --- compile ----------------------------------------------------------------
@@ -105,12 +110,14 @@ func compileSchema2(t reflect.Type, o opts) (*schema, error) {
 	if err := prefixFree(c.addrs); err != nil {
 		return nil, err
 	}
-	return &schema{
+	out := &schema{
 		root:      root,
 		addrs:     sortedPaths(append(append([]Path{}, c.addrs...), c.containers...)),
 		leafAddrs: sortedPaths(c.addrs),
 		leaves:    countLeaves(root),
-	}, nil
+	}
+	out.as = NewAddressSet(out.addrs)
+	return out, nil
 }
 
 func (c *compileCtx) rec(t reflect.Type, p Path) *node {

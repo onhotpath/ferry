@@ -86,7 +86,7 @@ func New[T any](options ...Option) (*Schema[T], error) {
 
 func (sc *Schema[T]) Load(ctx context.Context, src FSource) (T, error) {
 	var zero T
-	open, err := src.Bind(NewAddressSet(sc.s.addrs))
+	open, err := src.Bind(sc.s.as)
 	if err != nil {
 		return zero, err
 	}
