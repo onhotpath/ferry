@@ -91,8 +91,26 @@ func runTagMech() {
 //
 // The scanning loop below is reflect.StructTag.Lookup's, with the error paths
 // kept rather than collapsed into `break`.
+// tagKeyName is the struct tag key ferry reads. It is an Option, defaulting
+// to "ferry": the key says WHERE to look and never what the content means.
+var tagKeyName = "ferry"
+
+// ValidTagKey refuses a key that could never appear in a conventional struct
+// tag, at the point the Option is supplied rather than at schema compile.
+func ValidTagKey(k string) error {
+	if k == "" {
+		return fmt.Errorf("the ferry tag key may not be empty")
+	}
+	for i := 0; i < len(k); i++ {
+		if c := k[i]; c <= ' ' || c == ':' || c == '"' || c == 0x7f {
+			return fmt.Errorf("the ferry tag key %q contains %q, which cannot appear in a struct tag key", k, string(c))
+		}
+	}
+	return nil
+}
+
 func rawFerryTag(tag reflect.StructTag) (*string, error) {
-	const key = "ferry"
+	key := tagKeyName
 	var found *string
 	t := string(tag)
 	for t != "" {
@@ -112,8 +130,8 @@ func rawFerryTag(tag reflect.StructTag) (*string, error) {
 		}
 		if i == 0 || i+1 >= len(t) || t[i] != ':' || t[i+1] != '"' {
 			hint := ""
-			if strings.Contains(string(tag), `ferry:"`) {
-				hint = "; the usual cause is a bare double quote inside a ferry tag, which a struct tag value cannot contain"
+			if strings.Contains(string(tag), key+`:"`) {
+				hint = "; the usual cause is a bare double quote inside a "+key+" tag, which a struct tag value cannot contain"
 			}
 			return nil, fmt.Errorf("struct tag is not in the conventional `key:\"value\"` form, at %q%s", trunc(t), hint)
 		}
@@ -139,12 +157,12 @@ func rawFerryTag(tag reflect.StructTag) (*string, error) {
 		}
 		value, err := strconv.Unquote(qvalue)
 		if err != nil {
-			return nil, fmt.Errorf("ferry tag value %s is not a valid Go quoted string (%v); "+
+			return nil, fmt.Errorf(key+" tag value %s is not a valid Go quoted string (%v); "+
 				"a struct tag value is unquoted by strconv.Unquote, so it may not contain a bare "+
 				"double quote and may not contain an escape Go does not define", qvalue, err)
 		}
 		if found != nil {
-			return nil, fmt.Errorf("the field carries two ferry tags, %q and %q; reflect.StructTag.Get returns the first and go vet does not check it", *found, value)
+			return nil, fmt.Errorf("the field carries two %s tags, %q and %q; reflect.StructTag.Get returns the first and go vet does not check it", key, *found, value)
 		}
 		v := value
 		found = &v

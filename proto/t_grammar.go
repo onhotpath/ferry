@@ -242,14 +242,14 @@ func parseFerryTag(value string) (tagDecl, []error) {
 		spec, ok := lookupOpt(key)
 		if !ok {
 			if msg, isForeign := foreign[normOpt(key)]; isForeign {
-				errs = append(errs, fmt.Errorf("unknown option %q: %s", key, msg))
+				errs = append(errs, fmt.Errorf("unknown option %q: %s%s", key, msg, foreignKeyHint()))
 				continue
 			}
 			if sug, has := nearMiss(key); has {
 				errs = append(errs, fmt.Errorf("has invalid appearance of %q tag option; specify %q instead", key, sug))
 				continue
 			}
-			errs = append(errs, fmt.Errorf("unknown option %q; ferry's options are %s", key, vocabList()))
+			errs = append(errs, fmt.Errorf("unknown option %q; ferry's options are %s%s", key, vocabList(), foreignKeyHint()))
 			continue
 		}
 		if seen[spec.name] {
@@ -276,6 +276,21 @@ func parseFerryTag(value string) (tagDecl, []error) {
 		}
 	}
 	return d, errs
+}
+
+// foreignKeyHint fires only when the tag key has been pointed at a tag some
+// other library owns. The rule it explains is the whole answer to ADR-0003's
+// question: the key says where to look, never what the content means.
+var otherPeoplesKeys = map[string]bool{
+	"json": true, "yaml": true, "toml": true, "xml": true,
+	"mapstructure": true, "env": true, "bson": true, "db": true,
+}
+
+func foreignKeyHint() string {
+	if !otherPeoplesKeys[tagKeyName] {
+		return ""
+	}
+	return fmt.Sprintf(" (the ferry tag key is set to %q, which %s also uses; ferry validates its own grammar under whatever key it is told to read)", tagKeyName, tagKeyName)
 }
 
 func lookupOpt(k string) (optSpec, bool) {
@@ -336,7 +351,7 @@ func planField(f reflect.StructField) (fieldPlan, []error) {
 			return fieldPlan{skip: true}, nil
 		}
 		return fieldPlan{skip: true}, []error{fmt.Errorf(
-			"field %s carries no ferry tag: every exported field must name the segment it addresses, or be marked ferry:\"-\"", f.Name)}
+			"field %s carries no %s tag: every exported field must name the segment it addresses, or be marked %s:\"-\"", f.Name, tagKeyName, tagKeyName)}
 	}
 	d, errs := parseFerryTag(*raw)
 	if d.skip {
@@ -350,7 +365,7 @@ func planField(f reflect.StructField) (fieldPlan, []error) {
 	// anything, which is the same reading encoding/json/v2 takes.
 	if !f.IsExported() {
 		return fieldPlan{skip: true}, []error{fmt.Errorf(
-			"field %s is unexported and carries a ferry tag; reflect cannot set an unexported field, so the tag can never do anything (write ferry:%q if the intent is only to say so)", f.Name, "-")}
+			"field %s is unexported and carries a %s tag; reflect cannot set an unexported field, so the tag can never do anything (write %s:%q if the intent is only to say so)", f.Name, tagKeyName, tagKeyName, "-")}
 	}
 	return fieldPlan{decl: d}, errs
 }

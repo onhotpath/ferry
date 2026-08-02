@@ -53,6 +53,11 @@ the new grammar when `t11Mode` is set, so the end-to-end probe uses real names.
 | T26 | a load option on Dump, a dump option on Load | neither leaks |
 | T27 | the embedding cases T9 did not reach | found three defects, see below |
 | T28 | promotion round-tripped rather than compiled | equal, after the walk was made to share the field rule |
+| T29 | a library renaming the tag key | ferry's grammar under `mylib:`, strictness unchanged |
+| T30 | the key pointed at `json` | still refused, now with a diagnosis naming the cause |
+| T31 | the key itself | validated where the Option is supplied |
+| T32 | what a configurable key costs #16 | one type, two keys, two schemas; 18 ns against 28 ns, both hashable |
+| T33 | the escape character, four models | written out on nine intents, plus where `~` already appears |
 
 ## What overturned a draft answer
 
@@ -71,3 +76,10 @@ the new grammar when `t11Mode` is set, so the end-to-end probe uses real names.
   silence, though reflect can set through it. Now promoted. T27.
 - The walk did not share the compiler's field rule, so the schema promised an
   address the walk never visited. T27, fixed and round-tripped in T28.
+- The tag key was refused as configurable on a measurement of the wrong case:
+  T14 measured pointing ferry at `json`, and never measured a library renaming
+  the key while keeping ferry's grammar, which is the case that decides it.
+  Overturned by review. T29.
+- T33's first render escaped every punctuation character always, which made
+  the escape model look worse than it is. The escape is accepted anywhere and
+  required only where the character would otherwise be the grammar's own.
