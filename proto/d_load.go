@@ -158,17 +158,45 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 
 		case shapeStruct:
 			any := false
-			for i := range v.NumField() {
-				f := v.Type().Field(i)
-				if !f.IsExported() {
-					continue
+			var walk func(reflect.Value, Path, Path) error
+			walk = func(v reflect.Value, p, sp Path) error {
+				for i := range v.NumField() {
+					f := v.Type().Field(i)
+					if t11Mode {
+						// One field rule for the compiler and the walk. Two
+						// would let the schema promise an address the walk
+						// never visits, which is a silent loss.
+						plan, _ := planField(f)
+						if plan.skip {
+							continue
+						}
+						if plan.promote {
+							if err := walk(v.Field(i), p, sp); err != nil {
+								return err
+							}
+							continue
+						}
+						got, err := rec(v.Field(i), p.Name(plan.decl.name), sp.Name(plan.decl.name))
+						any = any || got
+						if err != nil {
+							return err
+						}
+						continue
+					}
+					if !f.IsExported() {
+						continue
+					}
+					n, _, _ := fieldTag(f)
+					got, err := rec(v.Field(i), p.Name(n), sp.Name(n))
+					any = any || got
+					if err != nil {
+						return err
+					}
 				}
-				n, _, _ := fieldTag(f)
-				got, err := rec(v.Field(i), p.Name(n), sp.Name(n))
-				any = any || got
-				if err != nil {
-					return any, err
-				}
+				return nil
+			}
+			if err := walk(v, p, sp); err != nil {
+				return any, err
 			}
 			if opts.required && !any {
 				return false, fmt.Errorf("ferry: %s: required, and the plane supplied nothing under it", p)
@@ -323,17 +351,37 @@ func dumpD(v reflect.Value, s *schema) ([]setCall, error) {
 			}
 			return rec(v.Elem(), p, sp)
 		case shapeStruct:
-			for i := range v.NumField() {
-				f := v.Type().Field(i)
-				if !f.IsExported() {
-					continue
+			var walk func(reflect.Value, Path, Path) error
+			walk = func(v reflect.Value, p, sp Path) error {
+				for i := range v.NumField() {
+					f := v.Type().Field(i)
+					if t11Mode {
+						plan, _ := planField(f)
+						if plan.skip {
+							continue
+						}
+						if plan.promote {
+							if err := walk(v.Field(i), p, sp); err != nil {
+								return err
+							}
+							continue
+						}
+						if err := rec(v.Field(i), p.Name(plan.decl.name), sp.Name(plan.decl.name)); err != nil {
+							return err
+						}
+						continue
+					}
+					if !f.IsExported() {
+						continue
+					}
+					n, _, _ := fieldTag(f)
+					if err := rec(v.Field(i), p.Name(n), sp.Name(n)); err != nil {
+						return err
+					}
 				}
-				n, _, _ := fieldTag(f)
-				if err := rec(v.Field(i), p.Name(n), sp.Name(n)); err != nil {
-					return err
-				}
+				return nil
 			}
-			return nil
+			return walk(v, p, sp)
 		case shapeSlice:
 			if v.Len() == 0 && v.Kind() != reflect.Array {
 				out = append(out, setCall{p, Null()})

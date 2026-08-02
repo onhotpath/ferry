@@ -434,3 +434,119 @@ func runT25() {
 		fmt.Printf("      %s = %s\n", c.p, c.v.GoString())
 	}
 }
+
+func init() { t11Hooks = append(t11Hooks, runT27) }
+
+// T27: the cases the fixtures above do not cover. Embedding was tested one
+// level deep, on a value receiver, with no options on the embedded field.
+type Deep struct {
+	Common
+	Extra string `ferry:"extra"`
+}
+type embDeep struct {
+	Deep
+	Port int `ferry:"port"`
+}
+type embPtr struct {
+	*Common
+	Port int `ferry:"port"`
+}
+type embPtrNested struct {
+	*Common `ferry:"common"`
+	Port    int `ferry:"port"`
+}
+type embOpt struct {
+	Common `ferry:"common,required"`
+	Port   int `ferry:"port"`
+}
+type embOptPromoted struct {
+	Common `ferry:",required"`
+	Port   int `ferry:"port"`
+}
+type embUnexported struct {
+	common
+	Port int `ferry:"port"`
+}
+type common struct {
+	Name string `ferry:"name"`
+}
+
+func runT27() {
+	hdr("T27  the embedding cases the T9 fixtures did not reach")
+	for _, c := range []struct {
+		what string
+		t    reflect.Type
+	}{
+		{"promotion two levels deep", reflect.TypeFor[embDeep]()},
+		{"embedded POINTER, promoted", reflect.TypeFor[embPtr]()},
+		{"embedded POINTER, nested", reflect.TypeFor[embPtrNested]()},
+		{"embedded value, tag with an option", reflect.TypeFor[embOpt]()},
+		{"embedded value, options but no name", reflect.TypeFor[embOptPromoted]()},
+		{"embedded UNEXPORTED struct type", reflect.TypeFor[embUnexported]()},
+	} {
+		s, err := compileT(c.t)
+		if err != nil {
+			fmt.Printf("  %-38s REFUSED\n", c.what)
+			for _, l := range errLines(err) {
+				fmt.Printf("      %s\n", trimTo(l, 108))
+			}
+			continue
+		}
+		fmt.Printf("  %-38s %v\n", c.what, sortedPaths(s.addrs))
+	}
+
+	// Before the refusal above existed, the promoted embedded pointer compiled
+	// clean and then: loading /name into it left the pointer nil and returned
+	// a nil error, and dumping one whose pointer was nil produced 2 Set calls.
+	// A silent total loss, of ADR-0005's maps-no-address class, found only by
+	// looking at a case the T9 fixtures did not contain.
+	//
+	// The unexported embedded type is the other one, and it goes the other
+	// way: reflect CAN set through it, so dropping it would have been the
+	// silent loss. Round-tripped here rather than reasoned about.
+	t11Mode = true
+	defer func() { t11Mode = false }()
+	if s, err := compileT(reflect.TypeFor[embUnexported]()); err == nil {
+		var dst embUnexported
+		_, lerr := loadD(map[Path]Value{path("name"): String("n"), path("port"): Number("7")}, s,
+			reflect.ValueOf(&dst).Elem(), loadOpts{})
+		fmt.Printf("  loading through an unexported embedded type: %+v err=%v\n", dst, lerr)
+		calls, derr := dumpD(reflect.ValueOf(dst), s)
+		fmt.Printf("  dumping it back: %d Set calls, err=%v\n", len(calls), derr)
+		for _, c := range calls {
+			fmt.Printf("      %s = %s\n", c.p, c.v.GoString())
+		}
+	}
+}
+
+func init() { t11Hooks = append(t11Hooks, runT28) }
+
+// T28: promotion, round-tripped rather than compiled. T9 only ever checked
+// the address set, so the walk agreeing with the compiler was assumed.
+type promoRT struct {
+	Deep
+	Port int `ferry:"port"`
+}
+
+func runT28() {
+	hdr("T28  promotion through a real load and dump, two levels deep")
+	t11Mode = true
+	defer func() { t11Mode = false }()
+	s, err := compileT(reflect.TypeFor[promoRT]())
+	if err != nil {
+		printErrs("  ", err)
+		return
+	}
+	fmt.Printf("  addresses %v\n", sortedPaths(s.addrs))
+	want := promoRT{Deep: Deep{Common: Common{Name: "n", Env: "e"}, Extra: "x"}, Port: 7}
+	calls, err := dumpD(reflect.ValueOf(want), s)
+	fmt.Printf("  dump: %d Set calls, err=%v\n", len(calls), err)
+	vals := callsToMap(calls)
+	var back promoRT
+	if _, err := loadD(vals, s, reflect.ValueOf(&back).Elem(), loadOpts{}); err != nil {
+		fmt.Println("  load:", err)
+	}
+	fmt.Printf("  round trip equal: %v\n", back == want)
+	fmt.Println("  before the walk shared the compiler's field rule, the schema promised")
+	fmt.Println("  /name and the walk never visited it: a silent loss with a nil error.")
+}

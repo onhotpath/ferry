@@ -51,6 +51,8 @@ the new grammar when `t11Mode` is set, so the end-to-end probe uses real names.
 | T24 | an empty default against no default | `default=` overwrites a seed; no default leaves it |
 | T25 | where each option is admissible | `omitzero` everywhere; the other two are ADR-0006's |
 | T26 | a load option on Dump, a dump option on Load | neither leaks |
+| T27 | the embedding cases T9 did not reach | found three defects, see below |
+| T28 | promotion round-tripped rather than compiled | equal, after the walk was made to share the field rule |
 
 ## What overturned a draft answer
 
@@ -63,3 +65,9 @@ the new grammar when `t11Mode` is set, so the end-to-end probe uses real names.
   as two. That is the third diagnostic tier.
 - T20b's first version put `,embed` and `,inline` on an ANONYMOUS field, where
   v2 promotes either way, so it measured nothing and looked like a pass.
+- A promoted embedded POINTER compiled clean, loaded into a nil pointer with a
+  nil error, and dumped through one. Now refused. T27.
+- An embedded UNEXPORTED struct type was skipped, dropping a mapped field in
+  silence, though reflect can set through it. Now promoted. T27.
+- The walk did not share the compiler's field rule, so the schema promised an
+  address the walk never visited. T27, fixed and round-tripped in T28.

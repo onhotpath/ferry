@@ -164,8 +164,16 @@ func walkStructFields(t reflect.Type, p Path, errs *[]error, rec func(reflect.Ty
 		}
 		if plan.promote {
 			et := f.Type
-			for et.Kind() == reflect.Pointer {
-				et = et.Elem()
+			// A promoted field's addresses land at the PARENT, so the pointer
+			// has no address subtree of its own and ADR-0006's presence bit
+			// has nothing to materialise it from. Measured before this
+			// refusal existed: a promoted embedded *T compiled clean, loaded
+			// into a nil pointer with a nil error, and dumped through one.
+			if et.Kind() == reflect.Pointer {
+				*errs = append(*errs, fmt.Errorf("ferry: %s: %s is an embedded pointer with no ferry tag, and a promoted field has no address of its own for the pointer to be optional at; give it a ferry tag to nest it, or ferry:\"-\"",
+					pathOrRoot(p.Name(f.Name)), f.Type))
+				bad = true
+				continue
 			}
 			if et.Kind() != reflect.Struct || classify(et) != shapeStruct {
 				*errs = append(*errs, fmt.Errorf("ferry: %s: %s is embedded and is not a struct ferry walks, so its fields cannot be promoted; give it a ferry tag to nest it, or ferry:\"-\"",

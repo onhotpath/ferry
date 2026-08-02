@@ -325,11 +325,15 @@ func planField(f reflect.StructField) (fieldPlan, []error) {
 		return fieldPlan{skip: true}, []error{err}
 	}
 	if raw == nil {
-		if !f.IsExported() {
-			return fieldPlan{skip: true}, nil
-		}
+		// An ANONYMOUS field is considered whether or not its own type is
+		// exported: reflect can set an exported field promoted through an
+		// unexported embedded type, measured, so skipping it would drop a
+		// mapped field in silence.
 		if f.Anonymous {
 			return fieldPlan{promote: true}, nil
+		}
+		if !f.IsExported() {
+			return fieldPlan{skip: true}, nil
 		}
 		return fieldPlan{skip: true}, []error{fmt.Errorf(
 			"field %s carries no ferry tag: every exported field must name the segment it addresses, or be marked ferry:\"-\"", f.Name)}
@@ -337,6 +341,9 @@ func planField(f reflect.StructField) (fieldPlan, []error) {
 	d, errs := parseFerryTag(*raw)
 	if d.skip {
 		return fieldPlan{skip: true}, errs
+	}
+	if f.Anonymous {
+		return fieldPlan{decl: d}, errs
 	}
 	// An unexported field is skipped either way (ADR-0005), so ferry:"-" on
 	// one is redundant and harmless. Anything else is a tag that can never do
