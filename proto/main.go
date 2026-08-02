@@ -28,5 +28,6 @@ func main() {
 	p10Fidelity()
 	p11Dynamic()
 	p12Lifetimes()
+	p13Slim()
 	fmt.Println()
 }

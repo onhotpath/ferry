@@ -166,3 +166,24 @@ func BenchmarkKeysMint(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkLoadSlim(b *testing.B) {
+	ctx := context.Background()
+	addrs, vals := benchAddrs()
+	open, err := SlimQuery{Values: vals}.Bind(addrs)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		r, err := open(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, p := range addrs.All() {
+			if _, err := r.Get(ctx, p); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}

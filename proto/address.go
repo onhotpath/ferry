@@ -127,3 +127,6 @@ func sortedPaths(ps []Path) []Path {
 	slices.SortFunc(out, CompareSegmentwise)
 	return out
 }
+
+// Join appends every segment of q onto p. Needed by the Under combinator.
+func (p Path) Join(q Path) Path { return Path{p.canon + q.canon} }
