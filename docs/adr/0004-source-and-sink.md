@@ -431,26 +431,36 @@ ADR-0003's driver-side rule binds flattening drivers only.
 
 ADR-0002 deferred this here, because its admission rule is that a first-party driver ships only to exercise an axis of the driver contract that no existing first-party driver exercises, and the axes are a property of these signatures.
 
+Each row is one such axis: something the contract asks of a driver that has to be exercised by real code somewhere, or the conformance suite is testing it against nothing.
+**`yes` means the driver exercises that axis and blank means it does not**, so a driver earns its place by owning a row no other driver has.
+The rows are read off the contract above, and the three `Committer`, `Releaser` and `Enumerator` rows are the measured output of the prototype's four drivers rather than a plan for them.
+
 | axis | env | query | kv | yaml | memory plane |
 | --- | --- | --- | --- | --- | --- |
-| produces a plane key, so carries the injectivity obligation | x | x | x | | |
-| walks segments as a tree instead | | | | x | |
-| has a serialization format | | | | x | |
-| carries plane-side type information | | | | x | |
-| opaque bytes only | | | x | | |
-| real I/O, cancellation, partial failure | | | x | x | |
-| batch versus lazy inside one open | | | x | | |
-| `Committer` without `Releaser` | | | x | | |
-| `Committer` and `Releaser` together | | | | x | |
-| no honest Dump at all | x | | | | |
-| per-request, hot path | | x | | | |
-| `Enumerator` | x | | x | x | |
+| produces a plane key, so carries the injectivity obligation | yes | yes | yes | | |
+| walks segments as a tree instead | | | | yes | |
+| has a serialization format | | | | yes | |
+| carries plane-side type information | | | | yes | |
+| opaque bytes only | | | yes | | |
+| real I/O, cancellation, partial failure | | | yes | yes | |
+| batch versus lazy inside one open | | | yes | | |
+| `Committer` without `Releaser` | | | yes | | |
+| `Committer` and `Releaser` together | | | | yes | |
+| structurally has no Dump | yes | | | | |
+| per-request, hot path | | yes | | | |
+| `Enumerator` | yes | | yes | yes | |
+
+One row is easy to misread and is worth spelling out.
+**"Structurally has no Dump" is env's alone, and it is not the same as "ships no sink".**
+Query params ship no sink here either, but they could have one: a query string is a perfectly good dump target, and percent-encoding is a format the driver may own because ADR-0002's bar on formats constrains core and not a driver outside it.
+Env cannot, for the reason ADR-0002 gave: setting the process environment is process-global mutation nobody wants, and the thing people do want is a `.env` file, which is a format.
+So env is the only plane where the absence of a `Sink` implementation is a property of the plane rather than a decision about scope, which is exactly what makes it the case that keeps `Source` and `Sink` honestly separate.
 
 **The list is `yaml`, `kv` and `env`, with `query` named as a candidate rather than a commitment.**
 
 - **yaml** reaches four axes nothing else does, and is the only driver needing both lifecycle interfaces. It is what keeps the conformance suite honest.
 - **kv** is the only real I/O, the only opaque-bytes plane, the only batch-versus-lazy choice, the only dynamically read-only sink, and the only `Committer` with nothing to release. Consul-shaped rather than Consul, so the exact backend stays open.
-- **env** is the flat key function with a transform, and the source-with-no-sink case, which is what keeps `Source` and `Sink` honestly separate.
+- **env** is the flat key function with a transform, and the only plane that structurally has no Dump, which is what keeps `Source` and `Sink` honestly separate.
 - **query** is the only per-request axis and the only driver implementing no optional interface at all, which is a weak claim on two counts: its key function is a flat join like env's, and it is also the driver this contract serves least well. See below.
 
 The memory plane's column is empty on every axis, which is ADR-0002's own point restated as a measurement.
