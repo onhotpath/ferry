@@ -26,6 +26,7 @@ var b25 = []struct {
 	{"B7", "the audit: what the fixtures above do not contain", runB7},
 	{"B8", "the same question on the Dump side, which B7a got wrong", runB8},
 	{"B9", "three worked programs, and the additive check", runB9},
+	{"B10", "an inherited walk defect: a driver error on the Load path", runB10},
 }
 
 func run25(which string) {
