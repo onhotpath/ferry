@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -39,6 +40,7 @@ var a41b = []struct {
 	{"A28", "ADR-0005: recursive types, and the maps-no-address backstop", runA28},
 	{"A29", "ADR-0004: a map field from a source that cannot enumerate", runA29},
 	{"A30", "ADR-0001: is a compile refusal deterministic over 300 runs?", runA30},
+	{"A31", "ADR-0009: what does the default registry hold before main() runs?", runA31},
 }
 
 // ---------------------------------------------------------------------------
@@ -573,3 +575,38 @@ func strSort(ss []string) {
 
 var _ = filepath.Join
 var _ = os.Getenv
+
+// ---------------------------------------------------------------------------
+// A31  what the default registry holds before main() runs
+// ---------------------------------------------------------------------------
+
+type A31Conf struct {
+	Addr netip.Addr `ferry:"addr"`
+}
+
+func runA31() {
+	says("ADR-0009", `"The default registry's freeze point is safe by Go's own initialisation
+    order, since every init completes before main.main." So a package init that
+    registers is the shape every consumer writes, and it is correct.`)
+
+	fmt.Printf("\n  the default registry at the top of main(), before any probe runs:\n")
+	fmt.Printf("    registrations: %d\n", len(defaultRegistry.byType))
+	for t := range defaultRegistry.byType {
+		fmt.Printf("      %v\n", t)
+	}
+	fmt.Println("    They come from two package init()s in r18_freeze.go, which exist to")
+	fmt.Println("    demonstrate exactly this property of ADR-0009's model.")
+
+	fmt.Println("\n  what that does to every probe that takes defaultOpts():")
+	fmt.Printf("    Compile[struct{ Addr netip.Addr }]()                    -> %v\n",
+		errOneLine(Compile[A31Conf]()))
+	fmt.Printf("    Compile[struct{ Addr netip.Addr }](WithRegistry(fresh)) -> %v\n",
+		errOneLine(Compile[A31Conf](WithRegistry(NewRegistry()))))
+
+	verdict("IMPLEMENTED", "and it is a measurement hazard rather than a defect:")
+	fmt.Println("           the registry ADR-0009 designed behaves exactly as designed, and")
+	fmt.Println("           the consequence is that E16's and B25's default-registry")
+	fmt.Println("           measurements were taken against a registry holding two codecs")
+	fmt.Println("           no probe in either suite asked for. A31 is why A3 uses a fresh")
+	fmt.Println("           registry to ask about the chain.")
+}

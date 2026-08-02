@@ -200,28 +200,37 @@ type A3IP struct {
 	IP net.IP `ferry:"ip"`
 }
 
+type A3Pfx struct {
+	P netip.Prefix `ferry:"p"`
+}
+
 func runA3() {
 	says("ADR-0007", `"The text pair is consulted BEFORE reflect.Kind admission.
     A declaration beats an inference."`)
 
 	fmt.Printf("\n  the package defaults, as the tip ships them:\n")
-	fmt.Printf("    chainOrder      = %v\n", chainOrder)
+	fmt.Printf("    chainOrder      = %v (len %d)\n", chainOrder, len(chainOrder))
 	fmt.Printf("    chainBeforeKind = %v\n", chainBeforeKind)
 
-	fmt.Println("\n  ADR-0007's own headline table, re-run through the tip's Compile/Dump:")
-	fmt.Printf("    netip.Addr        -> %v\n", errOneLine(Compile[A3Conf]()))
+	fmt.Println("\n  ADR-0007's own headline table, re-run against a FRESH registry so the")
+	fmt.Println("  chain is the only thing answering (see A31 for why that matters):")
 	ctx := context.Background()
-	vals, err := dumpTo(ctx, A3IP{IP: net.ParseIP("192.0.2.1")})
-	fmt.Printf("    net.IP            -> %s  err=%v\n", vals[Path{}.Name("ip")].GoString(), errOneLine(err))
-	fmt.Println("    ADR-0007's table says string(\"192.0.2.1\") for both rows.")
-
-	fmt.Println("\n  with the chain switched on by hand, which is what every P12/P19 probe")
-	fmt.Println("  that measures it does in its own body and then reverts:")
-	chainOrder, chainBeforeKind = []string{"text"}, true
-	fmt.Printf("    netip.Addr        -> %v\n", errOneLine(Compile[A3Conf](WithRegistry(NewRegistry()))))
-	vals2, _ := dumpTo(ctx, A3IP{IP: net.ParseIP("192.0.2.1")}, WithRegistry(NewRegistry()))
-	fmt.Printf("    net.IP            -> %s\n", vals2[Path{}.Name("ip")].GoString())
+	for _, m := range []struct {
+		label  string
+		order  []string
+		before bool
+	}{
+		{"as the tip ships", nil, false},
+		{"chain before kind", []string{"text"}, true},
+	} {
+		chainOrder, chainBeforeKind = m.order, m.before
+		fmt.Printf("    %-20s netip.Addr    -> %v\n", m.label, errOneLine(Compile[A3Conf](WithRegistry(NewRegistry()))))
+		fmt.Printf("    %-20s netip.Prefix  -> %v\n", "", errOneLine(Compile[A3Pfx](WithRegistry(NewRegistry()))))
+		vals, _ := dumpTo(ctx, A3IP{IP: net.ParseIP("192.0.2.1")}, WithRegistry(NewRegistry()))
+		fmt.Printf("    %-20s net.IP        -> %s\n", "", vals[Path{}.Name("ip")].GoString())
+	}
 	chainOrder, chainBeforeKind = nil, false
+	fmt.Println("    ADR-0007's chosen column is string(\"...\") for all three.")
 
 	verdict("IMPLEMENTED, OFF", "the chain is implemented and both orders are")
 	fmt.Println("           switchable, but the tip's default is chainOrder=nil and")
