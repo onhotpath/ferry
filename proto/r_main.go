@@ -31,6 +31,8 @@ var r19 = []struct {
 	{"R12", "the codec resolved into the compiled schema", runR12},
 	{"R13", "registration racing a compile", runR13},
 	{"R14", "three defects: String() at the zero value, and the nil interface", runR14},
+	{"R16", "can Register catch the zero-value defect with no proof", runR16},
+	{"R17", "the consumer's view: call sites, and the five open questions", runR17},
 	{"R15", "the audit: the cases the other probes do not cover", runR15},
 }
 

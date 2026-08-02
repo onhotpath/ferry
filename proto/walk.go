@@ -86,6 +86,21 @@ func compile(t reflect.Type) ([]Path, error) {
 		case shapeMap:
 			rec(t.Elem(), p.Name("*"))
 		default:
+			// A map whose key type is registered but not declared usable as a
+			// key gets its own diagnostic, because the generic "unsupported
+			// type" line tells a registrant nothing about the obligation they
+			// have to take on. The diagnostic is the only moment they are
+			// guaranteed to read.
+			if t.Kind() == reflect.Map && keyOptIn && activeReg != nil {
+				if _, own := activeReg.lookup(t.Key()); own && !registeredKeys[t.Key()] {
+					errs = append(errs, fmt.Errorf(
+						"ferry: %s: %s has a registered codec but is not declared usable as a map key; "+
+							"a key codec's text must be injective over the key type, or two keys collapse "+
+							"into one address; add .AsMapKey() to the registration if it is",
+						pathOrRoot(p), t.Key()))
+					return
+				}
+			}
 			errs = append(errs, unsupportedTypeError{p, t})
 		}
 	}

@@ -33,11 +33,17 @@ type Reg struct {
 	c     leafCodec
 }
 
-// TypeCodec builds a registration for T.
+// ValueCodec builds a registration for T from two functions over the boundary
+// Value. It is the general form: it is the only constructor whose decode half
+// sees the whole Value, so it is the only one that can accept a kind it never
+// emits (ADR-0006's Null escape hatch, R2c).
 //
 // kind is required and not defaulted, per ADR-0007: a codec whose text is a
 // run of digits must say Number, or it works on env and fails on YAML.
-func TypeCodec[T any](kind VKind, enc func(T) (Value, error), dec func(Value) (T, error)) Reg {
+//
+// Named ValueCodec rather than TypeCodec so the trio reads String / Value /
+// Text, after what the two halves speak. R17b is the argument.
+func ValueCodec[T any](kind VKind, enc func(T) (Value, error), dec func(Value) (T, error)) Reg {
 	t := reflect.TypeFor[T]()
 	return Reg{
 		t:    t,
@@ -79,6 +85,12 @@ func TypeCodec[T any](kind VKind, enc func(T) (Value, error), dec func(Value) (T
 			},
 		},
 	}
+}
+
+// TypeCodec is the name #12's P18 used, kept so that probe still reads as it
+// was written.
+func TypeCodec[T any](kind VKind, enc func(T) (Value, error), dec func(Value) (T, error)) Reg {
+	return ValueCodec(kind, enc, dec)
 }
 
 // StringCodec is the ergonomic case and the one that will be used most: the
