@@ -23,6 +23,7 @@ Benchmarks: `GOTOOLCHAIN=go1.27rc2 go test -run=NONE -bench=. -benchmem .`
 | P14 | Does every writer need closing? |
 | P15 | Release is not commit, and only one of them is conditional |
 | P16 | The final contract, all four drivers rewritten against it |
+| P17 | Absent, Null and the empty string, in both directions |
 
 Two probes are audits of this prototype's own earlier answers, and both changed
 it. P9 found that memoising the key table in core is unsound two different
