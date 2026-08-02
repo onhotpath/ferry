@@ -31,7 +31,11 @@ type cacheEntry struct {
 
 func schemaFor(t reflect.Type, o opts) (*schema, error) {
 	// The freeze is ADR-0009's, and this is the line that makes "first use"
-	// locatable: a schema compile against a registry is a use of it.
+	// locatable. What makes a compile a USE is that its result is RETAINED:
+	// ADR-0009's obligation is that a registry's answer for a type must never
+	// change once that type has been resolved against it, and a resolution
+	// that is discarded retains nothing to go stale. So caching and freezing
+	// are one decision, taken here, and compileOnce below takes neither.
 	o.reg.frozen.Store(true)
 
 	k := o.key(t)
@@ -146,8 +150,19 @@ func Compile[T any](options ...Option) error {
 	for _, op := range options {
 		op.apply(&o)
 	}
-	_, err := schemaFor(reflect.TypeFor[T](), o)
+	_, err := compileOnce(reflect.TypeFor[T](), o)
 	return err
+}
+
+// compileOnce is schemaFor without the cache and without the freeze, and the
+// two omissions are the same omission. E10 measured what happens otherwise: a
+// Compile from a package-level var freezes the default registry mid-import
+// graph, a later init's Register fails, and a dropped error leaves the plane
+// holding a representation the user replaced, with no error anywhere.
+func compileOnce(t reflect.Type, o opts) (*schema, error) {
+	done := o.reg.install()
+	defer done()
+	return compileSchema2(t, o)
 }
 
 // dumpTo is the in-memory half of Dump, used by probes that have no sink.

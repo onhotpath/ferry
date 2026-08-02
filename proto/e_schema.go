@@ -87,13 +87,15 @@ func compileSchema2(t reflect.Type, o opts) (*schema, error) {
 	c := &compileCtx{o: o, stack: map[reflect.Type]bool{}}
 	root := c.rec(t, Path{})
 
-	// The root leaf question ADR-0007 and ADR-0009 both handed here by name.
+	// The root question ADR-0007 and ADR-0009 both handed here by name.
 	// A chain-admitted or registered type at the root mints the empty path,
-	// which ADR-0003 says an address may not be. E7 is the measurement.
-	if root != nil && root.kind == nLeaf {
+	// which ADR-0003 says an address may not be - and E11 found the same hole
+	// through the other door, because a nil or empty root map or slice writes
+	// Null at its own address, which at the root IS the empty path.
+	if root != nil && !rootIsWalkedStruct(root) {
 		c.errs = append(c.errs, fmt.Errorf(
-			"ferry: the root type %s is a leaf, so it addresses the empty path and ADR-0003 says an address is non-empty; "+
-				"wrap it in a struct with a named field", t))
+			"ferry: the root type %s is not a struct ferry walks, so it can address the empty path "+
+				"and ADR-0003 says an address is non-empty; wrap it in a struct with a named field", t))
 	}
 	if len(c.errs) > 0 {
 		slices.SortFunc(c.errs, func(a, b error) int { return cmp.Compare(a.Error(), b.Error()) })
@@ -140,7 +142,14 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 	switch t.Kind() {
 	case reflect.Struct:
 		n := &node{kind: nStruct, typ: t, shape: p}
-		before := len(c.addrs)
+		// Counted in MINTED SHAPES and not in static addresses. A map or a
+		// slice field contributes only a dynamic shape, so counting static
+		// addresses refuses `struct{ Limits map[string]int }` as mapping no
+		// address, which ADR-0005 explicitly compiles: its own worked example
+		// is struct{Arr [3]string; Sl []string; M map[string]int} yielding
+		// /Sl/* and /M/*. Found by E11, three probes after this check was
+		// written, because every earlier fixture gave each struct a scalar.
+		before := c.minted
 		fieldErr := false
 		for i := range t.NumField() {
 			f := t.Field(i)
@@ -167,7 +176,7 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 		}
 		// ADR-0005's maps-no-address backstop, suppressed at any level that
 		// already reported a field error (ADR-0008's tier rule).
-		if len(c.addrs) == before && !fieldErr {
+		if c.minted == before && !fieldErr {
 			c.errs = append(c.errs, fmt.Errorf(
 				"ferry: %s: %s maps no address: it has no exported field ferry can address; register a codec for it",
 				pathOrRoot(p), t))
@@ -278,6 +287,17 @@ func isZeroDefault(n *node) bool {
 // container records a container's own address, which is where ADR-0005's
 // "a composite with no elements writes Null at its own address" is observed.
 // A container UNDER a dynamic shape has no static address at all.
+// rootIsWalkedStruct is the root rule, and it is asked of the COMPILED node
+// rather than of the Go kind: netip.Addr and big.Int are structs and are
+// leaves here, because ADR-0007's chain and ADR-0009's table are consulted
+// first.
+func rootIsWalkedStruct(n *node) bool {
+	for n.kind == nPtr {
+		n = n.elem
+	}
+	return n.kind == nStruct
+}
+
 func (c *compileCtx) container(p Path) {
 	if p.IsRoot() || hasStar(p) {
 		return

@@ -25,6 +25,8 @@ var e16 = []struct {
 	{"E6", "the walk written once, and how big the residue is", runE6},
 	{"E7", "a root leaf, and the Option rule", runE7},
 	{"E9", "parse-don't-validate: what Compile[T] actually asks", runE9},
+	{"E10", "auditing the Compile-freezes-the-registry call", runE10},
+	{"E11", "auditing the root map/slice permission", runE11},
 	{"E8", "the audit: the cases the other probes do not cover", runE8},
 }
 

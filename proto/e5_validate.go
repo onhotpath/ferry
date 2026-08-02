@@ -16,8 +16,8 @@ package main
 // and ADR-0009's soundness argument runs through where "first use" falls.
 
 import (
+	"context"
 	"fmt"
-	"reflect"
 )
 
 // E5Opaque is a struct with no exported field and no text pair, so ADR-0005's
@@ -39,6 +39,8 @@ func e5Codec() Reg {
 		E5Opaque.text,
 		func(s string) (E5Opaque, error) { return E5Opaque{s}, nil })
 }
+
+type E5Other struct{ v string }
 
 func runE5() {
 	fmt.Println("--- E5a: Compile and Load are the same call, so they cannot disagree ---")
@@ -66,53 +68,47 @@ func runE5() {
 	fmt.Println("  compile-affecting Option, and it takes them because there are exactly")
 	fmt.Println("  two and both change what compiles.")
 
-	fmt.Println("\n--- E5c: Compile is a USE, so it freezes the registry ---")
+	fmt.Println("\n--- E5c: Compile does NOT freeze, and that is E10's result ---")
 	fresh := NewRegistry()
 	fmt.Printf("  a new registry, frozen=%v\n", fresh.frozen.Load())
 	_ = Compile[E5Conf](WithRegistry(fresh))
 	fmt.Printf("  after Compile[E5Conf](WithRegistry(fresh)), frozen=%v\n", fresh.frozen.Load())
 	err := fresh.Register(e5Codec())
-	fmt.Printf("  a registration after that -> %v\n", err)
+	fmt.Printf("  a registration after that -> %v\n", trunc(err))
 
-	fmt.Println("\n  This is not a choice #16 gets to make freely. The alternative - Compile")
-	fmt.Println("  compiles without caching and without marking a use - is measured:")
+	fmt.Println("\n  A Load DOES freeze, because it retains the compiled schema in the cache:")
 	fresh2 := NewRegistry()
-	o := defaultOpts()
-	o.reg = fresh2
-	done := fresh2.install()
-	_, e1 := compileSchema2(reflect.TypeFor[E5Conf](), o)
-	done()
-	fmt.Printf("    Compile before the registration  -> %v\n", trunc(e1))
 	mustReg(fresh2, e5Codec())
-	done = fresh2.install()
-	_, e2 := compileSchema2(reflect.TypeFor[E5Conf](), o)
-	done()
-	fmt.Printf("    the Load that follows            -> %v\n", e2)
-	fmt.Println("  A Compile that does not freeze reports a failure that never happens,")
-	fmt.Println("  about a registry state no Load ever sees. Both readings are loud, and")
-	fmt.Println("  only one of them keeps ADR-0008's \"one compiler\" true.")
+	_, _ = loadFrom(context.Background(), E5Conf{}, map[Path]Value{}, WithRegistry(fresh2))
+	fmt.Printf("  after a Load, frozen=%v\n", fresh2.frozen.Load())
+	fmt.Printf("  a registration after that -> %v\n", trunc(fresh2.Register(StringCodec(
+		func(t E5Other) string { return t.v },
+		func(s string) (E5Other, error) { return E5Other{s}, nil }))))
 
-	fmt.Println("\n--- E5d: so where may Compile be called, and where may it not ---")
-	fmt.Println("  ADR-0009 priced exactly one broken shape: a LOAD during init(), where")
-	fmt.Println("  whether a later package's init may still register depends on the import")
-	fmt.Println("  graph. Compile is a second way into that shape, and a more likely one,")
-	fmt.Println("  because it is pitched as the thing you call to check a schema early.")
+	fmt.Println("\n  So the rule is about RETENTION rather than about the verb:")
+	fmt.Println("    ADR-0009's obligation is that a registry's answer for a type must")
+	fmt.Println("    never change once that type has been RESOLVED against it. A compile")
+	fmt.Println("    whose result is discarded resolves nothing that outlives the call.")
+	fmt.Println("    Caching and freezing are therefore one decision, not two.")
+
+	fmt.Println("\n--- E5d: so where may Compile be called ---")
+	fmt.Println("  Anywhere. That is the point of E10's correction: Compile records no use")
+	fmt.Println("  of the registry, so a Compile from a package-level var during init() is")
+	fmt.Println("  no longer able to poison a later package's Register.")
 	fmt.Println()
-	fmt.Println("    func init()     { ferry.Register(...) }        every init completes")
-	fmt.Println("    func TestX(t)   { ferry.Compile[Config]() }   before main/tests run,")
-	fmt.Println("                                                   so this is always safe")
+	fmt.Println("    func init()   { ferry.Register(...) }        every init completes")
+	fmt.Println("    func TestX(t) { ferry.Compile[Config]() }    before main/tests run")
+	fmt.Println("    var _ = must(ferry.Compile[Config]())        legal, and answers about")
+	fmt.Println("                                                 the registry AS IT STANDS")
 	fmt.Println()
-	fmt.Println("    var _ = must(ferry.Compile[Config]())         a package-level var, so")
-	fmt.Println("                                                   it runs DURING init and")
-	fmt.Println("                                                   freezes the default")
-	fmt.Println("                                                   registry mid-graph")
+	fmt.Println("  The residual cost, stated: a Compile that runs during init() answers")
+	fmt.Println("  about a registry a later init may still add to, so it can report a")
+	fmt.Println("  failure a later registration would have fixed. That is loud, it is at")
+	fmt.Println("  the Compile call, and it costs the user a moved line. The freezing")
+	fmt.Println("  reading's failure is a plane holding a representation nobody chose.")
 	fmt.Println()
-	fmt.Println("  Go's own initialisation order is what makes the first safe: every")
-	fmt.Println("  package-level variable and every init in the program runs to completion")
-	fmt.Println("  before main.main, and a test function is not an init. So Compile from a")
-	fmt.Println("  test is always after every Register, which is where ADR-0008 pitched it.")
-	fmt.Println("  Compile from a package-level var is ADR-0009's broken shape with a")
-	fmt.Println("  different verb on it, and #16 says so rather than leaving it to be found.")
+	fmt.Println("  ADR-0009's one broken shape - a LOAD during init() - is unchanged and")
+	fmt.Println("  still broken, because a Load retains its schema.")
 }
 
 func trunc(err error) string {
