@@ -225,10 +225,25 @@ That is ADR-0009's own answer to 5.14's first item reused: a default registry is
 A `Schema[T]` value the caller holds is a caller-facing bind-then-load split, which is [#25](https://github.com/onhotpath/ferry/issues/25)'s question by name.
 What this ADR removes is one of its two motivations, measured below.
 
-**On the name.**
+#### On the name, which was scanned rather than argued
+
 ADR-0001 left the exported verb names open and this ADR spends two of them.
-`Load` and `Dump` are the working assumptions confirmed; `Compile` replaces ADR-0008's `Validate`, on ADR-0001's own words rather than on taste; `LoadOver` is new and is the one spelling in this ADR taken on how it reads rather than on a measurement.
-It has to say "the plane is applied over this value and the result is a new value", and `LoadInto` is wrong because nothing is loaded *into* anything.
+`Load` and `Dump` are the working assumptions confirmed, and `Compile` replaces ADR-0008's `Validate` on ADR-0001's own words.
+`LoadOver` is new, and the candidates were scanned against every `api/go1*.txt` and the module cache rather than weighed by ear:
+
+| candidate | stdlib | why not |
+| --- | --- | --- |
+| **`LoadOver`** | 0 | taken |
+| `LoadInto` | **0**, and the corpus meaning is unanimous | every `-Into` in Go names a destination it **mutates**: `DeepCopyInto(out *T)`, `MergeInto`, `cloneInto`, `readDataInto`. It would set the reader's expectation to the signature this ADR deletes, and `_, err := LoadInto(ctx, cfg, src)` compiles, checks its error, leaves `cfg` untouched, and is flagged by nothing. |
+| `LoadSeeded` | `Seed` x6 | ADR-0006's own noun, which is the argument for it. Against it: all six stdlib `Seed`s are randomness or crypto, so a Go reader's first association is entropy; and it names only the seed half, not the reload half. |
+| `LoadOverlay` | 0 | "Overlay" is right and is **configuration** vocabulary, and ADR-0001 is explicit that ferry is not a configuration library. Borrowing it tilts the charter for a word. |
+| `Reload` | 0 | names one of the two uses. A first-ever load with a seed is not a re-anything, and [#13](https://github.com/onhotpath/ferry/issues/13) may want the verb. |
+
+`go vet`'s `unusedresult` check covers a fixed list of pure stdlib functions, so no tool catches the `LoadInto` misuse above.
+That is what disqualifies it rather than the reading.
+
+The one candidate with no name at all is folding both into `Load(ctx, seed, src, opts...)`, which deletes this question and 5.14's "two ways" exposure outright, at the cost of `Config{}` on every ordinary call site forever.
+It is recorded as the runner-up rather than dismissed: the difficulty of naming the second verb is real evidence for it, and the deciding argument the other way is that the common call site is the one that should read best.
 
 ### The cache key is three components, and the rule is what outlives them
 
