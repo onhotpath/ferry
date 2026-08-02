@@ -26,7 +26,7 @@ the new grammar when `t11Mode` is set, so the end-to-end probe uses real names.
 | C1 | is a plane name the Go field name? | 233 of 4835 third-party, 38 of 556 stdlib; 1/1580 for `yaml`, 0/808 for `mapstructure` |
 | T4 | every diagnosis the grammar produces | 40 cases, a third ill-formed |
 | T5 | near-miss | 22 of 26 misspellings get a specific remedy |
-| T6 | three escape models | doubling silently renames on a stray comma; no-escaping cannot write the name at all |
+| T6 | the escape models | doubling silently renames on a stray comma; no-escaping cannot write the name at all |
 | T7 | 5.10's second half | xload loses the delimiter; ferry writes it |
 | T8 | the naming rule | under a Go-name default, exporting a field adds an address |
 | T9 | embedding | promotion needs no word; a clash is ADR-0003's prefix-free rule |
@@ -37,7 +37,7 @@ the new grammar when `t11Mode` is set, so the end-to-end probe uses real names.
 | T14 | the tag key pointed at `json` | 3 of 4 fields refuse |
 | T14b | what the key costs #16's cache | 12 ns against 18 ns, both hashable |
 | T15 | `Validate[T]()` | from a real `go test`, no value and no plane |
-| T16 | ADR-0003's properties under one escape rule | 200k paths, 0 failures, 0 collisions |
+| T16 | ADR-0003's rendering | left alone: the tag has no escape character to share |
 | T17 | xload's `prefix=` | nesting, or ADR-0004's `Under`; concatenation unexpressible |
 | T18 | a name per direction | a round-trip violation by construction |
 | T19 | end to end, hostile names | 8 hostile segments through the real YAML driver, all exact |
@@ -61,6 +61,9 @@ the new grammar when `t11Mode` is set, so the end-to-end probe uses real names.
 | T34 | model F's failure modes | every one loud, each with a remedy |
 | T35 | model F end to end through the real YAML driver | 9 hostile names exact, 3 defaults including a comma and a tilde |
 
+Model F is the grammar as of round four. Every probe above re-runs under it;
+the `~` model survives only inside T33, which compares the two.
+
 ## What overturned a draft answer
 
 - The escape was drafted as json/v2's single-quoted string after reading its
@@ -83,5 +86,12 @@ the new grammar when `t11Mode` is set, so the end-to-end probe uses real names.
   the key while keeping ferry's grammar, which is the case that decides it.
   Overturned by review. T29.
 - T33's first render escaped every punctuation character always, which made
-  the escape model look worse than it is. The escape is accepted anywhere and
-  required only where the character would otherwise be the grammar's own.
+  the escape model look worse than it is.
+- The escape character itself was overturned by review. The deciding number is
+  that a comma appears in 22 of 565 real free-text tag values and a tilde in 2,
+  so the comma is the hatch people open and it is the one that has to read
+  well. Model F, bare or single-quoted with the quote doubled, has no escape
+  character at all.
+- T21's "one-backslash landmine" argument against a quoted model was weaker
+  than stated: ferry's own raw-tag scanner catches it loudly. What survives is
+  the reason ferry doubles the quote instead of backslash-escaping it.

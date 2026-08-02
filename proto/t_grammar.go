@@ -10,14 +10,17 @@ package main
 //	<option>  required | omitzero | default=<text>
 //	"-"       as the whole value: this field is not mapped.
 //
-// Escaping. `~` introduces an escape and `~x` yields x for x in the grammar's
-// own punctuation, `~ , = -`. Anything else after `~` is an error. This is the
-// same rule the address rendering uses, with a different alphabet, which is
-// why it is stated once.
+// Quoting. A name or an option value is BARE, or SINGLE-QUOTED with a literal
+// quote doubled inside it. A bare token carries no escapes at all, and only a
+// LEADING quote is significant, so an apostrophe inside a bare token is just
+// an apostrophe. There is no escape character.
 //
-// Nothing in the grammar needs a character that is not a valid Go string
-// escape, which T1/T2 measured to be a hard constraint rather than a
-// preference.
+// The single-quoted form is the one encoding/json/v2's own source carries,
+// for the reason T1/T2 measured independently: neither a backtick nor a
+// double quote can appear verbatim in a struct tag. ferry differs from v2
+// only in the inner escape, taking doubling over a backslash, because a
+// backslash in a tag value must be written `\\` and one short of that
+// produces a tag reflect.StructTag.Get cannot read at all.
 
 import (
 	"fmt"
@@ -37,9 +40,9 @@ type tagDecl struct {
 
 const tagPunct = "~,=-"
 
-// quotedMode swaps the escape model for model F, so the two can be run
-// against the same probes rather than compared on paper.
-var quotedMode bool
+// quotedMode is model F, which is the grammar. The `~` model survives only
+// inside T33, which compares the two on the same intents.
+var quotedMode = true
 
 // ---------- escaping ----------
 
@@ -206,10 +209,11 @@ func parseFerryTag(value string) (tagDecl, []error) {
 		return d, nil
 	}
 
-	split, unesc := splitFields, unescape
+	split := splitFields
+	unesc := func(s, what string) (string, error) { return unescape(s) }
 	if quotedMode {
 		split = splitFieldsQ
-		unesc = func(s string) (string, error) { return unquoteQ(s, "token") }
+		unesc = unquoteQ
 	}
 	fields := split(value)
 
@@ -219,7 +223,12 @@ func parseFerryTag(value string) (tagDecl, []error) {
 	case rawName == "":
 		errs = append(errs, fmt.Errorf("a ferry tag must name the segment this field addresses; write ferry:\"<name>\", or ferry:\"-\" to leave the field unmapped"))
 	case rawName == "-":
-		errs = append(errs, fmt.Errorf("`-` names no segment: write ferry:\"-\" on its own to leave the field unmapped, or ferry:\"~-,...\" to name the segment `-`"))
+		spell := `~-`
+		if quotedMode {
+			spell = `'-'`
+		}
+		errs = append(errs, fmt.Errorf("`-` names no segment: write %s:%q on its own to leave the field unmapped, or %s:%q to name the segment `-`",
+			tagKeyName, "-", tagKeyName, spell+",..."))
 	case !quotedMode && hasUnescaped(rawName, '='), quotedMode && !strings.HasPrefix(rawName, "'") && strings.Contains(rawName, "="):
 		before, _, _ := strings.Cut(rawName, "=")
 		if _, ok := lookupOpt(before); ok {
@@ -232,7 +241,7 @@ func parseFerryTag(value string) (tagDecl, []error) {
 			errs = append(errs, fmt.Errorf("a name may not contain `=`; %s", hint))
 		}
 	default:
-		n, err := unesc(rawName)
+		n, err := unesc(rawName, "name")
 		if err != nil {
 			errs = append(errs, err)
 		} else {
@@ -280,7 +289,7 @@ func parseFerryTag(value string) (tagDecl, []error) {
 		case spec.name == "omitzero":
 			d.omitzero = true
 		case spec.name == "default":
-			t, err := unesc(text)
+			t, err := unesc(text, "value")
 			if err != nil {
 				errs = append(errs, err)
 				continue

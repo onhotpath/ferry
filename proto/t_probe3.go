@@ -99,15 +99,15 @@ type twoNames struct {
 // ---- T19: end to end, with hostile segment text ----
 
 type hostile struct {
-	Comma  string `ferry:"a~,b"`
-	Equals string `ferry:"a~=b"`
-	Tilde  string `ferry:"a~~b"`
-	Dash   string `ferry:"~-"`
+	Comma  string `ferry:"'a,b'"`
+	Equals string `ferry:"'a=b'"`
+	Tilde  string `ferry:"a~b"`
+	Dash   string `ferry:"'-'"`
 	Slash  string `ferry:"a/b"`
 	Hash   string `ferry:"a#b"`
 	Space  string `ferry:"a b"`
 	Dot    string `ferry:"a.b"`
-	Greet  string `ferry:"greet,default=Hello~, world"`
+	Greet  string `ferry:"greet,default='Hello, world'"`
 }
 
 func runT14to19() {
@@ -141,7 +141,7 @@ func runT14to19() {
 	fmt.Printf("  Validate[ref5]()    -> %s\n", line1(Validate[ref5]()))
 	fmt.Println("  no value in hand, no plane reachable, no I/O: reflect.TypeFor[T]() only")
 
-	hdr("T16  ADR-0003's four properties under one escape rule shared with the tag")
+	hdr("T16  ADR-0003's rendering, which this ticket leaves alone")
 	fuzzUnified()
 
 	hdr("T17  xload's prefix=, taken apart")
@@ -281,9 +281,13 @@ func fuzzUnified() {
 	}
 	fmt.Printf("  %d fuzzed paths, segment text drawn from %v\n", n, alphabet)
 	fmt.Printf("  round-trip failures: %d    distinct segment lists sharing a rendering: %d\n", fails, collisions)
-	fmt.Println("  the prototype's ~0 ~1 ~2 spelling and this ~x one both satisfy ADR-0003's")
-	fmt.Println("  four properties; what ~x buys is that the tag grammar's escape is the")
-	fmt.Println("  same rule rather than a second one to learn.")
+	fmt.Println("  An earlier draft proposed unifying the address rendering's escape with the")
+	fmt.Println("  tag's, and this fuzz was its evidence. The tag grammar now has no escape")
+	fmt.Println("  character at all, so there is nothing to unify: ADR-0003's spelling stays")
+	fmt.Println("  the implementation's choice, untouched by this ticket. The result is kept")
+	fmt.Println("  because it shows the follow-the-character rule would also have worked, and")
+	fmt.Println("  because the address rendering is machine-generated - which is the reason a")
+	fmt.Println("  shared rule with a human-typed grammar was worth less than it sounded.")
 }
 
 func eqStrs(a, b []string) bool {

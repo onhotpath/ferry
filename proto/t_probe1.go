@@ -19,16 +19,20 @@ var grammarCases = []string{
 	"host,default=",
 	"port,default=8080,omitzero",
 	"-",
-	"~-",
-	"a~,b",
-	"a~=b",
-	"a~~b",
+	"'-'",
+	"'a,b'",
+	"'a=b'",
+	"'a''b'",
 	"feature-flags",
 	"db.host",
-	"K,default=~,",
-	"greeting,default=Hello~, world",
+	"it's",
+	"K,default=','",
+	"greeting,default='Hello, world'",
+	"greeting,default=it's here",
 	"path,default=/etc/ferry",
+	"home,default=~/.cache/app",
 	"query,default=a=b",
+	"brokers,default='h1:9092,h2:9092'",
 	// ill formed
 	"",
 	",required",
@@ -42,17 +46,17 @@ var grammarCases = []string{
 	"host,omitempty",
 	"host,inline",
 	"host,prefix=DB_",
-	"host,delimiter=,",
 	"host,nodump",
 	"host,required,required",
 	"host,,required",
 	"host,default",
 	"host,required=yes",
 	"host,defualt=x",
-	"a~xb",
-	"a~",
-	"host,default=~q",
+	"'a,b",
+	"host,default='abc",
+	"host,default='abc'def",
 }
+
 
 func runT4to7() {
 	hdr("T4  every diagnosis the grammar produces")
@@ -104,16 +108,16 @@ func runT4to7() {
 	fmt.Println("  cannot: its parseField splits on `,` so env:\"K,delimiter=,\" is unwritable.")
 	fmt.Println()
 	fmt.Printf("  %-22s %-26s %s\n", "model", "name `a,b`", "stray comma: `host,,required`")
-	fmt.Printf("  %-22s %-26s %s\n", "escape char `~,`", show(escName("a~,b")), show(escName("host,,required")))
+	fmt.Printf("  %-22s %-26s %s\n", "bare or 'quoted'", show(escName("'a,b'")), show(escName("host,,required")))
 	fmt.Printf("  %-22s %-26s %s\n", "doubling `,,`", show(dblName("a,,b")), show(dblName("host,,required")))
 	fmt.Printf("  %-22s %-26s %s\n", "no escaping", show(noneName("a,b")), show(noneName("host,,required")))
 
 	hdr("T7  5.10's second half, written out in each grammar")
 	fmt.Println("  xload   env:\"K,delimiter=,\"        -> ", xloadParse("K,delimiter=,"))
-	d, errs := parseFerryTag("K,default=~,")
-	fmt.Printf("  ferry   ferry:\"K,default=~,\"       ->  name=%q default=%q errs=%d\n", d.name, d.defText, len(errs))
-	d, errs = parseFerryTag("a~,b,required")
-	fmt.Printf("  ferry   ferry:\"a~,b,required\"      ->  name=%q required=%v errs=%d\n", d.name, d.required, len(errs))
+	d, errs := parseFerryTag("K,default=','")
+	fmt.Printf("  ferry   ferry:\"K,default=','\"      ->  name=%q default=%q errs=%d\n", d.name, d.defText, len(errs))
+	d, errs = parseFerryTag("'a,b',required")
+	fmt.Printf("  ferry   ferry:\"'a,b',required\"     ->  name=%q required=%v errs=%d\n", d.name, d.required, len(errs))
 }
 
 func describe(d tagDecl) string {
