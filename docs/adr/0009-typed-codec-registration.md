@@ -1,0 +1,877 @@
+# 9. Typed codec registration, and the lifetime of the identity table
+
+Status: Proposed
+Date: 2026-08-02
+Ticket: [#19](https://github.com/onhotpath/ferry/issues/19)
+
+## Context
+
+[ADR-0001](0001-what-ferry-supports.md) made core's type set closed and its extension explicit:
+
+> That set is extensible only by explicit typed codec registration ([#19](https://github.com/onhotpath/ferry/issues/19)), for types ferry does not own.
+> Registration extends the set, and the guarantee transfers to the registrant.
+> Registering without proving is permitted and forfeits the guarantee.
+
+This ADR is that sentence turned into an API.
+
+Four ADRs have since put obligations on it by name, and none of them is reopened here.
+[ADR-0005](0005-the-supported-type-set.md): a codec collapses a type to a leaf and a leaf needs no address set, which is what makes an interface and a recursive type expressible at all; a key codec's text must be injective; a proof is a triple of values, a relation and a boundary `Value`.
+[ADR-0006](0006-defaults-and-zero-values.md): a declared default arrives as a `String` `Value` at the field's address, and a registered codec is the only way to accept `Null` into a Go type whose kind has no null.
+[ADR-0007](0007-the-codec-chain-and-its-precedence.md): a registration is an entry in the same identity table the chain consults first; registering a type already in the table is a loud error; a codec declares the boundary kind it produces and core donates `String` to it; a codec is a pair, is total over its type including the zero value, and accepts every kind it emits; a codec takes no `context.Context` and cannot see call options.
+All five of ADR-0007's were exercised against a scratch registration on `proto/12-codec-chain`, so they arrive here known dischargeable rather than merely stated.
+
+What is left open is genuinely open, and one question dominates.
+ADR-0007 deliberately did not touch the table's **lifetime**, because that interacts with [#16](https://github.com/onhotpath/ferry/issues/16)'s schema cache rather than with precedence.
+The inherited answer is xload's, which has no registration at all: its only extension point is implementing `Decoder` on your own type, and `time.Duration` is reached by comparing `Type.String()` ([load.go:301](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L301)).
+That is survey item **5.9**'s third bullet, and it is this ticket's.
+
+This ADR is written from a throwaway prototype on branch `proto/19-registration`, which never merges.
+It is built on `proto/12-codec-chain`, so every measurement runs against a real `Path`, a real `Value`, the type set ADR-0005 landed, the chain ADR-0007 landed, and a real YAML plane over real files.
+Every number is from that prototype unless it cites the survey.
+
+**Three of the fifteen probes found defects, and all three are in code this ADR proposes rather than in code it inherited.**
+One is in this ADR's own headline example.
+The other two are in the single piece of reflection the registration API owns, so they would have been defects in every codec anyone ever registered.
+All three are recorded in full rather than quietly fixed.
+
+## Decision
+
+### What this closes, and what it does not
+
+The ticket asked for seven things by name.
+This table is the answer to each, so a reader can check the ADR against the ask without reading the rest of it.
+
+| The ticket asked | Closed | Where |
+| --- | --- | --- |
+| what registration looks like at the call site, and whether inference works without explicit instantiation | **yes**: three constructors, and inference works everywhere there is a value argument to infer from | [Three constructors](#three-constructors-and-inference-works) |
+| static registration only, or also dynamic registration by runtime `reflect.Type` | **yes: static only** | [Registration is static](#registration-is-static-and-the-entry-point-is-why) |
+| **whether registration is global, per-call, or per-instance** | **yes**: the table is a value, it freezes at its first use, and core ships a default one | [The table is a value](#the-table-is-a-value-and-it-freezes-at-its-first-use) |
+| how a registered codec interacts with the compiled schema in [#16](https://github.com/onhotpath/ferry/issues/16) | **yes**, as one obligation stated in one sentence | [What this hands #16](#what-this-hands-16) |
+| whether encode and decode register together as a pair | **yes**, and the API makes a half **unwritable** rather than refused | [Three constructors](#three-constructors-and-inference-works) |
+| the decline-and-fall-through mechanism, if any | **yes: none**, and json/v2's real mechanism does not port | [There is no decline](#there-is-no-decline-and-jsonv2s-mechanism-does-not-port) |
+| whether registration can require, or only enable, a proof | **yes: only enable**, for three measured reasons | [The proof is enabled](#the-proof-is-enabled-and-can-never-be-required) |
+
+Five questions this ADR had to answer that the ticket did not name:
+
+| Not asked for, answered anyway | Where |
+| --- | --- |
+| what a registration may not be, given that ADR-0007 named only two refusals | [What a registration may not be](#what-a-registration-may-not-be) |
+| how a key codec's injectivity obligation is communicated at registration | [A key codec says so](#a-key-codec-says-so-and-that-is-where-injectivity-is-communicated) |
+| whether the API can accidentally foreclose ADR-0006's `Null` escape hatch | [The declared kind is a donation target](#the-declared-kind-is-a-donation-target-and-the-accepted-set-is-the-codecs) |
+| how ADR-0005's named-duration hole is actually closed | [Registration is static](#registration-is-static-and-the-entry-point-is-why) |
+| whether a registration may lift one of ADR-0005's four permanent refusals | [What a registration may not be](#what-a-registration-may-not-be) |
+
+**Three things this ADR does not close.**
+
+- **A type with no name at a call site cannot be registered.**
+  Stated as an accepted cost with the case that would reopen it named, not solved.
+- **`map[time.Time]string` still collapses two distinct keys into one address.**
+  That is [#31](https://github.com/onhotpath/ferry/issues/31), it is core's own set rather than a registration, and the opt-in rule below deliberately does not reach it.
+- **Whether the schema cache lives on the registry or beside it** is [#16](https://github.com/onhotpath/ferry/issues/16)'s.
+  This ADR fixes the one property #16 has to preserve and measures what happens without it.
+
+### Three constructors, and inference works
+
+```go
+func TextCodec[T any, PT textPtr[T]](kind VKind) Reg
+func StringCodec[T any](format func(T) string, parse func(string) (T, error)) Reg
+func TypeCodec[T any](kind VKind, enc func(T) (Value, error), dec func(Value) (T, error)) Reg
+
+func (r *Registry) Register(regs ...Reg) error
+```
+
+`Reg` is opaque and the only way to make one is a constructor that takes **both halves**.
+That is ADR-0007's "a codec is a pair" made unrepresentable-otherwise rather than documented, and it is why the pair question needs no runtime check.
+
+**Inference works at every call site that has a value argument, and it is not marginal.**
+Ten registrations were written the way a user would write them and compiled; not one carries an explicit type argument.
+Five of them are one line, because `T` is inferred from a **method expression** on one side and a package parse function on the other:
+
+```go
+StringCodec(netip.Addr.String, netip.ParseAddr)
+StringCodec(netip.AddrPort.String, netip.ParseAddrPort)
+StringCodec(netip.Prefix.String, netip.ParsePrefix)
+StringCodec(language.Tag.String, language.Parse)
+StringCodec(uuid.UUID.String, uuid.Parse)
+```
+
+**Do not copy those five.**
+Three of them are wrong, and [The three defects](#the-three-defects-found-by-running-the-decisions) is why.
+They are shown here because the ergonomic result is real and separable from the correctness result: the API infers, and inference is not what makes a codec right.
+
+The remaining five cost between six and eighteen lines, and the shape is the same in each: `url.URL` needs a wrapper on both halves, a named `time.Duration` needs two literals, `big.Int` and `decimal.Decimal` need `TypeCodec` because their text is a number, and `net.Addr` needs `TypeCodec` because an interface codec owns a discriminator inside its own text.
+
+**A half pair is a build error, and the diagnostic documents the API.**
+Verified on `go1.27rc2`:
+
+```
+StringCodec(netip.Addr.String, netip.ParsePrefix)
+  in call to StringCodec, type func(s string) (netip.Prefix, error) of netip.ParsePrefix
+  does not match inferred type func(string) (netip.Addr, error) for func(string) (T, error)
+
+StringCodec(netip.ParseAddr, netip.Addr.String)      // halves swapped
+  in call to StringCodec, type func(s string) (netip.Addr, error) of netip.ParseAddr
+  does not match inferred type func(string) string for func(T) string
+
+StringCodec(netip.Addr.String)                       // one half only
+  not enough arguments in call to StringCodec
+    have (func(netip.Addr) string)
+    want (func(T) string, func(string) (T, error))
+```
+
+ADR-0007 measured zero half pairs across three corpora and made an incomplete **interface** pair a schema compile error.
+A half **registration** does not need that treatment, because it does not compile.
+
+**One ergonomic limit was found and no API shape removes it.**
+A method expression requires a **value** receiver, so `url.URL.String` is `invalid method expression url.URL.String (needs pointer receiver (*url.URL).String)` and `big.Int.String` is the same.
+That is a property of the standard library's receivers, and it is the difference between a one-line registration and a seven-line one.
+
+**Why three constructors rather than one.**
+`TypeCodec` is general and the other two are not sugar over it in the way that phrase usually means.
+
+- `TextCodec[T](kind)` is for a type that **already declares an inverse**.
+  It takes only a kind, because both halves come from `encoding.TextMarshaler` and `encoding.TextUnmarshaler`.
+  It is the constructor for the two cases ADR-0007 leaves: a type whose text pair is on the pointer receiver and is used by value, and a type whose text pair says `String` where the registrant needs another kind.
+  `PT` is inferred from `T` by constraint type inference, so the call site names one type argument: `TextCodec[netip.Addr](String)`.
+- `StringCodec(format, parse)` is for a type where **the registrant is declaring the inverse**.
+- `TypeCodec(kind, enc, dec)` is for a type where the registrant is also declaring the kind and the accepted set.
+
+**That ordering is not the ordering the API's ergonomics suggest, and the ADR states the honest one**: prefer `TextCodec` where the type has a pair, because the pair declares an inverse and `String() string` does not.
+This is not a style preference and it is the subject of the first defect below.
+
+### The declared kind is a donation target, and the accepted set is the codec's
+
+ADR-0007 fixed that a codec declares the boundary `Value` kind it **produces** and that core donates `String` to that kind before calling it.
+It did not fix what a codec **accepts**, and ADR-0006 landed a capability that turns on exactly that difference.
+
+> The declared kind is the donation target and nothing else.
+> It does not constrain the kinds a codec accepts, and it does not constrain the kinds a codec emits.
+
+**Why the accepted set must be wider.**
+ADR-0006 refuses `Null` at every leaf whose Go kind has no null, and its argument for choosing refusal over zeroing is recoverability, stated at line 194:
+
+> A registered codec for its own type accepts `Null` and returns 0.
+> That is ADR-0005's stated escape hatch used for what it is for.
+
+That is a claim about this ADR's API, made before this API existed.
+Run:
+
+```
+plain int, plane says null                 -> err: value: wrong kind
+registered R2Count, plane says null        -> 0
+registered R2Count, plane says number("7") -> 7
+registered R2Count, plane says string("7") -> 7
+```
+
+The codec declares `Number`, because that is what it produces, and separately accepts `Null`, which it never produces.
+ADR-0006's argument holds, and it holds only because ADR-0007 lets `Null` reach the codec rather than intercepting it.
+Had this ADR derived the accepted set from the declared kind, ADR-0006's choice between refusing and zeroing would have been forced the other way, and the two ADRs would have been quietly inconsistent.
+
+**And this is the measured reason there are three constructors and not one.**
+
+```
+StringCodec R2Count, plane says null       -> err: value: wrong kind
+```
+
+`StringCodec`'s decode half calls `Value.AsString`, which refuses `Null`.
+So the two-argument helper **cannot express ADR-0006's escape hatch**, and the general form whose decode half sees the whole `Value` has to stay.
+An API with only the ergonomic constructor would have closed a door another ADR is holding open.
+
+**Why the emitted set must be wider too.**
+ADR-0005's `net.Addr` codec returns `Null` for a nil interface, which is the mechanism that makes an interface expressible at all, and ADR-0007 requires that whatever a codec emits it accepts.
+So a codec declaring `String` and emitting `Null` is not a special case in an encode check, it is the rule: the declaration targets donation, and `Null` is emittable by any codec.
+
+**What core checks, and what it cannot.**
+One comparison per encode:
+
+```
+declares Number, emits String -> ferry: codec for main.R2Liar declared kind number but produced string
+```
+
+That catches a codec that lies about its declared kind.
+It cannot catch a codec that declares the right kind and the wrong text, which is what ADR-0005's golden column exists for and what the proof section below is about.
+
+### What a registration may not be
+
+ADR-0007 named two refusals.
+Measured, the table needs three, and the third is the one that matters.
+
+| | diagnostic |
+| --- | --- |
+| a type core owns | `time.Duration is in core's own set and its representation is pinned; define a named type over it and register that` |
+| a duplicate | `netip.Addr is already registered` |
+| **a pointer type** | `*big.Int: pointer indirection is structural and a pointer type never reaches the table; register big.Int instead` |
+| a named type over one core owns | **accepted**, and it must be: it is ADR-0005's documented escape |
+
+**The pointer refusal is not tidiness, and the prototype proved it by removing it.**
+ADR-0007's first defect was that `*big.Int` satisfies the whole text pair in its own right, so a `*big.Int` field became a leaf, ADR-0005's nil-pointer rule never ran, a nil dumped as `string("<nil>")` and the load segfaulted.
+ADR-0007 fixed that for the **chain**, by resolving pointer indirection before the chain is asked anything.
+With the check removed from the table, measured:
+
+```
+with the check removed, a nil *big.Int dumps string("<nil>")
+```
+
+The same hole, reopened through the other door.
+So the rule ADR-0007 states for the chain binds the table identically, and it is enforced at the registration call site rather than in the walk, which is earlier and names the type to register instead.
+
+**Registering a type the chain would claim is legal, and it wins.**
+Measured, with the text arm on:
+
+```
+slog.Level unregistered, chain claims it -> string("WARN")
+slog.Level registered, table claims it   -> number("4")
+```
+
+ADR-0007's chain is identity, then the text pair, then kind, so registration is step one and beats a text pair the type already has.
+This is not a loophole: it is the mechanism by which a user overrides a representation a **dependency** chose, which is precisely the drift exposure ADR-0007 records against before-kind ordering.
+Registration is the answer to that exposure, and it is worth saying so, because ADR-0007 named the exposure and left the remedy to this ticket.
+
+**Registering an INTERFACE claims the interface, and nothing else.**
+Measured, with a `net.Addr` codec registered:
+
+```
+struct{ A net.Addr }     -> addrs=[/A]
+struct{ A *net.TCPAddr } -> addrs=[/A/IP /A/Port /A/Zone]
+```
+
+Identity is `==`, so this is correct and it is not obvious.
+A user who registers the interface and then changes the field to the concrete type silently gets a different representation and a different address set, from an edit that is not a serialization change in any reviewer's reading.
+That is the same shape as ADR-0007's after-kind drift, triggered from the user's own struct rather than from a dependency, and it belongs in the documentation of registration rather than being discovered against a stored artefact.
+
+**A registration may lift one of ADR-0005's four permanent refusals, and the table does not stop it.**
+Measured, a `chan int` codec:
+
+```
+register a chan int codec -> nil
+compile=[/Ch]  dump=map[/Ch:string("ch")]  load err=nil
+back.Ch == orig -> false
+```
+
+The table takes it, because the table is keyed by `reflect.Type` and a `chan` is a perfectly good key.
+**ferry does not add a check for this**, and the reason is that ADR-0005's "the value does not exist outside the process" is a statement about the **proof** rather than about the mechanism.
+The codec runs; the round trip yields a different channel; and no relation the registrant can write makes that true, because a relation that returns true for two distinct channels says every channel is every other channel.
+ADR-0001 already permits registering without proving and says it forfeits the guarantee.
+A kind check here would refuse a registrant who has knowingly forfeited it, which is not core's call.
+
+### Registration is static, and the entry point is why
+
+> There is no registration by runtime `reflect.Type`.
+
+json/v2 cannot do it either, and that was re-checked rather than inherited from the ticket body.
+[go.dev/issue/73457](https://go.dev/issue/73457), "proposal: encoding/json/v2: MarshalFunc with reflect.Type", against the GitHub API on 2026-08-02: **open**, labels `Proposal` and `LibraryProposal`, last touched 2025-08-07.
+So there is no upstream answer to copy, and ferry decides on its own terms.
+
+**What only the dynamic form can express**, measured: a type reached at runtime and never named in source.
+`reflect.StructOf` is the only way to make one in pure Go, and a dynamic registration for it works.
+
+**What it costs**, measured: everything the typed form makes unrepresentable becomes a runtime question again.
+
+```
+wrong type inside enc -> PANIC: interface conversion: interface {} is netip.Addr, not time.Time
+wrong Set on dst      -> PANIC: reflect: call of reflect.Value.SetString on int64 Value
+```
+
+Both are panics **inside ferry**, on third-party code, at Dump.
+The typed form makes both a build error naming `T`.
+
+**The deciding argument is not the cost, it is that the capability has nowhere to land.**
+The research's recommendation 2 and ADR-0001's own working assumption make the entry point `Load[T]` / `Dump[T]`, and a type parameter can only be a type written in source.
+So a codec registered for a `reflect.StructOf` type is a codec for a type the entry point cannot be asked about.
+Shipping the registration half of a capability whose other half does not exist is shipping an interface with nothing behind it, which ADR-0001 rules out by name.
+This is stated as contingent on [#16](https://github.com/onhotpath/ferry/issues/16) rather than as settled: if #16 ships a non-generic entry point taking a `reflect.Type`, dynamic registration becomes reachable and this section is what it has to argue against.
+
+**And the case people actually reach for it with has a typed spelling.**
+The pitch is "I have N named types over one underlying type", which is ADR-0005's named-duration hole generalised.
+Core ships the one-liner instead:
+
+```go
+func DurationLike[T ~int64]() Reg
+```
+
+Measured over two named duration types:
+
+```
+/M string("1.5s")   /S string("1m30s")   load -> 1.5s 1m30s
+```
+
+**This is the answer to ADR-0005's documented sharp edge**, which that ADR left open as "a user who defines a named duration type registers a codec for it, and this is a documented sharp edge rather than a defect ferry can reflect its way out of".
+It is one line per type, with no `reflect.Type` in anyone's hand.
+It needs an explicit type argument, because there is no value argument to infer from, and that is the one place in this API where inference does not work.
+
+**A predicate arm is the other generalisation, and it is refused.**
+Instead of naming each type, register a predicate over `reflect.Type` and claim whatever matches.
+It was built and run rather than dismissed, because it is the one extension to ADR-0007's chain this ticket could plausibly have argued for.
+
+The predicate that rescues a named duration eats every named `int64` in the program:
+
+```
+R5Timeout -> string("30s")
+R5Port    -> string("30s")     <- a port number, 30000000000
+R5Retries -> string("30s")
+```
+
+ADR-0005 already ruled this out for core, saying that "closing it would require matching on the underlying type, which would then also capture every ordinary `type Port int`".
+A predicate arm is that rule handed to the user with the defect intact.
+
+And two predicates matching one type is precedence by **list order**:
+
+```
+order 1: underlying int64, treated as a duration -> string("30s")
+order 2: underlying int64, treated as a number   -> number("30000000000")
+```
+
+Registration order across packages is `init()` order, which is a property of the import graph rather than of anyone's intent.
+ADR-0007's chain is a map keyed by `reflect.Type` at step one precisely so that there is no order to get wrong, and a predicate arm reintroduces it.
+The lookup cost is **not** the argument and the ADR does not lean on it: 13 ns for a map hit against 20 to 43 ns for a scan of 1 to 16 predicates, and [#16](https://github.com/onhotpath/ferry/issues/16) resolves the claim once per type anyway.
+
+### The table is a value, and it freezes at its first use
+
+This is the largest question the ticket owns.
+
+> A registration goes into a `Registry`, which is a value.
+> **A registry freezes at its first use**, which is the first schema compiled against it, and a registration after that is a loud error.
+> Core ships a default registry, and the package-level `Register` writes to it.
+
+Three candidates were built and run against each other.
+The fixtures all register **after** a schema has been compiled, because a fixture that registers first cannot see the question at all, and that is the shape of mistake the prior sessions each made once.
+
+#### Global and mutable is unsound, three ways
+
+Measured, with a schema cache keyed by `reflect.Type`, which is the shape all eight stdlib type caches use.
+
+**A cached refusal stays a refusal.**
+
+```
+compile #1, nothing registered    -> ferry: /A: netip.Addr maps no address ...
+compile #2, netip.Addr REGISTERED -> the same error, from the cache
+the same compile, uncached        -> addrs=[/A], err=nil
+```
+
+Infuriating, and not dangerous, because it is loud.
+
+**A cached codec is silent.**
+The research's recommendation and ADR-0007 both put the resolved codec **in** the compiled schema, and that is the version that goes wrong:
+
+```
+codec baked into the schema at compile #1 -> string("192.0.2.1")
+codec the registration asked for          -> bytes("\x00...\xc0\x00\x02\x01")
+```
+
+No error, no diagnostic, and the plane now holds the representation the user replaced.
+
+**And the cached address set is the one that matters.**
+
+```
+compile #1, R6Backend unregistered -> addrs=[/B/Host /B/Port]
+compile #2, R6Backend REGISTERED   -> addrs=[/B/Host /B/Port]   (cache hit)
+the same compile, uncached         -> addrs=[/B]
+what dump actually writes          -> [/B]
+```
+
+ADR-0004 hands the **static address set** to `Bind` before any I/O.
+So ADR-0003's prefix-free check ran over a set that does not exist, the driver's key function was checked for injectivity over the wrong set, and `/B` is not in the table it precomputed, which makes a legitimate write a driver error.
+A global mutable table makes every one of those a function of when the first Load happened.
+
+#### Scoped, and what the schema cache must be keyed by
+
+Four candidate keys, all measured.
+
+| key | result |
+| --- | --- |
+| `reflect.Type` alone | two registries that disagree about `net.IP` share an entry, and the second gets the first's codec |
+| the registry **value** | `PANIC: runtime error: hash of unhashable type` |
+| the registered **type set** | two registries with the same types and different codecs have the same signature and collide |
+| the registry **pointer** | works |
+
+The second row is ADR-0004's own finding arriving one layer up.
+That ADR measured a driver value panicking as a map key because it holds a func field, and concluded that "a contract whose correctness depends on a driver author supplying the right identity is a prose rule with a runtime panic behind it".
+A registry is nothing but func fields and maps, so it is the worst case of that.
+
+The third row is why no content hash can work: a key can only see what is comparable, and the codec is both the part that differs and the part Go cannot compare.
+
+**The pointer key works, and it is sound only if the registry is frozen.**
+
+```
+compile with an empty registry  -> string("192.0.2.1")
+register into it, compile again -> string("192.0.2.1")   (cache hit)
+```
+
+Same pointer, different contents, same entry.
+The staleness of the global model returns in full.
+So the pointer key does not remove the freeze, it makes the freeze **per registry** instead of per process, and that is the whole difference between the scoped model and the frozen-global one.
+
+**A per-call registry is ruled out by the same measurement that admits a long-lived one.**
+
+```
+10000 per-call registries -> 10000 cache entries, none evictable
+```
+
+The research surveyed eight stdlib type caches and found no eviction anywhere, and states why: "the cache is bounded by the set of types the program statically declares, so it converges after warmup".
+Keying by a per-call value destroys exactly that property.
+A registry has to be long-lived, and that is a real constraint on how [#16](https://github.com/onhotpath/ferry/issues/16) spells the entry point rather than a free choice.
+
+#### Global-and-frozen was costed rather than assumed
+
+It removes the staleness entirely, and it costs two things.
+
+**Two tests cannot want different codecs for one type.**
+Under a global table the second `Register` returns "already registered", or "registration is closed" if any earlier test compiled a schema, depending on test order.
+Measured on this prototype's own probes: R6, R7 and R11 each need a **different** codec for `net.IP` or for one key type, in one process.
+Under a global table this prototype could not have been written, and neither can a registrant's own test suite for a codec they are choosing between two representations for.
+
+**The freeze point is decided by `init()` order.**
+The first compile is inside whichever Load or Dump ran first, which across packages is the import graph's.
+That is the same property this ADR refused a predicate arm for two sections above, in a different costume: correct today, broken by an import a dependency adds.
+
+**Its one real advantage is zero configuration**, and that is answerable without taking the model.
+Core ships a **default registry**, package-level `Register` writes to it, and it freezes on first use exactly like any other.
+So `ferry.Register(...)` in an `init()` followed by `ferry.Load[Config](ctx, src)` is available, and the scoped form is the escape hatch a test reaches for rather than the only way in.
+
+#### And freezing is what keeps the registry out of #20's problem
+
+A mutable registry read by a compile is a data race, whether or not any ADR mentions goroutines.
+Reported by the race detector:
+
+```
+Write at 0x... by goroutine 9:   runtime.mapassign -> (*Registry).Register
+Previous read by goroutine 10:   runtime.mapaccess2 -> identityLookup -> classify -> compile
+```
+
+No mutex inside ferry fixes it, because the read is the whole point of a lock-free cache hit.
+A frozen registry is written before the first reader exists and never again, so the read path is a plain map lookup with no lock and no atomic.
+ADR-0004 already relies on that shape and priced it: 8.8 ns/op for the write-once static table against 20.0 ns/op with a single mutex.
+
+Concurrency is [#20](https://github.com/onhotpath/ferry/issues/20)'s and nothing here decides it.
+What this ADR hands #20 is a registry that is immutable for the whole life of every schema compiled against it, which is one fewer shared mutable thing than a global table would have handed it.
+
+### There is no decline, and json/v2's mechanism does not port
+
+> A registration claims its type unconditionally.
+> There is no way for a codec to say "not mine" at runtime.
+
+**The mechanism was re-measured first, because both the ticket body and the research doc are wrong about how json/v2 spells it.**
+Both say v2 has a `SkipFunc`.
+Verified on `go1.27rc2`: `grep -rn SkipFunc $GOROOT/src/encoding/json/` returns **nothing**, and the mechanism survives as an unexported `maySkip bool` at [arshal_funcs.go:95](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/arshal_funcs.go).
+`SkipFunc` exists in the `github.com/go-json-experiment/json` mirror only.
+
+The capability was respelled rather than removed, and it was run rather than read.
+`JoinMarshalers`' godoc: "If a function returns [errors.ErrUnsupported], then the next applicable function is called, otherwise the default marshaling behavior is used."
+Measured, in a module importing `encoding/json/v2` on `go1.27rc2`:
+
+```
+MarshalToFunc  {A:1}  -> "first:1"    err=nil
+MarshalToFunc  {A:-1} -> "second:-1"  err=nil       declined, fell through
+MarshalFunc    {A:1}  -> "buf:1"      err=nil
+MarshalFunc    {A:-1} ->              err=json: cannot marshal from Go main.T: marshal
+                                      function of type func(T) ([]byte, error) may not
+                                      return errors.ErrUnsupported
+all functions decline -> {"A":-1}     err=nil       default behaviour
+```
+
+So v2 permits declining exactly where declining is observably free, on the streaming shape where nothing has been written, and forbids it on the shape that has already produced a buffer.
+ferry's codec produces a `Value` rather than writing to a stream, so "nothing has been written yet" is trivially true and **v2's own constraint does not bind ferry**.
+The question is therefore genuinely open on ferry's terms, and it was asked on ferry's terms.
+
+**A value-dependent claim makes the address set value-dependent.**
+Measured, one type, one compiled schema, a codec that declines when a field is zero:
+
+```
+compile, codec claims the type   -> [/B]
+compile, codec declines the type -> [/B/Host /B/Port]
+
+{Host:h Port:80} claimed  -> mints [/B] = string("h:80")
+{Host:h Port:0}  declined -> mints [/B/Host /B/Port]
+```
+
+Every ADR since ADR-0003 leans on the address set being computable from `reflect.TypeFor[T]()` alone with no value in hand.
+ADR-0004 hands the static set to `Bind` before any I/O, so the driver has precomputed a key table that is right for one of those values and wrong for the other, and ADR-0003's prefix-free check ran over a set the walk is about to leave.
+
+**And the Load direction has no answer at all.**
+The two rows above are two different **plane layouts**, not two code paths:
+
+```
+plane holds /B=string("h:80")           , codec claims -> {Host:h Port:80}
+plane holds /B/Host and /B/Port         , kind admits  -> {Host:h Port:80}
+```
+
+A codec declining on Load would have to ask the plane for addresses the source was never bound to, which ADR-0004's contract does not allow and which needs an `Enumerator` the plane may not implement.
+v2 can fall through on decode because it holds the whole document; ferry holds one `Value` at one address.
+That is the structural difference, and it is the reason the mechanism does not port rather than the reason it is unwanted.
+
+**The decline that would be sound is a decline about the type**, which is the predicate arm, refused above for its own reasons.
+So the two sound-looking spellings of "not mine" are one spelling, and it is already decided.
+
+**What ferry gives up, priced.**
+v2's decline exists because `WithMarshalers` is a **list**, so a caller composes several and needs a way to pass.
+ferry's step one is a map, and ADR-0007 already made a duplicate a loud error, so there is never a second entry to fall through to.
+The only thing decline could reach is steps two and three of ADR-0007's chain, and both are reachable by not registering the type:
+
+```
+net.IP unregistered, chain step 2 claims it -> string("192.0.2.1")
+net.IP with no chain, step 3 claims it      -> bytes("\x00...\xc0\x00\x02\x01")
+```
+
+"Fall through to the next step" is spelled "do not register this type", and it is a decision made once at a call site rather than per value at Dump.
+
+### A key codec says so, and that is where injectivity is communicated
+
+ADR-0005 admits a registered codec as a map key and puts injectivity on the registrant as a proof obligation.
+It did not say how a registrant finds out they have taken it on, and ADR-0007 then found the same hazard inside **core's** own set and filed [#31](https://github.com/onhotpath/ferry/issues/31).
+
+> A registration is usable as a map key only if it says so: `StringCodec(...).AsMapKey()`.
+> A `map[T]V` whose key type is registered without it is a schema compile error.
+
+**The implied rule was run first.**
+Measured, a registered codec whose text drops a field:
+
+```
+Go map holds 2 keys -> ferry dumps 1 address
+/M/api  number("2")
+```
+
+One entry silently dropped, no error, and which one survives is map iteration order.
+That is #31's defect occurring in user code, and ADR-0001 rules out silently ignoring anything.
+
+**A leaf codec and a key codec are promising different things, and the difference is measurable.**
+The same lossy codec at a leaf is fine in the sense that matters: it fails a round-trip proof, loudly, at one address, with the value visible.
+
+```
+leaf: {API 80} -> string("api") -> {api 0}
+```
+
+As a key it fails by making a **sibling entry cease to exist**, which no proof over the key type alone can see, because the collision is between two values rather than inside one.
+
+**Opt-in makes it a schema compile error.**
+
+```
+registered, no AsMapKey  -> ferry: /M: unsupported type map[netip.Addr]int (kind map)
+registered with AsMapKey -> addrs=[/M/*]
+```
+
+The refusal is at schema compile from `reflect.TypeFor[T]()` alone, which is the same assertability every other refusal in this design has.
+And the diagnostic is where the obligation gets communicated, which is the point: it is the only moment a registrant is guaranteed to read.
+
+**The cost, stated exactly.**
+A user who registers `netip.Addr` and then writes `map[netip.Addr]int` gets a compile error for a codec that **is** injective.
+That is a false refusal.
+It is affordable because the fix is one method call named after the obligation, and because the error arrives at schema compile so the user never ships it.
+The implied rule's failure is a dropped map entry at Dump, on a plane already being written, discovered by a diff or never.
+
+**Implying it from the declared kind was considered and excludes nothing.**
+That is what ADR-0007's prototype does, and the non-injective codec above declares `String`.
+The kind says what the text looks like; injectivity is about what the text forgets; no kind expresses that.
+
+**And this does not fix [#31](https://github.com/onhotpath/ferry/issues/31).**
+Measured, unchanged:
+
+```
+a == b: false   a.Equal(b): true
+map[time.Time]int, 2 Go keys -> 1 ferry address
+```
+
+`time.Time` is core's pre-seeded entry, not a registration, so the opt-in rule cannot reach it.
+Fixing that amends ADR-0005's admissible key set, which is #31's.
+This is said explicitly because the two look like one bug and the opt-in rule would otherwise read as having fixed both.
+
+### The proof is enabled, and can never be required
+
+ADR-0001's sentence is taken literally rather than strengthened.
+
+**The harness needs no accessor on a registration**, which is the finding that keeps `Reg` opaque:
+
+```go
+func RoundTrip(t *testing.T, r *ferry.Registry, p Plane, proofs ...Proof)
+```
+
+A proof exercises the codec through the ordinary walk, so `ferrytest` never opens a `Reg`.
+That matters because `ferrytest` is a separate package from `ferry`, so anything it needed from a `Reg` would be exported surface forever.
+It needs nothing.
+
+**What ADR-0005's triple catches over a registration**, run:
+
+| what is wrong | caught by |
+| --- | --- |
+| lossy text | the property, on 3 of 4 cases |
+| right value, wrong representation: a `Number` codec where the proof says `String` | **only the golden column**, on every case |
+| not total over the zero value | the property, on the first case |
+
+The middle row is ADR-0005's own argument reproduced against a registration: the value round-trips perfectly, and only column three sees it.
+It is also the difference between a codec that works on YAML and one that works on env, which ADR-0007 calls the most consequential thing #19 inherits.
+
+**Three measured reasons registration cannot require a proof, in order of weight.**
+
+1. **It puts a testing import in `main`.**
+   A proof carries values, so requiring it at registration puts test fixtures in production code and `ferrytest` in core's import graph, which is the thing ADR-0002 put the harness in a separate package to avoid.
+2. **It does not close the hole.**
+   ADR-0005 measured a knowingly lossy float codec caught by 1 of 4 values.
+   Reproduced here: the lossy `netip.Addr` codec that fails a four-case proof on three cases **passes a one-case proof**, and nothing can check a value list.
+3. **It fires in the wrong place.**
+   `Register` returns an error, so a failing proof would be a startup failure rather than a CI failure.
+   ADR-0001 makes the harness route (b) authority, and authority that fires in production is an outage.
+
+**What core does instead, and it is not nothing.**
+The declared-kind check on every encode, a build error for a half pair, and a harness that takes a `*Registry` so discharging the obligation is four lines.
+
+**And one thing that falls out of the registry being a value.**
+ADR-0005's completeness check iterates core's identity table and asserts that every member has a proof, so extending the set without extending the table fails CI.
+A **registry is enumerable in exactly the same way**:
+
+```
+ferrytest.Complete(registry, proofs...)            -> missing=[]
+after adding one registration and no proof         -> missing=[netip.Prefix]
+```
+
+ADR-0007's weakest point is that the text arm admits an unbounded, unenumerable set that this check structurally cannot cover.
+Registration is not in that class, and this is the difference: a registrant who wants the guarantee can have their own CI hold them to it, which is what makes "permitted and forfeits the guarantee" a choice rather than a shrug.
+
+### What this hands [#16](https://github.com/onhotpath/ferry/issues/16)
+
+ADR-0007 already said where the per-type claim belongs: "the claim is a property of `reflect.TypeFor[T]()` alone, so it belongs in the compiled schema and is computed once; where that lives is #16's".
+This ADR measures what that is worth and states the one thing it obliges.
+
+**The performance is not the argument and this ADR does not sell it as one.**
+Six leaves, three of them registered:
+
+```
+lookup per leaf, per call   381 ns/op   5 allocs/op
+resolved at compile         283 ns/op   5 allocs/op
+```
+
+Against ADR-0003's 476 ns twelve-key cached load, that is real and it is not a headline.
+The reason to resolve at compile is that #16 wants a schema that is a plan rather than a description.
+
+**The obligation is one sentence, and it is the whole lifetime answer seen from the other end:**
+
+> Once a type has been resolved against a registry, that registry's answer for that type must never change.
+
+The staleness measurements above are what happens without it.
+So "resolve the codec into the schema" and "freeze the registry at its first use" are one decision, and #19 cannot take the first half and leave the second to #16.
+
+**Three further constraints #16 inherits**, each measured here rather than asserted:
+
+- **The schema cache key must include the registry.**
+  Keying by `reflect.Type` alone is ADR-0004's `EnvSource{Sep}` defect one layer up.
+- **The cheap shape is available and the obvious one is not.**
+  A `sync.Map` keyed by a `{reflect.Type, *Registry}` pair costs 32 ns/op against 9 ns/op keyed by `reflect.Type` alone, because a two-word struct key boxes into an interface where a `reflect.Type` already is one.
+  Hanging the per-type cache **off** the registry gives 10 ns/op, so the outer lookup is a pointer dereference and the inner one keeps the stdlib's shape.
+  Which of those #16 picks is #16's; that the pair key is not free is this ADR's measurement.
+- **A registry must be long-lived**, because a per-call one gives an unbounded, non-evictable cache.
+
+### The three defects found by running the decisions
+
+All three were found by running rather than by reading, and all three are in code this ADR proposes.
+The first is in its own headline example.
+
+**`String()` is not an inverse at the zero value, for three of the five types the one-liner is most attractive for.**
+Measured on `go1.27rc2`, zero value to text and back:
+
+| type | route | zero to text | text back to a value |
+| --- | --- | --- | --- |
+| `netip.Addr` | `String`/`ParseAddr` | `"invalid IP"` | **fails** |
+| `netip.Addr` | text pair | `""` | ok |
+| `netip.AddrPort` | `String`/`ParseAddrPort` | `"invalid AddrPort"` | **fails** |
+| `netip.AddrPort` | text pair | `""` | ok |
+| `netip.Prefix` | `String`/`ParsePrefix` | `"invalid Prefix"` | **fails** |
+| `netip.Prefix` | text pair | `""` | ok |
+| `language.Tag` | `String`/`Parse` | `"und"` | ok |
+| `uuid.UUID` | `String`/`Parse` | the nil UUID | ok |
+| `url.URL`, `big.Int`, `decimal.Decimal` | `String`/parse | `""`, `"0"`, `"0"` | ok |
+
+ADR-0007 requires a codec to be total over its type **including the zero value**, and gives the reason: "the zero value is the value a codec sees most often, because an unset field is dumped".
+So the shape a user is most likely to write is broken on the value it will meet most often.
+
+**And registering it makes the type worse than not registering it.**
+
+```
+unregistered, chain step 2 (text pair): dump=string("")           load err=nil
+registered via String/ParseAddr:        dump=string("invalid IP") load err=ParseAddr("invalid IP"): unable to parse IP
+```
+
+Registration is step one and beats the text pair, so the registration **replaces a correct codec with a broken one**.
+The type worked before the user tried to help it.
+
+**This is ADR-0005's `fmt.Stringer` refusal handed back to the user by hand.**
+That ADR refused `fmt.Stringer` outright because "`String() string` declares no inverse", measured at three of six ordinary config types where it is not one.
+Registration cannot refuse a function the user passed, so the hazard ADR-0005 removed from the chain is fully available at a registration call site, and the one-liner is what makes it attractive.
+
+Three things follow, and they are this ADR's answer rather than a note:
+
+- Core ships `TextCodec[T](kind)`, so the case "the type already declares an inverse" has a constructor that uses it.
+- The documented preference order is `TextCodec`, then `StringCodec`, then `TypeCodec`, which is **not** the order their ergonomics suggest.
+- `StringCodec`'s doc comment names the zero value, because the five types it is most attractive for include three it breaks.
+
+The mitigation that distinguishes this from ADR-0005's case is that a registration is where a proof can be asked for, and the harness catches all three on their **first** case, because ADR-0005 already requires every value list to carry its zero.
+
+**The generic wrapper panics on a nil interface, in the encode half.**
+`TypeCodec`'s wrapper turns a typed codec into a reflective one, and the obvious spelling is a type assertion:
+
+```
+v.Interface().(T) on a nil interface field
+  panic: interface conversion: interface is nil, not net.Addr
+  TypeCodec[...].func1() -> encLeaf -> dump
+```
+
+**And in the decode half.**
+
+```
+dst.Set(reflect.ValueOf(out)) for a nil out
+  panic: reflect: call of reflect.Value.Set on zero Value
+  TypeCodec[...].func2() -> decLeaf -> load
+```
+
+Both fixes are one token wide.
+The encode half takes the comma-ok form and the decode half takes `dst.Set(reflect.ValueOf(&out).Elem())`, which yields a `Value` of static type `T` whatever the dynamic value is.
+Costs on `go1.27rc2`, priced on a **non-nil** interface so the fix is measured where it is not needed:
+
+| | ns/op |
+| --- | --- |
+| `v.Interface().(T)` | 6 |
+| `t, _ := v.Interface().(T)` | 4 |
+| `reflect.TypeAssert[T](v)` | 8 |
+
+The comma-ok form is not slower.
+`reflect.TypeAssert` also handles the nil case and is the slowest of the three, which is the research's own section 1e result reproduced at an interface target.
+
+**Why these two matter beyond a bug fix.**
+The wrapper is the one piece of reflection the registration API owns, and it exists precisely so a registrant never writes a `reflect.Value`.
+A defect in it is a defect in every codec ever registered, and no proof a registrant can write catches it, because the codec itself was correct.
+ADR-0005 makes the interface case the headline demonstration that a codec collapses a type to a leaf, and the zero value of an interface is a nil interface, so this is the intersection of two rules the design leans on.
+It belongs in the codec conformance cases ADR-0007 already asks for, and this ADR says so rather than treating it as an implementation note.
+
+Both were found by the audit fixture, which is the first in three prototypes to dump a registered interface at its zero value.
+
+### The audit
+
+Every prior session's worst defect was a case the fixtures did not contain, and #12's recorded one was that every fixture put the codec at a leaf in a one-field struct at a non-zero value.
+So a registered type was put in every position the walk has, populated and all-zero, through all three planes ADR-0005 requires.
+
+```
+/Leaf  /Ptr  /Slice/*  /Array#0  /Array#1  /MapVal/*  /MapKey/*  /Nested/Deep  /Iface
+```
+
+| fixture | memory | yaml, real files | flattening |
+| --- | --- | --- | --- |
+| populated | ok | ok | ok |
+| every field zero | ok | ok | **`Ptr` differs** |
+
+**The one failure is ADR-0005's own documented limit, unchanged.**
+A nil `*netip.Addr` writes `Null`, and a plane with no null cannot carry it, so it loads back as a non-nil pointer to the zero value.
+ADR-0005 measured exactly this for `*int` and `*Cred` and put it on the driver-fidelity side of the line.
+A registered type inherits it identically, which is the result worth recording: registration adds no new plane limitation and removes none.
+
+**Two seams were checked rather than assumed.**
+
+ADR-0006's default reaches a registered codec with no default-awareness in the codec:
+
+```
+plane empty, default applies -> 10.0.0.1
+plane supplies the address   -> 192.0.2.1
+```
+
+ADR-0007 measured that for a chain codec; this is the registered one, which is the case ADR-0006's sentence was written for.
+
+And a registered interface emitting `Null` survives a plane that has no null, because its codec accepts `String("")` as well:
+
+```
+dump nil net.Addr            -> null
+through the flattening plane -> string("")
+loads back                   -> <nil>
+```
+
+That is the accepted-set rule doing real work rather than being a principle: the registrant chose to accept a kind they never emit, and core did not choose it for them.
+
+### What this ADR does not decide
+
+- **Where the compiled schema is cached, and what the entry point looks like**: [#16](https://github.com/onhotpath/ferry/issues/16), with the one obligation and three constraints above.
+- **Whether a root leaf is a legal address.**
+  A registered type at the root mints the empty path, which ADR-0003 says an address may not be.
+  Pre-existing, named by ADR-0007 as #16's, and registration enlarges the set of types that can sit there.
+- **Core's admissible map key set**: [#31](https://github.com/onhotpath/ferry/issues/31), untouched on purpose.
+- **The error types every refusal here produces**: [#9](https://github.com/onhotpath/ferry/issues/9)'s convention, applied rather than invented.
+  This ADR collects and joins its registration errors per ADR-0001's determinism invariant and defers the types.
+- **How a default is spelled, and how a field is named**: [#11](https://github.com/onhotpath/ferry/issues/11).
+- **Whether the walk may run concurrently**: [#20](https://github.com/onhotpath/ferry/issues/20).
+  This ADR decides only that the registry is immutable for the life of every schema compiled against it.
+- **Whether `ferrytest`'s `Complete` check ships**, and what the harness's exact surface is.
+  This ADR establishes that it is possible because a registry is enumerable, and that it needs nothing from a `Reg`.
+- **The exported verb names**, which ADR-0001 left open.
+  `Register`, `Registry`, `TextCodec`, `StringCodec`, `TypeCodec` and `AsMapKey` are the working spellings.
+
+## Consequences
+
+- A registrant writes one line for a type whose text pair already exists, and up to eighteen for an interface.
+  Inference works at every call site with a value argument, so no user writes an explicit type argument except for `DurationLike[T]` and `TextCodec[T]`, which have nothing to infer from.
+- **A half pair is a build error rather than a runtime refusal**, so ADR-0007's "a codec is a pair" needs no check on the registration path at all.
+- **The one-line registration a user is most likely to write is wrong for three common stdlib types**, and ferry's answer is a different constructor plus a doc comment.
+  That is a weaker answer than a mechanism, and it is the weakest part of this ADR.
+  The harness catches all three on their first case, which is the whole mitigation, and it only helps a registrant who writes a proof.
+- Registration beats the text pair, which is what makes it the remedy for the dependency-drift exposure ADR-0007 recorded against before-kind ordering, and also what makes the defect above worse than it would otherwise be.
+  Both follow from the same rule and the ADR states both.
+- **The registry is a value that freezes at its first use, so nothing in ferry can be registered late.**
+  A user who registers after their first Load gets a loud error rather than a silently stale schema, and the error names the freeze point.
+  This is a real ergonomic constraint and it is the price of every soundness result in this ADR.
+- Core ships a default registry, so the zero-configuration path survives, and a test that wants a different codec for one type constructs its own registry rather than being unable to run.
+- **ferry has no dynamic registration**, so a `reflect.StructOf` type cannot be registered.
+  The argument that it has nowhere to land is contingent on [#16](https://github.com/onhotpath/ferry/issues/16) keeping a generic entry point, and this ADR says so rather than claiming a settled reason.
+- **There is no decline**, so a codec's claim is a property of the type alone, which is what keeps the address set computable with no value in hand.
+  The cost is that a type whose representation should depend on its value has no expression, and the answer is that such a type has no proof anybody can write either.
+- A registered key codec must opt in, so `map[T]V` over a freshly registered `T` is a compile error until the registrant says the word.
+  That is a false refusal for an injective codec, and it is the only place in this design where ferry asks for a keyword rather than inferring.
+- **Registration is enumerable where the text arm is not**, so ADR-0005's completeness check ports to a user's registry.
+  ADR-0007's weakest point does not get better, but registration does not join it.
+- The generic wrapper is the one piece of reflection this API owns, and two defects in it would have been defects in every registered codec.
+  Both are one token wide and neither is catchable by a registrant's proof, which makes the codec conformance suite ADR-0007 asks for load-bearing rather than optional.
+- ADR-0005's named-duration hole is closed by `DurationLike[T ~int64]()`, at one line per named type.
+  That ADR called it "a documented sharp edge rather than a defect ferry can reflect its way out of", and it is still not reflected out of: the user names the types.
+- Registration adds no new plane limitation and removes none.
+  A nil pointer to a registered type fails on a plane with no null exactly as a nil pointer to a core type does.
+
+## Items from the xload survey
+
+The survey is [`docs/research/generics-and-modern-go.md`](../research/generics-and-modern-go.md), section 5, against `github.com/gojekfarm/xtools` at [`a90b3aa`](https://github.com/gojekfarm/xtools/commit/a90b3aad2133248cec50f6b4d6e37b0d9e788adb).
+
+**5.9's third bullet is this ADR's**: "No way to register a decoder for a type you do not own, and `time.Duration` matched by `Type.String()`."
+
+The `Type.String()` half is dead, and it died in ADR-0005's identity table rather than here.
+The registration half is answered in full: a caller registers a typed pair for a type they do not own, at one to eighteen lines, with `T` inferred, and the codec goes into the same identity table the chain consults first.
+The rest of 5.9 is ADR-0007's and is unaffected.
+
+Two things worth recording, because 5.9 is where the survey's own recommendation sits.
+
+**Recommendation 7 says to copy `MarshalToFunc[T]` / `UnmarshalFromFunc[T]` / `JoinMarshalers` "with a `SkipFunc`-style decline-and-fall-through and a documented, overridable precedence chain".**
+Three of those four are declined, and each on a measurement rather than on taste.
+The typed-function shape is adopted.
+`SkipFunc` does not exist in the standard library, its respelling does not port to a non-streaming boundary, and ferry takes neither.
+"Overridable precedence" is refused because ADR-0007 already made the chain three fixed steps and a map at step one, and R5 measured what a user-orderable list does.
+
+**Recommendation 7's own cost note says "ferry probably needs both static and dynamic registration".**
+That is checked and declined, with the reason stated: the dynamic half has nowhere to land while the entry point is generic.
+
+**5.14** was enumerated rather than assumed, all four items.
+
+- *Two ways to set the loader.*
+  Bears on this ADR directly and is the item it came closest to repeating.
+  A default registry plus a scoped registry is two ways to supply a codec, which is the shape of the defect.
+  It is avoided by them being **one mechanism**: the default registry is a `Registry`, it freezes on first use like any other, and package-level `Register` is a method call on it rather than a second path with its own rules.
+  Nothing is expressible through one and not the other.
+- *The `CanAddr` loop that can only run once.*
+  Bears on this ADR through the generic wrapper, which is the code that takes a `reflect.Value` and produces a `T`.
+  It is not carried over, and the defects it did have are the opposite kind: not a loop that runs once, but a type assertion that panics on a nil interface, recorded above.
+  ADR-0007 already replaced the instinct behind the loop with a stated rule about receivers, and registration does not reopen it, because a registered codec is called with the value at its own address and never takes an address of its own.
+- *The non-deterministic select on a cancelled context.*
+  Concurrency, and [#20](https://github.com/onhotpath/ferry/issues/20)'s.
+  This ADR bears on it in one direction only, and it is the helpful one: a frozen registry is not shared mutable state, measured against the race detector's report for a mutable one.
+- *Value receivers on `Error()` where pointers are returned.*
+  Bears on this ADR twice.
+  The error types it produces are deferred to [#9](https://github.com/onhotpath/ferry/issues/9)'s convention rather than pre-empted, as ADR-0003 through ADR-0007 all did.
+  And its underlying cause, that a method set differs between a value and its pointer, is why `url.URL.String` is not a legal method expression and why the pointer-type refusal exists at all.
+
+**5.5, nondeterministic error output**, is [#9](https://github.com/onhotpath/ferry/issues/9)'s, and this ADR applies it rather than deciding it: `Register` collects every failure in a variadic call and reports them joined, rather than returning at the first.
+
+**5.7, `reflect.DeepEqual` as a probe**, is ADR-0005's, and it surfaces here as the reason the proof's relation is the registrant's and not the harness's.
+The registered `netip.Addr` codec's failure at the zero value is caught under `==`; a registrant who chooses a looser relation quietly widens what ferry tolerates, which is ADR-0005's own consequence applied to a type core does not own.
+
+**5.10's remaining half**, a flat plane holding a whole list in one value and a codec splitting it, is confirmed unchanged from ADR-0007: a splitting codec is a registered codec, the registrant carries the round-trip proof, and no arm in the chain does it.
+
+The remaining items are unaffected by this ADR.
