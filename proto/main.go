@@ -30,5 +30,6 @@ func main() {
 	p12Lifetimes()
 	p13Slim()
 	p14Closer()
+	p15Release()
 	fmt.Println()
 }
