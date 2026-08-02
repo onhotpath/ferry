@@ -27,9 +27,16 @@ type opts struct {
 	// load-affecting: these change what one call does with a compiled schema,
 	// so they are not.
 	observe func(Path, Value)
+	// sch is ADR-0010's scheduler seam, promoted from a hardcoded `serial` in
+	// the entry point to a load-affecting Option. #14 needs it because
+	// ADR-0011 puts aggregation here, and the required set is what a template
+	// reads out of an aggregate. It is load-affecting by ADR-0010's own rule -
+	// one compiled schema serves both schedulers - so it is not in the key,
+	// which is what stops a func value reaching a map key.
+	sch sched
 }
 
-func defaultOpts() opts { return opts{tagKey: "ferry", reg: defaultRegistry} }
+func defaultOpts() opts { return opts{tagKey: "ferry", reg: defaultRegistry, sch: serial} }
 
 type optFn func(*opts)
 
@@ -44,6 +51,9 @@ func WithRegistry(r *Registry) Option { return optFn(func(o *opts) { o.reg = r }
 // Observe is ADR-0006's presence observation. NOT compile-affecting: one
 // compiled schema serves a call with it and a call without it.
 func Observe(f func(Path, Value)) Option { return optFn(func(o *opts) { o.observe = f }) }
+
+// WithSched fills ADR-0010's seam. Load-affecting, per the rule above.
+func WithSched(s sched) Option { return optFn(func(o *opts) { o.sch = s }) }
 
 // --- the cache key ----------------------------------------------------------
 

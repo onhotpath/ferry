@@ -294,7 +294,10 @@ func loadDir(r FReader, ctx context.Context, o opts) direction {
 			val := get(at)
 			if val.Kind() == VAbsent {
 				if n.required {
-					return false, fmt.Errorf("ferry: %s: required, and the plane supplied nothing", at)
+					// ADR-0011's shape rather than a bare fmt.Errorf, because
+					// #14 reads the required set out of the error set and
+					// message text is not API. See t_errors.go.
+					return false, tErrAt(at, tErrMissing, "required, and the plane supplied nothing")
 				}
 				if n.def != nil {
 					// The default is a Value at an address, indistinguishable

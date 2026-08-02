@@ -455,13 +455,23 @@ func parseTag(f reflect.StructField, key string) (tag, error) {
 
 // splitTag honours ADR-0008's single-quoted token: a comma inside quotes does
 // not split.
+//
+// DEFECT FOUND BY #14, fixed here. The inherited condition was
+// `cur.Len() == 0 || inq`, which opens a quote only at the start of a whole
+// comma-separated part. ADR-0008's grammar is `option = ... / "default" "="
+// token`, so the quoted TOKEN begins after `default=`, and the inherited form
+// therefore could not parse ADR-0008's own headline example
+// `default='Hello, world'` - it split at the comma and reported
+// `unknown option "world'"`. Every fixture on this branch used a default with
+// no comma in it, which is the shape ADR-0008 measured as 3.9% of real
+// free-text tag values and singled out as the case that has to read well.
 func splitTag(s string) []string {
 	var out []string
 	var cur strings.Builder
 	inq := false
 	for i := 0; i < len(s); i++ {
 		switch {
-		case s[i] == '\'' && (cur.Len() == 0 || inq):
+		case s[i] == '\'' && (cur.Len() == 0 || strings.HasSuffix(cur.String(), "=") || inq):
 			if inq && i+1 < len(s) && s[i+1] == '\'' {
 				cur.WriteByte('\'')
 				cur.WriteByte('\'')

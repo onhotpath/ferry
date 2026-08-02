@@ -19,6 +19,7 @@ import (
 	"math/big"
 	"net/netip"
 	"net/url"
+	"os"
 	"reflect"
 	"time"
 )
@@ -40,7 +41,7 @@ type AppConfig struct {
 
 func runR17() {
 	fmt.Println("--- R17a: the whole consumer file, top to bottom ---")
-	fmt.Println(`
+	os.Stdout.WriteString(`
     package main
 
     import (
