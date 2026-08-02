@@ -486,7 +486,7 @@ So not shipping it costs nothing and shipping it doubles the test matrix on ever
 
 ### One thing the walk owns
 
-[ADR-0010](0010-the-generic-entry-point.md) measures that aggregation lands in its **scheduler** and not in its walk: the same walk function under a first-error scheduler and an aggregating one gives one error and two on the same plane, byte-identical in between.
+[ADR-0010](0010-the-entry-point-and-the-schema-cache.md) measures that aggregation lands in its **scheduler** and not in its walk: the same walk function under a first-error scheduler and an aggregating one gives one error and two on the same plane, byte-identical in between.
 That is right for almost everything this ADR needs, and it is worth confirming rather than assuming, because it means #9 costs #16's walk nothing.
 
 Ordering is not the walk's, because sorting happens when the aggregate is constructed, so the walk may emit in any order.
@@ -639,7 +639,7 @@ The ticket comment says the partial population "needs documenting"; under this r
 **The first draft of this section said "yields no value", and that has two readings once a seed exists.**
 It is recorded because the shape of the miss is the point, and because it is the third time in this design effort that a fixture loading into a fresh zero destination hid a distinction.
 
-[ADR-0010](0010-the-generic-entry-point.md) has `LoadOver(ctx, seed T, src)`, because ADR-0006 partitions defaults into declared ones for leaves and seeded values for composites.
+[ADR-0010](0010-the-entry-point-and-the-schema-cache.md) has `LoadOver(ctx, seed T, src)`, because ADR-0006 partitions defaults into declared ones for leaves and seeded values for composites.
 With a **zero** seed the two readings are byte-identical, and every fixture this ADR built used one.
 With a **live** seed they are not:
 
