@@ -25,7 +25,9 @@ type depTypeV2 struct {
 	Port int
 }
 
-func (v depTypeV2) MarshalText() ([]byte, error) { return fmt.Appendf(nil, "%s:%d", v.Host, v.Port), nil }
+func (v depTypeV2) MarshalText() ([]byte, error) {
+	return fmt.Appendf(nil, "%s:%d", v.Host, v.Port), nil
+}
 func (v *depTypeV2) UnmarshalText(b []byte) error {
 	_, err := fmt.Sscanf(string(b), "%s:%d", &v.Host, &v.Port)
 	return err
@@ -130,4 +132,3 @@ func runUpgrade() {
 	fmt.Printf("      round-trips: %v\n", load(d, reflect.ValueOf(&back).Elem()) == nil &&
 		back.Endpoint.String() == u.String())
 }
-

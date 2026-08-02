@@ -28,15 +28,21 @@ type hostConf struct {
 // edit silently changes the plane representation of the whole type.
 type growing0 struct{ n int }
 
-func (v growing0) MarshalText() ([]byte, error)  { return fmt.Appendf(nil, "g%d", v.n), nil }
-func (v *growing0) UnmarshalText(b []byte) error { _, err := fmt.Sscanf(string(b), "g%d", &v.n); return err }
+func (v growing0) MarshalText() ([]byte, error) { return fmt.Appendf(nil, "g%d", v.n), nil }
+func (v *growing0) UnmarshalText(b []byte) error {
+	_, err := fmt.Sscanf(string(b), "g%d", &v.n)
+	return err
+}
 
 type growing1 struct {
 	N int
 }
 
-func (v growing1) MarshalText() ([]byte, error)  { return fmt.Appendf(nil, "g%d", v.N), nil }
-func (v *growing1) UnmarshalText(b []byte) error { _, err := fmt.Sscanf(string(b), "g%d", &v.N); return err }
+func (v growing1) MarshalText() ([]byte, error) { return fmt.Appendf(nil, "g%d", v.N), nil }
+func (v *growing1) UnmarshalText(b []byte) error {
+	_, err := fmt.Sscanf(string(b), "g%d", &v.N)
+	return err
+}
 
 func p4yaml(v any) string {
 	dir, _ := os.MkdirTemp("", "p4")

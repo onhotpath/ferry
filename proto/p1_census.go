@@ -29,9 +29,9 @@ import (
 	"regexp"
 	"time"
 
+	xloadtype "github.com/gojekfarm/xtools/xload/type"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
-	xloadtype "github.com/gojekfarm/xtools/xload/type"
 	"golang.org/x/text/language"
 )
 
