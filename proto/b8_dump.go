@@ -128,7 +128,7 @@ func BindSink[T any](sink FSink, options ...Option) (*SinkBinding[T], error) {
 
 func (b *SinkBinding[T]) Dump(ctx context.Context, v T) error {
 	out := map[Path]Value{}
-	w := &walker{dir: dumpDir(out), sch: serial, ctx: ctx}
+	w := &walker{dir: dumpDir(out), sch: b.o.sch, ctx: ctx}
 	if _, err := w.walk(b.s.root, valueOf(v), Path{}); err != nil {
 		return err
 	}

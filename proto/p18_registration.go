@@ -35,7 +35,7 @@ import (
 type Timeout time.Duration
 
 func runRegistration() {
-		chainOrder, chainBeforeKind = []string{"text"}, true
+	chainOrder, chainBeforeKind = []string{"text"}, true
 	defer func() { chainOrder, chainBeforeKind = nil, false }()
 
 	fmt.Println("\n--- P18a: the five registrations a real user actually writes ---")
@@ -102,10 +102,10 @@ func runRegistration() {
 	fmt.Printf("    Register(...) -> err=%v\n", err)
 
 	type conf struct {
-		Endpoint url.URL           `ferry:"endpoint"`
-		Timeout  Timeout           `ferry:"timeout"`
-		Big      big.Int           `ferry:"big"`
-		Peer     net.Addr          `ferry:"peer"`
+		Endpoint url.URL            `ferry:"endpoint"`
+		Timeout  Timeout            `ferry:"timeout"`
+		Big      big.Int            `ferry:"big"`
+		Peer     net.Addr           `ferry:"peer"`
 		Hosts    map[netip.Addr]int `ferry:"hosts"`
 	}
 	c := conf{

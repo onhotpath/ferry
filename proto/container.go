@@ -17,11 +17,11 @@ func runContainer() {
 	defer os.RemoveAll(dir)
 
 	docs := map[string]string{
-		"absent      ": "other: 1\n",
-		"empty seq   ": "tags: []\n",
-		"empty map   ": "tags: {}\n",
+		"absent      ":  "other: 1\n",
+		"empty seq   ":  "tags: []\n",
+		"empty map   ":  "tags: {}\n",
 		"explicit null": "tags: null\n",
-		"populated   ": "tags: [a]\n",
+		"populated   ":  "tags: [a]\n",
 	}
 	probe := Path{}.Name("tags")
 	as := NewAddressSet([]Path{probe, Path{}.Name("other")})

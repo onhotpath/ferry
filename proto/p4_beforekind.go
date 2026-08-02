@@ -16,9 +16,9 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net"
-	"log/slog"
 	"net/netip"
 	"net/url"
 	"reflect"
@@ -97,8 +97,6 @@ func p4rows() []p4row {
 		{"net.IPNet", reflect.TypeFor[net.IPNet](), mustIPNet("10.0.0.0/8"), deepEq},
 	}
 }
-
-
 
 // p4run compiles, dumps and loads one value in a one-field holder, returning
 // the plane artefact and whether it came back.

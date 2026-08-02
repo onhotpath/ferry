@@ -58,6 +58,18 @@ func main() {
 		run25(p)
 		return
 	}
+	if p := os.Getenv("C10"); p != "" {
+		run10(p)
+		return
+	}
+	if p := os.Getenv("W15"); p != "" {
+		run15(p)
+		return
+	}
+	if p := os.Getenv("T14"); p != "" {
+		run14(p)
+		return
+	}
 	if p := os.Getenv("E16"); p != "" {
 		run16(p)
 		return

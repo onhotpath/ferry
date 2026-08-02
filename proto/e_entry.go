@@ -156,7 +156,7 @@ func dumpTo[T any](ctx context.Context, v T, options ...Option) (map[Path]Value,
 	done := o.reg.install()
 	defer done()
 	out := map[Path]Value{}
-	w := &walker{dir: dumpDir(out), sch: serial, ctx: ctx}
+	w := &walker{dir: dumpDir(out), sch: o.sch, ctx: ctx}
 	_, err = w.walk(s.root, reflect.ValueOf(v), Path{})
 	return out, err
 }
@@ -175,7 +175,7 @@ func loadFrom[T any](ctx context.Context, seed T, vals map[Path]Value, options .
 	defer done()
 	out := seed
 	rv := reflect.ValueOf(&out).Elem()
-	w := &walker{dir: loadDir(mapReader{vals}, ctx, o), sch: serial, ctx: ctx}
+	w := &walker{dir: loadDir(mapReader{vals}, ctx, o), sch: o.sch, ctx: ctx}
 	if _, err := w.walk(s.root, rv, Path{}); err != nil {
 		return seed, err
 	}

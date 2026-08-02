@@ -127,7 +127,7 @@ func runRefusals() {
 
 	fmt.Println("\n    before registration:")
 	tryRT("netip.Addr", reflect.TypeFor[netip.Addr](), reflect.ValueOf(netip.MustParseAddr("192.0.2.1")))
-	tryRT("big.Int", reflect.TypeFor[big.Int](), reflect.ValueOf(*big.NewInt(1<<40)))
+	tryRT("big.Int", reflect.TypeFor[big.Int](), reflect.ValueOf(*big.NewInt(1 << 40)))
 	tryRT("Node (recursive)", reflect.TypeFor[Node](), reflect.ValueOf(Node{"a", &Node{"b", nil}}))
 	tryRT("net.Addr (interface)", reflect.TypeFor[net.Addr](), reflect.Value{})
 	tryRT("map[netip.Addr]string", reflect.TypeFor[map[netip.Addr]string](),
@@ -194,7 +194,7 @@ func runRefusals() {
 
 	fmt.Println("\n    after registration:")
 	tryRT("netip.Addr", reflect.TypeFor[netip.Addr](), reflect.ValueOf(netip.MustParseAddr("192.0.2.1")))
-	tryRT("big.Int", reflect.TypeFor[big.Int](), reflect.ValueOf(*big.NewInt(1<<40)))
+	tryRT("big.Int", reflect.TypeFor[big.Int](), reflect.ValueOf(*big.NewInt(1 << 40)))
 	tryRT("Node (recursive)", reflect.TypeFor[Node](), reflect.ValueOf(Node{"a", &Node{"b", nil}}))
 	tryRT("net.Addr (interface)", reflect.TypeFor[net.Addr](),
 		reflect.ValueOf(&net.TCPAddr{IP: net.ParseIP("192.0.2.1"), Port: 80}).Convert(reflect.TypeFor[net.Addr]()))

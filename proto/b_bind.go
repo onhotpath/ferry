@@ -57,7 +57,7 @@ func (b *Binding[T]) LoadOver(ctx context.Context, seed T) (T, error) {
 	}
 	out := seed
 	rv := reflect.ValueOf(&out).Elem()
-	w := &walker{dir: loadDir(rd, ctx, b.o), sch: serial, ctx: ctx}
+	w := &walker{dir: loadDir(rd, ctx, b.o), sch: b.o.sch, ctx: ctx}
 	if _, err := w.walk(b.s.root, rv, Path{}); err != nil {
 		return seed, err
 	}

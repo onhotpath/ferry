@@ -14,8 +14,8 @@ package main
 // {kind, text}, so every leaf is materialised on its own regardless.
 
 import (
-	jsonv2 "encoding/json/v2"
 	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"testing"
 )

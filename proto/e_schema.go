@@ -339,6 +339,24 @@ func countLeaves(n *node) int {
 	}
 }
 
+// DEFECT FOUND BY #15, fixed here.
+//
+// The inherited version checked only for EXACT DUPLICATES, which is the
+// weaker half of ADR-0003's rule. ADR-0003 is explicit that this is the
+// distinction that matters and gives the measured reason:
+//
+//	"Prefix-freeness, rather than duplicate detection, is the rule, and the
+//	 prototype found out why by accident. A leaf at /db and a subtree under
+//	 /db are two distinct addresses, so a duplicate check accepts them. A
+//	 flat plane holds both happily, as DB and DB_HOST. A tree plane cannot."
+//
+// So the headline rule of ADR-0003 was not implemented on the branch every
+// later ADR was measured against, and nothing noticed because no fixture put
+// a leaf and a subtree at one segment. #15 found it by asking whether the
+// Registry - which has two namespaces per key and CAN hold both - is more
+// permissive than core, and getting "ok" from core.
+//
+// A path is a prefix of itself, so this subsumes the duplicate check.
 func prefixFree(addrs []Path) error {
 	seen := map[string]bool{}
 	var clash []error
@@ -348,6 +366,19 @@ func prefixFree(addrs []Path) error {
 			clash = append(clash, fmt.Errorf("ferry: two fields address %s", s))
 		}
 		seen[s] = true
+	}
+	// The prefix relation holds only at SEGMENT boundaries, which is what
+	// keeps ADR-0003's "DB and DB_HOST as two flat single-segment addresses
+	// remain legal" true.
+	sorted := sortedPaths(addrs)
+	for i := range sorted {
+		for j := i + 1; j < len(sorted); j++ {
+			if isSegmentPrefix(sorted[i], sorted[j]) {
+				clash = append(clash, fmt.Errorf(
+					"ferry: %s is a prefix of %s: a leaf and a subtree may not share a segment, "+
+						"because a tree plane cannot hold both", sorted[i], sorted[j]))
+			}
+		}
 	}
 	slices.SortFunc(clash, func(a, b error) int { return cmp.Compare(a.Error(), b.Error()) })
 	if len(clash) > 0 {
@@ -462,13 +493,23 @@ func parseTag(f reflect.StructField, key string) (tag, error) {
 
 // splitTag honours ADR-0008's single-quoted token: a comma inside quotes does
 // not split.
+//
+// DEFECT FOUND BY #14, fixed here. The inherited condition was
+// `cur.Len() == 0 || inq`, which opens a quote only at the start of a whole
+// comma-separated part. ADR-0008's grammar is `option = ... / "default" "="
+// token`, so the quoted TOKEN begins after `default=`, and the inherited form
+// therefore could not parse ADR-0008's own headline example
+// `default='Hello, world'` - it split at the comma and reported
+// `unknown option "world'"`. Every fixture on this branch used a default with
+// no comma in it, which is the shape ADR-0008 measured as 3.9% of real
+// free-text tag values and singled out as the case that has to read well.
 func splitTag(s string) []string {
 	var out []string
 	var cur strings.Builder
 	inq := false
 	for i := 0; i < len(s); i++ {
 		switch {
-		case s[i] == '\'' && (cur.Len() == 0 || inq):
+		case s[i] == '\'' && (cur.Len() == 0 || strings.HasSuffix(cur.String(), "=") || inq):
 			if inq && i+1 < len(s) && s[i+1] == '\'' {
 				cur.WriteByte('\'')
 				cur.WriteByte('\'')
@@ -493,4 +534,21 @@ func unquoteTok(s string) string {
 		return strings.ReplaceAll(s[1:len(s)-1], "''", "'")
 	}
 	return s
+}
+
+// isSegmentPrefix reports whether a is a proper prefix of b at a segment
+// boundary. It compares segments rather than the canonical bytes, because
+// "/db" is a prefix of "/db/host" and is NOT a prefix of "/dbhost", and the
+// byte forms cannot tell those apart.
+func isSegmentPrefix(a, b Path) bool {
+	as, bs := a.Segments(), b.Segments()
+	if len(as) >= len(bs) {
+		return false
+	}
+	for i := range as {
+		if as[i] != bs[i] {
+			return false
+		}
+	}
+	return true
 }

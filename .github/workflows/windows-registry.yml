@@ -1,0 +1,63 @@
+# The first CI this repository has had, and it exists for one ticket:
+# #15 asks whether ferry's interfaces survive a genuinely non-file, typed,
+# hierarchical plane, and the interesting half of that is not "does it compile
+# on Windows". It is whether ADR-0003's address model expresses a Registry path
+# and whether ADR-0004's Value carries REG_DWORD, REG_MULTI_SZ and REG_BINARY
+# without a lossy trip through text. Neither is answerable without a real hive.
+#
+# Deliberately narrow. It runs on the prototype branches only, it has read-only
+# permissions, it uses no secrets, and it prints nothing it did not write
+# itself - this repository is public.
+
+name: windows-registry
+
+on:
+  push:
+    branches:
+      - 'proto/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  registry:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0-rc.2'
+          cache: false
+
+      - name: toolchain
+        working-directory: proto
+        run: go version
+
+      - name: vet
+        working-directory: proto
+        env:
+          GOTOOLCHAIN: go1.27rc2
+        run: go vet ./...
+
+      # W0 is reconnaissance and runs first, so a later probe that goes green
+      # can be read against what this runner could actually do.
+      - name: W15 all probes
+        working-directory: proto
+        env:
+          GOTOOLCHAIN: go1.27rc2
+          W15: all
+        run: go run .
+
+      # The engine itself, on a platform it has never been built for. Cheap,
+      # and it is the only thing here that would catch a path-separator
+      # assumption in the inherited prototype.
+      - name: the inherited suites, on Windows
+        working-directory: proto
+        env:
+          GOTOOLCHAIN: go1.27rc2
+        run: |
+          $env:T14='all'; go run .; if ($LASTEXITCODE -ne 0) { exit 1 }
+          $env:T14=''; $env:C10='all'; go run .; if ($LASTEXITCODE -ne 0) { exit 1 }
+          $env:C10=''; $env:E16='all'; go run .; if ($LASTEXITCODE -ne 0) { exit 1 }

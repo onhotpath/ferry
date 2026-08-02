@@ -6,6 +6,7 @@ require (
 	github.com/gojekfarm/xtools/xload v0.10.1-0.20260702091221-a90b3aad2133
 	github.com/google/uuid v1.6.0
 	github.com/shopspring/decimal v1.4.0
+	golang.org/x/sys v0.47.0
 	golang.org/x/text v0.40.0
 	gopkg.in/yaml.v3 v3.0.1
 )
