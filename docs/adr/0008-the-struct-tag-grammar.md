@@ -832,6 +832,10 @@ It does hand #9 one shape it should not have to invent: the three tiers are a su
   The research doc offers it as an alternative to a validation entry point or as a complement.
   This ADR ships the entry point, which needs no tooling and runs in a user's own test, and records that an analyzer would catch the same class at build time for users who wire it up.
   It has no ticket, and one is proposed in the resolution comment rather than decided here.
+- **Whether a library built on ferry may add words to the grammar**: [#34](https://github.com/onhotpath/ferry/issues/34), filed from this ADR and bucketed Milestoned under ADR-0001.
+  The tag **key** is an Option here and the **vocabulary** is not, so `mylib:"host,retry=3"` is a schema compile error and correctly so.
+  Opening the namespace would have to answer ADR-0001's own sentence that "the `ferry` tag namespace is closed to third-party tooling", and the sharpest question it inherits is whether an extension's option is inert to ferry, because one that is not is a second authority.
+  Nothing in this ADR depends on it or anticipates it.
 - **The byte spelling of the address rendering.**
   An earlier draft proposed unifying it with the tag's escape; the grammar now has no escape character, so ADR-0003's spelling is untouched and stays an implementation choice.
 - **The migration guide from xload**, which [#1](https://github.com/onhotpath/ferry/issues/1) lists as unspecified until this grammar exists.
