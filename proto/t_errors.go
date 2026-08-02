@@ -145,3 +145,21 @@ func tAggregating(tasks []func() error) error {
 	}
 	return tNewAggregate(errs)
 }
+
+// dropMissingUnder removes ErrMissing elements from an error, returning nil if
+// that leaves nothing. It is the mechanism half of the candidate fix in
+// e_walk.go's nPtr case.
+//
+// It is only sound if every sibling under the pointer actually RAN, because
+// the presence bit it is gated on is accumulated across siblings. Z2 measures
+// what happens when they do not.
+func dropMissingUnder(err error) error {
+	var kept []error
+	for _, e := range tElements(err) {
+		if errors.Is(e, tErrMissing) {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	return tNewAggregate(kept)
+}

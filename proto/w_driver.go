@@ -100,6 +100,11 @@ type WRegSink struct {
 	NumberAs uint32 // wDWORD or wQWORD
 	// ReadOnly forces the ADR-0004 refusal without needing a denied hive.
 	ReadOnly bool
+	// MultiSZ names the addresses whose Bytes value is a NUL-joined list and
+	// should be written as a REG_MULTI_SZ. W6 is why this exists: the codec
+	// can collapse the Go type to one address and cannot tell the driver what
+	// plane type to use, because Value has no kind for it.
+	MultiSZ func(Path) bool
 }
 
 func (s WRegSource) Bind(a *AddressSet) (FOpenFunc, error) {
@@ -128,7 +133,7 @@ func (s WRegSink) Bind(a *AddressSet) (FOpenWriterFunc, error) {
 			// writability is a fact about the plane and Bind does no I/O.
 			return nil, fmt.Errorf("%w: registry: the key was opened without KEY_SET_VALUE", ErrReadOnly)
 		}
-		return &wRegWriter{store: s.Store, kf: kf, numberAs: num}, nil
+		return &wRegWriter{store: s.Store, kf: kf, numberAs: num, multi: s.MultiSZ}, nil
 	}, nil
 }
 
@@ -186,6 +191,7 @@ type wRegWriter struct {
 	store    wStore
 	kf       wRegKey
 	numberAs uint32
+	multi    func(Path) bool
 }
 
 func (w *wRegWriter) Set(_ context.Context, p Path, v Value) error {
@@ -196,6 +202,9 @@ func (w *wRegWriter) Set(_ context.Context, p Path, v Value) error {
 	rv, err := wFromFerry(v, w.numberAs)
 	if err != nil {
 		return fmt.Errorf("registry: %s: %w", p, err)
+	}
+	if w.multi != nil && w.multi(p) && rv.typ == wBINARY {
+		rv = wVal{typ: wMULTI_SZ, ss: strings.Split(string(rv.b), "\x00")}
 	}
 	return w.store.SetValue(sub, name, rv)
 }
@@ -222,9 +231,11 @@ func wToFerry(v wVal) (Value, error) {
 	case wNONE:
 		return Null(), nil
 	case wMULTI_SZ:
-		// THE HOLE. See W3. There is no ADR-0004 kind for a list of strings at
-		// one address, and every available answer loses something.
-		return Absent, fmt.Errorf("REG_MULTI_SZ has no ferry Value kind")
+		// W6: handed over as NUL-joined Bytes, which a registered codec turns
+		// back into a []string. Lossless, because the Win32 format is
+		// NUL-separated so an element cannot contain one. What it is NOT is
+		// self-describing - see W6(d).
+		return Bytes([]byte(strings.Join(v.ss, "\x00"))), nil
 	}
 	return Absent, fmt.Errorf("unknown registry type %d", v.typ)
 }

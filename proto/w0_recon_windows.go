@@ -35,6 +35,8 @@ func w15probes() []w15probe {
 		{"W3", "do natively typed values fit, or is there a lossy trip through strings", runW3, false},
 		{"W4", "the same driver against a real hive: permissions, case, namespaces", runW4, true},
 		{"W5", "the second data point #25 asked for", runW5, false},
+		{"W6", "can a codec and a named type close the REG_MULTI_SZ hole", runW6, false},
+		{"W7", "is REG_MULTI_SZ common on a real install", runW7, true},
 	}
 }
 

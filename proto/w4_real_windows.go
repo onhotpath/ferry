@@ -134,3 +134,39 @@ func wNames(st wStore, sub string) []string {
 	n, _ := st.ValueNames(sub)
 	return n
 }
+
+// runW7 checks that REG_MULTI_SZ is an ordinary type on a real Windows
+// install rather than a curiosity this ticket reached for.
+//
+// It reads well-known SYSTEM keys and prints the TYPE and the element COUNT
+// only. No value data is printed: this repository is public and a runner's
+// pending-rename list is full of its own file paths.
+func runW7() {
+	fmt.Println("is REG_MULTI_SZ actually common, or did this ticket reach for it?")
+	fmt.Printf("  %-58s %-14s %s\n", "value", "type", "elements")
+	for _, c := range []struct{ key, name string }{
+		{`SYSTEM\CurrentControlSet\Services\Dnscache`, "DependOnService"},
+		{`SYSTEM\CurrentControlSet\Services\LanmanWorkstation`, "DependOnService"},
+		{`SYSTEM\CurrentControlSet\Control\Session Manager`, "PendingFileRenameOperations"},
+		{`SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management`, "PagingFiles"},
+		{`SYSTEM\CurrentControlSet\Control\Network`, "FilterClasses"},
+	} {
+		k, err := registry.OpenKey(registry.LOCAL_MACHINE, c.key, registry.QUERY_VALUE)
+		if err != nil {
+			fmt.Printf("  %-58s %s\n", c.name, "(key not present)")
+			continue
+		}
+		_, typ, err := k.GetValue(c.name, nil)
+		if err != nil {
+			k.Close()
+			fmt.Printf("  %-58s %s\n", c.name, "(value not present)")
+			continue
+		}
+		n := -1
+		if ss, _, e := k.GetStringsValue(c.name); e == nil {
+			n = len(ss)
+		}
+		k.Close()
+		fmt.Printf("  %-58s %-14s %d\n", c.name, wTypeName(typ), n)
+	}
+}

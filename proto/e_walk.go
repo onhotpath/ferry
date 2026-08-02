@@ -111,6 +111,18 @@ func (w *walker) walk(n *node, v reflect.Value, at Path) (bool, error) {
 		}
 		fresh := reflect.New(n.typ.Elem()).Elem()
 		p, err := w.walk(n.elem, fresh, at)
+		if !p && err != nil {
+			// CANDIDATE FIX for the finding #14 reported: a `required` leaf
+			// beneath an optional *T made the whole section mandatory.
+			//
+			// If nothing under the pointer was present, the section does not
+			// exist, and a `required` failure beneath it is a CONSEQUENCE of
+			// that rather than a failure of its own. ADR-0011's one rule -
+			// "report every failure that is not a consequence of another" -
+			// applied to the mirror of the case it already handles, which is a
+			// required child under a REQUIRED parent.
+			err = dropMissingUnder(err)
+		}
 		if err != nil {
 			return p, err
 		}

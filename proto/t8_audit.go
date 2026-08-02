@@ -74,25 +74,56 @@ func runT8() {
 
 	// ---------------------------------------------------------------- A3
 	fmt.Println("\nA3  `required` on a leaf inside an OPTIONAL subtree")
-	fmt.Printf("    the required set the recipe found: %v\n", sortedPaths(keysOf(p.required)))
-	fmt.Println("    /tls/cert is in it, and TLS is a *TTLS whose whole point is to be")
-	fmt.Println("    omittable. Measured directly, against a plane holding a complete config")
-	fmt.Println("    and no TLS section at all:")
-	full := map[Path]Value{
-		path("name"): String("svc"), path("db", "host"): String("h"),
+	fmt.Println("    Found here as a defect and RESOLVED by the repo owner: when a section")
+	fmt.Println("    is optional as a whole, a `required` inside it does not apply while the")
+	fmt.Println("    section is absent. The fix is in e_walk.go's nil-pointer branch.")
+	full := map[Path]Value{path("name"): String("svc"), path("db", "host"): String("h")}
+	partial := map[Path]Value{path("name"): String("svc"), path("db", "host"): String("h"),
+		path("tls", "key"): String("k")}
+	for _, c := range []struct {
+		label string
+		vals  map[Path]Value
+		want  string
+	}{
+		{"no tls section at all", full, "accept: the section is optional"},
+		{"tls/key present, cert missing", partial, "REFUSE: the section exists"},
+	} {
+		for _, sch := range []struct {
+			label string
+			s     sched
+		}{{"aggregating", tAggregating}, {"first-error", serial}} {
+			_, err := Load[TConf](ctx, tFixedSource{vals: c.vals}, WithSched(sch.s))
+			fmt.Printf("      %-30s %-12s -> %s\n", c.label, sch.label, errShortW(err))
+		}
+		fmt.Printf("      %-30s want: %s\n", "", c.want)
 	}
-	_, err3 := Load[TConf](ctx, tFixedSource{vals: full}, WithSched(tAggregating))
-	fmt.Printf("%s\n", tIndent(errText(err3)))
-	fmt.Println("    So one `required` field anywhere beneath an optional pointer makes the")
-	fmt.Println("    whole optional section MANDATORY, and nothing said so.")
-	fmt.Println("    ADR-0006 states the neighbouring rule - \"an optional section stays")
-	fmt.Println("    optional and its defaults fill holes in it once it exists\" - and it says")
-	fmt.Println("    that about DEFAULTS. It never asks the same question about `required`,")
-	fmt.Println("    and the answer the walk gives is the opposite one.")
-	fmt.Println("    ADR-0011 has the machinery: it suppresses a required child under a")
-	fmt.Println("    required PARENT. The rule it does not have is the one for a child under")
-	fmt.Println("    an ABSENT optional parent. This is a finding against ADR-0006 and a")
-	fmt.Println("    ticket rather than something #14 may decide.")
+	fmt.Println("    THE PRECONDITION, and it is not obvious: the fix is gated on ADR-0006's")
+	fmt.Println("    presence bit, which is accumulated across the pointer's siblings. Under")
+	fmt.Println("    first-error scheduling the failing field returns before its siblings")
+	fmt.Println("    run, so the bit is incomplete and the second row above is SILENTLY")
+	fmt.Println("    ACCEPTED - strictly worse than the bug it fixes.")
+	fmt.Println("    It is sound in ferry as designed, because ADR-0011 says \"on Load,")
+	fmt.Println("    aggregate\" and declines to ship StopOnFirstError. What it hands #20 is")
+	fmt.Println("    a SECOND hazard on the presence bit: ADR-0010 already reports a data")
+	fmt.Println("    race on it, and now it is load-bearing for a correctness rule, so a")
+	fmt.Println("    scheduler that abandons siblings on the first error breaks this in the")
+	fmt.Println("    silent direction.")
+	fmt.Println("    It is ADR-0011's own rule applied - \"report every failure that is not a")
+	fmt.Println("    consequence of another\" - to the mirror of the case it already handles,")
+	fmt.Println("    a required child under a REQUIRED parent.")
+
+	fmt.Println("\nA3b THE COST TO #14, which falls out of the fix rather than being chosen")
+	pf, _ := tPlanFor[TConf](ctx, tAggregating)
+	fmt.Printf("    the required set a template can now discover: %v\n", sortedPaths(keysOf(pf.required)))
+	fmt.Println("    /tls/cert is correctly no longer required, and it is correctly no")
+	fmt.Println("    longer DISCOVERABLE. #14's recipe learns required-ness by reading the")
+	fmt.Println("    error set, and the error is now suppressed, so a generated template")
+	fmt.Println("    cannot tell the user \"if you add a tls section, cert is mandatory\".")
+	fmt.Println("    The section renders as `tls: null` with nothing inside it.")
+	fmt.Println("    That is the price of reading declarations out of an error set rather")
+	fmt.Println("    than out of a schema, and it is the same wall section 1.5 hit: a")
+	fmt.Println("    CONDITIONAL requirement is a property of the type, and the error set")
+	fmt.Println("    only ever reports what this plane did.")
 
 	// ---------------------------------------------------------------- A4
 	fmt.Println("\nA4  `required` on a leaf under a DYNAMIC shape")
