@@ -52,6 +52,7 @@ Four questions this ADR had to answer that the ticket did not name, all of which
 | what stops a struct admitted by kind from being a silent total loss | [A struct that maps no address](#a-struct-that-maps-no-address-does-not-compile) |
 | whether a recursive type has a finite address set | [A recursive type](#a-recursive-type-does-not-compile) |
 | whether an array is a static or a dynamic composite | [The enumerated set](#the-enumerated-set) |
+| what actually limits each refusal, and which are permanent | [Every refusal is one of three kinds](#every-refusal-is-one-of-three-kinds-and-only-one-of-them-is-permanent) |
 
 **Three things this ADR does not close, stated here rather than left to the reader to notice.**
 
@@ -148,15 +149,16 @@ ferry does not follow it, because an absent address leaving a zero value is the 
 ADR-0003 said that if this ticket admitted no indexed composite, the kind would simply go unused.
 Slices and arrays are admitted, so it is used, and ADR-0003's measured reason for kinding segments at all stands: an emitter that guesses list-versus-map from base-10 text turns `map[string]int{"0": ...}` into a YAML sequence and destroys the key.
 
-**A map key type is restricted to `string` and the integer kinds.**
+**A map key type is restricted to `string`, the integer kinds, and any type with a registered codec whose form is a `String`.**
 A key becomes segment text on the way out and must be parsed back on the way in, so a key type is a decode and not a conversion.
 The prototype's first draft converted the segment text straight to the key type and panicked on `map[int]string` with `value of type string cannot be converted to type int`, which is how the restriction was found rather than assumed.
 Float keys are excluded because the mapping is not injective: two distinct `NaN` payloads both format as `NaN`.
 
 **Refused, at schema compile.**
+Sorted below into what actually limits each, because only four of these are permanent.
 
 - `complex64`, `complex128`, `chan`, `func`, `interface`, `uintptr`, `unsafe.Pointer`.
-- A map whose key type is not `string` or an integer kind.
+- A map whose key type is not `string`, an integer kind, or a registered codec.
 - A struct that maps no address, which is its own section below.
 - A recursive type, which is its own section below.
 
@@ -252,6 +254,84 @@ A recursive type has an unbounded static address set, so schema compile refuses 
 Measured: `struct{ Name string; Next *Node }`, `struct{ Kids []Tree }` and `struct{ M map[string]ViaMap }` all recurse without bound, and all three are detected by a type-stack from `reflect.TypeFor[T]()` alone with no value in hand.
 
 This is not a limitation ferry chose so much as one ADR-0003 already implies: an address set that cannot be enumerated cannot be handed to `Bind` before I/O, which is the precondition the driver-side injectivity rule needs.
+
+### Every refusal is one of three kinds, and only one of them is permanent
+
+"Refused" is not one thing, and lumping the refusals together makes ferry look more closed than it is.
+Sorted by what actually limits them, and tested against a registered codec rather than reasoned about:
+
+**(a) The value does not exist outside the process.**
+`chan`, `func`, `unsafe.Pointer`, `uintptr` used as a real pointer.
+
+A codec has to produce a `Value`, which is a kind and text, and rebuild the value from that text alone.
+For these there is nothing text could carry.
+The sharpest case is `func`, and it fails on the encode side before the decode side is even reached: measured, `reflect.TypeFor[func()]().Comparable()` is **false**, so a codec cannot even ask which registered function this is.
+A `chan` is comparable, but its identity is a pointer into this process's heap.
+**Nothing lifts these, and they are the only permanent refusals.**
+
+**(b) Core cannot compute an address set for the type.**
+Interfaces, recursive types, and structs that map no address.
+
+This is the large category and it is **entirely liftable**, for one reason worth stating as a rule:
+
+> A codec collapses a type to a leaf, and a leaf needs no address set.
+
+`classify` consults the identity table before `reflect.Kind`, so a registered type is a leaf, mints exactly one address, and is never walked.
+Whatever made its address set uncomputable stops being asked.
+Measured, the same five types before and after registering a codec:
+
+| type | before | after |
+| --- | --- | --- |
+| `netip.Addr` | refused, maps no address | `string("192.0.2.1")` |
+| `big.Int` | refused, maps no address | `string("1099511627776")` |
+| `Node`, recursive | refused, unbounded address set | `string("a>b")` |
+| `net.Addr`, an **interface** | refused, interface kind | `string("tcp://192.0.2.1:80")` |
+| `map[netip.Addr]string` | refused, key type | `/V/10.0.0.1=string("a")` |
+
+The interface row is the one that looks impossible and is not.
+A registered codec for `net.Addr` owns the discriminator inside its own text, so ferry needs no type registry and the plane gets no ferry-specific tagging.
+The recursive row is the same trick: a codec terminates the walk that would otherwise not terminate.
+
+**A registered codec may also serve as a map key**, which is what lifts the last row, and it carries a stronger obligation than a leaf codec:
+
+> A key codec's text must be **injective** over the key type.
+
+Two distinct keys producing one text collapse into one address, silently.
+Core ships `string` and the integer kinds because both are trivially injective; `float64` is excluded because two distinct `NaN` payloads both format as `NaN`.
+Injectivity is not checkable in general, so it is a proof obligation on the registrant, discharged over their supplied value list in the same harness.
+
+**(c) Refused by policy, not by constraint.**
+`complex64`, `complex128`, `uintptr`.
+
+Nothing structural refuses these and the ADR should not imply otherwise.
+Measured: `strconv.FormatComplex` and `ParseComplex` are a total inverse pair, `(1+2i)` round-trips bit-exactly.
+They are out because no plane in ferry's range has a complex type, and because a config or i18n or query-parameter struct containing a `complex128` is not a case worth a row in a table that has to be maintained forever.
+`uintptr` round-trips as a `uint` and means nothing in another process.
+Registration is available for anyone who disagrees, which is the correct amount of effort to ask of that user.
+
+**So the honest summary is that ferry refuses four Go kinds permanently, and everything else is a matter of who supplies the codec.**
+That is a materially different claim from "the set is closed", and it is the one ADR-0001 actually made: core's set is closed, extension is explicit, and extension carries its proof.
+
+**One ordering consequence, and it is [#12](https://github.com/onhotpath/ferry/issues/12)'s to take.**
+Category (b) shrinks a lot if the codec chain consults `encoding.TextMarshaler` and `TextUnmarshaler` before kind admission, with no registration by anyone.
+Measured:
+
+| type | has a text pair | today | if the chain ran first |
+| --- | --- | --- | --- |
+| `netip.AddrPort` | yes | refused | `string("192.0.2.1:80")` |
+| `netip.Prefix` | yes | refused | `string("10.0.0.0/8")` |
+| `netip.Addr` | yes | refused | `string("192.0.2.1")` |
+| `big.Int` | yes | refused | `string("1099511627776")` |
+| `net.IP` | yes | **`bytes("\x00...")`** | `string("192.0.2.1")` |
+| `url.URL`, `net.IPNet`, `[16]byte` UUID | no | unchanged | unchanged |
+
+Four refusals become support, and `net.IP` stops being an unreadable blob, which is category 3 of the three-outcomes section shrinking too.
+This ADR does not decide the chain, so it states the interaction as a constraint instead:
+
+> The maps-no-address rule and the kind admission rule are **backstops**, and they only apply after the codec chain has declined.
+
+If #12 puts `TextMarshaler` ahead of kind, this ADR's refusal list gets shorter and nothing in it becomes wrong.
+If #12 puts it after, `net.IP` keeps landing as sixteen raw bytes and that is a decision someone took rather than one that happened.
 
 ### A type outside the set is refused at schema compile, and every violation is reported
 
@@ -484,6 +564,29 @@ same instant?           false
 So a stored timestamp is unaffected and a stored "when to run next" is wrong by an hour, half the year.
 `time.UTC` costs nothing: it round-trips under `==`, Location included.
 The practical guidance that falls out is that a `time.Time` crossing a ferry plane should be UTC, and this is a property of RFC 3339 rather than of ferry.
+
+**The loaded `Location` is machine-dependent, which is worse than lossy.**
+`time.Parse` is documented ([format.go:1012-1015](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/time/format.go)): "if the offset corresponds to a time zone used by the current location (`Local`), then Parse uses that location and zone in the returned time. Otherwise it records the time as being in a fabricated location with time fixed at the given zone offset."
+
+Measured on a machine whose local zone is `Asia/Kolkata`, loading the same document:
+
+```
+in   Asia/Kolkata  +05:30    wire "2026-01-15T12:00:00+05:30"    out  Location "Local"
+in   America/New_York -05:00 wire "2026-01-15T12:00:00-05:00"    out  Location ""
+```
+
+The first row's `Location` would be a fabricated fixed zone on any machine not at `+05:30`.
+So two machines loading one plane get `time.Time` values that are `.Equal` and not `==`, and whose `Location` differs.
+ADR-0001's determinism invariant is about ferry's output ordering and is not violated, but "the same plane loads to the same value everywhere" is not true for `time.Time` and a reader would assume it is.
+This is inherited from `time.Parse` and there is no way to avoid it while using RFC 3339.
+
+**`encoding/json/v2` is measured, not assumed, and it does exactly the same thing.**
+It has precisely two time-related options in the whole package set, `FormatDurationAsNano` and `ParseTimeWithLooseRFC3339`, and neither touches zones.
+The `format:` tag option that could have specified a zone-preserving layout was removed from the supported set in 1.27 and now errors: `Go struct field V has unsupported "format" tag option`.
+Measured on `go1.27rc2`, v2 produces `{"v":"2026-01-15T12:00:00-05:00"}`, loads back to `Location` `""`, and shows the identical DST blindness and the identical `Local` machine-dependence.
+v1 is the same.
+**So there is no zone-preserving option in the standard library to adopt**, and ferry is not choosing a worse answer than json/v2; it is inheriting the only answer RFC 3339 permits.
+A user who needs zone identity stores it as a second field, or registers a codec.
 
 `time.Time` also has values with no text form at all: `MarshalText` errors with `year outside of range [0,9999]`, so the representation is partial over the type and the error surfaces rather than being swallowed.
 
@@ -748,6 +851,10 @@ Core's test iterates the identity table and the admitted kind list and asserts t
   The only part of that answer this ADR owns is the consequence: such a type cannot round-trip, so it cannot be in the guaranteed set, and admitting it would be admitting a member whose proof cannot be written.
   Where that is detected, and whether it is a refusal or a narrower guarantee, is #12's.
 - The registration API, including how a named type over `time.Duration` is rescued: [#19](https://github.com/onhotpath/ferry/issues/19).
+  This ADR hands #19 two obligations it would not otherwise have: a codec collapses a type to a leaf, which is what makes an interface and a recursive type expressible, and a key codec's text must be injective over the key type or two keys collapse into one address.
+- **What counts as a breaking change to plane contents**: [#28](https://github.com/onhotpath/ferry/issues/28), filed from this ADR.
+  The golden column pins `30s` and RFC 3339 and shortest-float text into every artefact a user has stored, and changing one of them breaks data while the Go API stays stable, which semver does not describe and no tool can see.
+  ADR-0002 versioned modules and said nothing about values, because until this ADR nothing had pinned them.
 - Where the compiled schema is cached and what the generic entry point looks like: [#16](https://github.com/onhotpath/ferry/issues/16).
 - Whether the walk may run concurrently: [#20](https://github.com/onhotpath/ferry/issues/20).
 - **Opaque capture of a structured subtree**, which ADR-0004 left open by name.
@@ -759,12 +866,20 @@ Core's test iterates the identity table and the admitted kind list and asserts t
 
 - Core's supported set is small and enumerable, and a contributor can read it off one table rather than off the walk.
   The cost is that ordinary types people expect to work, `netip.Addr` and `url.URL` among them, do not until somebody registers them, and the compile error is the only thing standing between that and a silent empty field.
+- Only four Go kinds are refused permanently: `chan`, `func`, `unsafe.Pointer` and `uintptr`, and they fail because the value does not exist outside the process.
+  Everything else refused is a question of who supplies the codec, because a codec collapses a type to a leaf and a leaf needs no address set.
+  That includes the two cases that look impossible, an interface and a recursive type, both measured round-tripping after registration.
+  ferry is therefore much less closed than the word "refused" suggests, and the ADR says so rather than letting the list read as a wall.
+- The refusal list is partly [#12](https://github.com/onhotpath/ferry/issues/12)'s to shorten.
+  `netip.Addr`, `netip.AddrPort`, `netip.Prefix` and `big.Int` all carry an inverse text pair already, so whether they are supported out of the box is decided by whether the codec chain consults `TextMarshaler` before kind.
+  So is whether `net.IP` lands as `192.0.2.1` or as sixteen raw bytes.
 - There are three outcomes and not two, and the third is the one to watch: a type admitted by kind gets an unpinned representation nobody chose.
   `net.IP` and a `[16]byte` UUID both round-trip exactly and both write raw bytes into the plane.
   Value fidelity holds, legibility does not, and core's guarantee is silent about it by construction.
   This is the price of the same rule that makes `type Port int` work for free, and the documentation obligation it creates is real rather than a formality.
-- A `time.Time` that is not UTC loses its zone's DST rules, which is worse than losing its name: arithmetic across a transition gives a different instant.
-  ferry is identical to `encoding/json/v2` here, and the guidance is that a time crossing a plane should be UTC.
+- A `time.Time` that is not UTC loses its zone's DST rules, which is worse than losing its name: arithmetic across a transition gives a different instant, and the `Location` it loads to depends on the reading machine's own zone.
+  Measured, `encoding/json/v2` does exactly the same thing, has only two time options and neither touches zones, and its `format:` tag escape was removed in 1.27.
+  So there is no stdlib answer to adopt, and the guidance is that a time crossing a plane should be UTC.
 - The equality relation in each proof is also the specification of what the harness may not notice.
   `.Equal` cannot see `time.Time`'s zone being discarded, measured at zero failures against a codec that throws it away.
   That is the argument for the golden column stated at its strongest, and it means a contributor choosing a loose relation quietly widens what ferry tolerates.
