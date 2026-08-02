@@ -38,6 +38,8 @@ var gapsHook = func() {}
 var flatHook = func() {}
 var edgesHook = func() {}
 var timeHook = func() {}
+var refusalHook = func() {}
+var chainHook = func() {}
 
 func hdr(s string) { fmt.Printf("\n=== %s ===\n", s) }
 
@@ -240,6 +242,12 @@ func main() {
 
 	hdr("P16 what the time.Time losses cost")
 	timeHook()
+
+	hdr("P17 every refusal: the limiting factor, and whether a codec lifts it")
+	refusalHook()
+
+	hdr("P18 how much the codec-chain ORDER decides (interacts with #12)")
+	chainHook()
 }
 
 func init() { runAtEnd = runHarness }
@@ -259,3 +267,7 @@ func init() { flatHook = runFlat }
 func init() { edgesHook = runEdges }
 
 func init() { timeHook = runTimeCost }
+
+func init() { refusalHook = runRefusals }
+
+func init() { chainHook = runChainOrder }

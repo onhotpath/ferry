@@ -22,6 +22,8 @@ Run: `GOTOOLCHAIN=go1.27rc2 go run .`
 | `flat.go` | a plane with no type information, which is what hid G2 |
 | `edges.go` | what actually happens to fifteen types people reach for |
 | `timecost.go` | what the `time.Time` losses cost, and what the relation buys |
+| `refusals.go` | every refused kind: the limiting factor, and whether a codec lifts it |
+| `chainorder.go` | how much the codec-chain order decides, which is [#12](https://github.com/onhotpath/ferry/issues/12)'s |
 
 ## Probes
 
@@ -43,6 +45,8 @@ Run: `GOTOOLCHAIN=go1.27rc2 go run .`
 | P14 | the core table through a plane with no type information | 11/11 scalars, and nil pointers do not survive |
 | P15 | what happens to fifteen real-world types | **three outcomes, not two.** Five refused, nine admitted, and several admitted with a surprising representation |
 | P16 | what the `time.Time` losses cost | the zone loss is invisible to `.Equal`, and it breaks DST arithmetic |
+| P17 | can a registered codec lift each refusal | **yes for every one except three.** A codec collapses a type to a leaf, and a leaf needs no address set |
+| P18 | how much the codec-chain order decides | `netip.AddrPort`, `netip.Prefix` and `net.IP` are decided by ordering alone, with no registration |
 
 ## The gap audit (P13), which a review challenge forced
 

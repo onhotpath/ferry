@@ -81,6 +81,21 @@ const (
 	shapeUnsupported
 )
 
+// validMapKey: core ships string and the integer kinds, and a registered
+// codec extends the set exactly as it extends the leaf set.
+func validMapKey(k reflect.Type) bool {
+	if _, ok := byIdentity[k]; ok {
+		return true
+	}
+	switch k.Kind() {
+	case reflect.String,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return true
+	}
+	return false
+}
+
 func classify(t reflect.Type) shape {
 	if _, ok := byIdentity[t]; ok {
 		return shapeLeaf
@@ -101,6 +116,9 @@ func classify(t reflect.Type) shape {
 	case reflect.Pointer:
 		return shapePointer
 	case reflect.Map:
+		if !validMapKey(t.Key()) {
+			return shapeUnsupported
+		}
 		return shapeMap
 	}
 	return shapeUnsupported

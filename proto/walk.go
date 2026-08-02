@@ -30,8 +30,22 @@ func (e unsupportedTypeError) Error() string {
 func compile(t reflect.Type) ([]Path, error) {
 	var out []Path
 	var errs []error
+	// The type-stack that makes a recursive type a refusal rather than a hang.
+	// It is a stack and not a seen-set: the same type appearing twice as
+	// SIBLINGS is fine, and only appearing twice on one path is a cycle.
+	stack := map[reflect.Type]bool{}
 	var rec func(reflect.Type, Path)
 	rec = func(t reflect.Type, p Path) {
+		if classify(t) != shapeLeaf && stack[t] {
+			errs = append(errs, fmt.Errorf(
+				"ferry: %s: %s is recursive, so its address set is unbounded; register a codec for it",
+				pathOrRoot(p), t))
+			return
+		}
+		if classify(t) != shapeLeaf {
+			stack[t] = true
+			defer delete(stack, t)
+		}
 		switch classify(t) {
 		case shapeLeaf:
 			out = append(out, p)
@@ -169,6 +183,13 @@ func dump(v reflect.Value) (map[Path]Value, error) {
 // and not a conversion: only a string key is a conversion, and everything else
 // has to be parsed, which is why the admissible key set is not "any comparable".
 func decMapKey(text string, dst reflect.Value) error {
+	// A registered codec whose form is a String serves as a key, because a
+	// key is only ever segment text. The obligation it carries is stronger
+	// than a leaf codec's: the text must be INJECTIVE over the key type, or
+	// two distinct keys collapse into one address.
+	if c, ok := byIdentity[dst.Type()]; ok {
+		return c.dec(String(text), dst)
+	}
 	switch dst.Kind() {
 	case reflect.String:
 		dst.SetString(text)
@@ -181,6 +202,11 @@ func decMapKey(text string, dst reflect.Value) error {
 }
 
 func mapKeyText(k reflect.Value) string {
+	if c, ok := byIdentity[k.Type()]; ok {
+		if v, err := c.enc(k); err == nil && v.Kind() == VString {
+			return v.Text()
+		}
+	}
 	switch k.Kind() {
 	case reflect.String:
 		return k.String()
