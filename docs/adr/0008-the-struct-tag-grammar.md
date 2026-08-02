@@ -33,9 +33,10 @@ A clean break from it is decided, so it is a comparison and not a starting point
 
 This ADR is written from a throwaway prototype on branch `proto/11-tag-grammar`, which never merges.
 It is built on `proto/8-defaults`, so every measurement runs against a real `Path`, a real `Value`, the real type set, #8's real compiled schema, and the real YAML driver over real files.
-Thirty-eight probes across three rounds.
-**Nine overturned an answer this ADR had already reached in draft.**
-Three came from an audit round aimed at the case the earlier fixtures did not contain, one was a probe that passed while measuring nothing, and one was a review round breaking this ADR's own answer on the tag key by pointing out that its measurement was of the wrong case.
+Forty-one probes across four rounds.
+**Eleven overturned an answer this ADR had already reached in draft.**
+Three came from an audit round aimed at the case the earlier fixtures did not contain, and one was a probe that passed while measuring nothing.
+Two came from review: the tag key, whose refusal rested on a measurement of the wrong case, and the escape character, which three drafts chose before measuring which of its cases was the common one.
 
 ## Decision
 
@@ -66,7 +67,7 @@ This is the union, so a reader can check it rather than rediscover it.
 | ADR-0001 | near-miss suggestions | [Diagnostics](#diagnostics-three-tiers-and-the-vocabulary-of-the-neighbourhood) |
 | ADR-0001 | where option contradictions sit | as above, tier three |
 | ADR-0003 | how a tag names a segment | [The grammar](#the-grammar) |
-| ADR-0003 | how a segment containing the grammar's punctuation is written | [The escape is `~`](#the-escape-is--and-it-follows-the-character) |
+| ADR-0003 | how a segment containing the grammar's punctuation is written | [A token is bare, or single-quoted](#a-token-is-bare-or-single-quoted-with-the-quote-doubled) |
 | ADR-0003 | whether prefix and squash exist | **neither** |
 | ADR-0003 | whether a per-field case option exists | **no** |
 | ADR-0003 | whether the struct tag key is configurable | **yes**, with the stated answer ADR-0003 demanded |
@@ -90,7 +91,7 @@ Seven questions this ADR had to answer that nobody asked.
 | whether a tag option may name a codec or a format | [What is not in the vocabulary](#what-is-not-in-the-vocabulary-and-why-each-is-a-refusal-rather-than-an-omission) |
 | what a diagnostic tier above ADR-0006's two looks like | [Diagnostics](#diagnostics-three-tiers-and-the-vocabulary-of-the-neighbourhood) |
 | what the grammar's own blind spot is | [The one mistake the grammar cannot see](#the-one-mistake-the-grammar-cannot-see) |
-| whether the escape rule the address rendering uses can serve both | [The escape is `~`](#the-escape-is--and-it-follows-the-character) |
+| whether ferry needs an escape character at all | [A token is bare, or single-quoted](#a-token-is-bare-or-single-quoted-with-the-quote-doubled) |
 | whether the walk and the schema compiler may have separate field rules | [`-` skips, and embedding needs no word](#--skips-and-embedding-needs-no-word) |
 
 **Three things this ADR does not close.**
@@ -107,19 +108,19 @@ Seven questions this ADR had to answer that nobody asked.
 ```
 tag      =  name *( "," option )  /  "-"
 
-name     =  1*( plain / escaped )
-option   =  "required"  /  "omitzero"  /  "default" "=" text
-text     =  *( plain / escaped )
+name     =  token          ; and may not be empty
+option   =  "required"  /  "omitzero"  /  "default" "=" token
 
-escaped  =  "~" ( "~" / "," / "=" / "-" )
-plain    =  any byte except "," and "~"
+token    =  bare  /  quoted
+bare     =  *( any byte except "," , and not beginning with "'" )
+quoted   =  "'" *( any byte except "'"  /  "''" ) "'"
 ```
 
 Four words, and one of them is punctuation.
 `-` as the whole value means the field is not mapped; `required` and `default=` are Load-side; `omitzero` is Dump-side; the name is shared.
 
-`default=` splits on its first `=`, so `default=a=b` is the text `a=b` and needs no escape.
-The `=` escape exists for the name, which is not split on `=` at all and where an unescaped one is refused.
+`default=` splits on its first `=`, so `default=a=b` is the text `a=b` and is written bare.
+A bare **name** may not contain `=` at all, which is the one place the grammar guesses at intent, and it is covered below.
 
 The field rule, which is the other half of the grammar and is where most of the argument is:
 
@@ -254,7 +255,7 @@ The reverse move, defaulting now and requiring later, breaks compiling code.
 There is no worked case where that is wrong rather than merely verbose, and the verbosity is mechanical.
 The mitigation is the diagnosis, which names the field and gives both remedies.
 
-### The escape is `~`, and it follows the character
+### A token is bare, or single-quoted with the quote doubled
 
 ADR-0003's consequences state the obligation:
 
@@ -263,32 +264,70 @@ ADR-0003's consequences state the obligation:
 And survey item 5.10's second half is the cautionary case: xload's `parseField` splits the tag on `,` at [load.go:219](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L219), so `env:"K,delimiter=,"` cannot be written at all.
 Reproduced: it parses to key `K` and options `["delimiter=", ""]`, and the delimiter is now the empty string.
 
-> `~` introduces an escape.
-> `~x` yields `x` for `x` in the grammar's own punctuation, `~ , = -`.
-> Anything else after `~` is an error.
+> A name or an option value is **bare**, or **single-quoted with a literal quote doubled** inside it.
+> A bare token carries no escapes at all, and only a **leading** quote is significant.
+> There is no escape character.
 
-The escape is **accepted anywhere and required only where the character would otherwise be the grammar's own**: `,` and `~` always, `=` only in a name, and `-` only when the whole name is `-`.
-So `ferry:"cors-origins"` and `ferry:"query,default=a=b"` need no escape and are written the obvious way.
+```go
+Host     string `ferry:"host"`
+Port     int    `ferry:"port,default=8080"`
+Origins  []string `ferry:"cors-origins"`
+Greeting string `ferry:"greeting,default='Hello, world'"`
+Brokers  string `ferry:"brokers,default='h1:9092,h2:9092'"`
+Cache    string `ferry:"cache,default=~/.cache/app"`
+Note     string `ferry:"note,default=it's here"`
+Odd      string `ferry:"'a,b'"`
+Dash     string `ferry:"'-'"`
+Apos     string `ferry:"'a''b'"`
+```
 
-Three models were implemented and measured against the same two inputs, rather than argued:
+Because only a leading quote is significant, an apostrophe inside a bare token is just an apostrophe, and `default=it's here` needs no quoting.
 
-| model | the name `a,b` | a stray comma, `host,,required` |
+**The measurement that decided it is which hatch people actually open.**
+Across 565 free-text struct tag values in the corpus, the ones whose whole content is text a user chose (`default:`, `envDefault:`, `help:`, `usage:`, `desc:`):
+
+| | count | share |
 | --- | --- | --- |
-| escape character, `a~,b` | `name="a,b"` | refused: empty option |
-| doubling, `a,,b` | `name="a,b"` | **`name="host,required"`, no options, silently** |
-| no escaping | unwritable | refused: empty option |
+| containing a comma | 22 | **3.9%** |
+| containing a tilde | 2 | 0.7% |
 
-Doubling is the model that needs no escape character and it loses on the row that matters: a typo becomes a wrongly-named address with no diagnostic, which is ADR-0001's prohibition on silently ignoring anything, arriving as silently renaming instead.
+Real examples of the first: `default:"1,2"`, `default:"one:two,three:four"`, `description:"A x,y point"`, `help:"Help, I need ${somebody}"`.
 
-**`encoding/json/v2` has this problem too, and Go 1.27 does not solve it**, which was measured rather than assumed after its source suggested otherwise.
+So the comma is the case that has to read well, by roughly ten to one over anything else.
+`default='Hello, world'` is guessable by a reader who has never seen ferry; the alternatives below are not.
 
-v2's `consumeTagOption` carries a single-quoted-string grammar and a comment that states ferry's own constraint independently:
+**Four models were implemented and run against the same eleven intents rather than argued.**
 
-> "The grammar is nearly identical to a double-quoted Go string literal, but uses single quotes as the terminators.
-> The reason for a custom grammar is because both backtick and double quotes cannot be used verbatim in a struct tag."
-> ([go1.27rc2 `src/encoding/json/v2/fields.go`](https://cs.opensource.google/go/go/+/refs/tags/go1.27rc2:src/encoding/json/v2/fields.go))
+| intent | `~` escape | `,,` doubling | no escape | bare or `'quoted'` |
+| --- | --- | --- | --- | --- |
+| `ferry:"host"` | same | same | same | same |
+| `port,default=8080` | same | same | same | same |
+| `cors-origins` | same | same | same | same |
+| a comma in a default | `default=Hello~, world` | `default=Hello,, world` | **unwritable** | `default='Hello, world'` |
+| a broker list default | `default=h1:9092~,h2:9092` | `default=h1:9092,,h2:9092` | **unwritable** | `default='h1:9092,h2:9092'` |
+| a tilde in a default | `default=~~/.cache/app` | `default=~/.cache/app` | **unwritable** | `default=~/.cache/app` |
+| an apostrophe in a default | `default=it's here` | `default=it's here` | `default=it's here` | `default=it's here` |
+| a comma in a name | `a~,b` | `a,,b` | **unwritable** | `'a,b'` |
+| a name that is exactly `-` | `~-` | `-` | `-` | `'-'` |
+| **the typo `host,,required`** | refused | **`name="host,required"`, silently** | refused | refused |
 
-Measured on `go1.27rc2`, that machinery is not reachable from the name position:
+Doubling the separator is the model that needs no escape character, and it loses on the last row: a stray comma becomes a wrongly-named address with no diagnostic, which is ADR-0001's prohibition arriving as silent renaming rather than silent ignoring.
+No escaping at all is the maximally reversible option and it leaves ADR-0003's obligation unmet on the row that is 3.9% of real values.
+The `~` escape works and reads worse than quoting on that same row.
+
+**The quoted form is `encoding/json/v2`'s own design, and its source states ferry's constraint independently.**
+
+```
+"The grammar is nearly identical to a double-quoted Go string literal, but uses
+ single quotes as the terminators. The reason for a custom grammar is because
+ both backtick and double quotes cannot be used verbatim in a struct tag."
+     go1.27rc2, src/encoding/json/v2/fields.go, consumeTagOption
+```
+
+That is the same fact [What a struct tag can carry](#what-a-struct-tag-can-carry-and-what-it-cannot) measured, reached independently by the standard library, in the release ADR-0001 makes ferry's floor.
+
+**It is a design ferry copies rather than an API it inherits, because v2 does not actually offer it.**
+Measured on `go1.27rc2`:
 
 ```
 json:"a,b"              marshals as {"a":"v"}          the name is truncated at the comma, silently
@@ -298,45 +337,62 @@ json:"t,format:'...'"   Go struct field T has unsupported `format` tag option
 
 The name is consumed with `allowQuoted=false`, so a quoted name is refused; the only caller that passes `allowQuoted=true` is `format:`, which 1.27 removed pending typed struct tags and which now errors.
 So **there is no working quoted-token path in json/v2 today**, and a JSON member name containing a comma is unexpressible in the standard library's newest tag grammar.
-There was nothing to copy.
+ferry takes the grammar and wires it where v2 did not.
 
-**And the single-quote model would have been the wrong thing to copy anyway**, for a reason the section above already measured.
-A `'` inside a single-quoted name is written `\'`, which a struct tag value spells `\\'` because `Unquote` runs first.
-Measured:
+**ferry differs from v2 in one place, the inner escape, and the reason is measured.**
+v2 escapes an inner quote with a backslash; ferry doubles it, SQL's convention.
+A backslash in a struct tag value must be written `\\`, because `strconv.Unquote` runs first:
 
 ```
 ferry:"'it\\'s'"    Lookup -> "'it\'s'"  ok=true                the correct spelling
-ferry:"'it\'s'"     Lookup -> ""         ok=false               one backslash short, and the tag is gone
+ferry:"'it\'s'"     Lookup -> ""         ok=false               one backslash short
 ```
 
-`~` needs no backslash at any depth, so no spelling of it can vanish.
+ferry's own raw-tag scanner catches the second case loudly, so it is not the silent landmine an earlier draft of this ADR called it.
+What survives is simpler: doubling needs no backslash at any depth, so there is no spelling to get one character wrong, and `''` is a convention every SQL and CSV user already knows.
 
-**One escape rule serves the tag and the address rendering**, which is why it is `~` and not something new.
-ADR-0003 took RFC 6901's escaping model on the ground that escaping a separator and an escape character is a solved problem, and left the exact byte spelling to the implementation.
-Re-running ADR-0003's own property under the follow-the-character rule, over 200,000 fuzzed paths with segment text drawn from `a b / # ~ ~0 ~1 ~2 , = -` plus the empty string, an embedded NUL, non-ASCII and a space: **0 round-trip failures and 0 distinct segment lists sharing a rendering.**
-The prototype's `~0 ~1 ~2` spelling satisfies ADR-0003 equally; what the follow-the-character rule buys is that a reader learns one rule instead of two.
-That is a recommendation to the implementation and not an amendment to ADR-0003, which never fixed the bytes.
-
-**Measured end to end through the real YAML driver**, a struct whose every segment contains the grammar's own punctuation:
+**Every failure mode is loud, and carries its remedy.**
 
 ```
-tag                        address        segment      the YAML the driver wrote
-ferry:"a~,b"               /a,b           "a,b"        a,b: "c"
-ferry:"a~=b"               /a=b           "a=b"        a=b: "e"
-ferry:"a~~b"               /a~0b          "a~b"        a~b: "t"
-ferry:"~-"                 /-             "-"          '-': "d"
-ferry:"a/b"                /a~1b          "a/b"        a/b: "s"
-ferry:"a#b"                /a~2b          "a#b"        a#b: "h"
-ferry:"a b"                /a b           "a b"        a b: "sp"
-ferry:"greet,default=Hello~, world"                    greet: ""
+ferry:"host,default='abc"     value "'abc" is not terminated: a quoted value ends at a single
+                              quote, and a literal quote inside it is doubled
+ferry:"host,default='abc'def" value "'abc'def" has text after the closing quote
+ferry:"'a,b"                  name "'a,b" is not terminated: ...
+ferry:"host,,required"        empty option: two commas with nothing between them
+ferry:"-,required"            `-` names no segment: write ferry:"-" on its own to leave the
+                              field unmapped, or ferry:"'-',..." to name the segment `-`
 ```
 
-All eight load back exactly, and with `/greet` deleted from the document the declared default arrives as `Hello, world`.
-`/` and `#` need no escape in a **tag**, because they are the address rendering's punctuation and not the grammar's; the two alphabets are disjoint and the rule is shared.
+**Measured end to end through the real YAML driver**, on a struct whose every segment contains punctuation the grammar uses:
+
+```
+tag                    address    segment    the YAML the driver wrote
+ferry:"'a,b'"          /a,b       "a,b"      a,b: "c"
+ferry:"'a=b'"          /a=b       "a=b"      a=b: "e"
+ferry:"'a''b'"         /a'b       "a'b"      a'b: "q"
+ferry:"'-'"            /-         "-"        '-': "d"
+ferry:"a/b"            /a~1b      "a/b"      a/b: "s"
+ferry:"a#b"            /a~2b      "a#b"      a#b: "h"
+ferry:"a b"            /a b       "a b"      a b: "sp"
+ferry:"a~b"            /a~0b      "a~b"      a~b: "t"
+ferry:"it's"           /it's      "it's"     it's: "ap"
+```
+
+All nine round-trip exactly, and with their addresses deleted from the document the three declared defaults arrive as `Hello, world`, `~/.cache/app` and `h1:9092,h2:9092`.
+`/`, `#` and `~` need no quoting in a **tag**: they are the address rendering's punctuation, not the grammar's, and the two alphabets are disjoint.
+
+**One wart, recorded rather than hidden.**
+`default=` and `default=''` both mean the empty string, so one value has two spellings.
+ADR-0006 requires only that an empty default be distinguishable from *no* default, and both remain distinct from the option's absence, so nothing it needs is lost.
 
 **One thing is deliberately unwritable: an empty segment name.**
 `ferry:""` is refused, because the empty tag value has to mean something and "you left the name out" is the more useful reading than "the segment is called nothing".
 ADR-0003's address model permits empty segment text, and a driver would refuse it anyway: an empty segment has no environment variable name.
+
+**And ADR-0003's rendering is left alone.**
+An earlier draft proposed unifying the address rendering's escape with the tag's, and fuzzed 200,000 paths to show one rule could serve both.
+The grammar now has no escape character, so there is nothing to unify: the rendering's byte spelling stays what ADR-0003 left it, an implementation choice.
+The result is recorded because the reason the unification was worth less than it sounded is worth keeping: the address rendering is machine-generated and never typed by a human.
 
 ### Direction is a property of the option, and the grammar does not spell it
 
@@ -377,7 +433,7 @@ If a direction-scoped option ever earns its place, it arrives into a grammar tha
 ### `-` skips, and embedding needs no word
 
 `ferry:"-"`, as the whole tag value, means the field is not mapped in either direction.
-A segment whose text is literally `-` is `ferry:"~-"`, measured above.
+A segment whose text is literally `-` is `ferry:"'-'"`, measured above.
 `ferry:"-,required"` is refused rather than read either way, with both remedies in the message.
 
 `ferry:"-"` on an unexported field is redundant and accepted; any other tag on an unexported field is an error, because `reflect` cannot set it and the tag can never do anything.
@@ -776,8 +832,8 @@ It does hand #9 one shape it should not have to invent: the three tiers are a su
   The research doc offers it as an alternative to a validation entry point or as a complement.
   This ADR ships the entry point, which needs no tooling and runs in a user's own test, and records that an analyzer would catch the same class at build time for users who wire it up.
   It has no ticket, and one is proposed in the resolution comment rather than decided here.
-- **Whether the address rendering adopts the follow-the-character escape.**
-  ADR-0003 left the bytes to the implementation and this ADR measures that both spellings work.
+- **The byte spelling of the address rendering.**
+  An earlier draft proposed unifying it with the tag's escape; the grammar now has no escape character, so ADR-0003's spelling is untouched and stays an implementation choice.
 - **The migration guide from xload**, which [#1](https://github.com/onhotpath/ferry/issues/1) lists as unspecified until this grammar exists.
   It exists now, and the guide is somebody's.
 - **Whether the vocabulary ever grows.**
@@ -794,7 +850,11 @@ It does hand #9 one shape it should not have to invent: the three tiers are a su
   The cost is thirty tags on a thirty-field struct, and the return is that exporting a field cannot change the plane, that a generated template speaks the plane's vocabulary, and that ferry never invents a representation.
   A Go-field-name default would have been right about one time in twenty, measured.
 - The grammar can name any segment a plane can hold, except the empty one, which is deliberate.
-  That closes the half of survey item 5.10 ADR-0003 left open, and it is a property `encoding/json/v2` does not have in Go 1.27.
+  That closes the half of survey item 5.10 ADR-0003 left open, and it is a property `encoding/json/v2` does not have in Go 1.27, where a member name containing a comma is silently truncated.
+- **ferry has no escape character.**
+  A token is bare or single-quoted, the quote is doubled inside, and nothing in the grammar needs a backslash at any depth.
+  The design is json/v2's, wired where v2 left it unwired, and the one divergence is doubling rather than backslash-escaping the inner quote.
+  The cost is two forms for one token, so the parser has a mode and the documentation has a second paragraph.
 - **ferry is stricter than `encoding/json/v2`, measurably.**
   v2 rejects near-misses of its six options and silently ignores everything else; ferry rejects everything it does not recognise and suggests a remedy for 22 of 26 measured mistakes.
   The cost is ADR-0001's, already priced: the vocabulary is frozen, and a future option is a breaking change for anyone who used that word.
@@ -807,6 +867,8 @@ It does hand #9 one shape it should not have to invent: the three tiers are a su
   Pointing it at a tag another mapper owns is still refused, and now says why.
 - Diagnostics have three tiers rather than ADR-0006's two, and the suppression rule extends to ADR-0005's "maps no address" check.
   One field's single mistake reports once.
+- The escape character was the last thing to change and it changed on one number: a comma appears in 22 of 565 real free-text tag values and a tilde in 2.
+  Three drafts optimised the rare row before measuring which row was rare.
 - The three embedding defects the audit found were all outside the shape of the original fixtures, and all three were silent.
   The one that generalises is that **the walk and the schema compiler must share one field rule**, or the schema promises an address the walk never visits.
 - **The grammar has one blind spot and it is not closable**: a bare option word in the name position is a name.
@@ -825,8 +887,10 @@ The survey is [`docs/research/generics-and-modern-go.md`](../research/generics-a
 **5.10, composite values are string-splitting, and it is not escapable.**
 The half ADR-0003 and ADR-0005 left here is closed, and it is this ticket's outright.
 xload's `parseField` splits the tag on `,` at [load.go:219](https://github.com/gojekfarm/xtools/blob/a90b3aad2133248cec50f6b4d6e37b0d9e788adb/xload/load.go#L219), so `env:"K,delimiter=,"` cannot be written; reproduced, it parses to key `K` with the delimiter silently empty.
-ferry writes the same intent as `ferry:"K,default=~,"` and gets the comma, and eight hostile segment names round-trip through the real YAML driver.
-The measurement that decided the escape model is that the alternative needing no escape character, doubling the separator, silently renames a field on a stray comma.
+ferry writes the same intent as `ferry:"K,default=','"` and gets the comma, and nine hostile segment names round-trip through the real YAML driver.
+Two measurements decided the model.
+A comma appears in 22 of 565 real free-text tag values and a tilde in 2, so the comma is the hatch that has to read well.
+And the model needing no quoting at all, doubling the separator, silently renames a field on a stray comma.
 
 **5.14** was enumerated rather than assumed, all four items.
 
