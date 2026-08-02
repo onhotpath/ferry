@@ -832,8 +832,6 @@ Where a declaration attaches is decided here, not there: it attaches to the stat
   Until one of them lands, that hazard exists in whatever the working entry point is.
 - A struct merges into a seeded value field by field and a slice or a map is replaced wholesale.
   Both follow from the one rule and neither looks like it does, so this is a documentation obligation rather than a design choice.
-- `required` on a composite cannot be satisfied by an empty one, because a plane cannot report present-and-empty at a container address.
-  That is ADR-0005's forced collision surfacing in a third place, and the workaround is an explicit `null`.
 - The walk now returns a bool per subtree, which is a change to the walk's own signature rather than a new interface, and it is what makes both `*T` materialisation and the presence observation possible from one pass.
 
 ## Items from the xload survey
