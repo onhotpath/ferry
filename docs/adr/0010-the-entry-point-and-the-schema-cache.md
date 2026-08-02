@@ -36,8 +36,8 @@ This ADR is written from a throwaway prototype on branch `proto/16-entry-point`,
 It is built on `proto/19-registration`, so every measurement runs against a real `Path`, a real `Value`, the type set ADR-0005 landed, the chain ADR-0007 landed, the `Registry` ADR-0009 landed, and a real YAML plane over real files.
 Every number is from that prototype unless it cites the survey.
 
-**Two of the eight probes overturned something an ADR already said, and one of those is a number two ADRs both offered this ticket in good faith.**
-Both are recorded in full.
+**Four of the eleven probes overturned something that was already written down: one an ADR-0009 measurement offered to this ticket in good faith, two decisions this ADR had itself reached in draft, and one rule of ADR-0005's that had never been run against a struct whose only field is a map.**
+All four are recorded in full, because the shape of each miss is the argument for the audit that found it.
 
 ## Decision
 
@@ -50,7 +50,7 @@ The ticket asked for five things by name, and the owner's comment added a sixth.
 | `Load[T]` / `Dump[T]`, or `Load(ctx, &v)` in xload's style | **yes**: `Load[T]`, and the deciding argument is ADR-0006's reload leak rather than ergonomics | [The entry point](#the-entry-point-returns-a-value-and-that-is-adr-0006s-decision-not-a-taste-one) |
 | the cache architecture | **yes**: a `sync.Map` per registry, keyed by `{reflect.Type, tagKey}`, with the compile behind a per-entry `sync.OnceValues` | [The cache](#the-cache-is-a-two-level-one-per-registry) |
 | what is compiled into a leaf: data, or resolved behaviour | **yes**: resolved behaviour, and the three things it holds are priced separately because only one of them is large | [What a leaf holds](#a-leaf-holds-resolved-behaviour-and-the-three-things-it-holds-do-not-cost-the-same) |
-| whether there is a public validation entry point | **yes**, and it is renamed: `Compile[T]()` is `Load`'s compiler reporting whether the schema compiled, and it **freezes the registry** | [Compile](#compilet-is-the-compiler-and-it-is-a-use-of-the-registry) |
+| whether there is a public validation entry point | **yes**, and it is renamed: `Compile[T]()` is `Load`'s compiler reporting whether the schema compiled, and it takes **neither the cache nor the freeze** | [Compile](#compilet-is-the-compiler-and-it-is-not-a-use-of-the-registry) |
 | what the cache key actually is | **yes**, plus the rule for what may ever join it and a one-line mechanism that enforces it at build time | [The cache key](#the-cache-key-is-three-components-and-the-rule-is-what-outlives-them) |
 | **the walk architecture** (the owner's comment) | **yes**, and there are three axes it can be duplicated on rather than one | [The walk](#the-walk-is-written-once-on-three-axes-and-not-one) |
 
@@ -58,7 +58,7 @@ Two more this ticket inherited from other ADRs:
 
 | Handed over by | Closed | Where |
 | --- | --- | --- |
-| ADR-0007 and ADR-0009: whether a root leaf is a legal address | **yes: no**, and the rule is not about the Go kind | [A root leaf](#a-root-leaf-is-refused-and-the-rule-is-not-about-the-go-kind) |
+| ADR-0007 and ADR-0009: whether a root leaf is a legal address | **yes: no**, and the rule is asked of the compiled node rather than of the Go kind | [The root](#the-root-must-be-a-struct-ferry-walks-and-the-rule-is-asked-of-the-compiled-node) |
 | ADR-0007: where the compiled schema caches the per-type claim | **yes**, in the leaf, resolved once | [What a leaf holds](#a-leaf-holds-resolved-behaviour-and-the-three-things-it-holds-do-not-cost-the-same) |
 
 Four questions this ADR had to answer that nobody asked:
@@ -67,7 +67,7 @@ Four questions this ADR had to answer that nobody asked:
 | --- | --- |
 | where ADR-0006's **seeded value** goes, given a signature with no destination | [The entry point](#the-entry-point-returns-a-value-and-that-is-adr-0006s-decision-not-a-taste-one) |
 | whether `json/v1`'s recursive-type placeholder is live for ferry at all | [The cache](#the-cache-is-a-two-level-one-per-registry) |
-| what the compile entry point does to ADR-0009's freeze, and where it may therefore be called | [Compile](#compilet-is-the-compiler-and-it-is-a-use-of-the-registry) |
+| what the compile entry point does to ADR-0009's freeze, and what "first use" therefore means | [Compile](#compilet-is-the-compiler-and-it-is-not-a-use-of-the-registry) |
 | what the schema cache does to [#25](https://github.com/onhotpath/ferry/issues/25)'s motivating measurement | [What this hands the tickets that were waiting](#what-this-hands-the-tickets-that-were-waiting) |
 
 **Three things this ADR does not close.**
@@ -519,7 +519,7 @@ FRESH destination,  walk 2 (broken) -> {Common:{Name: Env:} Port:0}       equal=
 That is a rule about ferry's tests rather than about its API, and it belongs here because it is half of the constraint the owner's comment set and the half that is easy to lose.
 It is also cheaper to honour than it was for xload: `Load` returns a value, so a subtest that wants a shared destination has to write one.
 
-### `Compile[T]()` is the compiler, and it is a use of the registry
+### `Compile[T]()` is the compiler, and it is not a use of the registry
 
 ADR-0008 named this entry point `Validate[T]()` and required that it and `Load` share one compiler, because two entry points that could disagree about whether a type is legal would be viper's two-engines defect at ferry's own front door.
 That requirement is kept in full.
@@ -595,45 +595,59 @@ Compile[Conf]()                  -> ferry: /listen: main.Opaque maps no address 
 Compile[Conf](WithRegistry(reg)) -> <nil>
 ```
 
-#### And here is what nobody has looked at
+#### And here is what nobody has looked at, including this ADR's own draft
 
-ADR-0009 made a registry freeze at its **first use**, which is the first schema compiled against it, and its soundness argument runs through where that falls.
-This entry point compiles a schema.
-Measured:
+ADR-0009 made a registry freeze at its **first use**, which it defines as the first schema compiled against it, and its soundness argument runs through where that falls.
+`Compile` compiles a schema, so on ADR-0009's wording it freezes.
 
-```
-a new registry, frozen=false
-after Compile[Conf](WithRegistry(fresh)), frozen=true
-a registration after that -> ferry: main.Opaque: the registry is frozen; every
-                             registration must happen before the first schema
-                             is compiled
-```
+**An earlier draft of this ADR decided exactly that, and it was wrong.**
+It weighed two readings, found both loud, and picked freezing because a non-freezing `Compile` "reports a failure that never happens".
+It never asked the next question, which is *loud to whom*.
 
-**So `Compile` freezes, and that is not a free choice.**
-The alternative - it compiles without caching and without marking a use - was implemented and run:
+The measurement that settles it needs a type that compiles **both ways with different representations**, which ADR-0007's chain-before-kind makes ordinary and which the draft's own fixture did not contain.
+A type carrying a text pair, with a registration that would give it a different boundary kind:
 
 ```
-Compile before the registration -> ferry: /listen: main.Opaque maps no address ...
-the Load that follows           -> <nil>
+unregistered, the chain claims it        -> /level = string("WARN")
+registered, the table claims it          -> /level = number("2")
+
+Compile first, Register's error DROPPED  -> /level = string("WARN")   err = <nil>
 ```
 
-A `Compile` that does not freeze reports a failure that never happens, about a registry state no `Load` will ever see.
-Both readings are loud, and only one of them keeps ADR-0008's "one compiler" true.
+An early `Compile` freezes the registry, the later `Register` fails, and **a caller who does not check that error gets a plane holding the representation they replaced, with no error anywhere**.
+That is ADR-0009's staleness defect, which the freeze exists to prevent, reached through the freeze.
+The draft's first fixture for this used a type that only compiles *with* the codec, so the failure was loud and the probe measured nothing; that mistake is recorded rather than replaced, because it is the same shape as #12's and #19's worst ones.
 
-**Where `Compile` may therefore be called.**
-ADR-0009 priced exactly one broken shape, a `Load` during `init()`, and gave the reason the ordinary shape is safe: Go initialises imported packages before the importer, and every package-level variable and every `init` in the program runs to completion before `main.main`.
-`Compile` is a second and more likely route into that shape, because it is the thing you call to check a schema early.
+The same sequence with a non-freezing `Compile`:
 
-```go
-func init()   { ferry.Register(...) }       // every init completes before
-func TestX(t) { ferry.Compile[Config]() }   // a test runs: always safe
-
-var _ = must(ferry.Compile[Config]())       // runs DURING init, and freezes
-                                            // the default registry mid-graph
+```
+Compile before the registration          -> <nil>
+Register's error DROPPED, then Dump      -> /level = number("2")
 ```
 
-A test function is not an `init`, so `Compile` from a test - which is where ADR-0008 pitched it - is always after every `Register`.
-`Compile` from a package-level variable is ADR-0009's broken shape with a different verb on it, and it is named here rather than left to be found.
+> `Compile` takes **neither the cache nor the freeze**, and it is one omission rather than two.
+
+**The rule underneath, which is a better statement of ADR-0009's obligation than "first use".**
+ADR-0009's sentence is that *once a type has been resolved against a registry, that registry's answer for that type must never change*.
+That is a constraint on a resolution which is **retained**.
+A compile whose result is discarded resolves nothing that outlives the call, so there is nothing to go stale.
+
+> Caching and freezing are one decision, not two.
+> A call that retains a compiled schema freezes the registry; a call that discards one does not.
+
+Measured, which is the whole difference between the two entry points:
+
+```
+after Compile[Conf](WithRegistry(fresh))  -> frozen=false, a later Register is accepted
+after a Load                              -> frozen=true,  a later Register is refused
+```
+
+**So `Compile` may be called anywhere**, including from a package-level variable during `init`, which is the shape the draft was about to make dangerous.
+ADR-0009's one broken shape, a **`Load`** during `init`, is unchanged and still broken, because a `Load` retains its schema.
+
+The residual cost is stated rather than hidden: a `Compile` that runs during `init` answers about a registry a later `init` may still add to, so it can report a failure a later registration would have fixed.
+That is loud, it is at the `Compile` call, and it costs the user a moved line.
+The freezing reading's failure is a plane holding a representation nobody chose.
 
 #### The amendment to ADR-0008, stated plainly
 
@@ -645,7 +659,7 @@ This ADR changes it, on the grounds above, and the change is:
 
 A one-line pointer is added to ADR-0008 at the point where the name is decided, so a reader arriving there is not left with a name that no longer exists.
 
-### A root leaf is refused, and the rule is not about the Go kind
+### The root must be a struct ferry walks, and the rule is asked of the compiled node
 
 ADR-0007 handed this over: "a chain-admitted type at the root mints the empty path, which ADR-0003 says an address may not be... this is pre-existing - a root `int` does the same - and belongs to #16's entry point, but the chain enlarges the set of types that can sit there."
 ADR-0009 repeated it for a registered type.
@@ -655,21 +669,22 @@ Measured, over nine root types:
 | root type | |
 | --- | --- |
 | `struct{...}` | `[/v]` |
+| `*struct{...}` | `[/v]` |
 | `int` | **refused** |
 | `time.Duration`, an identity-table leaf | **refused** |
 | `netip.Addr`, a **struct** the chain claims | **refused** |
 | `big.Int`, a **struct** a registration claims | **refused** |
-| `map[string]int` | `[]` static, addresses minted from the value |
-| `[]string` | `[]` static, as above |
-| `[2]string` | `[#0 #1]` |
-| `*struct{...}` | `[/v]` |
+| `map[string]int` | **refused**, see below |
+| `[]string` | **refused**, see below |
+| `[2]string` | **refused**, see below |
 
 Read the rows rather than the summary.
-`netip.Addr` and `big.Int` are structs, so a rule spelled "the root must be a struct" admits both and then ADR-0007's chain and ADR-0009's table collapse them to a leaf at the empty path.
+`netip.Addr` and `big.Int` are structs and are refused, because ADR-0007's chain and ADR-0009's table are consulted first and collapse them to a leaf at the empty path.
 
-> The root may not be a **leaf**, and whether it is one is decided after the chain and the registry have been asked, not before.
+> The root must be a struct ferry **walks**, decided after the chain and the registry have been asked rather than before.
 
 That is a rule the entry point's signature cannot express and only the compiler can, which is why it lands at schema compile rather than at `Load`.
+It is also why `ErrNotStruct` surviving, which the research and the ticket both predicted, is true in a narrower way than it sounds: the refusal is not "your Go kind is not struct", it is "what you gave me compiled to a leaf".
 
 **What a root leaf actually does, with the check removed**, is the finding:
 
@@ -682,16 +697,69 @@ Not a panic and not a wrong value.
 The sink writes an empty mapping and returns a nil error, so the value is **silently and totally lost**.
 That is ADR-0005's maps-no-address class arriving at the one address ADR-0003 forgot to protect, and it is what makes this a refusal rather than a documented sharp edge.
 
-**A root map and a root slice stay legal, and that is deliberate.**
-Both mint non-empty addresses, so ADR-0003 has no objection, and both are things people dump:
+#### A root map and a root slice are refused too, and an earlier draft got this wrong
+
+The draft let them through, on the grounds that they mint non-empty addresses and that "plane-to-plane transfer is exactly the caller who would depend on it".
+Both halves are wrong and the second is wrong on an ADR that was already written.
+
+**The address claim holds for a populated one only.**
+Measured:
 
 ```
-Dump(ctx, map[string]int{"a":1,"b":2}) -> [/a /b]
-and back                               -> map[a:1 b:2]
+map[string]int{"a":1}  ->  /a = number("1")
+map[string]int{}       ->  "" = null          <- the empty path
+map[string]int(nil)    ->  "" = null
+[]string{"a"}          ->  #0 = string("a")
+[]string{}             ->  "" = null
+[]string(nil)          ->  "" = null
 ```
 
-The cost is real and is ADR-0004's asymmetry at its most visible: a root map has **no static address at all**, so the set handed to `Bind` is empty, the driver's injectivity check runs over nothing, and it is loadable only from a source implementing `Enumerator`.
-Refusing them was considered and is the wrong direction: refusing is the reversible direction only when nobody depends on the refusal, and ADR-0001's plane-to-plane transfer is exactly the caller who would.
+A composite with no elements writes `Null` at its own address, which ADR-0005 decided and this ADR does not reopen.
+At the root that address **is** the empty path, so a root map reopens the exact hole the root-leaf rule closes, at the value it will most often have on a first run.
+Through the real YAML sink it writes `{}` and returns a nil error, which is the same silent total loss measured above.
+
+**And the justification cited the wrong mechanism.**
+ADR-0006 already measured that plane-to-plane transfer has two shapes, and that the plane-preserving one is address-to-address, "a loop from `Reader.Get` into `Writer.Set`, [which] builds no Go value and never runs this ADR's rules at all".
+It never calls `Load[T]` at any type.
+The struct-mediated shape uses a struct.
+So the caller the draft named as depending on the permission does not use it.
+
+Three further costs, none of which was priced:
+
+- **The static address set handed to `Bind` is empty**, so ADR-0003's driver-side injectivity rule is vacuously true over the whole schema, before any I/O.
+- **ADR-0008's naming rule never fires**, because there is no field, so no segment name was written by a human. That is the property ADR-0008 spent thirty tags on a thirty-field struct to buy.
+- **Load needs an `Enumerator` for every address**, so the type is loadable from a strict subset of the planes a struct is.
+
+An array is refused for the same family of reasons: `[0]T` at the root mints nothing at all, which is a `Dump` that writes zero addresses and returns nil.
+
+The remedy is one line and it gives the user back the thing ADR-0008 wanted them to have:
+
+```go
+type Labels struct {
+    M map[string]string `ferry:"labels"`
+}
+```
+
+**And this is the reversible direction, which is the rule the draft broke in order to allow it.**
+Nobody can depend on a refusal, so admitting root dynamic composites later is additive; the draft argued the opposite way round on a caller that turned out not to exist.
+
+### Three defects found by running the decisions
+
+All three were found by running rather than by reading, and all three are in decisions this ADR had already reached in draft.
+
+**`Compile` freezing the registry**, above.
+The fixture that would have caught it needs a type that compiles both ways with different representations, and the draft's fixture used a type that only compiles with the codec, so the failure was loud and the probe measured nothing.
+That is #12's and #19's worst-defect shape exactly: a fixture in which the case cannot go wrong quietly.
+
+**A root map and a root slice**, above.
+Found by asking what a root dynamic composite does at its **empty** value, which no probe had asked because every fixture populated it.
+
+**The maps-no-address backstop counted the wrong thing.**
+ADR-0005 requires that every struct visited during schema compile contributes at least one address.
+The compiler counted **static leaf addresses**, so a map or a slice field - which contributes only a dynamic shape - counted as nothing, and `struct{ Limits map[string]int }` was refused as mapping no address.
+ADR-0005's own worked example compiles that type, yielding `/Sl/*` and `/M/*`.
+The rule is over **minted address shapes** and not over the static tier, and stating that is this ADR's, because ADR-0005 wrote the rule before the two tiers had a compiler to be counted in.
+Found three probes after the check was written, because every earlier fixture gave each struct a scalar field.
 
 ### The unbounded cache, and the one thing ferry adds to it
 
@@ -756,13 +824,20 @@ Nothing is added to that package, and one thing is handed to it: the equivalence
   The shape taken costs 32 ns and no allocations against a compile in the tens of microseconds, so nothing is lost except a number in an earlier ADR that should not be quoted forward.
 - A compile-affecting Option must be comparable, and the static assertion turns a violation into a build error rather than the runtime panic ADR-0006 measured.
   The assertion works only because the key is a plain-map-shaped struct; the `sync.Map` the cache actually uses would not catch it.
+- **The root must be a struct ferry walks**, so a root leaf, a root map, a root slice and a root array are all refused at schema compile.
+  An earlier draft admitted the dynamic composites, on a justification that cited plane-to-plane transfer - which ADR-0006 had already measured as address-to-address and building no Go value, so it never calls `Load[T]`.
+  A nil or empty root map writes `Null` at the empty path and the YAML sink writes `{}` with a nil error, so the permission reopened the hole the root-leaf rule closes, at the value a first run most often has.
+  Refusing is additive to lift later; the draft argued the reverse on a caller that does not exist.
 - **The schema and the walk cannot disagree about the static address set**, because they are one list rather than two computations of one rule.
   That closes the defect ADR-0008 found in a real ferry prototype, and it covers the static tier only - a dynamic address is minted by the walk and was never in the schema.
 - The walk is written once and the residue is three named operations, which is a weaker claim than "one walk" and the true one.
   Roughly half the walk is shared and none of the shared half exists twice.
 - A concurrent mode is a scheduler and never a second walk, and #20 inherits a seam plus a data race on the presence bit.
   Saying the seam exists without saying the race does would have handed #20 something that looks like a drop-in.
-- **`Compile` freezes the registry**, so a `Compile` in a package-level variable is ADR-0009's one broken shape reached by a new route.
+- **`Compile` takes neither the cache nor the freeze**, which restates ADR-0009's obligation more precisely than "first use" does: the constraint is on a resolution that is **retained**, so caching and freezing are one decision.
+  An earlier draft of this ADR had `Compile` freeze, and measured only the case where the resulting `Register` failure is checked.
+  With the error dropped, that reading leaves the plane holding a representation the user replaced, with no error anywhere - which is the defect ADR-0009's freeze exists to prevent, reached through the freeze.
+  ADR-0009's one broken shape, a `Load` during `init`, is unchanged.
   From a test it is always safe, and that is a property of Go's initialisation order rather than of ferry's design.
 - The compile is the whole cost the cache saves, and resolving the codec into the leaf is a modest separate win.
   Neither is the argument for compiling behaviour into the schema; ADR-0009's staleness result is.
