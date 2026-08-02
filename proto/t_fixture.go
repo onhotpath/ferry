@@ -96,3 +96,14 @@ type TOpaqueConf struct {
 	Listen string  `ferry:"listen,default=:8080"`
 	Handle TOpaque `ferry:"handle"`
 }
+
+// WPrefix is a leaf and a subtree at one segment, which is ADR-0003's
+// prefix-free rule's actual subject and which no fixture on this branch had.
+type WPrefix struct {
+	DB    string   `ferry:"db"`
+	DBSub WPrefSub `ferry:"db"`
+}
+
+type WPrefSub struct {
+	Host string `ferry:"host"`
+}

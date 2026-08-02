@@ -278,7 +278,20 @@ func dumpDir(out map[Path]Value) direction {
 // Enumerator, and a source that does not implement one must fail loudly
 // rather than yield an empty map.
 func loadDir(r FReader, ctx context.Context, o opts) direction {
-	get := func(at Path) Value {
+	// DEFECT FOUND BY #15, fixed here.
+	//
+	// The inherited version discarded the reader's error and substituted
+	// Absent. A driver reporting "this address holds a type I cannot express"
+	// - which is exactly what a Registry driver does for REG_MULTI_SZ - was
+	// therefore indistinguishable from a missing key, so the address silently
+	// took its default or its zero value.
+	//
+	// That is survey item 5.11's shape (a provider discarding a parse error),
+	// which ADR-0001 rules out BY ARCHITECTURE and names as the failure it
+	// rules out by name, occurring inside ferry's own walk rather than inside
+	// a driver. No fixture caught it because every prototype source returns a
+	// nil error.
+	get := func(at Path) (Value, error) {
 		v, err := r.Get(ctx, at)
 		if err != nil {
 			v = Value{}
@@ -286,12 +299,15 @@ func loadDir(r FReader, ctx context.Context, o opts) direction {
 		if o.observe != nil {
 			o.observe(at, v)
 		}
-		return v
+		return v, err
 	}
 	return direction{
 		name: "load",
 		leaf: func(n *node, v reflect.Value, at Path) (bool, error) {
-			val := get(at)
+			val, err := get(at)
+			if err != nil {
+				return false, tErrAt(at, tErrPlane, "%v", err)
+			}
 			if val.Kind() == VAbsent {
 				if n.required {
 					// ADR-0011's shape rather than a bare fmt.Errorf, because
@@ -312,7 +328,11 @@ func loadDir(r FReader, ctx context.Context, o opts) direction {
 			return true, nil
 		},
 		container: func(n *node, v reflect.Value, at Path) (bool, bool, error) {
-			if val := get(at); val.Kind() == VNull {
+			val, err := get(at)
+			if err != nil {
+				return true, false, tErrAt(at, tErrPlane, "%v", err)
+			}
+			if val.Kind() == VNull {
 				if v.CanSet() {
 					v.Set(reflect.Zero(n.typ))
 				}

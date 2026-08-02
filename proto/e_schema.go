@@ -332,6 +332,24 @@ func countLeaves(n *node) int {
 	}
 }
 
+// DEFECT FOUND BY #15, fixed here.
+//
+// The inherited version checked only for EXACT DUPLICATES, which is the
+// weaker half of ADR-0003's rule. ADR-0003 is explicit that this is the
+// distinction that matters and gives the measured reason:
+//
+//	"Prefix-freeness, rather than duplicate detection, is the rule, and the
+//	 prototype found out why by accident. A leaf at /db and a subtree under
+//	 /db are two distinct addresses, so a duplicate check accepts them. A
+//	 flat plane holds both happily, as DB and DB_HOST. A tree plane cannot."
+//
+// So the headline rule of ADR-0003 was not implemented on the branch every
+// later ADR was measured against, and nothing noticed because no fixture put
+// a leaf and a subtree at one segment. #15 found it by asking whether the
+// Registry - which has two namespaces per key and CAN hold both - is more
+// permissive than core, and getting "ok" from core.
+//
+// A path is a prefix of itself, so this subsumes the duplicate check.
 func prefixFree(addrs []Path) error {
 	seen := map[string]bool{}
 	var clash []error
@@ -341,6 +359,19 @@ func prefixFree(addrs []Path) error {
 			clash = append(clash, fmt.Errorf("ferry: two fields address %s", s))
 		}
 		seen[s] = true
+	}
+	// The prefix relation holds only at SEGMENT boundaries, which is what
+	// keeps ADR-0003's "DB and DB_HOST as two flat single-segment addresses
+	// remain legal" true.
+	sorted := sortedPaths(addrs)
+	for i := range sorted {
+		for j := i + 1; j < len(sorted); j++ {
+			if isSegmentPrefix(sorted[i], sorted[j]) {
+				clash = append(clash, fmt.Errorf(
+					"ferry: %s is a prefix of %s: a leaf and a subtree may not share a segment, "+
+						"because a tree plane cannot hold both", sorted[i], sorted[j]))
+			}
+		}
 	}
 	slices.SortFunc(clash, func(a, b error) int { return cmp.Compare(a.Error(), b.Error()) })
 	if len(clash) > 0 {
@@ -496,4 +527,21 @@ func unquoteTok(s string) string {
 		return strings.ReplaceAll(s[1:len(s)-1], "''", "'")
 	}
 	return s
+}
+
+// isSegmentPrefix reports whether a is a proper prefix of b at a segment
+// boundary. It compares segments rather than the canonical bytes, because
+// "/db" is a prefix of "/db/host" and is NOT a prefix of "/dbhost", and the
+// byte forms cannot tell those apart.
+func isSegmentPrefix(a, b Path) bool {
+	as, bs := a.Segments(), b.Segments()
+	if len(as) >= len(bs) {
+		return false
+	}
+	for i := range as {
+		if as[i] != bs[i] {
+			return false
+		}
+	}
+	return true
 }

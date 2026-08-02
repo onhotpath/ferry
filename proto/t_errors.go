@@ -30,6 +30,7 @@ var (
 	tErrSchema  = errors.New("schema error")
 	tErrMissing = errors.New("missing")
 	tErrValue   = errors.New("invalid value")
+	tErrPlane   = errors.New("plane error")
 )
 
 // tError is ADR-0011's `Error`: one exported name, no exported fields, a
