@@ -168,8 +168,8 @@ func runE4() {
 	fmt.Println("\n  And an ERROR replays the same way, which matters more than the panic")
 	fmt.Println("  because ferry's compile returns errors rather than panicking:")
 	for i := range 2 {
-		if err := Validate[E4Bad](); err != nil {
-			fmt.Printf("    Validate[E4Bad]() call %d -> %v\n", i+1, err)
+		if err := Compile[E4Bad](); err != nil {
+			fmt.Printf("    Compile[E4Bad]() call %d -> %v\n", i+1, err)
 		}
 	}
 
@@ -178,7 +178,7 @@ func runE4() {
 	fmt.Println("  self-referential type's inner lookup does not recurse forever.")
 	fmt.Println("  For ferry the question is whether a compile ever performs a cache")
 	fmt.Println("  lookup for a type it is in the middle of compiling. Two facts:")
-	err := Validate[E4Node]()
+	err := Compile[E4Node]()
 	fmt.Printf("\n    (i)  ADR-0005 refuses a recursive type at compile:\n         %v\n", err)
 	fmt.Println("\n    (ii) and the cache is keyed per ROOT type, not per visited type: a")
 	fmt.Println("         nested struct's addresses depend on the path from the root, so")
@@ -193,7 +193,7 @@ func runE4() {
 		B inner `ferry:"b"`
 	}
 	before := regEntries(defaultRegistry)
-	_ = Validate[outer]()
+	_ = Compile[outer]()
 	fmt.Printf("         cache entries after compiling outer{A inner; B inner}: +%d\n",
 		regEntries(defaultRegistry)-before)
 	fmt.Println("\n  So the recursion hazard v1's placeholder exists for is not live for")

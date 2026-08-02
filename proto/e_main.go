@@ -21,9 +21,10 @@ var e16 = []struct {
 	{"E2", "the cache key: three components, and what it costs to hold them", runE2},
 	{"E3", "resolved behaviour in the leaf, against a lookup per call", runE3},
 	{"E4", "the two-level cache: the herd, the panic, and recursive types", runE4},
-	{"E5", "Validate, and what it does to the freeze", runE5},
+	{"E5", "Compile[T], and what it does to the freeze", runE5},
 	{"E6", "the walk written once, and how big the residue is", runE6},
 	{"E7", "a root leaf, and the Option rule", runE7},
+	{"E9", "parse-don't-validate: what Compile[T] actually asks", runE9},
 	{"E8", "the audit: the cases the other probes do not cover", runE8},
 }
 

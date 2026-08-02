@@ -126,10 +126,22 @@ func Dump[T any](ctx context.Context, v T, sink FSink, options ...Option) error 
 	return fDump(ctx, open, out, addrs)
 }
 
-// Validate compiles the schema for T and discards it. ADR-0008 requires that
-// it and Load share ONE compiler, or it validates a schema no Load will
-// compile, so it is literally the same call.
-func Validate[T any](options ...Option) error {
+// Compile compiles the schema for T and reports whether it compiled.
+//
+// It is named Compile and not Validate because ADR-0001 spends the word
+// "validation" on a thing ferry rules out by architecture, and a package that
+// rules out validation and then exports Validate is telling a reader something
+// untrue. What this asks is whether the program's own ANNOTATION is
+// well-formed, from reflect.TypeFor[T]() alone, with no value constructed and
+// no plane reachable.
+//
+// It returns only an error because ADR-0001 keeps the compiled schema
+// unexported. That is a divergence from regexp.Compile's shape, and it is a
+// consequence of a decision taken elsewhere rather than a choice made here.
+//
+// ADR-0008 requires that it and Load share ONE compiler, or it compiles a
+// schema no Load will, so it is literally the same call.
+func Compile[T any](options ...Option) error {
 	o := defaultOpts()
 	for _, op := range options {
 		op.apply(&o)

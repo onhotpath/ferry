@@ -181,14 +181,14 @@ func runE1() {
 	fmt.Println("     Verified by compiling: `interface{ ~struct{} }` matches only the EMPTY")
 	fmt.Println("     struct, and there is no wildcard form. See e1_notstruct.go.")
 
-	fmt.Println("\n--- E1e: Validate, from a test, with no value and no plane ---")
+	fmt.Println("\n--- E1e: Compile[T], from a test, with no value and no plane ---")
 	type E1Bad struct {
 		Host string `ferry:"host,requird"`
 		Port int    `ferry:"port,default=abc"`
 		Nope string
 	}
-	fmt.Printf("  Validate[E1Config]() -> %v\n", Validate[E1Config]())
-	fmt.Printf("  Validate[E1Bad]()    ->\n%v\n", indent(Validate[E1Bad]()))
+	fmt.Printf("  Compile[E1Config]() -> %v\n", Compile[E1Config]())
+	fmt.Printf("  Compile[E1Bad]()    ->\n%v\n", indent(Compile[E1Bad]()))
 }
 
 func indent(err error) string {
