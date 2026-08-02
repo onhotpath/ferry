@@ -33,9 +33,9 @@ A clean break from it is decided, so it is a comparison and not a starting point
 
 This ADR is written from a throwaway prototype on branch `proto/11-tag-grammar`, which never merges.
 It is built on `proto/8-defaults`, so every measurement runs against a real `Path`, a real `Value`, the real type set, #8's real compiled schema, and the real YAML driver over real files.
-Thirty-two probes across two rounds.
-**Seven overturned an answer this ADR had already reached in draft**, and three of the seven came from one audit round aimed at the case the earlier fixtures did not contain.
-One of the seven was a probe that passed while measuring nothing.
+Thirty-eight probes across three rounds.
+**Nine overturned an answer this ADR had already reached in draft.**
+Three came from an audit round aimed at the case the earlier fixtures did not contain, one was a probe that passed while measuring nothing, and one was a review round breaking this ADR's own answer on the tag key by pointing out that its measurement was of the wrong case.
 
 ## Decision
 
@@ -47,7 +47,7 @@ The ticket asked for four things by name.
 | --- | --- | --- |
 | which options are load-only, dump-only, and shared | **yes**, one table | [Direction is a property of the option](#direction-is-a-property-of-the-option-and-the-grammar-does-not-spell-it) |
 | how direction is expressed without the grammar becoming confusing | **yes: it is not expressed** | as above |
-| whether the tag name stays configurable, as xload's `FieldTagName` allows | **yes: no**, and the reason is strictness rather than cost | [The tag key is `ferry`](#the-tag-key-is-ferry-and-it-is-not-configurable) |
+| whether the tag name stays configurable, as xload's `FieldTagName` allows | **yes**, it is an Option defaulting to `ferry` | [The tag key is an Option](#the-tag-key-is-an-option-defaulting-to-ferry) |
 | how prefixing and nesting express themselves under ADR-0003's address model | **yes**: nesting is the mechanism and `prefix` does not exist | [What is not in the vocabulary](#what-is-not-in-the-vocabulary-and-why-each-is-a-refusal-rather-than-an-omission) |
 
 Its two comments asked for two more, and both are this ticket's outright.
@@ -69,7 +69,7 @@ This is the union, so a reader can check it rather than rediscover it.
 | ADR-0003 | how a segment containing the grammar's punctuation is written | [The escape is `~`](#the-escape-is--and-it-follows-the-character) |
 | ADR-0003 | whether prefix and squash exist | **neither** |
 | ADR-0003 | whether a per-field case option exists | **no** |
-| ADR-0003 | whether the struct tag key is configurable | **no** |
+| ADR-0003 | whether the struct tag key is configurable | **yes**, with the stated answer ADR-0003 demanded |
 | ADR-0005 | how a field is named | [The name is mandatory](#the-name-is-mandatory-and-a-go-field-name-is-not-a-default) |
 | ADR-0005 | whether a composite's element naming is configurable | **no**, and there is nothing for a tag to configure |
 | ADR-0005 | whether embedding is spelled `embed` | **no word is spent** |
@@ -100,6 +100,7 @@ Seven questions this ADR had to answer that nobody asked.
 - **An empty segment name is unwritable from a tag**, deliberately, though the address model permits one.
 - **The migration guide from xload** is named in [#1](https://github.com/onhotpath/ferry/issues/1) as unspecified until this grammar exists.
   It exists now, and the guide is still not written.
+  The tag-key Option makes it shorter than it would have been: an xload user keeps `env:` as their key and rewrites only the option words.
 
 ### The grammar
 
@@ -265,6 +266,9 @@ Reproduced: it parses to key `K` and options `["delimiter=", ""]`, and the delim
 > `~` introduces an escape.
 > `~x` yields `x` for `x` in the grammar's own punctuation, `~ , = -`.
 > Anything else after `~` is an error.
+
+The escape is **accepted anywhere and required only where the character would otherwise be the grammar's own**: `,` and `~` always, `=` only in a name, and `-` only when the whole name is `-`.
+So `ferry:"cors-origins"` and `ferry:"query,default=a=b"` need no escape and are written the obvious way.
 
 Three models were implemented and measured against the same two inputs, rather than argued:
 
@@ -466,37 +470,78 @@ Measured after the walk was made to share it, on a two-level promotion through a
 Under ADR-0003 a slice element mints an `Index` segment whose text is its position, and a map key mints a `Name` segment whose text comes from the key type's own representation, which ADR-0005 restricts and ADR-0007 extends.
 A declaration inside a map value or a slice element attaches to the static address shape, `/servers/*/port`, which ADR-0006 decided and this ADR inherits unchanged.
 
-### The tag key is `ferry`, and it is not configurable
+### The tag key is an Option, defaulting to `ferry`
 
-ADR-0003 flagged that "configurable" and "strict" are compatible only with a stated answer for the case where the key names a tag somebody else owns.
-Here is the answer, measured against a struct annotated for `json`:
+> The struct tag key ferry reads is a caller-supplied Option.
+> It defaults to `ferry`, ferry reads exactly one key, and the key names **where to look and never what the content means**.
+
+That last clause is the stated answer ADR-0003 demanded, and it is the whole thing.
+Whatever key ferry is told to read, it reads ferry's grammar under it and validates it strictly.
+
+**The case the Option is for is a library built on ferry**, whose users should be writing that library's tag and not ferry's.
+Measured:
 
 ```
-json:"host,omitempty"   REFUSED  ferry has no omitempty; its omission option is `omitzero`...
-json:"port,string"      REFUSED  ferry has no string option; a plane's own type information is respected...
-json:"-"                ok       not mapped
-json:"name"             ok       name="name"
+type Config struct {
+    Host string   `mylib:"host"`
+    Port int      `mylib:"port,default=8080"`
+    Tags []string `mylib:"tags"`
+}
+
+tag key = "mylib"  ->  /host /port /tags/*,  and /port carries string("8080")
 ```
 
-Three of four fields refuse, and the fourth compiles only because `name` happens to carry no option.
-So a configurable key is usable against a foreign tag **only if strictness is switched off for it**, which is ADR-0001's rule with an off switch, and ADR-0001 ruled out silently ignoring anything by architecture.
+ferry's grammar under somebody else's key.
+Nothing about strictness changes, because the vocabulary is still ferry's, and the field rule still bites:
 
-**Cost is not the argument, and it was measured so that it cannot be mistaken for one.**
-A per-instance key would become part of [#16](https://github.com/onhotpath/ferry/issues/16)'s schema cache key, and unlike ADR-0006's compile-affecting Option, a string is hashable:
+```
+Tags []string                  (no mylib tag)
+  ->  ferry: /Tags: field Tags carries no mylib tag: every exported field must name
+      the segment it addresses, or be marked mylib:"-"
+```
 
-| cache key | ns/op | allocs/op |
-| --- | --- | --- |
-| `map[reflect.Type]` | 12.0 | 0 |
-| `map[struct{reflect.Type; string}]` | 18.0 | 0 |
+**An earlier draft of this ADR refused the Option, and the refusal was argued from the wrong case.**
+It is recorded because the shape of the mistake matters more than its fix.
 
-Six nanoseconds, against ADR-0006's measured `hash of unhashable type main.LoadOption` panic for the other kind of Option.
-So the cache can afford it and strictness cannot, and the ADR says which of the two decided it.
+The draft measured pointing ferry at `json`, where three of four fields refuse because `omitempty` and `string` are not ferry's words, and concluded that "configurable" and "strict" are incompatible.
+That measurement is correct and it is about a different question.
+It never measured a library **renaming** the key while keeping ferry's grammar, which is the case a wrapping library actually has, and in which there is no conflict with strictness at all.
+One case was mistaken for the class.
 
-**Two smaller reasons, neither load-bearing.**
-Merovius' argument in [go.dev/issue/74472](https://go.dev/issue/74472) that tag keys are not namespaced, so two YAML packages both claim `yaml:`, is a reason to pick a distinctive key rather than a reason to make it configurable; `ferry` is distinctive.
-And migration from xload's `env:` tag is a written guide, which [ADR-0001](0001-what-ferry-supports.md) already made the plan, rather than a compatibility switch in core.
+**Pointing the key at a tag somebody else owns is still refused, and that is now a feature of the rule rather than an argument against it.**
+Measured, with the diagnosis the rule earns:
 
-**Refusing keeps the decision open**, on ADR-0006's rule: nothing depends on a key being fixed, so an Option can add one later, and #16 gets the simplest cache key in the meantime.
+```
+tag key = "json",  Host string `json:"host,omitempty"`
+  ->  ferry: /Host: unknown option "omitempty": ferry has no omitempty; its omission option
+      is `omitzero` ... (the ferry tag key is set to "json", which json also uses; ferry
+      validates its own grammar under whatever key it is told to read)
+```
+
+The parenthetical fires only when the configured key is one another mapper is known to own.
+It is the difference between a refusal a user can act on and one that reads as a bug.
+
+**The key is validated where the Option is supplied**, not at schema compile, because a key that could never appear in a conventional struct tag is a mistake at the call site:
+
+```
+"ferry"    ok        ""         the ferry tag key may not be empty
+"mylib"    ok        "my lib"   contains " ", which cannot appear in a struct tag key
+"my-lib"   ok        `my"lib`   contains `"`
+                     "my:lib"   contains ":"
+```
+
+**ferry reads exactly one key, and a list is refused.**
+A list is a precedence question wearing a convenience costume, and one struct shows why:
+
+```
+Host string `ferry:"ferry_host" mylib:"mylib_host"`
+
+tag key "ferry" -> [/ferry_host]      tag key "mylib" -> [/mylib_host]
+```
+
+Two keys on one field give two address sets and nothing in the tag says which is meant.
+ADR-0001 ruled out a built-in precedence ladder for sources; the same reasoning applies to a ladder of tag keys.
+This is the reversible direction: a list can be added later, and nothing depends on it being refused.
 
 ### What is not in the vocabulary, and why each is a refusal rather than an omission
 
@@ -618,9 +663,16 @@ a field carrying two ferry tags                 ferry: /H: the field carries two
 The last two are the point.
 `go vet` catches the sixth and misses the seventh, and `go test` runs neither.
 
-It takes no arguments, and that is a consequence of the tag key not being configurable rather than a separate decision.
-No tag content depends on the call site, so `Validate[T]()` and a later `Load[T]` see the same tags and can share whatever cache #16 builds.
-Whether they see the same **codec registry** is [#19](https://github.com/onhotpath/ferry/issues/19)'s, and it is the one thing that could make them disagree.
+**It takes the same Options a `Load` would**, and that is forced rather than chosen.
+Measured, the same type under two keys:
+
+```
+Validate[Config]() with the key set to "mylib"  ->  nil
+Validate[Config]() with the key left at "ferry" ->  ferry: /Host: field Host carries no ferry tag ...
+```
+
+A `Validate` that could not see the tag-key Option would validate a schema no `Load` will ever compile, which is the two-authorities defect at the front door again.
+Whether they also see the same **codec registry** is [#19](https://github.com/onhotpath/ferry/issues/19)'s, and it is the other thing that could make them disagree.
 
 ### What a declared default is not
 
@@ -683,9 +735,20 @@ The bare-word case is left, named, and visible in the artefact: a segment called
 
 **[#16](https://github.com/onhotpath/ferry/issues/16), the generic entry point and the schema cache.**
 The ticket's own comment says the tag-key question determines the cache design and should be resolved jointly, so this is the answer stated as an obligation.
-The tag key is fixed, no tag option affects what compiles, and `Validate[T]()` is the compiler, so **nothing in this ADR makes a compiled schema depend on anything but `reflect.Type`**.
-That is narrower than "the cache key is `reflect.Type`", and the difference is not this ADR's to close: ADR-0007 makes a registered codec change whether a type compiles at all, so whether the codec registry is part of the key depends on [#19](https://github.com/onhotpath/ferry/issues/19) making it process-wide or per-instance.
-What this ADR guarantees is that the **tag** contributes nothing to that key.
+**The tag key is part of whatever keys the schema cache**, and this ADR hands #16 the measurement rather than the conclusion.
+Measured, one `reflect.Type` under two keys yields two different address sets, so the key is compile-affecting in exactly ADR-0006's sense.
+It is also a **string**, which is the cheap end of the question ADR-0006 opened:
+
+| cache key | ns/op | allocs/op |
+| --- | --- | --- |
+| `map[reflect.Type]` | 18.0 | 0 |
+| `map[struct{reflect.Type; string}]` | 28.0 | 0 |
+
+Ten nanoseconds and no allocations, against ADR-0006's measured `hash of unhashable type main.LoadOption` panic for the other kind of compile-affecting Option, which is a func list.
+So #16 inherits a compile-affecting Option that its cache can actually hold.
+
+No **tag option** affects what compiles, so the key is the only thing this ADR adds to that cache key.
+What else might be in it is not this ADR's to close: ADR-0007 makes a registered codec change whether a type compiles at all, so whether the codec registry belongs there depends on [#19](https://github.com/onhotpath/ferry/issues/19) making it process-wide or per-instance.
 If a tag-key Option ever lands it becomes part of that key, at a measured 12 ns against 18 ns and no allocations either way, which is the cheap end of the question ADR-0006 opened.
 The expensive end, a compile-affecting Option whose value is unhashable, is untouched by this ADR because no tag option is one.
 
@@ -739,8 +802,9 @@ It does hand #9 one shape it should not have to invent: the three tiers are a su
   So the grammar has no direction concept to get wrong, and no shape committed if one is ever needed.
 - Embedding, prefixing and squashing cost no vocabulary between them, because a structured address already expresses all three.
   The one hazard, a promoted name clashing with a sibling, is caught by ADR-0003's existing prefix-free rule with nothing added.
-- The tag key is fixed, so a compiled schema is a function of `reflect.Type` alone and #16 gets the simplest cache key available.
-  The measured cost of a configurable key is six nanoseconds and the measured cost of strictness under one is three refusals in four fields, and the second is what decided it.
+- **The tag key is an Option**, so a library built on ferry can have its users write its own tag, and ferry's grammar and strictness travel with the key rather than with the word `ferry`.
+  The cost is that the key becomes part of #16's schema cache key and an argument to `Validate`, measured at 18 ns against 28 ns with no allocations, which is the cheap end of ADR-0006's compile-affecting-Option question.
+  Pointing it at a tag another mapper owns is still refused, and now says why.
 - Diagnostics have three tiers rather than ADR-0006's two, and the suppression rule extends to ADR-0005's "maps no address" check.
   One field's single mistake reports once.
 - The three embedding defects the audit found were all outside the shape of the original fixtures, and all three were silent.
@@ -749,6 +813,9 @@ It does hand #9 one shape it should not have to invent: the three tiers are a su
   It follows from ADR-0003's decision that core has no opinion about segment text, and the alternative would make a legal name unwritable.
 - `Validate[T]()` takes no arguments, which is a consequence of two other decisions rather than a design choice, and it is the same compiler `Load` will use.
 - A declared `default=aGk=` on a `[]byte` field is four bytes and not `hi`, documented here as ADR-0007 required.
+- An earlier draft refused the configurable key, on a measurement of the wrong case.
+  Pointing ferry at `json` and a library renaming the key are different questions, and only the first conflicts with strictness.
+  It is recorded because it is the clearest instance in this ticket of a correct measurement answering a question nobody asked.
 - ADR-0002's v1 trigger is now something a person can hold: the grammar exists, and what remains is one first-party driver and one external adopter using it.
 
 ## Items from the xload survey
