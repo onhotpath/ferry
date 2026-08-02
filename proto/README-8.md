@@ -18,6 +18,11 @@ Run: `GOTOOLCHAIN=go1.27rc2 go run . d`
 | `d_probe1.go` | D1-D6 |
 | `d_probe2.go` | D7-D13 |
 | `d_probe3.go` | D14-D22 |
+| `d_null.go` | N1-N3, the Null-at-a-scalar question reopened under review |
+| `d_reqc.go` | R1-R4, what `required` does at a container address |
+| `d_opt2.go`, `d_opt2b.go` | O2a-O2d and B1-B3, the two candidate cuts for `required` |
+| `d_stack.go` | S1-S3, stacked refusals and the tag spelling |
+| `d_reqslice.go` | RS1-RS3, whether "explicitly `[]` satisfies required" is writable |
 
 Every rule with a live alternative is a field on `loadOpts`, so the two candidates are measured against each other rather than argued.
 
@@ -59,6 +64,30 @@ Each was written into a draft before it was run.
 - **Declarations are keyed by address.** They are keyed by address *shape*: `/servers/a/port` is not in the schema and never can be, because the key comes from the value. Keyed by the realised address, every default under a map or a slice silently vanished. D15.
 - **An array walks the elements the plane has.** It walks all N, because its element addresses are static. Walking only the present ones made an element's declarations conditional on a sibling. D20.
 - **ADR-0005's composite rule was settled.** Its wording is "yields the zero value" and its fixtures could not tell that from "leaves unchanged", because the destination was always zero. D2, and D19 is what forces the distinction to be resolved rather than left implicit.
+
+## Round two: twenty more probes, opened by review
+
+The owner challenged the ADR's deciding argument for refusing `Null` at a scalar, which was that plane-to-plane transfer would silently turn a YAML null into a zero.
+
+| # | question | result |
+| --- | --- | --- |
+| N1 | does the transfer argument hold | **no.** The plane-preserving transfer is address-to-address, never builds a Go value, and never runs #8's rules. The struct-mediated one already rewrites `Tags: []` to `null`, which ADR-0005 accepted |
+| N2 | is either null policy recoverable without a knob | **asymmetric.** Under refuse a registered codec recovers leniency; under zero nothing recovers strictness, because the zeroing precedes the chain |
+| N3 | the four ways a human writes "no value here" | **the ergonomic claim was overstated.** A commented-out line removes the key, so it is `Absent` and takes the default. Only a blank key and an explicit `null` reach the null path, and there zeroing gives `0`, the one answer nobody wants |
+| R1 | `required` at a container address, through real YAML | separates two documents that load to the identical value, and the error says "the plane does not have it" when it does |
+| R2 | the `null` workaround on a plane with no null | **does not exist.** On env, query, TOML and KV no document satisfies a required composite while leaving it empty |
+| R3 | is the address `required` names even in the set | a composite's own address exists only when it is nil or empty; a non-pointer struct and an array have none at all |
+| R4 | the two composites with no own address | `required` on a non-pointer struct was **accepted at compile and enforced by nothing** |
+| O2a-d | the first cut: refuse `required` on every composite | works, and refuses `*Cred` too, which is a genuine use case |
+| S1 | a composite carrying both `required` and a default | three errors for one field, so admissibility must be checked before contradictions |
+| S2 | what the tag does with `default=["value"]` | **`reflect.StructTag.Get` truncates it to `origins,default=[`.** `go vet` catches it, `go test` does not, which confirms ADR-0001's vet-gap claim for a `ferry` tag |
+| S3 | the diagnostic rule applied | two errors, not three, and the contradiction still fires where both options are admissible |
+| B1-B3 | the second cut: the static/dynamic line | `required` is admissible where children come from the TYPE. `*Cred` works again, on every plane |
+| RS1 | can "explicitly `[]` satisfies required" be written | **no.** Five documents, three observations: `key missing`, `[]` and `{}` are one |
+| RS2 | the four readings side by side | the wanted reading needs two answers for one input |
+| RS3 | would a seventh kind rescue it | no: env, query and KV cannot express "present and empty" at all, so the rule would hold on three planes of six |
+
+**Four more answers overturned in round two:** the transfer argument that decided `Null`; the ergonomic claim that argued against it; the composite-versus-leaf cut for `required`; and the refusal of `required` on `*Cred`.
 
 **And two rules the ADR had not stated, found by auditing its strongest claim.**
 "Absent does not write" was written as though it said one thing at every kind.

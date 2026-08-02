@@ -170,6 +170,9 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 					return any, err
 				}
 			}
+			if opts.required && !any {
+				return false, fmt.Errorf("ferry: %s: required, and the plane supplied nothing under it", p)
+			}
 			return any, nil
 
 		case shapeSlice:
@@ -226,6 +229,9 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 					if err != nil {
 						return any, err
 					}
+				}
+				if opts.required && len(kids) == 0 {
+					return false, fmt.Errorf("ferry: %s: required, and the plane supplied nothing under it", p)
 				}
 				return any, nil
 			}

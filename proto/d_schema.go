@@ -18,6 +18,10 @@ import (
 	"strings"
 )
 
+// allowRequiredOnComposite re-enables the pre-option-2 behaviour, so the
+// probes that documented it still run.
+var allowRequiredOnComposite bool
+
 type fieldOpts struct {
 	def      *Value // declared default, always String kind; nil = no default
 	defText  string
@@ -94,6 +98,20 @@ func compileD(t reflect.Type) (*schema, error) {
 			defer delete(stack, t)
 		}
 
+		// `required` names an address, so it is legal only where that address
+		// is ALWAYS realised. A composite's own address exists only when it is
+		// nil or empty, and a non-pointer struct and an array have none at all.
+		// ADMISSIBILITY first: is each option legal at this type on its own?
+		// A CONTRADICTION between two options is only meaningful if both of
+		// them survived that, or one mistake reports as three errors.
+		reqOK, defOK := o.required, o.hasDef
+		if o.required && !allowRequiredOnComposite {
+			if !requiredAdmissible(t) {
+				errs = append(errs, requiredOnCompositeErr(p, t, sh))
+				reqOK = false
+			}
+		}
+
 		// A declaration is legal only where a value can actually land.
 		if o.hasDef {
 			switch sh {
@@ -104,6 +122,7 @@ func compileD(t reflect.Type) (*schema, error) {
 				if err := decLeaf(*o.def, probe); err != nil {
 					errs = append(errs, fmt.Errorf(
 						"ferry: %s: default %q is not a valid %s: %v", pathOrRoot(p), o.defText, t, err))
+					defOK = false
 				}
 			case shapePointer:
 				if classify(t.Elem()) == shapeLeaf {
@@ -114,6 +133,7 @@ func compileD(t reflect.Type) (*schema, error) {
 					}
 				} else {
 					errs = append(errs, defOnCompositeErr(p, t))
+					defOK = false
 				}
 			default:
 				// A composite's value lives at MANY addresses and a tag holds
@@ -121,15 +141,16 @@ func compileD(t reflect.Type) (*schema, error) {
 				// inside the tag, which is 5.10 - the exact defect ADR-0003
 				// removed structurally with Index segments.
 				errs = append(errs, defOnCompositeErr(p, t))
+				defOK = false
 			}
-			if o.required {
+			if reqOK && defOK {
 				errs = append(errs, fmt.Errorf(
 					"ferry: %s: required and default contradict: a default answers absence and required forbids it", pathOrRoot(p)))
 			}
 			// omitzero + a default that is not the Go zero value is a
 			// round-trip violation, and it is checkable here because the
 			// default's text is parsed at compile.
-			if o.omitzero && sh == shapeLeaf {
+			if defOK && o.omitzero && sh == shapeLeaf {
 				probe := reflect.New(t).Elem()
 				if err := decLeaf(*o.def, probe); err == nil && !probe.IsZero() {
 					errs = append(errs, fmt.Errorf(
@@ -197,5 +218,40 @@ func compileD(t reflect.Type) (*schema, error) {
 func defOnCompositeErr(p Path, t reflect.Type) error {
 	return fmt.Errorf(
 		"ferry: %s: %s is a composite, so it has no single address a default could sit at; seed the value instead",
+		pathOrRoot(p), t)
+}
+
+// requiredAdmissible: `required` asserts the plane supplied this address, and
+// that assertion has a plane-independent meaning exactly where the address's
+// children are STATIC. That is ADR-0003's static tier, reused rather than a
+// new distinction:
+//
+//	leaf          the address itself is static
+//	struct        one Name per exported field, from the type
+//	[N]T          exactly N Index segments, from the type
+//	*T            follows T
+//
+//	[]T, map[K]V  children come from the VALUE, so "supplied" would mean
+//	              "at least one element", which is a length constraint on the
+//	              value and ADR-0001 rules those out.
+func requiredAdmissible(t reflect.Type) bool {
+	switch classify(t) {
+	case shapeLeaf, shapeStruct:
+		return true
+	case shapePointer:
+		return requiredAdmissible(t.Elem())
+	case shapeSlice:
+		return t.Kind() == reflect.Array
+	}
+	return false
+}
+
+// requiredOnCompositeErr explains the refusal in terms of the address, because
+// that is what makes it a rule rather than a restriction: `required` asserts
+// the plane has an address, and this address is not always there to have.
+func requiredOnCompositeErr(p Path, t reflect.Type, sh shape) error {
+	_ = sh
+	return fmt.Errorf(
+		"ferry: %s: required is not available on %s: a plane cannot report \"present and empty\" at a container address, so required could only mean \"at least one element\", which is a constraint on the value; model the distinction as a struct with a set flag, or check len() after Load",
 		pathOrRoot(p), t)
 }

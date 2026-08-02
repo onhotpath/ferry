@@ -354,6 +354,9 @@ type D22Conf struct {
 }
 
 func d22() {
+	allowRequiredOnComposite = true
+	defer func() { allowRequiredOnComposite = false }()
+
 	dhdr("D22 required at a container address")
 	s := mustSchema(reflect.TypeFor[D22Conf]())
 	for _, c := range []struct {
