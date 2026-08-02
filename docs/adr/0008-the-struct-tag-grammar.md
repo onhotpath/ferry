@@ -1,6 +1,6 @@
 # 8. The struct tag grammar
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-02
 Ticket: [#11](https://github.com/onhotpath/ferry/issues/11)
 
