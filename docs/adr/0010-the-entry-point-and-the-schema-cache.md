@@ -228,7 +228,7 @@ What this ADR removes is one of its two motivations, measured below.
 
 #### On failure it yields the seed, which is [#9](https://github.com/onhotpath/ferry/issues/9)'s constraint read once rather than twice
 
-[ADR-0011](0011-the-error-model.md) ([#9](https://github.com/onhotpath/ferry/issues/9)) imposes a constraint on this signature from a ticket that does not own it, and says so: **when a Load fails, ferry yields no value.**
+ADR-0011 ([#9](https://github.com/onhotpath/ferry/issues/9)) imposes a constraint on this signature from a ticket that does not own it, and says so: **when a Load fails, ferry yields no value.**
 Aggregating means the walk continues past a failed field, so a partially populated destination exists inside ferry either way; ADR-0011 rules that it does not cross the boundary, on the grounds that a process which starts with `/db/host` set and `/db/port` zero is the worst available outcome because it runs and is wrong.
 
 This ADR agrees, and the rule is honoured **as a property rather than as a promise**: the walk builds into a copy of the seed, so the partial is unreachable from the caller whatever happens.
@@ -839,7 +839,7 @@ Whether a watcher hands a caller a channel of `T` or something else is #13's.
 
 **[#9](https://github.com/onhotpath/ferry/issues/9), errors.**
 This ADR produces refusals at schema compile, aggregated and sorted, and defers every type.
-Three things are reconciled with [ADR-0011](0011-the-error-model.md), which was written in parallel and which neither ADR had seen when it was drafted.
+Three things are reconciled with ADR-0011, which was written in parallel and which neither ADR had seen when it was drafted.
 
 - **Yield nothing** is adopted, and refined at `LoadOver` above.
 - **ferry has exactly one aggregate constructor and never calls `errors.Join`.**
@@ -874,7 +874,7 @@ Nothing is added to that package, and one thing is handed to it: the equivalence
 - **`Load` returns a value, so ferry cannot be handed a destination that already holds a previous load's results without the caller writing it.**
   That is ADR-0006's erasure defect made hard to reach rather than documented, and it is the deciding argument for the generic entry point - a bigger one than `ErrNotPointer` disappearing.
   The cost is that a caller wanting the carry-over writes `LoadOver`, and that ferry ships two load verbs where xload ships one.
-- **On failure `LoadOver` yields the seed and `Load` yields the zero value**, which is [ADR-0011](0011-the-error-model.md)'s "ferry yields no value" read as *no value it built*.
+- **On failure `LoadOver` yields the seed and `Load` yields the zero value**, which is ADR-0011's "ferry yields no value" read as *no value it built*.
   ADR-0011 imposed the rule from a ticket that does not own this surface and named that as the call it was least sure of; it is adopted, and the one reading it could not have seen is the one where returning the zero value would destroy a live config ferry never touched.
   ferry therefore has one rule here rather than two, and the partial the walk builds is unreachable from the caller as a property rather than as a documented promise.
 - `ErrNotPointer` stops existing and `ErrNotStruct` survives, because Go has no constraint meaning "any struct".
