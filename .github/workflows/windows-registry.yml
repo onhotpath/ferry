@@ -35,12 +35,28 @@ jobs:
         working-directory: proto
         run: go version
 
-      # W0 is reconnaissance rather than a probe: it reports what privileges
-      # this runner actually has, because a permission probe against a hive the
-      # runner can write is a probe that measures nothing.
-      - name: W0 reconnaissance
+      - name: vet
         working-directory: proto
         env:
           GOTOOLCHAIN: go1.27rc2
-          W15: '0'
+        run: go vet ./...
+
+      # W0 is reconnaissance and runs first, so a later probe that goes green
+      # can be read against what this runner could actually do.
+      - name: W15 all probes
+        working-directory: proto
+        env:
+          GOTOOLCHAIN: go1.27rc2
+          W15: all
         run: go run .
+
+      # The engine itself, on a platform it has never been built for. Cheap,
+      # and it is the only thing here that would catch a path-separator
+      # assumption in the inherited prototype.
+      - name: the inherited suites, on Windows
+        working-directory: proto
+        env:
+          GOTOOLCHAIN: go1.27rc2
+        run: |
+          $env:T14='all'; go run .; if ($LASTEXITCODE -ne 0) { exit 1 }
+          $env:T14=''; $env:E16='all'; go run .; if ($LASTEXITCODE -ne 0) { exit 1 }
