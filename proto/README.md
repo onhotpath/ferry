@@ -30,6 +30,7 @@ The source scan is separate: `python3 ../scan_halfpairs.py "label" <root>`.
 | `p12_halfpair.go` | the three answers for an incomplete pair, and the blast radius of the strict one |
 | `p13_mapkey.go` | a chain-admitted type as a map key, and the injectivity obligation |
 | `p14_audit.go` | the cases the other thirteen probes do not cover |
+| `p15_defaults.go` | the seam with #8: a declared default reaching a codec |
 | `../scan_halfpairs.py` | half-pair census by declaration scan over a whole source tree |
 
 Changes to inherited files, all load-bearing:
@@ -55,9 +56,10 @@ Changes to inherited files, all load-bearing:
 | P9 | declared kind, raw or donated | a codec whose text is digits must declare `Number` or it works on env and fails on YAML. A codec seeing the **raw** value fails on all three flat planes, which is ADR-0005's G2 delegated to every registrant |
 | P10 | zero and omission | "zero in Go" and "empty on the plane" disagree in **both** directions: `time.Time{}` encodes to 20 bytes, and a deliberately-set value can encode to nothing |
 | P11 | context in a codec | no recognised interface takes one; a ferry-own one would make cancellability a function of precedence; the honest use case is I/O and ADR-0004 already put that in `Source` |
-| P12 | the half pair | strict refusal costs **1 type in the whole go1.27rc2 public standard library** (an internal tooling type) and **0** in a third-party corpus |
+| P12 | the half pair | **zero half pairs** in all three corpora and all four arms: 29 config types, the whole go1.27rc2 public standard library, and a third-party corpus. The one the scan first reported is under `_gen/`, which the go tool does not compile |
 | P13 | a chain type as a map key | works once `validMapKey` consults the chain. **And `map[time.Time]string` silently collapses two distinct keys into one address today**, in core's own set |
 | P14 | the audit | zero values, every composite position, the flattening plane, real YAML, and the root all pass; `regexp.Regexp`'s zero does not round-trip under `DeepEqual`; the completeness check structurally cannot see a chain-admitted type; core's 11/11 and 10/10 are unaffected |
+| P15 | the seam with #8 | a declared default is a `String` `Value` at the address, so a codec gets defaults with no default-awareness. `default=aGk=` on a `[]byte` field lands as the four bytes `aGk=`, not as decoded base64 |
 
 ## Two defects this found in inherited code
 

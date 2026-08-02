@@ -31,7 +31,11 @@ ARMS = {
 def scan(root, skip_tests=True, exclude=None):
     methods = defaultdict(set)   # (pkgdir, type) -> {method}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in ('testdata', '.git', 'vendor')]
+        # The go tool ignores directories starting with '_' or '.', so they
+        # are not part of any package and must not count toward the census.
+        dirnames[:] = [d for d in dirnames
+                       if d not in ('testdata', '.git', 'vendor')
+                       and not d.startswith('_') and not d.startswith('.')]
         rel = os.path.relpath(dirpath, root)
         if exclude and (rel.split(os.sep)[0] in exclude or '/internal/' in '/' + rel + '/'):
             continue

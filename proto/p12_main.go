@@ -73,7 +73,11 @@ func run12(which string) {
 		h12("P14", "the audit: the case the fixtures do not cover")
 		runAudit12()
 	}
-	if !all && !strings.Contains("1 2 3 4 5 6 7 8 9 10 11 12 13 14", which) {
+	if run("15") {
+		h12("P15", "the seam with #8: defaults through the chain")
+		runDefaults()
+	}
+	if !all && !strings.Contains("1 2 3 4 5 6 7 8 9 10 11 12 13 14 15", which) {
 		fmt.Fprintln(os.Stderr, "unknown probe", which)
 		os.Exit(1)
 	}
