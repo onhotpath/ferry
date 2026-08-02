@@ -46,7 +46,7 @@ func runX2a() {
 	_, err := Load[X2Five](ctx, x2FixedSource{x2BadFive()})
 	fmt.Printf("    errors reported: %d\n", len(Elements(err)))
 	fmt.Printf("    %%v  : %v\n", err)
-	fmt.Println("    %+v :")
+	fmt.Printf("    %%+v :\n")
 	for _, l := range strings.Split(fmt.Sprintf("%+v", err), "\n") {
 		if strings.TrimSpace(l) != "" {
 			fmt.Printf("      %s\n", l)
@@ -331,7 +331,7 @@ func runX2c() {
 		fromDriver(mClose, Path{}, false, errorsNew("kv: flush failed")))
 	fmt.Printf("%+v\n", rep)
 
-	fmt.Println("  Error() is one line naming the addresses; %+v is the report:")
+	fmt.Printf("  Error() is one line naming the addresses; %%+v is the report:\n")
 	fmt.Printf("    %%v -> %v\n", rep)
 	many := make([]error, 40)
 	for i := range many {

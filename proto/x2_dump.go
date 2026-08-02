@@ -44,7 +44,6 @@ func (p *x2Plane) writtenStr() string {
 // x2RefusingSink is the non-staging sink: ADR-0004's "http PUT per key" row,
 // and the one with something to lose.
 type x2RefusingSink struct {
-	store     *BStore
 	plane     *x2Plane
 	refuseAll bool
 	refuse    map[string]bool
@@ -157,7 +156,7 @@ func runX2f() {
 	element."`)
 
 	for _, tc := range []struct {
-		label            string
+		label             string
 		failSet, failShut bool
 	}{
 		{"success", false, false},

@@ -275,8 +275,10 @@ func x2CodecSwapCheck() {
 	good := byIdentity[t]
 	byIdentity[t] = leafCodec{
 		name: "lossy: whole seconds only",
-		enc:  func(v reflect.Value) (Value, error) { return String(time.Duration(v.Int()).Truncate(time.Minute).String()), nil },
-		dec:  good.dec,
+		enc: func(v reflect.Value) (Value, error) {
+			return String(time.Duration(v.Int()).Truncate(time.Minute).String()), nil
+		},
+		dec: good.dec,
 	}
 	after := len(failsOn(Type("time.Duration", Eq[time.Duration], 90*time.Second), memoryPlane()))
 	byIdentity[t] = good

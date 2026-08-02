@@ -170,7 +170,7 @@ func (b *SinkBinding[T]) Dump(ctx context.Context, v T) (err error) {
 	if staging {
 		// Interleaved: one walk, encoding and writing at each leaf, both
 		// failure kinds aggregated by the one scheduler.
-		w := &walker{dir: writeDir(ctx, wr, b.o.sch), sch: b.o.sch, ctx: ctx}
+		w := &walker{dir: writeDir(ctx, wr), sch: b.o.sch, ctx: ctx}
 		if _, werr := w.walk(b.s.root, valueOf(v), Path{}); werr != nil {
 			return werr
 		}
@@ -214,7 +214,7 @@ func (b *SinkBinding[T]) Dump(ctx context.Context, v T) (err error) {
 // the interleaved branch. It is not a second walk: it is a third `direction`
 // over the one walk in e_walk.go, which is what #16's "write the walk exactly
 // once" constraint is for.
-func writeDir(ctx context.Context, wr FWriter, _ sched) direction {
+func writeDir(ctx context.Context, wr FWriter) direction {
 	set := func(at Path, val Value) error {
 		if err := wr.Set(ctx, at, val); err != nil {
 			return fromDriver(mWalk, at, true, err)

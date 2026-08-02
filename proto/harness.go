@@ -26,7 +26,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"reflect"
 	"slices"
 	"time"
 )
@@ -211,8 +210,6 @@ func CoreTypes() []Proof { return coreSet() }
 // produce a refusal, so for the memory and YAML planes the two are the same
 // question.
 func failsOn(pr Proof, pl Plane) []string { f, _ := pr.run(pl); return f }
-
-var _ = reflect.TypeOf // kept: the file's other users of reflect may go away
 
 // coreSet is the table. Adding a type means adding a row, and a row cannot be
 // written without naming the relation under which the type round-trips.
