@@ -1,6 +1,6 @@
 # 9. Typed codec registration, and the lifetime of the identity table
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-02
 Ticket: [#19](https://github.com/onhotpath/ferry/issues/19)
 
