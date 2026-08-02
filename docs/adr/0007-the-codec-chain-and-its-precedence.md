@@ -1,6 +1,6 @@
 # 7. The codec chain, and its precedence
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-02
 Ticket: [#12](https://github.com/onhotpath/ferry/issues/12)
 
