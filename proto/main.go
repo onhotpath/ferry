@@ -31,5 +31,6 @@ func main() {
 	p13Slim()
 	p14Closer()
 	p15Release()
+	p16Final()
 	fmt.Println()
 }

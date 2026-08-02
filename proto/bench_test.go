@@ -187,3 +187,44 @@ func BenchmarkLoadSlim(b *testing.B) {
 		}
 	}
 }
+
+// The final contract, six-address load, bound once.
+func BenchmarkLoadFinal(b *testing.B) {
+	ctx := context.Background()
+	addrs, vals := benchAddrs()
+	open, err := FQuery{Values: vals}.Bind(addrs)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		r, err := open(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, p := range addrs.All() {
+			if _, err := r.Get(ctx, p); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+// The same, binding every time, which is what a one-shot Load does.
+func BenchmarkBindLoadFinal(b *testing.B) {
+	ctx := context.Background()
+	addrs, vals := benchAddrs()
+	b.ReportAllocs()
+	for b.Loop() {
+		open, err := FQuery{Values: vals}.Bind(addrs)
+		if err != nil {
+			b.Fatal(err)
+		}
+		r, _ := open(ctx)
+		for _, p := range addrs.All() {
+			if _, err := r.Get(ctx, p); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
