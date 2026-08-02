@@ -27,6 +27,9 @@ var b25 = []struct {
 	{"B8", "the same question on the Dump side, which B7a got wrong", runB8},
 	{"B9", "three worked programs, and the additive check", runB9},
 	{"B10", "an inherited walk defect: a driver error on the Load path", runB10},
+	{"B11", "auditing ADR-0001's \"and its Go type\" claim", runB11},
+	{"B12", "and whether template generation can reach the defaults at all", runB12},
+	{"B13", "#15's question asked of the value model rather than a driver", runB13},
 }
 
 func run25(which string) {
