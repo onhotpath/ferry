@@ -33,6 +33,7 @@ var r19 = []struct {
 	{"R14", "three defects: String() at the zero value, and the nil interface", runR14},
 	{"R16", "can Register catch the zero-value defect with no proof", runR16},
 	{"R17", "the consumer's view: call sites, and the five open questions", runR17},
+	{"R18", "is the freeze decision complete: what freezes, and the default registry", runR18},
 	{"R15", "the audit: the cases the other probes do not cover", runR15},
 }
 
