@@ -56,10 +56,20 @@ func compile(t reflect.Type) ([]Path, error) {
 					"ferry: %s: %s maps no address: it has no exported field ferry can address; register a codec for it",
 					pathOrRoot(p), t))
 			}
-		case shapeSlice, shapeMap:
-			// dynamic: addresses come from the value, not the type.
-			// The element type is still checked here, which is the whole
-			// reason compile can refuse before a value exists.
+		case shapeSlice:
+			// An ARRAY's length is part of its type, so its element
+			// addresses are static: N of them, known with no value in hand.
+			// A SLICE's are dynamic. That difference is not cosmetic - it
+			// decides whether the field is loadable from a source that
+			// cannot enumerate (ADR-0004's Enumerator asymmetry).
+			if t.Kind() == reflect.Array {
+				for i := range t.Len() {
+					rec(t.Elem(), p.Index(i))
+				}
+				return
+			}
+			rec(t.Elem(), p.Name("*"))
+		case shapeMap:
 			rec(t.Elem(), p.Name("*"))
 		default:
 			errs = append(errs, unsupportedTypeError{p, t})
@@ -266,7 +276,16 @@ func load(vals map[Path]Value, dst reflect.Value) error {
 					n = i + 1
 				}
 			}
-			v.Set(reflect.MakeSlice(v.Type(), n, n))
+			if v.Kind() == reflect.Array {
+				// An array's length is the type's, not the plane's. An index
+				// the array cannot hold is loud; a missing one leaves the
+				// element at its zero value, which is #8's rule applied.
+				if n > v.Len() {
+					return fmt.Errorf("ferry: %s: plane has index %d, %s holds %d", p, n-1, v.Type(), v.Len())
+				}
+			} else {
+				v.Set(reflect.MakeSlice(v.Type(), n, n))
+			}
 			for _, k := range kids {
 				segs := k.Segments()
 				i, _ := strconv.Atoi(segs[len(segs)-1].Text)

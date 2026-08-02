@@ -18,6 +18,8 @@ Run: `GOTOOLCHAIN=go1.27rc2 go run .`
 | `container.go` | what a real plane reports at a container address |
 | `audit2.go` | the property's blind spot: representation |
 | `audit3.go` | the struct admitted by kind that maps nothing |
+| `gaps.go` | the audit against the ticket's literal asks, after a review challenge |
+| `flat.go` | a plane with no type information, which is what hid G2 |
 
 ## Probes
 
@@ -35,6 +37,26 @@ Run: `GOTOOLCHAIN=go1.27rc2 go run .`
 | P10 | can a plane report present-and-empty at a container address | no: `tags: []`, `tags: {}` and a missing key are one observation |
 | P11 | does the property catch a wrong representation | **no.** nanoseconds round-trips perfectly. Representation needs a golden column |
 | P12 | a struct whose fields are all unexported | `netip.Addr`, `big.Int`, `netip.AddrPort`, `time.Location` compile clean and dump nothing, silently |
+| P13 | the gap audit, run after a review challenge | five gaps, two of them severe. See below |
+| P14 | the core table through a plane with no type information | 11/11 scalars, and nil pointers do not survive |
+
+## The gap audit (P13), which a review challenge forced
+
+Every proof up to P12 fed `dump`'s own output back into `load`, so the kinds always matched.
+No probe had ever loaded from a plane that reports different kinds than ferry writes, which is the majority case: ADR-0004 records that three of four first-party drivers have no type information at all.
+
+| # | claim under test | result |
+| --- | --- | --- |
+| G1 | the ADR's stated `*[]T` escape hatch for nil-versus-empty | **the claim was false.** A nil pointer and a pointer to an empty slice both mint `/P=null` and both load back nil |
+| G2 | loading from an all-`String` plane | **failed outright**, `value: wrong kind`, every field zero. env, query and kv could not have loaded a single integer |
+| G3 | `[N]T` for a non-byte `T` | **panicked**, `reflect.MakeSlice of non-slice type`. Arrays were listed as supported and were never exercised |
+| G4 | named types over an admitted kind | fine, admitted by kind |
+| G5 | a bad leaf | loud in all four cases: bad syntax, overflow, wrong kind, empty text |
+| G6 | embedded structs | currently a named field, `/Base/ID`; [#11](https://github.com/onhotpath/ferry/issues/11)'s to change |
+| G7 | an array's addresses | **static**, N of them from the type, unlike a slice's |
+
+G2's fix is the String-donor rule in `typeset.go`, and P14 is the plane that would have caught it.
+G1 has no fix and the claim was removed from the ADR.
 
 ## Two defects found in `proto/5-source-sink` while using it
 

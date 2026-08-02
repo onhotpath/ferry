@@ -34,6 +34,8 @@ var auditHook = func() {}
 var containerHook = func() {}
 var audit2Hook = func() {}
 var audit3Hook = func() {}
+var gapsHook = func() {}
+var flatHook = func() {}
 
 func hdr(s string) { fmt.Printf("\n=== %s ===\n", s) }
 
@@ -224,6 +226,12 @@ func main() {
 
 	hdr("P12 the struct admitted by kind that maps nothing")
 	audit3Hook()
+
+	hdr("P13 gap audit against the ticket's literal asks")
+	gapsHook()
+
+	hdr("P14 the flattening plane")
+	flatHook()
 }
 
 func init() { runAtEnd = runHarness }
@@ -235,3 +243,7 @@ func init() { containerHook = runContainer }
 func init() { audit2Hook = runAudit2 }
 
 func init() { audit3Hook = runAudit3 }
+
+func init() { gapsHook = runGaps }
+
+func init() { flatHook = runFlat }

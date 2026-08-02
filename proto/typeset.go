@@ -140,10 +140,34 @@ func encLeaf(v reflect.Value) (Value, error) {
 	return Value{}, fmt.Errorf("no leaf encoding for %s", t)
 }
 
+// asDonor normalises the one coercion the type set admits on Load: a plane
+// with no type information reports String, so a String is accepted wherever
+// the leaf's own kind is, and is parsed by that kind's own parser. Nothing
+// else coerces: a Number is NOT accepted for a Go string field, because a
+// plane that reports Number is asserting a type and ferry respects it.
+func asDonor(val Value, want VKind) Value {
+	if val.Kind() == VString && want != VString {
+		return Value{kind: want, text: val.Text()}
+	}
+	return val
+}
+
 func decLeaf(val Value, dst reflect.Value) error {
 	t := dst.Type()
 	if c, ok := byIdentity[t]; ok {
 		return c.dec(val, dst)
+	}
+	switch t.Kind() {
+	case reflect.Bool:
+		val = asDonor(val, VBool)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		val = asDonor(val, VNumber)
+	case reflect.Slice, reflect.Array:
+		// Bytes and String both hold raw bytes in text, so this is a
+		// relabel and not a decode.
+		val = asDonor(val, VBytes)
 	}
 	switch t.Kind() {
 	case reflect.Bool:
