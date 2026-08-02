@@ -6,11 +6,16 @@
 # binary is named after its module and carries no extension, so `ferryproto5`
 # matches no pattern anyone would think to write. A 4.3 MB one reached main in
 # PR #24 and had to be purged by history rewrite.
+#
+# Widened for #15, which needs a Windows runner and therefore needs .github/
+# committed. The deny-by-default is NOT weakened: this is one more entry in the
+# allowlist, and every pattern below still applies inside it.
 /*
 !/.gitignore
 !/AGENTS.md
 !/CLAUDE.md
 !/docs/
+!/.github/
 
 # Belt and braces, for anyone working in a subdirectory or on a proto branch.
 /proto/

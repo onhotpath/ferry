@@ -1,0 +1,46 @@
+# The first CI this repository has had, and it exists for one ticket:
+# #15 asks whether ferry's interfaces survive a genuinely non-file, typed,
+# hierarchical plane, and the interesting half of that is not "does it compile
+# on Windows". It is whether ADR-0003's address model expresses a Registry path
+# and whether ADR-0004's Value carries REG_DWORD, REG_MULTI_SZ and REG_BINARY
+# without a lossy trip through text. Neither is answerable without a real hive.
+#
+# Deliberately narrow. It runs on the prototype branches only, it has read-only
+# permissions, it uses no secrets, and it prints nothing it did not write
+# itself - this repository is public.
+
+name: windows-registry
+
+on:
+  push:
+    branches:
+      - 'proto/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  registry:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0-rc.2'
+          cache: false
+
+      - name: toolchain
+        working-directory: proto
+        run: go version
+
+      # W0 is reconnaissance rather than a probe: it reports what privileges
+      # this runner actually has, because a permission probe against a hive the
+      # runner can write is a probe that measures nothing.
+      - name: W0 reconnaissance
+        working-directory: proto
+        env:
+          GOTOOLCHAIN: go1.27rc2
+          W15: '0'
+        run: go run .
