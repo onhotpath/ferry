@@ -17,11 +17,14 @@ Run: `GOTOOLCHAIN=go1.27rc2 go run . d`
 | `d_load.go` | the Load walk with Absent/Null separated, defaults applied, and a presence bit carried per subtree; plus a Dump that records `Set` calls so an omission is observable as the absence of one |
 | `d_probe1.go` | D1-D6 |
 | `d_probe2.go` | D7-D13 |
-| `d_probe3.go` | D14-D20 |
+| `d_probe3.go` | D14-D22 |
 
 Every rule with a live alternative is a field on `loadOpts`, so the two candidates are measured against each other rather than argued.
 
 ## Probes
+
+D21 and D22 are the audit of this ADR's own strongest claim, run after the ADR was drafted.
+Both found something.
 
 | # | question | result |
 | --- | --- | --- |
@@ -45,6 +48,8 @@ Every rule with a live alternative is a field on `loadOpts`, so the two candidat
 | D18 | the same default through all three of the harness's planes | identical on all three; and a blank YAML key is a `null`, so it is refused rather than defaulted |
 | D19 | loading twice into one destination with a key deleted in between | **the previous load's value leaks, under both rules.** Absent-does-not-write is a rule about one load |
 | D20 | a default inside an array element | applies, because an array element is a static address; a slice element's is not |
+| D21 | partial presence into a seeded destination, per kind | **a struct merges and a composite replaces.** Both follow from the one rule and neither looks like it does |
+| D22 | `required` at a container address | reached by no other probe, and unimplemented until this one. A container cannot be present-and-empty, so `tags: []` cannot satisfy it |
 
 ## Four answers this prototype overturned
 
@@ -54,5 +59,10 @@ Each was written into a draft before it was run.
 - **Declarations are keyed by address.** They are keyed by address *shape*: `/servers/a/port` is not in the schema and never can be, because the key comes from the value. Keyed by the realised address, every default under a map or a slice silently vanished. D15.
 - **An array walks the elements the plane has.** It walks all N, because its element addresses are static. Walking only the present ones made an element's declarations conditional on a sibling. D20.
 - **ADR-0005's composite rule was settled.** Its wording is "yields the zero value" and its fixtures could not tell that from "leaves unchanged", because the destination was always zero. D2, and D19 is what forces the distinction to be resolved rather than left implicit.
+
+**And two rules the ADR had not stated, found by auditing its strongest claim.**
+"Absent does not write" was written as though it said one thing at every kind.
+D21 shows it does not look like it: a struct merges field by field and a slice or a map is replaced wholesale, because a container is one decision the plane either made or did not.
+D22 reached a case no earlier probe had: `required` on a composite was accepted by schema compile and enforced by nothing.
 
 And one survey claim that did not reproduce: 5.7 calls the `DeepEqual` probe expensive, and on the same walk it is 549 ns against the presence bit's 422. Real, and not what "expensive" implies. The correctness half of 5.7 reproduces exactly.

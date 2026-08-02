@@ -300,3 +300,80 @@ func d20() {
 	fmt.Println("  walked either way. A slice element is not: it exists only if the plane")
 	fmt.Println("  has one. Two types a user treats as interchangeable, differing again.")
 }
+
+// ---------------------------------------------------------------------------
+// D21 The audit of this ADR's strongest claim: does "Absent does not write"
+//     say the same thing at every kind, or does it only look like it?
+// ---------------------------------------------------------------------------
+
+type D21Inner struct {
+	User string `ferry:"user"`
+	Pass string `ferry:"pass"`
+}
+
+type D21Conf struct {
+	Auth   D21Inner       `ferry:"auth"`
+	Tags   []string       `ferry:"tags"`
+	Limits map[string]int `ferry:"limits"`
+}
+
+func d21() {
+	dhdr("D21 partial presence into a seeded destination, per kind")
+	s := mustSchema(reflect.TypeFor[D21Conf]())
+	seed := func() D21Conf {
+		return D21Conf{
+			Auth:   D21Inner{User: "u", Pass: "p"},
+			Tags:   []string{"a", "b"},
+			Limits: map[string]int{"rps": 1, "burst": 2},
+		}
+	}
+	plane := map[Path]Value{
+		addr("auth", "user"):  String("NEW"),
+		addr("tags").Index(0): String("NEW"),
+		addr("limits", "rps"): Number("99"),
+	}
+	v := seed()
+	_, _ = loadD(plane, s, reflect.ValueOf(&v).Elem(), loadOpts{})
+	fmt.Printf("  seed   %+v\n", seed())
+	fmt.Printf("  plane  /auth/user, /tags#0 and /limits/rps only\n")
+	fmt.Printf("  result %+v\n", v)
+	fmt.Println("  A STRUCT merges, because each field is its own address and the ones the")
+	fmt.Println("  plane does not have are Absent. A SLICE and a MAP replace, because the")
+	fmt.Println("  container is one decision and the plane made it. Both follow from the")
+	fmt.Println("  rule; they do not look like they do, and that has to be documented.")
+}
+
+// ---------------------------------------------------------------------------
+// D22 required at a container address, which no other probe reached.
+// ---------------------------------------------------------------------------
+
+type D22Conf struct {
+	Tags   []string       `ferry:"tags,required"`
+	Limits map[string]int `ferry:"limits,required"`
+	Auth   *D21Inner      `ferry:"auth,required"`
+}
+
+func d22() {
+	dhdr("D22 required at a container address")
+	s := mustSchema(reflect.TypeFor[D22Conf]())
+	for _, c := range []struct {
+		label string
+		plane map[Path]Value
+	}{
+		{"nothing at all", map[Path]Value{}},
+		{"explicit Null at each", map[Path]Value{
+			addr("tags"): Null(), addr("limits"): Null(), addr("auth"): Null()}},
+		{"one child under each", map[Path]Value{
+			addr("tags").Index(0): String("a"), addr("limits", "rps"): Number("1"),
+			addr("auth", "user"): String("u")}},
+	} {
+		var v D22Conf
+		_, err := loadD(c.plane, s, reflect.ValueOf(&v).Elem(), loadOpts{})
+		fmt.Printf("  %-22s -> Tags=%v Limits=%v Auth=%v err=%v\n",
+			c.label, v.Tags, v.Limits, v.Auth != nil, err)
+	}
+	fmt.Println("  A container's presence is children, or a Null at its own address.")
+	fmt.Println("  It CANNOT be present-and-empty, because no plane can report that")
+	fmt.Println("  (ADR-0005's forced collision), so `tags: []` reads as Absent and")
+	fmt.Println("  cannot satisfy required. That is inherited, not chosen.")
+}

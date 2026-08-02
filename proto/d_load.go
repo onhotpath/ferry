@@ -139,6 +139,9 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 				v.Set(reflect.Zero(v.Type()))
 				return true, nil
 			}
+			if opts.required && val.Kind() == VAbsent && len(children(vals, p)) == 0 {
+				return false, fmt.Errorf("ferry: %s: required, and the plane does not have it", p)
+			}
 			// A pointer to a COMPOSITE. Materialise it exactly when something
 			// under it was present. This is 5.7, and it is a walk decision
 			// rather than a comparison against a fresh zero value.
@@ -173,6 +176,13 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 			val := planeAt(vals, p)
 			if o.observe != nil {
 				o.observe(p, val)
+			}
+			if opts.required && val.Kind() == VAbsent && len(children(vals, p)) == 0 {
+				// A container's presence is children, or a Null at its own
+				// address. It cannot be present-and-empty, because no plane can
+				// report that (ADR-0005), so a required composite cannot be
+				// satisfied by an empty one.
+				return false, fmt.Errorf("ferry: %s: required, and the plane does not have it", p)
 			}
 			if val.Kind() == VNull {
 				v.Set(reflect.Zero(v.Type()))
@@ -233,6 +243,13 @@ func loadD(vals map[Path]Value, s *schema, dst reflect.Value, o loadOpts) (bool,
 			val := planeAt(vals, p)
 			if o.observe != nil {
 				o.observe(p, val)
+			}
+			if opts.required && val.Kind() == VAbsent && len(children(vals, p)) == 0 {
+				// A container's presence is children, or a Null at its own
+				// address. It cannot be present-and-empty, because no plane can
+				// report that (ADR-0005), so a required composite cannot be
+				// satisfied by an empty one.
+				return false, fmt.Errorf("ferry: %s: required, and the plane does not have it", p)
 			}
 			if val.Kind() == VNull {
 				v.Set(reflect.Zero(v.Type()))
