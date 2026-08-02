@@ -29,7 +29,10 @@ Three results bear on decisions that are already Accepted.
 - **ADR-0004's three optional interfaces compose badly with the wrapping that #10's whole mechanism is made of.**
   A naive middleware over the real YAML sink makes the plane never get written, with a nil error.
 
-Five defects were found in the inherited prototype, four of them silent, and two of those were two latent defects cancelling each other out.
+Two findings this document originally left open were resolved during review and are now measured rather than proposed: an absent optional section suppresses a `required` child (section 1.5), and the `REG_MULTI_SZ` hole closes with a registered codec plus a driver option, so ADR-0004's value model needs no amendment (section 2.7).
+The second corrects a reading earlier in this document.
+
+Six defects were found in the inherited prototype, five of them silent, and two of those were latent defects cancelling each other out.
 
 ## 1. Template generation (#14)
 
@@ -128,13 +131,57 @@ ferry: 3 errors:
   /tls/cert: required, and the plane supplied nothing
 ```
 
-That repair is a comment-syntax capability, so on every `values only` plane in section 1.6 the seeded artefact is one a Load refuses until a human edits it.
+That repair is a comment-syntax capability, so on every `values only` plane in section 1.7 the seeded artefact is one a Load refuses until a human edits it.
 That is the right answer and it looks like a broken tool.
 
 **yaml.v3 has no disabled-entry node**, so even a plane with a comment syntax has no library-level notion of a key that is present in the document and absent to a reader.
 Every emitter does this textually, and this one does too.
 
-### 1.5 The annotation channel is the easy half
+### 1.5 `required` under an absent optional section, found here and resolved
+
+`T14=8`, A3.
+
+```go
+type TLS struct {
+    Cert string `ferry:"cert,required"`   // if you configure TLS, you must give a cert
+    Key  string `ferry:"key"`
+}
+type Conf struct {
+    TLS *TLS `ferry:"tls"`                // ...but TLS itself is optional
+}
+```
+
+Measured against a plane holding a complete config and no `tls` section, this refused with `/tls/cert: required, and the plane supplied nothing`.
+So one `required` anywhere beneath an optional pointer made the whole section mandatory and the pointer stopped meaning anything.
+
+ADR-0006 asks the neighbouring question about **defaults** and answers it well - *"a default fills a hole in a section, and never conjures the section"*, measured - and never asks it of `required`.
+
+**Resolved by the repo owner**: when a section is optional as a whole, a `required` inside it does not apply while the section is absent.
+The fix is one condition in the walk's nil-pointer branch, and it is ADR-0011's own rule - *"report every failure that is not a consequence of another"* - applied to the mirror of the case it already handles, a required child under a **required** parent.
+
+| plane | scheduler | result | |
+| --- | --- | --- | --- |
+| no `tls` section at all | aggregating | accepted | correct |
+| `tls/key` present, `cert` missing | aggregating | refused | correct |
+| `tls/key` present, `cert` missing | **first error** | **accepted** | **wrong** |
+
+**The precondition is not obvious and is why both scheduler rows are printed.**
+The fix is gated on ADR-0006's presence bit, which is accumulated across the pointer's siblings.
+Under first-error scheduling the failing field returns before its siblings run, so the bit is incomplete and the suppression fires on a section that *is* present - strictly worse than the bug it fixes.
+
+It is sound in ferry as designed, because ADR-0011 says *"on Load, aggregate"* and declines to ship `StopOnFirstError`, calling it *"a public knob whose only job is to make ferry report less"*.
+What it hands [#20](https://github.com/onhotpath/ferry/issues/20) is a **second** hazard on the presence bit: ADR-0010 already reports a data race on it, and it is now load-bearing for a correctness rule, so a scheduler that abandons siblings on the first error breaks this in the silent direction.
+
+**One cost falls out rather than being chosen**, and it is #14's.
+A template can no longer *discover* a conditionally-required field: the recipe learns required-ness by reading the error set, and the error is now correctly suppressed, so a generated template renders the section as `tls: null` and cannot say "if you add a tls section, cert is mandatory".
+That is the price of reading declarations out of an error set rather than out of a schema, which is section 1.7's wall in a different place.
+
+**A separate inherited defect surfaced alongside it.**
+`required` on the pointer *itself*, which ADR-0006 decides means *"the plane supplied at least one of the address's static children"*, is enforced by nothing on `proto/16-entry-point`.
+ADR-0006 explicitly records repairing that in its own draft; the repair was never carried onto the branch every later ADR was measured against.
+With it in place the two spellings mean two useful and distinct things - `tls,required` for a mandatory section, `cert,required` for mandatory-if-present - and today only the second does anything, and it does the first one's job.
+
+### 1.6 The annotation channel is the easy half
 
 `T14=4`.
 
@@ -157,7 +204,7 @@ It works, and it is [ADR-0010](../adr/0010-the-entry-point-and-the-schema-cache.
 Reproduced against a real divergence rather than described: an emitter that reimplements the field rule and handles an embedded field the obvious way disagrees with the compiler, annotates `/port` and silently leaves `/env` bare, with no error from anything.
 ADR-0008 found the identical defect in a real ferry prototype and called it silent.
 
-### 1.6 Which planes can be templated, and what one that cannot reports
+### 1.7 Which planes can be templated, and what one that cannot reports
 
 `T14=5`.
 **The predicate is "has a comment syntax", not "has a format", and it is a strictly smaller set.**
@@ -187,7 +234,7 @@ ADR-0001 describes template generation as *"dump a defaulted struct to a starter
 A plane that cannot annotate cannot silently drop the markers, because ADR-0001 rules out ignoring anything silently.
 The two available answers are to refuse at the generator - the assertion is available at bind time, which is the same before-any-I/O property ADR-0004 buys with a context-free `Bind` - or to degrade to seeding and say so in the return value.
 
-### 1.7 Where the prose comes from
+### 1.8 Where the prose comes from
 
 `T14=6`.
 Three candidate sources, all run.
@@ -202,7 +249,7 @@ Three candidate sources, all run.
 **The source people want is a build-time source**, which is what makes template generation a generator rather than a function.
 ADR-0002 reserves `cmd/` and says the prefix keeps the root namespace free *"because ... #14 may want a command"*.
 
-### 1.8 The API surface
+### 1.9 The API surface
 
 `T14=7`, argued last because the artefact is what rules three candidates out.
 
@@ -310,14 +357,11 @@ Value fidelity holds and driver fidelity does not, and the conformance suite as 
 `REG_EXPAND_SZ` loses its type the same way, and the semantics with it: `REG_EXPAND_SZ` tells every Windows reader to expand the variable and `REG_SZ` tells it not to.
 A driver could read before writing, which makes every `Set` a `Get` first - survey item 5.13's amplification - and still has nothing to preserve on a key that does not exist yet, which is every template and every first run.
 
-**`REG_MULTI_SZ` has no representation in the six kinds.**
+**`REG_MULTI_SZ` has no representation in the six kinds**, and section 2.7 is what closes it.
 Measured on a real hive, `["a" "b,c" ""]` round-trips through Win32 exactly, including the element containing a comma and the empty element.
 It is a real, lossless, native list of strings at **one** value name.
 ADR-0004 closed the model with no group arm on the argument that a composite gets one address per element so nothing ever asks the plane for the value *at* `/servers`, and named the remaining case as a flat plane holding a whole list in one value, arriving as `String("a,b,c")` for a codec to split.
 `REG_MULTI_SZ` is not that case: the elements are separately delimited by the plane, so there is nothing for a codec to split and no delimiter to choose.
-Four available answers, each losing something: refuse the type, join with a separator (lossy, and 5.10 reintroduced at the driver), join with NUL as `Bytes` (lossless, and every consumer registers a codec to read a plain `[]string`), or map it to `Index` addresses (what ferry wants, and the boundary has no shape for it).
-ADR-0004 calls the missing escape arm *"the weakest call in this ADR"* with v0 as the whole mitigation.
-**This is the first measured plane that needs one.**
 
 **A negative number has no Registry integer type**, so one Go field gets two plane types decided by the value rather than by the type.
 ADR-0005's golden column pins a representation per Go type, and here the representation is a function of the value.
@@ -370,6 +414,66 @@ minted set on the binding  [write 1 ok, write 2 REFUSED (collides with "Prod")]
 minted set on the open     [write 1 ok, write 2 ok]
 ```
 
+### 2.7 The `REG_MULTI_SZ` hole closes with a codec and a driver option, and needs no amendment
+
+`W15=6`, `W15=7`.
+
+**First, whether it is a real case or one this ticket reached for.**
+Read-only on the runner's own install, reporting type and element count and never the data:
+
+| value | type | elements |
+| --- | --- | --- |
+| `Services\Dnscache\DependOnService` | `REG_MULTI_SZ` | 2 |
+| `Services\LanmanWorkstation\DependOnService` | `REG_MULTI_SZ` | 3 |
+| `Session Manager\Memory Management\PagingFiles` | `REG_MULTI_SZ` | 1 |
+| `Control\Network\FilterClasses` | `REG_MULTI_SZ` | 15 |
+| `Session Manager\PendingFileRenameOperations` | not present | |
+
+Four of five on a stock image, so it is ordinary.
+The fifth is a real `REG_MULTI_SZ` value and only exists while a reboot-pending rename is scheduled, so it is a poor example and is listed as one.
+
+**Second, the write-side damage, which is worse than the read side.**
+What ferry writes today for `Deps []string` tagged `DependOnService`:
+
+```
+services\acme\dependonservice : 0 = REG_SZ("RpcSs")
+services\acme\dependonservice : 1 = REG_SZ("Tcpip")
+```
+
+A **subkey** holding values named `0` and `1`, where Windows expects one `REG_MULTI_SZ` value of that name.
+The service control manager does not see a dependency list at all.
+So this is not only a type ferry cannot read, it is a type ferry actively destroys on a round trip.
+
+**Third, the route, which was built rather than reasoned about.**
+A named type with a registered codec, using ADR-0005's own mechanism - *"a codec collapses a type to a leaf, and a leaf needs no address set"*:
+
+```go
+type MultiSZ []string
+reg.Register(ferry.ValueCodec(ferry.Bytes, encNULJoined, decNULJoined))
+```
+
+| | address set | plane holds | round trip |
+| --- | --- | --- | --- |
+| plain `[]string` | `/deps#0`, `/deps#1` | a subkey of numbered values | through ferry only |
+| codec alone | `/deps` | `REG_BINARY` | **exact** |
+| codec plus a driver option | `/deps` | `REG_MULTI_SZ(["RpcSs" "Tcpip" ""])` | **exact** |
+
+The NUL join is lossless rather than a delimiter choice, because the Win32 format is NUL-separated so an element cannot contain one.
+
+**And the codec cannot close it alone, for a reason worth stating precisely.**
+A codec's entire output is a `Value`, which is a kind and text, and none of the six kinds means `MULTI_SZ`, so there is no channel through which it tells the driver what it produced.
+The encoding cannot be self-describing either: NUL-joined bytes are indistinguishable from a genuine binary blob containing a NUL, so a driver that guessed would corrupt the second case.
+Declaring `String` instead fails at the Win32 level, because a `REG_SZ` is NUL-terminated and cannot carry an embedded NUL.
+
+**So the missing half is a driver option, which is the shape ADR-0003 already gives the separator on exactly this reasoning, and ADR-0004's value model needs no amendment.**
+This corrects an earlier reading in this document, which had `REG_MULTI_SZ` as the first measured plane needing the escape arm ADR-0004 calls *"the weakest call in this ADR"*.
+It is not: the escape arm would carry a driver-native value, which ADR-0004 refuses because it breaks plane-to-plane transfer, and the codec route carries plane-neutral bytes instead.
+
+**What it costs the user, which is the part that should decide whether ferry is happy with this.**
+Three things for what is in Go a `[]string`: define a named type, register a codec, and configure the driver.
+Steps two and three spell the same fact twice, once as a type and once as an address predicate, which is the drift ADR-0006 measured against a `Static` defaults source and section 3.3 measured against a redaction table.
+And the failure mode of doing none of them is silent on the plane: a plain `[]string` compiles, dumps, and round-trips through ferry perfectly while writing a shape no Windows consumer recognises.
+
 ## 3. Cross-cutting concerns (#10)
 
 Held until ADR-0012 was accepted, because a middleware wraps a `Source` and #25 owned whether the plane instance still arrives at construction.
@@ -420,7 +524,7 @@ So the trade ADR-0004 made is between boilerplate in every driver and a silent f
 **A wrapping Sink can guarantee a secret never reaches the sink.**
 It sees every `Set` before the inner sink does, and that is a property of ADR-0004's contract rather than of the wrapper.
 
-**It cannot guarantee a secret never reaches the plane**, because section 1.6 established that an annotated template emitter has to bypass `Sink` entirely.
+**It cannot guarantee a secret never reaches the plane**, because section 1.7 established that an annotated template emitter has to bypass `Sink` entirely.
 Measured: the emitted template contains the credential while the redacted dump does not.
 
 **And the wrapper has to be told which addresses are secret.**
@@ -451,7 +555,7 @@ So dropping the assertion changes ferry's error policy as well as losing the com
 
 ## 4. Defects found in the inherited prototype
 
-All five were found by running rather than by reading, and four were silent.
+All six were found by running rather than by reading, and five were silent.
 None is a defect in an ADR.
 
 - **`prefixFree` checked only for exact duplicates.**
@@ -468,6 +572,10 @@ None is a defect in an ADR.
 - **`splitTag` could not parse ADR-0008's own headline example.**
   `default='Hello, world'` split at the comma and reported `unknown option "world'"`, because a quote opened a token only at the start of a whole comma-separated part rather than after `default=`.
   Every fixture on the branch used a default with no comma in it, which is the case ADR-0008 measured as 3.9% of real free-text tag values and singled out as the one that has to read well.
+- **`required` on a `*struct` is enforced by nothing.**
+  ADR-0006 decides that it means "the plane supplied at least one of the address's static children", and explicitly records repairing this in its own draft after shipping a version where it "was accepted at schema compile and enforced by nothing".
+  That repair was never carried onto `proto/16-entry-point`.
+  Found while checking section 1.5's neighbouring case, and not fixed here: it is ADR-0006's repair rather than this ticket's.
 - **`r17_usage.go` tripped `go vet`'s printf check** on a raw string of sample source.
 
 ## 5. A toolchain bug
@@ -490,8 +598,9 @@ The survey is [`generics-and-modern-go.md`](generics-and-modern-go.md), section 
 
 **5.10, composite values are string-splitting.**
 Touched by #15 and it is the one item this work makes *harder* rather than easier.
-ADR-0003 removed the structural cause with `Index` segments, and `REG_MULTI_SZ` is a plane holding a native list at one address, so the only lossy answer available to a driver is to join the elements with a separator - which is 5.10 reintroduced at the driver rather than at the tag.
-The lossless answers are to refuse the type or to hand over NUL-joined `Bytes`.
+ADR-0003 removed the structural cause with `Index` segments, and `REG_MULTI_SZ` is a plane holding a native list at one address.
+The tempting answer is to join the elements with a separator, which is 5.10 reintroduced at the driver rather than at the tag.
+Section 2.7 takes the lossless one instead: NUL-joined `Bytes` behind a registered codec, where the NUL is not a delimiter anybody chose but the format's own separator, so an element cannot contain it.
 
 **5.11, the YAML provider silently discards parse errors.**
 Addressed, and found live in ferry's own walk rather than in a driver: `loadDir` discarded the `Reader`'s error and substituted `Absent`.
@@ -527,7 +636,7 @@ A Registry driver that preserved `REG_DWORD` against `REG_QWORD` would have to `
 ## 7. Honest gaps
 
 - **No first-party Registry driver was written for `driver/`.** What exists is a prototype driver over a `wStore` seam, with a fake and a real backend. It implements `Source`, `Sink`, `Enumerator` and no `Committer`, and it has no conformance suite because none exists yet.
-- **`REG_MULTI_SZ`'s four answers were enumerated and none was implemented.** The driver refuses the type. Which answer ferry should take is a decision, not a report.
+- **The `REG_MULTI_SZ` route is implemented and is not a first-party driver's.** Section 2.7 measures a codec plus a driver option round-tripping exactly. What is untested is whether the driver option is the right *spelling*, and whether a first-party driver would want to detect the type on read and preserve it on write rather than being told.
 - **The permission probe does not test an ACL.** It tests an access mask on a handle and one hive denied to administrators. A denied ACL on a key the process created was not attempted, because the runner is elevated and the mask route is deterministic.
 - **Nothing was run on a non-elevated Windows session**, so "what a normal user's process sees" is inferred from the access-mask result rather than measured.
 - **The template emitter was written for YAML only.** The TOML and `.env` rows in section 1.6 are reasoned from those formats having a comment syntax, not run.
@@ -535,4 +644,5 @@ A Registry driver that preserved `REG_DWORD` against `REG_QWORD` would have to `
 - **The `Annotator` interface was written to emit with and not proposed.** Whether ADR-0004 should grow a fourth optional interface is a decision, and section 3.2 is an argument that it should grow *fewer*.
 - **No wrapper conformance case was written**, which is the concrete thing section 3.2 argues `ferrytest` owes. It belongs to [#35](https://github.com/onhotpath/ferry/issues/35).
 - **The bind cost in section 2.6 is a microbenchmark of the key function alone**, not a whole-load figure, so it is not comparable to ADR-0012's numbers.
-- **`required` under an optional `*struct`** is reported as a finding and not resolved. Whether an absent optional section should suppress a required child is a decision, and this document proposes a ticket rather than an answer.
+- **The `required` suppression of section 1.5 is untested under a concurrent scheduler**, which is where its precondition would actually break. #20 owns whether one exists.
+- **`required` on the pointer itself is still unenforced** on `proto/16-entry-point`. Section 1.5 records it; the repair is ADR-0006's and was not implemented here.
