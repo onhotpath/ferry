@@ -62,9 +62,11 @@ flags:
   # one, and core's was `/`. No repository-relative path begins with a slash,
   # so it matched nothing, every file was filtered out, and Codecov rejected
   # the upload as REPORT_EMPTY: a successful upload that reports zero, which is
-  # #98. Proved on ceed2a3 by sending the byte-identical profile twice, once
-  # under `core` and once under a flag with no filter - the first errored
-  # REPORT_EMPTY, the second merged at 100.0% over three files.
+  # #98, where the measurement is recorded: one commit uploaded the
+  # byte-identical profile three times, once under `core` and twice under flags
+  # with no filter, and only `core` errored REPORT_EMPTY while both others
+  # merged at 100.0% over three files. Same bytes, same config, only the flag
+  # differed.
   #
   # The filters are gone rather than corrected because they were never load
   # bearing. Each module runs its own `go test` and uploads only its own
