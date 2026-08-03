@@ -39,9 +39,10 @@ env:
   # 'latest', so a lint failure is always this repository's doing and never a
   # linter release nobody asked for.
 
-  # Near-total, because core is a library of pure logic with no I/O to plead.
-  # See the coverage job for what makes this start biting.
-  COVERAGE_MIN: '90'
+  # The coverage threshold used to be an env var here. It lives in codecov.yml
+  # now, on the line marked `ferry-core-threshold`, and the coverage job reads it
+  # from there. Codecov needs the number in its own file regardless, and two
+  # copies of one threshold is a pair that drifts.
 
 jobs:
   # ADR-0002: "the directory is a CI predicate". driver/* is exactly the set of
@@ -425,9 +426,21 @@ jobs:
           # live, so core is where a data race would be.
           go test -race ./...
 
+  # Coverage runs per module so Codecov can report each one under its own flag.
+  # Averaging a driver into core would let a well-tested driver hide a gap in
+  # core, and ADR-0002 versions and releases the two independently.
+  #
+  # The gate below is core's alone, and it stays in this workflow rather than
+  # moving to Codecov. Codecov reports; a third-party outage must not be able to
+  # make an untested branch mergeable.
   coverage:
-    name: Coverage gate on core
+    name: Coverage ${{ matrix.module }}
     runs-on: ubuntu-latest
+    needs: modules
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.modules.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
 
@@ -435,10 +448,29 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: go test -coverprofile, then gate at ${{ env.COVERAGE_MIN }}%
+      - name: go test -coverprofile
+        working-directory: ${{ matrix.module }}
         run: |
           set -euo pipefail
           go test -covermode=atomic -coverprofile=cover.out ./...
+
+      - name: Gate core at the codecov.yml threshold
+        if: matrix.module == '.'
+        run: |
+          set -euo pipefail
+
+          # codecov.yml is the one place the number is written. Read it from
+          # there rather than keeping a second copy, and fail loudly if the
+          # marked line has moved: a threshold that silently reads as empty is
+          # a gate that silently passes.
+          min=$(sed -n 's/^[[:space:]]*target:[[:space:]]*\([0-9]\{1,3\}\)%[[:space:]]*#[[:space:]]*ferry-core-threshold.*/\1/p' codecov.yml)
+          if [ -z "$min" ]; then
+            echo "FAIL: could not read the core threshold from codecov.yml."
+            echo "      The gate reads the line marked 'ferry-core-threshold'."
+            echo "      Restore that marker rather than hardcoding a number here."
+            exit 1
+          fi
+          echo "threshold from codecov.yml: ${min}%"
 
           # cover.out lines after the mode header are:
           #   file.go:from.col,to.col numstmt count
@@ -453,7 +485,7 @@ jobs:
           echo "core: $stmts coverable statement(s)"
 
           if [ "$stmts" -eq 0 ]; then
-            echo "SKIPPED: coverage gate (threshold ${COVERAGE_MIN}%)"
+            echo "SKIPPED: coverage gate (threshold ${min}%)"
             echo "  why: core has no statements, so there is no ratio to gate."
             echo "  clears: the first function body that lands in core."
             exit 0
@@ -461,12 +493,40 @@ jobs:
 
           go tool cover -func=cover.out
           total=$(go tool cover -func=cover.out | awk '/^total:/ { print $3 }' | tr -d '%')
-          echo "core coverage: ${total}%   threshold: ${COVERAGE_MIN}%"
+          echo "core coverage: ${total}%   threshold: ${min}%"
 
-          awk -v t="$total" -v m="$COVERAGE_MIN" 'BEGIN { exit !(t + 0 >= m + 0) }' || {
-            echo "FAIL: coverage ${total}% is below the ${COVERAGE_MIN}% gate."
+          awk -v t="$total" -v m="$min" 'BEGIN { exit !(t + 0 >= m + 0) }' || {
+            echo "FAIL: coverage ${total}% is below the ${min}% gate."
             echo "      Core is pure logic with no I/O to plead, so the gate is"
             echo "      near-total on purpose."
             exit 1
           }
           echo "OK: coverage gate passed."
+
+      - name: Derive the Codecov flag for this module
+        id: flag
+        run: |
+          set -euo pipefail
+          # '.' is core; a driver's flag is its path with the separator swapped,
+          # because a Codecov flag may not contain a slash. GitHub's expression
+          # syntax has no string replace, so it is done here, and the names have
+          # to match the `flags:` block in codecov.yml exactly.
+          m='${{ matrix.module }}'
+          if [ "$m" = "." ]; then
+            flag=core
+          else
+            flag=${m//\//-}
+          fi
+          echo "module '$m' uploads under flag '$flag'"
+          echo "name=$flag" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          flags: ${{ steps.flag.outputs.name }}
+          files: ${{ matrix.module }}/cover.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          # A pull request from a fork cannot read the token, and a contributor
+          # cannot fix that. The gate above is what enforces the threshold, so
+          # a failed upload reports nothing and blocks nothing.
+          fail_ci_if_error: false
