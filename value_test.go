@@ -24,12 +24,12 @@ type kindSample struct {
 // arrives as a failing test here rather than as a row nobody wrote.
 func kindSamples() []kindSample {
 	return []kindSample{
-		{Absent, Value{}},
-		{Null, Nul()},
-		{Bool, Boo(true)},
-		{Number, Num("8080")},
-		{String, Str("8080")},
-		{Bytes, Byt([]byte("hi"))},
+		{KindAbsent, Value{}},
+		{KindNull, Null()},
+		{KindBool, Bool(true)},
+		{KindNumber, Number("8080")},
+		{KindString, String("8080")},
+		{KindBytes, Bytes([]byte("hi"))},
 	}
 }
 
@@ -48,13 +48,13 @@ type accessorCase struct {
 // error, which is what makes it the accessor a caller reaches for first.
 func valueAccessors() []accessorCase {
 	return []accessorCase{
-		{"AsString", String, func(v Value) (any, error) { s, err := v.AsString(); return s, err }, ""},
-		{"AsNumber", Number, func(v Value) (any, error) { s, err := v.AsNumber(); return s, err }, ""},
-		{"AsBool", Bool, func(v Value) (any, error) { b, err := v.AsBool(); return b, err }, false},
-		{"AsBytes", Bytes, func(v Value) (any, error) { b, err := v.AsBytes(); return b, err }, []byte(nil)},
-		{"AsInt", Number, func(v Value) (any, error) { n, err := v.AsInt(); return n, err }, int64(0)},
-		{"AsUint", Number, func(v Value) (any, error) { n, err := v.AsUint(); return n, err }, uint64(0)},
-		{"AsFloat", Number, func(v Value) (any, error) { f, err := v.AsFloat(); return f, err }, float64(0)},
+		{"AsString", KindString, func(v Value) (any, error) { s, err := v.AsString(); return s, err }, ""},
+		{"AsNumber", KindNumber, func(v Value) (any, error) { s, err := v.AsNumber(); return s, err }, ""},
+		{"AsBool", KindBool, func(v Value) (any, error) { b, err := v.AsBool(); return b, err }, false},
+		{"AsBytes", KindBytes, func(v Value) (any, error) { b, err := v.AsBytes(); return b, err }, []byte(nil)},
+		{"AsInt", KindNumber, func(v Value) (any, error) { n, err := v.AsInt(); return n, err }, int64(0)},
+		{"AsUint", KindNumber, func(v Value) (any, error) { n, err := v.AsUint(); return n, err }, uint64(0)},
+		{"AsFloat", KindNumber, func(v Value) (any, error) { f, err := v.AsFloat(); return f, err }, float64(0)},
 	}
 }
 
@@ -64,8 +64,8 @@ func valueAccessors() []accessorCase {
 // Absent.AsInt() among them.
 func TestAccessorMatrix(t *testing.T) {
 	ks := kindSamples()
-	if len(ks) != int(Bytes)+1 {
-		t.Fatalf("the matrix covers %d kinds and the kind set has %d", len(ks), int(Bytes)+1)
+	if len(ks) != int(KindBytes)+1 {
+		t.Fatalf("the matrix covers %d kinds and the kind set has %d", len(ks), int(KindBytes)+1)
 	}
 
 	for _, k := range ks {
@@ -117,12 +117,12 @@ func callAccessor(t *testing.T, v Value, a accessorCase) (any, error) {
 // TestZeroValueIsAbsent asserts kind zero, which is what makes a map miss
 // absence itself rather than something a recording sink has to reconcile.
 func TestZeroValueIsAbsent(t *testing.T) {
-	if Absent != 0 {
-		t.Fatalf("Absent is %d, want kind zero", Absent)
+	if KindAbsent != 0 {
+		t.Fatalf("KindAbsent is %d, want kind zero", KindAbsent)
 	}
 
 	var v Value
-	if v.Kind() != Absent {
+	if v.Kind() != KindAbsent {
 		t.Fatalf("the zero Value has kind %s, want absent", v.Kind())
 	}
 
@@ -131,14 +131,14 @@ func TestZeroValueIsAbsent(t *testing.T) {
 	}
 
 	// A lookup miss is the observation, with no parallel presence map.
-	miss := map[string]Value{"/host": Str("h")}["/nope"]
-	if miss.Kind() != Absent {
+	miss := map[string]Value{"/host": String("h")}["/nope"]
+	if miss.Kind() != KindAbsent {
 		t.Fatalf("a map miss has kind %s, want absent", miss.Kind())
 	}
 
 	// And absence stays distinct from every present observation, empty ones
 	// included: ADR-0004's "absent is not null is not the empty string".
-	for _, present := range []Value{Nul(), Str(""), Byt(nil), Num("")} {
+	for _, present := range []Value{Null(), String(""), Bytes(nil), Number("")} {
 		if present == (Value{}) {
 			t.Fatalf("%#v compares equal to Absent", present)
 		}
@@ -151,10 +151,10 @@ func TestComparableAsMapKey(t *testing.T) {
 	// A recording sink is this map, so the assertion is the sink's: four
 	// observations that differ only in kind or only in text stay four entries.
 	entries := []kindSample{
-		{Number, Num("8080")},
-		{String, Str("8080")},
-		{Null, Nul()},
-		{Absent, Value{}},
+		{KindNumber, Number("8080")},
+		{KindString, String("8080")},
+		{KindNull, Null()},
+		{KindAbsent, Value{}},
 	}
 
 	m := make(map[Value]VKind, len(entries))
@@ -172,12 +172,12 @@ func TestComparableAsMapKey(t *testing.T) {
 		}
 	}
 
-	same, again := Num("8080"), Num("8080")
+	same, again := Number("8080"), Number("8080")
 	if same != again {
 		t.Fatal("two equal values compare unequal")
 	}
 
-	quoted := Str("8080")
+	quoted := String("8080")
 	if same == quoted {
 		t.Fatal("a number and a string over the same text compare equal")
 	}
@@ -207,16 +207,16 @@ func TestKindSetIsClosedAtSix(t *testing.T) {
 		kind VKind
 		name string
 	}{
-		{Absent, "absent"},
-		{Null, "null"},
-		{Bool, "bool"},
-		{Number, "number"},
-		{String, "string"},
-		{Bytes, "bytes"},
+		{KindAbsent, "absent"},
+		{KindNull, "null"},
+		{KindBool, "bool"},
+		{KindNumber, "number"},
+		{KindString, "string"},
+		{KindBytes, "bytes"},
 	}
 
-	if len(want) != int(Bytes)+1 {
-		t.Fatalf("the kind set has %d members and this table names %d", int(Bytes)+1, len(want))
+	if len(want) != int(KindBytes)+1 {
+		t.Fatalf("the kind set has %d members and this table names %d", int(KindBytes)+1, len(want))
 	}
 
 	for i, w := range want {
@@ -238,7 +238,7 @@ func TestKindSetIsClosedAtSix(t *testing.T) {
 // `port: 8080` and `port: "8080"` are two observations, and each round-trips to
 // its own spelling.
 func TestQuotingSurvives(t *testing.T) {
-	unquoted, quoted := Num("8080"), Str("8080")
+	unquoted, quoted := Number("8080"), String("8080")
 
 	if unquoted == quoted {
 		t.Fatal("the quoted and unquoted spellings compare equal")
@@ -246,22 +246,22 @@ func TestQuotingSurvives(t *testing.T) {
 
 	n, err := unquoted.AsNumber()
 	if err != nil || n != "8080" {
-		t.Fatalf("Num(\"8080\").AsNumber() = %q, %v", n, err)
+		t.Fatalf("Number(\"8080\").AsNumber() = %q, %v", n, err)
 	}
 
 	s, err := quoted.AsString()
 	if err != nil || s != "8080" {
-		t.Fatalf("Str(\"8080\").AsString() = %q, %v", s, err)
+		t.Fatalf("String(\"8080\").AsString() = %q, %v", s, err)
 	}
 
 	// Neither answers as the other, which is what keeps them two observations
 	// rather than one with a hint attached.
 	if _, err := unquoted.AsString(); !errors.Is(err, ErrWrongKind) {
-		t.Fatalf("Num(\"8080\").AsString() error is %v, want one matching ErrWrongKind", err)
+		t.Fatalf("Number(\"8080\").AsString() error is %v, want one matching ErrWrongKind", err)
 	}
 
 	if _, err := quoted.AsNumber(); !errors.Is(err, ErrWrongKind) {
-		t.Fatalf("Str(\"8080\").AsNumber() error is %v, want one matching ErrWrongKind", err)
+		t.Fatalf("String(\"8080\").AsNumber() error is %v, want one matching ErrWrongKind", err)
 	}
 }
 
@@ -286,20 +286,20 @@ func TestSourceTextSurvives(t *testing.T) {
 func checkTextSurvives(t *testing.T, text string) {
 	t.Helper()
 
-	num, str := Num(text), Str(text)
+	num, str := Number(text), String(text)
 
 	got, err := num.AsNumber()
 	if err != nil || got != text {
-		t.Fatalf("Num(%q).AsNumber() = %q, %v", text, got, err)
+		t.Fatalf("Number(%q).AsNumber() = %q, %v", text, got, err)
 	}
 
 	got, err = str.AsString()
 	if err != nil || got != text {
-		t.Fatalf("Str(%q).AsString() = %q, %v", text, got, err)
+		t.Fatalf("String(%q).AsString() = %q, %v", text, got, err)
 	}
 
 	if num == str {
-		t.Fatalf("Num(%q) and Str(%q) compare equal", text, text)
+		t.Fatalf("Number(%q) and String(%q) compare equal", text, text)
 	}
 }
 
@@ -312,7 +312,7 @@ func TestBytesAreCarriedUnmodified(t *testing.T) {
 		t.Fatal("the case does not test what it claims: these bytes are valid UTF-8")
 	}
 
-	v := Byt(raw)
+	v := Bytes(raw)
 
 	got, err := v.AsBytes()
 	if err != nil {
@@ -336,9 +336,9 @@ func TestBytesAreCarriedUnmodified(t *testing.T) {
 	}
 
 	// An empty Bytes is a present observation and stays one.
-	empty, err := Byt(nil).AsBytes()
+	empty, err := Bytes(nil).AsBytes()
 	if err != nil || len(empty) != 0 {
-		t.Fatalf("Byt(nil).AsBytes() = % x, %v", empty, err)
+		t.Fatalf("Bytes(nil).AsBytes() = % x, %v", empty, err)
 	}
 }
 
@@ -382,7 +382,7 @@ func TestNumberParsing(t *testing.T) {
 func checkNumCase(t *testing.T, c numCase) {
 	t.Helper()
 
-	got, err := c.call(Num(c.text))
+	got, err := c.call(Number(c.text))
 	if !errors.Is(err, c.wantErr) {
 		t.Fatalf("parsing %q: error %v, want one matching %v", c.text, err, c.wantErr)
 	}
@@ -393,18 +393,18 @@ func checkNumCase(t *testing.T, c numCase) {
 }
 
 // TestBoolIsCanonical covers the invariant that lets AsBool answer with no
-// parse arm: Boo is the only door into the kind.
+// parse arm: the Bool constructor is the only door into the kind.
 func TestBoolIsCanonical(t *testing.T) {
 	for _, want := range []bool{true, false} {
 		t.Run(strconv.FormatBool(want), func(t *testing.T) {
-			got, err := Boo(want).AsBool()
+			got, err := Bool(want).AsBool()
 			if err != nil || got != want {
-				t.Fatalf("Boo(%t).AsBool() = %t, %v", want, got, err)
+				t.Fatalf("Bool(%t).AsBool() = %t, %v", want, got, err)
 			}
 		})
 	}
 
-	if Boo(true) == Boo(false) {
+	if Bool(true) == Bool(false) {
 		t.Fatal("true and false compare equal")
 	}
 }
@@ -415,7 +415,7 @@ func TestBoolIsCanonical(t *testing.T) {
 func TestErrorsNameStructureAndNotText(t *testing.T) {
 	const secret = "18446744073709551615"
 
-	_, err := Num(secret).AsInt()
+	_, err := Number(secret).AsInt()
 	if !errors.Is(err, strconv.ErrRange) {
 		t.Fatalf("error %v does not match strconv.ErrRange", err)
 	}
@@ -429,7 +429,7 @@ func TestErrorsNameStructureAndNotText(t *testing.T) {
 	}
 
 	// A syntax failure takes the other arm, and keeps the same rule.
-	_, err = Num("hunter2").AsFloat()
+	_, err = Number("hunter2").AsFloat()
 	if !errors.Is(err, strconv.ErrSyntax) {
 		t.Fatalf("error %v does not match strconv.ErrSyntax", err)
 	}
@@ -440,7 +440,7 @@ func TestErrorsNameStructureAndNotText(t *testing.T) {
 
 	// A wrong-kind refusal names the two kinds, which is structure, and nothing
 	// the plane spelled.
-	_, err = Str("hunter2").AsInt()
+	_, err = String("hunter2").AsInt()
 	if strings.Contains(err.Error(), "hunter2") {
 		t.Fatalf("the message repeats the plane's text: %q", err.Error())
 	}
@@ -458,13 +458,13 @@ func TestGoString(t *testing.T) {
 		want string
 	}{
 		{Value{}, "absent"},
-		{Nul(), "null"},
-		{Boo(true), `bool("true")`},
-		{Boo(false), `bool("false")`},
-		{Num("8080"), `number("8080")`},
-		{Str(""), `string("")`},
-		{Str("8080"), `string("8080")`},
-		{Byt([]byte{0xff}), `bytes("\xff")`},
+		{Null(), "null"},
+		{Bool(true), `bool("true")`},
+		{Bool(false), `bool("false")`},
+		{Number("8080"), `number("8080")`},
+		{String(""), `string("")`},
+		{String("8080"), `string("8080")`},
+		{Bytes([]byte{0xff}), `bytes("\xff")`},
 	} {
 		t.Run(c.want, func(t *testing.T) {
 			checkGoString(t, c.v, c.want)
