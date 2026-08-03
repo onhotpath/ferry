@@ -1226,6 +1226,9 @@ That is the accepted-set rule doing real work rather than being a principle: the
 - **Whether the walk may run concurrently**: [#20](https://github.com/onhotpath/ferry/issues/20).
   This ADR decides only that the registry is immutable for the life of every schema compiled against it.
 - **What `ferrytest` exports, and what the conformance suites contain**: [#35](https://github.com/onhotpath/ferry/issues/35), filed from this ADR.
+  *(Closed since, by [ADR-0014](0014-what-ferrytest-exports.md).
+  Both collisions this ADR named are resolved: `RoundTrip` takes Options rather than a `*Registry`, because a parameter would be a second way to say what `WithRegistry` says; and the two completeness checks are one function over the union of three tables, joined by `reflect.Type`.
+  The constraint this ADR set survives - a proof needs nothing from a `Reg` - and the one thing exported for the package's sake is `(*Registry).Types()`, which is a property of the registry rather than of any registration.)*
   This ADR adds three things to a package that seven ADRs now assign obligations to and no ticket owned: `RoundTrip` taking a `*Registry`, `Complete` over a registry, and `Injective` over a key codec's value list.
   It establishes that each is possible, and that none of them needs anything from a `Reg`, which is the constraint the package's design inherits.
   It does not decide their spelling, and it names two collisions it created rather than leaving them to be found: ADR-0005's `RoundTrip` and this one's are the same function with different signatures, and ADR-0005's completeness check over core's table and this one's over a registry are the same check over two tables.
