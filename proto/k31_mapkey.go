@@ -625,8 +625,13 @@ func k31e() {
 		out, lerr := Load[k31Times](ctx, MemSource{m})
 		fmt.Printf("  in : %d keys\n  wire: %d addresses (dump err=%v)\n  out: %d keys (load err=%v)\n",
 			len(in.V), len(m), derr, len(out.V), lerr)
-		for k, v := range out.V {
-			fmt.Printf("       %v = %q  Location=%q\n", k.Format(time.RFC3339), v, k.Location())
+		// The surviving VALUE is a draw from the collapse race and is not
+		// printed: this line flipped between runs of the same binary, which is
+		// the defect this file argues against, in this file. The address and
+		// the Location are stable and are what the finding rests on.
+		for k := range out.V {
+			fmt.Printf("       %v  Location=%q  (the value that survives is a draw; see K31=11)\n",
+				k.Format(time.RFC3339), k.Location())
 		}
 	})
 
@@ -1166,9 +1171,14 @@ func k31k() {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
+		// The frequencies are NOT printed. They are a sample of a distribution
+		// the program does not control, so they moved between runs - measured
+		// at 29/300 to 46/300 for the same outcome over 8 runs - and the line
+		// above already states the fact stably. Which outcomes occur is the
+		// finding; how often each won is noise with a number on it.
 		fmt.Printf("\n    %s: %d distinct outcome(s) over 300 dumps\n", label, len(seen))
 		for _, k := range keys {
-			fmt.Printf("      %3d/300  %s\n", seen[k], shorten2(k, 78))
+			fmt.Printf("      %s\n", shorten2(k, 78))
 		}
 	}
 

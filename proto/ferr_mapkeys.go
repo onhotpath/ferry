@@ -33,6 +33,7 @@ package main
 // so the world as the tip shipped stays measurable.
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 )
@@ -54,17 +55,26 @@ func sortedMapMembers(v reflect.Value, at Path) ([]member, error) {
 	if !keyCollisionCheck {
 		return ms, nil
 	}
-	lost, first := 0, ""
-	for i := 1; i < len(ms); i++ {
-		if ms[i].seg.Text == ms[i-1].seg.Text {
-			if lost == 0 {
-				first = ms[i].seg.Text
-			}
-			lost++
+	// The count has to be true of the address the message NAMES, so it is the
+	// length of the run at that address and not the map-wide total. addrs is
+	// the map-wide statement, and it is a count of ADDRESSES rather than of
+	// entries, so the two numbers cannot be read as one.
+	first, lost, addrs := "", 0, 0
+	for i, run := 1, 1; i <= len(ms); i++ {
+		if i < len(ms) && ms[i].seg.Text == ms[i-1].seg.Text {
+			run++
+			continue
 		}
+		if run > 1 {
+			addrs++
+			if first == "" {
+				first, lost = ms[i-1].seg.Text, run-1
+			}
+		}
+		run = 1
 	}
-	if lost > 0 {
-		return nil, mapKeyCollapse(at, v.Type(), first, lost)
+	if addrs > 0 {
+		return nil, mapKeyCollapse(at, v.Type(), first, lost, addrs)
 	}
 	return ms, nil
 }
@@ -73,11 +83,26 @@ func sortedMapMembers(v reflect.Value, at Path) ([]member, error) {
 // values, because ferry's own message text never carries a value the plane
 // supplied and a map key is the user's value on its way to becoming one.
 //
-// It COUNTS. #45's first version said "one entry would be lost" whatever the
-// arity, which is wrong the moment three keys collide, and #31's review caught
-// it.
-func mapKeyCollapse(at Path, t reflect.Type, text string, lost int) error {
+// It COUNTS, and the count is TRUE OF THE ADDRESS IT NAMES. Three versions of
+// this message have now been wrong about arity, each caught by the next pair of
+// eyes rather than by a fixture:
+//
+//	#45's first said "one entry would be lost" whatever the arity;
+//	the merged version counted correctly but attributed the MAP-WIDE total to
+//	the one address it named, so four keys collapsing into two addresses, one
+//	entry lost at each, reported "so 2 entries would be lost" at /m/x;
+//	this one reports the run length at that address, and states the map-wide
+//	fact as a count of ADDRESSES so the two numbers cannot be read as one.
+//
+// No probe caught any of the three, because no probe builds a multi-run
+// collision. That is a conformance case for #35, not a comment.
+func mapKeyCollapse(at Path, t reflect.Type, text string, lost, addrs int) error {
+	more := ""
+	if addrs > 1 {
+		more = fmt.Sprintf(" (%d addresses of this map collapse)", addrs)
+	}
 	return errAt(mWalk, ErrValue, at.Name(text),
-		"keys of %s render to this one address, so %d entr%s would be lost; "+
-			"a key codec's text must be injective over the key type", t, lost, plural(lost))
+		"keys of %s render to this one address, so %d entr%s would be lost%s; "+
+			"a key codec's text must be injective over the key type",
+		t, lost, plural(lost), more)
 }
