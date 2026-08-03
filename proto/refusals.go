@@ -25,7 +25,15 @@ import (
 func register[T any](enc func(T) (Value, error), dec func(Value) (T, error)) {
 	byIdentity[reflect.TypeFor[T]()] = leafCodec{
 		name: reflect.TypeFor[T]().String(),
-		enc:  func(v reflect.Value) (Value, error) { return enc(v.Interface().(T)) },
+		// #31 surfaced this shim. It writes into byIdentity, which is CORE's
+		// own pre-seeded table and not a registry, so under the rule that key
+		// admissibility is declared per entry it has to declare one. These
+		// entries stand in for REGISTRATIONS, which under ADR-0009 declare a
+		// kind and may say .AsMapKey(), so both are set here rather than
+		// leaving the zero value to mean something.
+		kind:  VString,
+		asKey: true,
+		enc:   func(v reflect.Value) (Value, error) { return enc(v.Interface().(T)) },
 		dec: func(val Value, dst reflect.Value) error {
 			out, err := dec(val)
 			if err != nil {

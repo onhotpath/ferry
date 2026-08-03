@@ -9,9 +9,11 @@ package main
 // nobody registered, so the obligation has to go somewhere.
 
 import (
+	"context"
 	"fmt"
 	"net/netip"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -81,26 +83,40 @@ func runMapKey() {
 	mm := map[time.Time]string{utc: "utc", fixed: "fixed"}
 	fmt.Printf("      Go map holds %d distinct keys\n", len(mm))
 	h := struct{ V map[time.Time]string }{mm}
-	d, err := dump(reflect.ValueOf(h))
-	fmt.Printf("      ferry dumps %d addresses: %s err=%v\n", len(d), fmtVals(d), err)
+	// Two tickets closed this from two directions within hours of each other,
+	// and the resolution keeps both. #31 took core's own table: time.Time is no
+	// longer admitted as a key at all, so this refuses at COMPILE. #45 took the
+	// walk: a duplicate address is refused as it is minted, so anything that
+	// reaches a dump refuses THERE. asShipped runs the world before either.
+	//
+	// The single-sample `ferry dumps N addresses` print is deliberately NOT
+	// here. It was the flaky line, it draws one value from a distribution, and
+	// the outcome set below states the same fact without lying about arity.
+	asShipped(func() {
+		outs := k31Outcomes(200, func() (map[Path]Value, error) { return dump(reflect.ValueOf(h)) })
+		fmt.Printf("      as shipped: %d distinct outcome(s) over 200 dumps of ONE value\n", len(outs))
+	})
+	fmt.Println("      with #31's rule, at compile:")
+	fmt.Printf("      %v\n", errOneLine(Compile[struct {
+		V map[time.Time]string `ferry:"v"`
+	}]()))
+	fmt.Println("      and with #45's rule, at the dump, on a key core still admits:")
+	fmt.Printf("      %v\n", errOneLine(k31DumpCollision()))
 	fmt.Println(`    ^ AS FOUND: two keys, one address, SILENTLY, and which entry
-      survived decided by map iteration order - this line was one of the
-      two in the whole suite that flipped between runs of the same
+      survived decided by map iteration order - this was one of the two
+      lines in the whole suite that flipped between runs of the same
       binary. That is ADR-0005's named hazard occurring inside CORE's
       own set rather than in a registered codec, and no probe in #7
       reached it because none used a composite key.
 
-      It is now a refusal, and the refusal is ADR-0007's R3 under #45
-      rather than anything aimed at this case. #31 stays OPEN and this
-      is worth being precise about: R3 does not amend the admissible
-      key set, which is what #31 asks for. map[time.Time]string still
-      COMPILES, and time.Time is still a key type core admits on core's
-      own proof. What R3 removes is the silence - a dump that would
-      lose an entry now says so, at the address it would have lost it
-      at. The narrower fix and the ticket are not the same thing.
+      BOTH are closed now, by two rules that do not subsume each other.
+      #31 removes time.Time from the admissible key set, so this exact
+      case never reaches a plane. #45's check removes the SILENCE for
+      every key that is still admitted - core's own and any registrant
+      who said .AsMapKey() and was wrong - and it is the only one of
+      the two that can catch a lying registrant.
 
-      Measured: with R3 this suite is byte-identical over 8 runs; the
-      same binary without it produced 2 distinct outputs over 8.`)
+      Measured: zero map-key variance in this suite over 12 runs.`)
 
 	fmt.Println("\n--- P13c: so the rule has to be stated over the key set, not the codec ---")
 	fmt.Println("    An arm's text form is injective for netip.Addr and is not for")
@@ -112,4 +128,22 @@ func runMapKey() {
     injectivity over a TYPE is undecidable, but a collapse between two
     values IN HAND is not, so ferry checks the map it is actually
     dumping. It proves nothing about the type and it loses no entry.`)
+}
+
+// P13Lie is a registrant who said .AsMapKey() and was wrong: its text is
+// case-folded, so two distinct Go values render alike. #31's rule cannot reach
+// it - the type is not core's - and #45's dump-time check is the only thing
+// that does. That is the case the two rules do not share.
+type P13Lie struct{ S string }
+
+func k31DumpCollision() error {
+	reg := mustReg(NewRegistry(), StringCodec(
+		func(l P13Lie) string { return strings.ToLower(l.S) },
+		func(s string) (P13Lie, error) { return P13Lie{s}, nil },
+	).AsMapKey())
+	v := struct {
+		M map[P13Lie]int `ferry:"m"`
+	}{M: map[P13Lie]int{{"Prod"}: 1, {"prod"}: 2, {"PROD"}: 3}}
+	_, err := dumpTo(context.Background(), v, WithRegistry(reg))
+	return err
 }

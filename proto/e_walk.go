@@ -349,19 +349,7 @@ func dumpDir(out map[Path]Value) direction {
 				}
 				return ms, nil
 			}
-			// ADR-0007's R3, under #45: two Go keys rendering to one address is a
-			// lost entry, and it is observable exactly from the values in hand.
-			// Free, because rendering once and sorting the rendered pairs replaces
-			// a comparator that re-rendered both sides on every comparison.
-			keyed, dup := sortedMapKeys(v)
-			if dup >= 0 {
-				return nil, mapKeyCollapse(at, v.Type(), keyed[dup].text)
-			}
-			ms := make([]member, 0, len(keyed))
-			for _, k := range keyed {
-				ms = append(ms, member{seg: Segment{Kind: Name, Text: k.text}, key: k.key})
-			}
-			return ms, nil
+			return sortedMapMembers(v, at)
 		},
 	}
 }
@@ -530,3 +518,19 @@ func cmpStr(a, b string) int {
 	}
 	return 0
 }
+
+func plural(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
+}
+
+// keyCodecInstalled is #31's seam for K31=10: off, the two caller-facing entry
+// points walk with no registry installed, which is the world as the tip
+// shipped and means a registered key codec's text is not what Dump writes.
+var keyCodecInstalled = true
+
+// keyCollisionCheck is #31's seam: off, the walk overwrites and an entry
+// vanishes with a nil error, which is the world as the tip shipped.
+var keyCollisionCheck = true

@@ -26,12 +26,27 @@ type leafCodec struct {
 	kind VKind
 	enc  func(reflect.Value) (Value, error)
 	dec  func(Value, reflect.Value) error
+
+	// asKey is #31's rule applied to CORE's own table. Key admissibility is a
+	// separate, explicit property and is never inherited from being in the
+	// identity table, because the two obligations are different: a leaf codec
+	// promises a round trip under the type's own relation, and a key codec
+	// promises injectivity under ==. time.Time satisfies the first and cannot
+	// satisfy the second, under any codec (K31=2).
+	//
+	// This is deliberately the same shape as ADR-0009's .AsMapKey() on a
+	// registration. A rule core states and exempts itself from is not a rule.
+	asKey bool
 }
 
 var byIdentity = map[reflect.Type]leafCodec{
 	reflect.TypeFor[time.Duration](): {
 		name: "time.Duration",
 		kind: VString,
+		// Proved by search rather than by construction: no collision over 2^20
+		// random values plus the extremes (K31=9). That is a bound rather than
+		// a proof, and it is recorded as one.
+		asKey: true,
 		enc: func(v reflect.Value) (Value, error) {
 			return String(time.Duration(v.Int()).String()), nil
 		},
@@ -51,6 +66,12 @@ var byIdentity = map[reflect.Type]leafCodec{
 	reflect.TypeFor[time.Time](): {
 		name: "time.Time",
 		kind: VString,
+		// DISPROVED, and not by RFC 3339's fault. time.Time's == compares its
+		// *Location pointer, and no text carries a pointer, so NO codec over
+		// this type can be injective under ==. Measured: 0 of 12 stdlib
+		// encodings distinguish two values built from two FixedZone("UTC", 0)
+		// calls (K31=2).
+		asKey: false,
 		enc: func(v reflect.Value) (Value, error) {
 			b, err := v.Interface().(time.Time).MarshalText()
 			if err != nil {
@@ -108,13 +129,27 @@ const (
 
 // validMapKey: core ships string and the integer kinds, and a registered
 // codec extends the set exactly as it extends the leaf set.
+// keyProvedOnly is #31's seam. When it is on, an identity-table entry keys a
+// map only if the entry says so, which is the rule this ticket decides. Off, it
+// is the rule the tip shipped: anything in the table keys a map, which is how
+// map[time.Time]string collapses.
+var keyProvedOnly = true
+
 func validMapKey(k reflect.Type) bool {
+	// CORE's own pre-seeded table first, because #31's rule is about core
+	// exempting itself. The entry declares key admissibility; membership of the
+	// table confers none.
+	if c, ok := byIdentity[k]; ok {
+		if keyProvedOnly {
+			return c.asKey && c.kind == VString
+		}
+		return true
+	}
 	if c, ok := identityLookup(k); ok {
-		// ADR-0009's opt-in. Core's own entries key a map on core's proof; a
-		// REGISTERED type has to say so, which is where the injectivity
-		// obligation is communicated. keyOptIn defaults to the decided rule and
-		// R11a turns it off to run the rule ADR-0009 refused, which is the
-		// measurement the decision rests on.
+		// ADR-0009's opt-in, unchanged. A REGISTERED type has to say so, which
+		// is where the injectivity obligation is communicated. keyOptIn
+		// defaults to the decided rule and R11a turns it off to run the rule
+		// ADR-0009 refused, which is the measurement that decision rests on.
 		if keyOptIn && activeReg != nil {
 			if _, own := activeReg.lookup(k); own {
 				return registeredKeys[k] && c.kind == VString
@@ -142,6 +177,16 @@ func validMapKey(k reflect.Type) bool {
 	// Y45=1 measures the inversion that made the old answer wrong: with the arm
 	// in place, registering a type left it LESS usable than not registering it,
 	// which is true nowhere else in ferry.
+	//
+	// WHO OWNS WHICH ARM, after #31 and #45 landed within hours of each other on
+	// two branches. They are three arms of one rule over three disjoint
+	// populations, and the disjointness is enforced by Register's "core's own
+	// set is pinned" guard rather than by convention:
+	//   (1) core's own identity-table entries        - #31, leafCodec.asKey
+	//   (2) a registration                           - ADR-0009, registeredKeys
+	//   (3) a type only the chain claims             - #45, refused outright
+	// Arm (3) is this deletion. After the merge there is no route to a map key
+	// nobody vouched for.
 	switch k.Kind() {
 	case reflect.String,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -177,6 +222,16 @@ func validMapKey(k reflect.Type) bool {
 // R11e records the sibling case for core's own pre-seeded entries, which is
 // #31's and which neither this rule nor ADR-0009's reaches.
 func mapKeyRefusal(p Path, k reflect.Type) error {
+	// #31's diagnostic, and it names no remedy involving a codec, because K31=2
+	// measured that for time.Time no such codec exists. A message offering an
+	// impossible remedy is worse than one offering none.
+	if c, ok := byIdentity[k]; ok && keyProvedOnly && !c.asKey {
+		return errAt(mCompile, ErrSchema, p,
+			"%s is in core's own set and is not usable as a map key: its text is "+
+				"not injective over the type, so two distinct keys collapse into one "+
+				"address; key the map by a type that is, or convert the key yourself",
+			k)
+	}
 	if _, ok := identityLookup(k); ok && keyOptIn && activeReg != nil {
 		if _, own := activeReg.lookup(k); own && !registeredKeys[k] {
 			return errAt(mCompile, ErrSchema, p,

@@ -177,12 +177,12 @@ func dump(v reflect.Value) (map[Path]Value, error) {
 			// Determinism is a package-wide invariant: sort the keys. And the
 			// collapse check rides along, through the same helper the engine uses,
 			// so the two do not drift about what a lost map entry looks like.
-			keyed, dup := sortedMapKeys(v)
-			if dup >= 0 {
-				return mapKeyCollapse(p, v.Type(), keyed[dup].text)
+			ms, merr := sortedMapMembers(v, p)
+			if merr != nil {
+				return merr
 			}
-			for _, k := range keyed {
-				if err := rec(v.MapIndex(k.key), p.Name(k.text)); err != nil {
+			for _, m := range ms {
+				if err := rec(v.MapIndex(m.key), p.Name(m.seg.Text)); err != nil {
 					return err
 				}
 			}

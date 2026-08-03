@@ -72,8 +72,15 @@ func (b *Binding[T]) LoadOver(ctx context.Context, seed T) (res T, err error) {
 	}
 	out := seed
 	rv := reflect.ValueOf(&out).Elem()
+	// #31 K31=10, the Load half of the same thing.
+	undo := func() {}
+	if keyCodecInstalled {
+		undo = b.o.reg.install()
+	}
 	w := &walker{dir: loadDir(rd, ctx, b.o), sch: b.o.sch, ctx: ctx}
-	if _, werr := w.walk(b.s.root, rv, Path{}); werr != nil {
+	_, werr := w.walk(b.s.root, rv, Path{})
+	undo()
+	if werr != nil {
 		return seed, werr
 	}
 	return out, nil

@@ -54,21 +54,30 @@ func runR11() {
 		d, derr := dump(reflect.ValueOf(c{m}))
 		fmt.Printf("    Go map holds %d keys -> ferry dumps %d address(es), err=%v\n",
 			len(m), len(d), derr)
-		for _, p := range sortedAddrs(d) {
-			fmt.Printf("      %-8s %s\n", p, d[p].GoString())
+		// #31. This line used to print the surviving entry, which is decided by
+		// Go's map iteration order, so it was not byte-stable across runs of
+		// the same binary - one of the two lines the #41 audit records as flaky
+		// and hands to this ticket. The outcome SET is stable, and it is the
+		// sharper statement: the drop has no deterministic answer to give.
+		outs := k31Outcomes(200, func() (map[Path]Value, error) { return dump(reflect.ValueOf(c{m})) })
+		fmt.Printf("      %d distinct outcome(s) over 200 dumps of one value:\n", len(outs))
+		for _, o := range outs {
+			fmt.Printf("        %s\n", o)
 		}
 	})
 	fmt.Println(`    ^ AS FOUND this read ` + "`" + `ferry dumps 1 address(es), err=<nil>` + "`" + ` with
       /M/api holding whichever of the two entries won: one silently
       dropped, and which one survives decided by map iteration order.
-      ADR-0001 rules out silently ignoring anything, and this probe is
-      that rule being broken.
+      ADR-0001 rules out silently ignoring anything, and its determinism
+      invariant rules out this too - there is no stable answer a
+      collapsing dump could give, which is why the fix is a refusal and
+      not a tie-break.
 
-      It is now a REFUSAL, which is ADR-0007's R3 under #45. The rule
-      the probe exists to argue against is unchanged - the implied rule
-      still admits the key - and what changed is that the LOSS is no
-      longer silent. R3 needs nothing from the registrant: two Go keys
-      rendering to one address is observable from the values in hand.
+      It is now a REFUSAL. The rule this probe exists to argue against
+      is unchanged - the implied rule still admits the key - and what
+      changed is that the LOSS is no longer silent. The check needs
+      nothing from the registrant: two Go keys rendering to one address
+      is observable from the values in hand.
 
       Note what that does to this measurement: R11a can no longer show
       a dropped entry at all, so the argument for .AsMapKey() now rests

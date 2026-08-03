@@ -18,51 +18,66 @@ package main
 // comparison.
 //
 // It is a DUMP-side check and there is no Load-side counterpart. Measured
-// (Y45=6): on Load the plane holds one address and nothing was lost on that
-// Load - the loss happened on whichever Dump wrote the file.
+// (Y45=6, and #31 independently at K31=5): loadDir's members takes its
+// addresses from FEnumerator.Children, which is already a set, so one walk
+// cannot be handed the same address twice. Nothing was lost on that Load - the
+// loss happened on whichever Dump wrote the file.
+//
+// TWO SESSIONS WROTE THIS CHECK WITHIN HOURS OF EACH OTHER, on #45 and on #31,
+// and the function below is neither one verbatim. From #45: the two call sites
+// (e_walk AND the superseded walk.go, which #31's single site missed) and the
+// colliding address in the error's Path, where Elements() and ADR-0003's sort
+// key read it. From #31: building []member in place, which costs one allocation
+// fewer per map; counting the entries lost rather than assuming one, which #45
+// got measurably wrong on a three-way collision; and the keyCollisionCheck seam,
+// so the world as the tip shipped stays measurable.
 
 import (
 	"reflect"
 	"slices"
 )
 
-// keyedMember is one map entry, with its address segment already rendered.
-type keyedMember struct {
-	text string
-	key  reflect.Value
-}
-
-// sortedMapKeys renders every key once, sorts by the rendering - which is
-// ADR-0003's determinism invariant for the dynamic tier - and reports the first
-// pair that collapses.
+// sortedMapMembers renders every key once, sorts by the rendering - which is
+// ADR-0003's determinism invariant for the dynamic tier - and refuses if two
+// keys landed on one address.
 //
-// The returned index is into the sorted slice, or -1.
-func sortedMapKeys(v reflect.Value) ([]keyedMember, int) {
+// Rendering once is both the check and an optimisation: the comparator used to
+// re-render both sides on every comparison. Measured at the shipped call site,
+// 3x faster at 8 keys and ~7x at 512.
+func sortedMapMembers(v reflect.Value, at Path) ([]member, error) {
 	keys := v.MapKeys()
-	ms := make([]keyedMember, len(keys))
+	ms := make([]member, len(keys))
 	for i, k := range keys {
-		ms[i] = keyedMember{text: mapKeyText(k), key: k}
+		ms[i] = member{seg: Segment{Kind: Name, Text: mapKeyText(k)}, key: k}
 	}
-	slices.SortFunc(ms, func(a, b keyedMember) int { return cmpStr(a.text, b.text) })
+	slices.SortFunc(ms, func(a, b member) int { return cmpStr(a.seg.Text, b.seg.Text) })
+	if !keyCollisionCheck {
+		return ms, nil
+	}
+	lost, first := 0, ""
 	for i := 1; i < len(ms); i++ {
-		if ms[i].text == ms[i-1].text {
-			return ms, i
+		if ms[i].seg.Text == ms[i-1].seg.Text {
+			if lost == 0 {
+				first = ms[i].seg.Text
+			}
+			lost++
 		}
 	}
-	return ms, -1
+	if lost > 0 {
+		return nil, mapKeyCollapse(at, v.Type(), first, lost)
+	}
+	return ms, nil
 }
 
 // mapKeyCollapse is the diagnostic. It names the address rather than the two Go
 // values, because ferry's own message text never carries a value the plane
-// supplied and a map key is the user's value on its way to becoming one -
-// printing it would leak exactly what ADR-0011's redaction rule protects.
+// supplied and a map key is the user's value on its way to becoming one.
 //
-// The remedy it names is the registrant's, because under ADR-0007's reversal
-// the only way to reach this at all is a registration carrying `.AsMapKey()`,
-// or one of core's own pre-seeded entries. The latter is #31 and this message
-// does not pretend to fix it.
-func mapKeyCollapse(at Path, t reflect.Type, text string) error {
+// It COUNTS. #45's first version said "one entry would be lost" whatever the
+// arity, which is wrong the moment three keys collide, and #31's review caught
+// it.
+func mapKeyCollapse(at Path, t reflect.Type, text string, lost int) error {
 	return errAt(mWalk, ErrValue, at.Name(text),
-		"two keys of %s render to this one address, so one entry would be lost; "+
-			"a key codec's text must be injective over the key type", t)
+		"keys of %s render to this one address, so %d entr%s would be lost; "+
+			"a key codec's text must be injective over the key type", t, lost, plural(lost))
 }
