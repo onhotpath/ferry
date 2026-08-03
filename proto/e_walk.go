@@ -350,15 +350,7 @@ func dumpDir(out map[Path]Value) direction {
 				}
 				return ms, nil
 			}
-			keys := v.MapKeys()
-			slices.SortFunc(keys, func(a, b reflect.Value) int {
-				return cmpStr(mapKeyText(a), mapKeyText(b))
-			})
-			ms := make([]member, 0, len(keys))
-			for _, k := range keys {
-				ms = append(ms, member{seg: Segment{Kind: Name, Text: mapKeyText(k)}, key: k})
-			}
-			return ms, nil
+			return mapMembers(v, at)
 		},
 	}
 }
@@ -527,3 +519,60 @@ func cmpStr(a, b string) int {
 	}
 	return 0
 }
+
+// mapMembers is ADR-0003's dynamic tier at the point a map key address is
+// minted, plus the sort ADR-0001's determinism invariant already required.
+//
+// #31. The tip computed mapKeyText INSIDE the comparator, so a key's text was
+// recomputed O(n log n) times and no two texts were ever compared for equality.
+// Computing it once per key is what a duplicate check needs anyway, so the
+// check and the optimisation are one edit and the result is faster than what it
+// replaces: 5134 ns -> 1947 ns at 8 keys, 1279066 -> 189553 at 512 (K31=4).
+//
+// The message names the ADDRESS and the key TYPE and not the two Go values.
+// The address already carries the colliding text, because a map key's segment
+// IS its text, so naming it costs nothing that ADR-0003 has not already spent;
+// printing the values would add whatever else the key type carries, and on a
+// Dump the key is the program's own data.
+func mapMembers(v reflect.Value, at Path) ([]member, error) {
+	keys := v.MapKeys()
+	ms := make([]member, len(keys))
+	for i, k := range keys {
+		ms[i] = member{seg: Segment{Kind: Name, Text: mapKeyText(k)}, key: k}
+	}
+	slices.SortFunc(ms, func(a, b member) int { return cmpStr(a.seg.Text, b.seg.Text) })
+	if keyCollisionCheck {
+		lost, first := 0, ""
+		for i := 1; i < len(ms); i++ {
+			if ms[i].seg.Text == ms[i-1].seg.Text {
+				if lost == 0 {
+					first = ms[i].seg.Text
+				}
+				lost++
+			}
+		}
+		if lost > 0 {
+			return nil, errAt(mWalk, ErrValue, at,
+				"map keys of type %s are not injective: %s is addressed more than "+
+					"once, and %d entr%s would be lost",
+				v.Type().Key(), at.Name(first), lost, plural(lost))
+		}
+	}
+	return ms, nil
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
+}
+
+// keyCodecInstalled is #31's seam for K31=10: off, the two caller-facing entry
+// points walk with no registry installed, which is the world as the tip
+// shipped and means a registered key codec's text is not what Dump writes.
+var keyCodecInstalled = true
+
+// keyCollisionCheck is #31's seam: off, the walk overwrites and an entry
+// vanishes with a nil error, which is the world as the tip shipped.
+var keyCollisionCheck = true

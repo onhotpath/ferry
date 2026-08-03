@@ -185,8 +185,20 @@ func (b *SinkBinding[T]) Dump(ctx context.Context, v T) (err error) {
 	// which is the distinction the ADR's first draft missed by measuring a sink
 	// that could only refuse a write.
 	out := map[Path]Value{}
+	// #31 K31=10. The walk resolves a MAP KEY's codec through the package-level
+	// activeReg rather than out of the compiled node, so an entry point that
+	// does not install the registry writes a key text the registrant did not
+	// register. compileOnce, dumpTo and loadFrom all installed it; the two
+	// entry points a caller actually reaches did not. This restores the
+	// registry for the duration of the walk; the real fix is to resolve the key
+	// codec into the node, which is a change to the compiler.
+	undo := func() {}
+	if keyCodecInstalled {
+		undo = b.o.reg.install()
+	}
 	w := &walker{dir: dumpDir(out), sch: b.o.sch, ctx: ctx}
 	_, encErr := w.walk(b.s.root, valueOf(v), Path{})
+	undo()
 
 	// The open comes next in BOTH branches, because "Dump asks the sink whether
 	// it can stage" is a question about the Writer, and there is no Writer
