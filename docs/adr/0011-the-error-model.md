@@ -408,6 +408,20 @@ Measured over four failure shapes on an eight-address struct, attempts / written
 | aggregate, interleaved | 8 / 0 / 8 | 8 / 6 / 2 | 6 / **6** / 2 | 6 / 4 / 4 |
 | **two-phase, then aggregate** | 8 / 0 / 8 | 8 / 6 / 2 | 0 / **0** / 2 | 0 / **0** / 2 |
 
+> **Note added under [#41](https://github.com/onhotpath/ferry/issues/41): the `fail-fast` row is a counterfactual, and the table is not amended.**
+> `fail-fast` is a comparison baseline rather than a policy ferry implements: `sched` and `serial` are unexported and `WithSched` takes a parameter of an unexported func type, so **no importer can select it**.
+> Its numbers are the length of a *prefix* of the write order, so they are a function of that order, and the row as published is an interleaved fail-fast walking in **reflect field order** - which is what a `Dump` that wrote during the walk would do, and which ferry no longer has a code path for.
+> Re-measured on the current engine, two of its four cells read differently: column 2 because writing is now segment-wise per [ADR-0003](0003-how-a-leaf-addresses-a-plane.md), and column 4 because the buffer lets an encode failure survive to join the plane's refusal, which an interleaved fail-fast never reaches.
+> Amending them would replace a measurement of the policy this section argues *against* with a measurement of a policy nothing implements, taken through a scheduler no caller can select, so the row stays as published and is labelled instead.
+>
+> **The eight cells of the two aggregating rows are order-independent, and that is now proved rather than asserted**: run over all 8! = 40320 orderings of the eight addresses, each of the eight cells admits exactly one attempts/written/errors triple, and each is the published one.
+> Neither aggregating policy stops, so every number is a set cardinality rather than a prefix length.
+> `fail-fast` admits seven, seven and ten distinct triples in the other three columns.
+>
+> The comparison this row exists to make survives untouched: 1/0/1 against 8/6/2 makes the point at least as sharply as 2/1/1 did.
+> Evidence: `X4=1..5` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
+> The worked `fail-fast` plane line below is the same row shown as addresses and carries the same caveat; measured on the current engine it still reads `/Name /Region /Replicas`, because column 3's stop is an *encode* failure, which the walk reaches in reflect order.
+
 The third column is the case the first probe never built, shown as what the plane actually holds:
 
 ```
