@@ -453,6 +453,31 @@ Measured on a twelve-leaf struct with two nested structs, which is research 5.3'
 > **The ratio is what this section argues and the ratio got better**, from nine times to thirteen, so nothing here is weakened.
 > No number in the table above is edited, because the whole point of the two-level cache is that a compile happens once: optimising it is moot behind the cache, and a footnote is the right weight for a figure nobody should be tuning against.
 > Evidence: `E16=3` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip), and commit `2e22bbf` for the three-state comparison.
+>
+> > **Amended under [#58](https://github.com/onhotpath/ferry/issues/58): the compile figure is now 44800 B, and the claim it supports is unchanged.**
+> >
+> > The paragraph above reads **44560 B and 2577 allocs**, chain off and chain on, identical to the byte.
+> > It now reads **44800 B and 2577 allocs**, chain off and chain on, still identical to the byte.
+> > The claim the figure exists to support - that turning the chain on is free - is what was measured and it still holds; only the absolute number moved.
+> >
+> > **What moved it is this ADR's own rule reaching one more field.**
+> > #58 found that a map key's text was the single codec lookup the compiled schema did not carry: it was re-derived at walk time against a package global, which the two caller-facing entry points do not install, so a registered key codec was resolved at compile and then not called.
+> > The fix stores the resolved key pair on the `nMap` node, which is the resolve-into-the-schema rule at the one position that did not follow it.
+> > That is two function words on every compiled `node`: **+240 B on this fixture, and `allocs/op` unchanged at 2577**, because the pair is a struct field and not a new allocation.
+> >
+> > **The direction is the one this section argues for, and the walk got cheaper rather than merely staying level.**
+> > The stopgap the tip was carrying - install the registry around each of the two caller-facing walks, so the walk-time lookup finds it - is what a per-call answer to a per-compile question costs.
+> > Removing it, measured on `B25`:
+> >
+> > | | with the stopgap | resolved in the node |
+> > | --- | --- | --- |
+> > | held `Load` | 1336 B, 47 allocs | **1312 B, 46 allocs** |
+> > | held `Dump` | 3654 B, 142 allocs | **3629 B, 141 allocs** |
+> >
+> > **One allocation and 24 bytes per `Load` and per `Dump`, paid back once at compile as 240 bytes on a schema that is compiled once and cached.**
+> > That trade is this section's whole argument, arriving at a field it had not reached.
+> >
+> > Evidence: `E16=3` and `B25=all` on [`proto/58-mapkey`](https://github.com/onhotpath/ferry/tree/proto/58-mapkey) against `proto/tip` at `2120610`, with the chain-off state taken the same way commit `2e22bbf` took it.
 
 Nine times, on this prototype, and the same shape on Dump: 54842 ns/op against 6505 ns/op.
 The absolute numbers are the prototype's and not ferry's - its chain is unmemoised and its `Path` allocates per segment - and research 5.3's own figures on xload are 3343 ns against 476 ns.
