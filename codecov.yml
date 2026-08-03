@@ -55,21 +55,30 @@ coverage:
         threshold: 0%
 
 flags:
+  # No flag carries a `paths` filter, on purpose.
+  #
+  # A Codecov flag path is a repository-relative prefix, and it is applied as a
+  # filter over the uploaded report. These four flags used to be scoped with
+  # one, and core's was `/`. No repository-relative path begins with a slash,
+  # so it matched nothing, every file was filtered out, and Codecov rejected
+  # the upload as REPORT_EMPTY: a successful upload that reports zero, which is
+  # #98. Proved on ceed2a3 by sending the byte-identical profile twice, once
+  # under `core` and once under a flag with no filter - the first errored
+  # REPORT_EMPTY, the second merged at 100.0% over three files.
+  #
+  # The filters are gone rather than corrected because they were never load
+  # bearing. Each module runs its own `go test` and uploads only its own
+  # profile, so the flags already partition the tree by construction, and the
+  # per-module statuses above select on the flag rather than on the path. A
+  # path filter would be a second, weaker copy of a rule the upload already
+  # enforces, and this issue is what the second copy cost.
   core:
-    paths:
-      - /
     carryforward: false
   driver-env:
-    paths:
-      - driver/env
     carryforward: false
   driver-kv:
-    paths:
-      - driver/kv
     carryforward: false
   driver-yaml:
-    paths:
-      - driver/yaml
     carryforward: false
 
 comment:
