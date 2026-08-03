@@ -123,7 +123,7 @@ The `fixed` column was added afterwards and is the only part of this table that 
 | D5 | 0009 | a key codec opts in with `AsMapKey()` | implemented, off | A5 | `7242ab5`, corrected `ce65f41` |
 | D6 | 0011 | ferry aggregates, at every moment, in both directions | not implemented | A6 | `958d225` |
 | D7 | 0011 | ferry's own message text never carries a plane value | not implemented | A7 | `958d225` |
-| D8 | 0011 | one `Error` type, four classes, one aggregate constructor, never `errors.Join` | not implemented | A8 | `958d225`, **partly** |
+| D8 | 0011 | one `Error` type, four classes, one aggregate constructor, never `errors.Join` | not implemented | A8 | `958d225` runtime, `0d86c00` compiler |
 | D9 | 0008 | core does not call `reflect.StructTag.Get` or `Lookup` | not implemented | A9 | `7242ab5`, corrected `ce65f41` |
 | D10 | 0008 | a token is bare or single-quoted with the quote doubled | not implemented | A10 | `854baef` |
 | D11 | 0008 | a promoted embedded pointer is a schema compile error | not implemented | A11 | `7242ab5` |
@@ -137,8 +137,9 @@ The `fixed` column was added afterwards and is the only part of this table that 
 D1, D10, D12, D15 and D16 are `the-enabled-bucket.md`'s, re-run here against the tip.
 The other twelve are new.
 
-Sixteen of the seventeen are closed on `proto/tip`, and D8 is closed on the runtime path only: `e_schema.go` still calls `errors.Join` at two sites, so a **schema** refusal remains invisible to `Elements()` and is ordered by construction rather than segment-wise.
-Section 8 has the detail and the one further deviation the remediation itself uncovered.
+**All seventeen are closed on `proto/tip`.**
+D8 took two commits and was the last to close, because its compiler half is not a swap: `join` sorts on `(moment, location, message)`, so a schema refusal has to *be* a `*Error` carrying all three before changing the constructor buys anything.
+Section 8 has the detail, the one further deviation the remediation itself uncovered, and the two questions it hands on.
 
 ### 3.2 Statements that hold
 
@@ -624,12 +625,14 @@ Every other `proto/*` branch is history.
 | `proto/41-runtime` | D6 D7 D8 D12 D13 D14, the harness, the flattening plane | merged |
 | `proto/41-typeset-tag` | `X3`, ADR-0005's admitted set against ADR-0008's field rule | merged |
 | `proto/41-measure` | `X4`, ADR-0011's table and the `Get`-order question | merged |
+| `proto/45-mapkey` | `Y45`, [#45](https://github.com/onhotpath/ferry/issues/45)'s three questions | merged |
 
-Sixteen of the seventeen deviations are closed.
-The seventeenth, D8, is closed on the runtime path and open on the compiler one.
+**All seventeen deviations are closed, and so is D18.**
+D8 was the last, and its compiler half was the hardest, for a reason worth stating: it is not a swap.
+`join` sorts on `(moment, location, message)`, so a schema refusal has to *be* a `*Error` carrying all three before switching the constructor buys anything - otherwise it sorts as `mNone` with no location and the result orders by rendered string again, which is what it did before.
 
 Every fix was regression-diffed against every suite, normalised for timings and heap addresses, and the whole set is byte-identical apart from the rows a fix was meant to move.
-`go test ./...` is red on one case, `TestCoreTypesComplete`, which is D18 below and is a finding rather than a regression.
+**`go test ./...` is green**, for the first time since this audit began.
 
 ### 8.2 D18, which the remediation found rather than the audit
 
@@ -637,6 +640,9 @@ ADR-0005 specifies a completeness check - "core's test iterates the identity tab
 Implemented at `7242ab5`, it is **red on arrival**: eighteen admitted members, eleven proof rows, seven with none (`int16 int32 int64 uint uint8 uint16 uint32`).
 ADR-0005's published "11 of 11 core types" is eleven of eighteen.
 That is an ADR amendment and not a prototype fix, and it is one of the five fixture defects named in the summary.
+
+**Closed.** The seven rows are in `coreSet()`, each with the boundary values that distinguish its width from its neighbours, so a codec that silently truncates fails here rather than in production.
+ADR-0005's eleven-of-eighteen is eighteen of eighteen, and `go test ./...` is green.
 
 ### 8.3 The audit's own two leaks
 
@@ -651,25 +657,67 @@ Two further probes printed live pointers, so `A41=all` was not byte-stable acros
 All three fixed; `A41=all` is now identical over repeated runs.
 
 With the two leaks closed, thirteen `VERDICT:` strings in `A41` were describing a world that no longer exists and were reconciled against measured output, each keeping what was found as an "as FOUND" clause.
-All thirty-one probes now read `IMPLEMENTED`, except `A8`, which reads `PARTLY`.
+All thirty-one probes now read `IMPLEMENTED`. `A8` read `PARTLY` until D8's compiler half landed.
 
-### 8.4 What is still open
+### 8.4 What was still open, and what closed it
 
-- **D8's compiler half.** `e_schema.go:107` and `:423` call `errors.Join`. Measured on a schema with two independent refusals: the result is not a ferry aggregate, and `Elements()` reports 1 of 2.
-- **`walk.go` is not retired.** The superseded walk and `e_schema.go` disagree about **12 of 26** named third-party types, including `Conf`, `main.go`'s own fixture, which compiles on one with 13 addresses and produces 11 refusals on the other. The default `go run .` suite therefore still exercises the naming rule ADR-0008 refused. Evidence: `X3=4`.
-- **`DiffErrors` sorts by `strings.Compare` on the canonical rendering**, so twelve indices come out `0 1 10 11 2 3 4 5 6 7 8 9`. That is verbatim what ADR-0003 calls "a subtle bug ... it will be a conformance-suite case", inside a helper ADR-0011 says reports in segment-wise order, in one of ADR-0003's own three named places. Fix: key the map by `Path` and compare with `CompareSegmentwise`.
-- **`e3_resolved.go` indexes `s.root.fields[5]` positionally** and dereferences its `def`. Any reordering of `n.fields` panics it.
-- **`P12` and `P19` each carry one line whose winner is decided by map iteration order**, flaky across runs of the same binary. Pre-existing, and [#31](https://github.com/onhotpath/ferry/issues/31)'s.
-- **[#45](https://github.com/onhotpath/ferry/issues/45), the `.AsMapKey()` gap.** ADR-0009 makes the injectivity obligation opt-in for a registration; ADR-0007 independently admits a chain-claimed `String` type as a map key with no call site at which to say the word. The refusal is lifted by deleting a line rather than adding one. Neither ADR closes it.
-- **The `Get`-order question.** ADR-0003 names three places ferry sorts segment-wise and a `Get` sequence is none of them. Measured over 200 runs the sequence is deterministic, which is what ADR-0001 asks for; and the extension is undeliverable anyway, because a promoted embedded struct contributes no segment and so has no sort key. Open for the repo owner. Evidence: `X4=6..11`.
+Every item this section listed when the resolution was first written is now closed except two, both of which are somebody else's ticket by design.
 
-### 8.5 The four ADR amendments this produced
+- **D8's compiler half.** ~~`e_schema.go:107` and `:423` call `errors.Join`.~~ **Closed.** Fourteen refusal sites, plus `mapKeyRefusal` and `unsupportedType`, are now `*Error` values carrying `mCompile`, `ErrSchema` and an address; both `errors.Join` calls are `join`. Measured on a schema with two independent refusals: it is a ferry aggregate and `Elements()` reports 2 of 2.
+  The rendering consequence is real and it is the ADR's: an aggregate prints a **summary** under `%v` with the elements under `%+v`. Eleven probe sites split `Error()` on newlines and were finding one line saying "3 errors" and none of them; they go through `Elements()` now, which is the probes reading their own finding.
+- **`DiffErrors` sorts by the canonical rendering.** **Closed.** The key holds the `Path` rather than its `String()`, and the sort is `CompareSegmentwise`. Twelve indices now read `0 1 2 3 4 5 6 7 8 9 10 11`. `Path` is already comparable, so this cost nothing.
+- **`e3_resolved.go` indexes `s.root.fields[5]` positionally.** **Closed.** Both lookups are by address. [#50](https://github.com/onhotpath/ferry/pull/50)'s costing of a per-node field sort had found that index 5 would become a node with a nil `def` and segfault the probe, which is what makes this worth fixing rather than noting.
+- **`P12` and `P19`'s map-iteration-order flakes.** **P12's is closed**, by R3 rather than by anything aimed at it: the line that flipped was `map[time.Time]string` losing an entry, and losing it is now a refusal. Measured, `P12=all` is byte-identical over 8 runs of one binary where the same binary without R3 gave 2 distinct outputs over 8. `P19`'s two `R11` lines are refusals for the same reason; the flake was not observed there in 6 runs, so no claim is made that one was fixed.
+- **[#45](https://github.com/onhotpath/ferry/issues/45), the `.AsMapKey()` gap.** **Closed**, and it produced a fifth ADR amendment. See 8.6.
+- **The `Get`-order question.** **Closed** by one clause in ADR-0003 saying the sequence is deliberately unspecified. See 8.6.
 
-| ADR | what moves | why it is not a quiet edit |
-| --- | --- | --- |
-| 0005 | the flattening-plane row, the completeness check, and a **how** column on the three-outcomes table | three published numbers change and three rows marked "admitted, round-trips" no longer compile |
-| 0008 | one phrase, "one per field" | the worked block's element count is right and its attribution is not |
-| 0010 | a footnote on the 47370 ns compile | the sentence beside it described work the measurement did not do; it does now |
-| 0011 | one sentence, and **no change to the table** | the row that moved is a counterfactual no importer can reach |
+**`walk.go` is not retired, and that is a decision rather than an omission.**
+It is the engine ADR-0003, ADR-0004, ADR-0005, ADR-0007 and ADR-0009's numbers were taken on, **34 probe files** call it, and `X3=4c` reproduces ADR-0005's published `/IP` and `/Mask` row *on it*.
+Deleting it deletes the ability to reproduce published evidence, which is the opposite of what this ticket exists to protect.
 
-Each lands as its own PR against its own ADR, so a reviewer sees one argument at a time.
+What was actually wrong is narrower and is fixed: `Conf` and `Inner`, the default `go run .` fixture, carried **no ferry tags**, so the suite a reader runs first exercised the naming rule ADR-0008 refused, on a struct the current engine would not compile - 13 addresses against 11 refusals.
+They are tagged with the segment names `walk.go` was already inventing, so every address and every published number on that fixture is unchanged and the naming disagreement goes from 11 refusals to 0.
+
+**And that surfaced one the refusals were hiding**, which is reported and not fixed:
+
+```
+only in e_schema: [/Limits /Opt /Tags]
+only in walk.go : [/Limits/* /Tags/*]
+```
+
+The two engines mint different **static** address sets for the same compiling type.
+`walk.go` puts a dynamic composite into the static set as a wildcard where `e_schema` puts the container address it is enumerated under, and `e_schema` additionally mints `/Opt` for the optional section itself.
+That is ADR-0003's two-tier model rather than ADR-0008's naming rule, and **the static set is what `Bind` receives**, so deciding it changes a driver contract.
+Not this ticket's, and it needs a ticket.
+
+The 12-of-26 third-party disagreement stands and is not fixable by tagging, because those are exported fields in other people's packages.
+ADR-0005's answer to that is registration, and [#46](https://github.com/onhotpath/ferry/pull/46) is where it landed.
+
+### 8.5 The six ADR amendments this produced
+
+Each landed as its own PR against its own ADR, so a reviewer saw one argument at a time.
+
+| ADR | what moved | why it was not a quiet edit | PR |
+| --- | --- | --- | --- |
+| 0005 | the flattening-plane row, the completeness check, and a **how** column on the three-outcomes table | three published numbers change and three rows marked "admitted, round-trips" no longer compile | [#46](https://github.com/onhotpath/ferry/pull/46) |
+| 0008 | one phrase, "one per field" | the worked block's element count is right and its attribution is not | [#47](https://github.com/onhotpath/ferry/pull/47) |
+| 0010 | a footnote on the 47370 ns compile | the sentence beside it described work the measurement did not do; it does now | [#48](https://github.com/onhotpath/ferry/pull/48) |
+| 0011 | one sentence, and **no change to the table** | the row that moved is a counterfactual no importer can reach | [#49](https://github.com/onhotpath/ferry/pull/49) |
+| 0003 | one clause: the `Get` sequence is deliberately unspecified | "wherever ferry enumerates addresses" reads as covering a fourth place, and the extension is undeliverable | [#50](https://github.com/onhotpath/ferry/pull/50) |
+| 0007 | **a decision reversed**: keying a map is registration-only | the permission it granted predates the terms it invoked | [#51](https://github.com/onhotpath/ferry/pull/51) |
+
+The last one is the only **reversal**, and it is the one worth reading, because neither ADR was wrong on its own.
+ADR-0007 admitted a chain-claimed `String` type as a map key "on the same terms as a registered codec"; ADR-0009 landed afterwards and made those terms an explicit `.AsMapKey()` opt-in, whose whole mechanism is a diagnostic at the registration call site.
+A chain arm has no call site.
+So the two composed into an outcome neither wrote down - **the refusal is lifted by deleting a line** - which made the map key the only position in ferry where registering a type left it *less* usable than not registering it.
+
+That is the same shape as this audit's own summary finding, one level up: not a rule that drifted, but two correct rules whose composition nobody measured.
+A reader of either document could not have seen it.
+
+### 8.6 What this ticket hands on
+
+Three things, each with a ticket or needing one.
+
+- **[#31](https://github.com/onhotpath/ferry/issues/31) is untouched and is now half-mitigated.** `map[time.Time]string` still compiles - R3 does not amend the admissible key set, which is what #31 asks for - but a dump that would lose an entry now refuses at the address it would have lost it at. The silence is gone; the ticket is not.
+- **The two engines' static address sets disagree** about dynamic composites and optional sections, which is a driver-contract question and has no ticket.
+- **[#35](https://github.com/onhotpath/ferry/issues/35) inherits section 5's thirty conformance cases**, plus the four this remediation added: the collapse check, the segment-wise diff, `Elements()` over a schema refusal, and the completeness check now that it is green.
