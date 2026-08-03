@@ -63,16 +63,22 @@ func TestCaptureIsAT(t *testing.T) {
 // The surface is fixed by decision rather than left to emerge - which is why
 // revive's max-public-structs is switched off in this repository - so a name
 // arriving here without an ADR behind it is a change to a published contract
-// that a driver's CI depends on. The five still missing from ADR-0014's twenty
-// are the suites and the table that need a codec registry and a wider type set:
-// Driver, Codec, Complete, Injective and CoreTypes.
+// that a driver's CI depends on. The four still missing from ADR-0014's twenty
+// are the suites that need a codec registry: Driver, Codec, Complete and
+// Injective.
+//
+// CoreTypes arrived ahead of the engine that can satisfy it, which is #72's own
+// decision rather than an accident of ordering: the table is ADR-0013's
+// compatibility promise in executable form, so it is complete from the ticket
+// that writes it and the types the engine cannot yet carry are named in a skip
+// list in core's own test rather than being absent from the artefact.
 //
 // Twenty rather than nineteen since #101, which added Instance: the shape as
 // published could not support its own golden artefact case, because nothing
 // handed a suite the contents of the plane instance it had just dumped to.
 func TestExportedSurface(t *testing.T) {
 	want := []string{
-		"Artefact", "At", "BitEq", "Case", "Eq", "Instance", "MapEq", "MemPlane",
+		"Artefact", "At", "BitEq", "Case", "CoreTypes", "Eq", "Instance", "MapEq", "MemPlane",
 		"Plane", "Proof", "PtrEq", "Record", "RoundTrip", "SliceEq", "Static", "T", "Type",
 	}
 
