@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -98,6 +99,16 @@ func (r fYAMLReader) Get(_ context.Context, addr Path) (Value, error) {
 	case "!!int", "!!float":
 		return Number(n.Value), nil
 	case "!!binary":
+		// #28 Q28=4's seam: the driver's own spelling of Bytes, which
+		// ADR-0005 puts on the driver's side of the line. Both halves change
+		// together, which is exactly why a round-trip suite cannot see it.
+		if q28HexBytes {
+			raw, err := hex.DecodeString(n.Value)
+			if err != nil {
+				return Value{}, fmt.Errorf("yaml: !!binary at %s: %w", n.Value, err)
+			}
+			return Bytes(raw), nil
+		}
 		raw, err := base64.StdEncoding.DecodeString(n.Value)
 		if err != nil {
 			return Value{}, fmt.Errorf("yaml: !!binary at %s: %w", n.Value, err)
@@ -218,7 +229,11 @@ func fYAMLNode(last bool, want yaml.Kind, v Value) *yaml.Node {
 			n.Tag = "!!float"
 		}
 	case VBytes:
-		n.Tag, n.Value = "!!binary", base64.StdEncoding.EncodeToString([]byte(v.Text()))
+		if q28HexBytes {
+			n.Tag, n.Value = "!!binary", hex.EncodeToString([]byte(v.Text()))
+		} else {
+			n.Tag, n.Value = "!!binary", base64.StdEncoding.EncodeToString([]byte(v.Text()))
+		}
 	default:
 		n.Tag, n.Value, n.Style = "!!str", v.Text(), yaml.DoubleQuotedStyle
 	}
