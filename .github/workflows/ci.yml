@@ -530,3 +530,28 @@ jobs:
           # cannot fix that. The gate above is what enforces the threshold, so
           # a failed upload reports nothing and blocks nothing.
           fail_ci_if_error: false
+
+      # TEMPORARY (#98). Two probes against the live service, uploading core's
+      # profile under flags that codecov.yml does not declare, so they carry no
+      # `paths` filter. The `core` upload above is the control.
+      - name: Probe - rewrite core's profile to repo-relative paths
+        if: matrix.module == '.'
+        run: sed 's|github\.com/onhotpath/ferry/||' cover.out > cover.rel.out
+
+      - name: Probe - upload under an undeclared flag, import paths
+        if: matrix.module == '.'
+        uses: codecov/codecov-action@v5
+        with:
+          flags: probe-noflagpaths
+          files: cover.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+      - name: Probe - upload under an undeclared flag, repo-relative paths
+        if: matrix.module == '.'
+        uses: codecov/codecov-action@v5
+        with:
+          flags: probe-relpaths
+          files: cover.rel.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
