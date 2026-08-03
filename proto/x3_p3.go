@@ -217,13 +217,16 @@ func runX3_3() {
 	fmt.Println("    worth stating because ADR-0009's opt-in is now the default (#41 D5)")
 	fmt.Println("    and a reader would otherwise expect the question to be asked.")
 	fmt.Println("    The comparable neighbour with the same text form is netip.Prefix, and")
-	fmt.Println("    there the opt-in does fire - through the CHAIN, which #41 D5 records")
-	fmt.Println("    as the hole the opt-in does not close:")
+	fmt.Println("    it is where #41 D5's reported hole showed. As FOUND the first row")
+	fmt.Println("    below compiled: the CHAIN claimed netip.Prefix as a key with nobody")
+	fmt.Println("    having said .AsMapKey(). That became #45, and ADR-0007 reversed its")
+	fmt.Println("    own sentence - keying a map is registration-only - so all three rows")
+	fmt.Println("    now run under one rule:")
 	for _, c := range []struct {
 		label string
 		reg   *Registry
 	}{
-		{"nothing registered (chain claims it)", NewRegistry()},
+		{"nothing registered at all", NewRegistry()},
 		{"registered without .AsMapKey()", x3PrefixReg(false)},
 		{"registered with    .AsMapKey()", x3PrefixReg(true)},
 	} {

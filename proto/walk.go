@@ -86,20 +86,20 @@ func compile(t reflect.Type) ([]Path, error) {
 		case shapeMap:
 			rec(t.Elem(), p.Name("*"))
 		default:
-			// A map whose key type is registered but not declared usable as a
-			// key gets its own diagnostic, because the generic "unsupported
-			// type" line tells a registrant nothing about the obligation they
-			// have to take on. The diagnostic is the only moment they are
-			// guaranteed to read.
-			if t.Kind() == reflect.Map && keyOptIn && activeReg != nil {
-				if _, own := activeReg.lookup(t.Key()); own && !registeredKeys[t.Key()] {
-					errs = append(errs, fmt.Errorf(
-						"ferry: %s: %s has a registered codec but is not declared usable as a map key; "+
-							"a key codec's text must be injective over the key type, or two keys collapse "+
-							"into one address; add .AsMapKey() to the registration if it is",
-						pathOrRoot(p), t.Key()))
-					return
-				}
+			// A refused map key gets its own diagnostic, because the generic
+			// "unsupported type" line tells the author nothing about the
+			// obligation they have to take on, and ADR-0009 is explicit that the
+			// diagnostic IS the mechanism.
+			//
+			// It calls mapKeyRefusal rather than carrying its own copy. #45 added
+			// a SECOND such diagnostic - for a chain-claimed key, which ADR-0007's
+			// reversal now refuses - and this file held a hand-written copy of the
+			// first, so the two engines would have told a user different things.
+			// That is ADR-0010's duplication axis 1, and #41 D2 closed the same
+			// shape for kind admission by making one function the authority.
+			if t.Kind() == reflect.Map && !validMapKey(t.Key()) {
+				errs = append(errs, mapKeyRefusal(p, t.Key()))
+				return
 			}
 			errs = append(errs, unsupportedTypeError{p, t})
 		}
@@ -185,6 +185,12 @@ func dump(v reflect.Value) (map[Path]Value, error) {
 				}
 			}
 			return nil
+		}
+		// Same authority as the compile-time site above: a refused map key says
+		// WHY here too, or a user who never calls Compile[T] sees the generic
+		// line and the compile-time one disagreeing about the same type.
+		if v.Kind() == reflect.Map && !validMapKey(v.Type().Key()) {
+			return mapKeyRefusal(p, v.Type().Key())
 		}
 		return unsupportedTypeError{p, v.Type()}
 	}
@@ -364,6 +370,12 @@ func load(vals map[Path]Value, dst reflect.Value) error {
 			}
 			v.Set(m)
 			return nil
+		}
+		// Same authority as the compile-time site above: a refused map key says
+		// WHY here too, or a user who never calls Compile[T] sees the generic
+		// line and the compile-time one disagreeing about the same type.
+		if v.Kind() == reflect.Map && !validMapKey(v.Type().Key()) {
+			return mapKeyRefusal(p, v.Type().Key())
 		}
 		return unsupportedTypeError{p, v.Type()}
 	}

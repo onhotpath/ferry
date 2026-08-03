@@ -39,19 +39,18 @@ func runY5() {
 	fmt.Println(`
   (2) THE REMEDY, AND WHAT IT COSTS THE USER. One line, at a call site the
   author does not have yet, and it is the SAME line ADR-0009 already asks
-  for. R1 is not in the engine, so the middle column is today's answer and
-  the right one is what R1 would give:`)
-	fmt.Printf("    %-30s %-12s %s\n", "", "today", "under R1")
-	fmt.Printf("    %-30s %-12s %s\n", "nothing registered",
-		errOneLine(Compile[yMap[netip.Addr]](WithRegistry(NewRegistry()))), "REFUSED, with the Y8 diagnostic")
-	fmt.Printf("    %-30s %-12s %s\n", "TextCodec(...).AsMapKey()",
-		errOneLine(Compile[yMap[netip.Addr]](WithRegistry(yAddrReg(true)))), "<nil>, unchanged")
+  for. R1 is now the engine, so both columns are measured:`)
+	fmt.Printf("    %-30s %-12s %s\n", "", "as FOUND", "under R1, measured")
+	fmt.Printf("    %-30s %-12s %s\n", "nothing registered", "<nil>",
+		shortenY(errOneLine(Compile[yMap[netip.Addr]](WithRegistry(NewRegistry())))))
+	fmt.Printf("    %-30s %-12s %s\n", "TextCodec(...).AsMapKey()", "<nil>",
+		errOneLine(Compile[yMap[netip.Addr]](WithRegistry(yAddrReg(true)))))
 
 	fmt.Println(`
   (3) THE ASYMMETRY, STATED AS A SIZE. Under R1 there is exactly one thing
   a chain-claimed type cannot do that a registered one can, and it is
-  keying a map. Every other position is unchanged, and each below compiles
-  TODAY against a fresh registry, which is what R1 leaves alone:`)
+  keying a map. Every row below is measured against a FRESH registry, so
+  the four that compile are the chain still claiming the type:`)
 	ctx := context.Background()
 	fresh := NewRegistry()
 	for _, row := range []struct {
@@ -63,12 +62,12 @@ func runY5() {
 		{"slice element", Compile[yLeaf[[]netip.Addr]](WithRegistry(fresh)), "unchanged"},
 		{"pointer to leaf", Compile[yLeaf[*netip.Addr]](WithRegistry(fresh)), "unchanged"},
 		{"map VALUE", Compile[yLeaf[map[string]netip.Addr]](WithRegistry(fresh)), "unchanged"},
-		{"map KEY", Compile[yMap[netip.Addr]](WithRegistry(fresh)), "REFUSED"},
+		{"map KEY", Compile[yMap[netip.Addr]](WithRegistry(fresh)), "the one that moved"},
 	} {
-		fmt.Printf("    %-18s today %-8s under R1 %s\n", row.what, errOneLine(row.err), row.underR1)
+		fmt.Printf("    %-18s %-10s %s\n", row.what, shortenY(errOneLine(row.err)), row.underR1)
 	}
 	v, _ := dumpTo(ctx, yLeaf[netip.Addr]{netip.MustParseAddr("192.0.2.1")}, WithRegistry(fresh))
-	fmt.Printf("    and the leaf still lands as %s, unregistered, under R1 too\n", v[Path{}.Name("v")].GoString())
+	fmt.Printf("    and the leaf still lands as %s, unregistered\n", v[Path{}.Name("v")].GoString())
 
 	fmt.Println(`
   So the asymmetry is one position out of five, and it is the one position
@@ -103,7 +102,7 @@ func runY6() {
 			c, ok := activeChainCodec(t)
 			return ok && c.kind == VString
 		}},
-		{"R1 registration-only", func(reflect.Type) bool { return false }},
+		{"R1 registration-only (DECIDED, shipped)", func(reflect.Type) bool { return false }},
 		{"R2 compile-time warning", func(t reflect.Type) bool {
 			c, ok := activeChainCodec(t)
 			return ok && c.kind == VString
@@ -128,9 +127,11 @@ func runY6() {
 	done()
 
 	fmt.Println(`
-  R0 is what ships. Y4 is its measurement: two entries dropped, no error,
-  winner by map iteration order. It is out, because ADR-0001 rules out
-  silently ignoring anything and this ignores a map entry.
+  R0 is what ferry shipped as FOUND. Y4 is its measurement: two entries
+  dropped, no error, winner by map iteration order. It is out, because
+  ADR-0001 rules out silently ignoring anything and this ignores a map
+  entry. R1 is the decided rule and is now the engine, which is why Y1's
+  third row and Y4's first line both refuse.
 
   R2 needs a channel ferry does not have. Measured against the codebase:`)
 	fmt.Println("    ferry.Error classes                 : ErrSchema ErrMissing ErrValue ErrPlane ErrDriver")
@@ -313,9 +314,11 @@ func runY7() {
 // ---------------------------------------------------------------------------
 
 func runY8() {
-	fmt.Println(`  RECOMMENDED: R1, keying a map is registration-only. The chain may claim
-  a type at a leaf, in a slice, behind a pointer and as a map VALUE, and it
-  may not claim a map KEY.
+	fmt.Println(`  DECIDED, and shipped on this branch: R1, keying a map is
+  registration-only. The chain may claim a type at a leaf, in a slice,
+  behind a pointer and as a map VALUE, and it may not claim a map KEY.
+  ADR-0007 reversed its own sentence; typeset.go's validMapKey no longer
+  has a chain arm, and mapKeyRefusal carries the message below.
 
   The four things it rests on, each measured above:
 
@@ -349,9 +352,10 @@ func runY8() {
   nobody can be ASKED, not because the answer would be no.
 
   THE DIAGNOSTIC, which is where ADR-0009 says the obligation lives, and
-  which has to name a type the author never mentioned:`)
+  which has to name a type the author never mentioned. Read out of the
+  engine rather than out of this file, so the two cannot drift:`)
 
-	fmt.Printf("\n    %s\n", yProposedDiag(Path{}.Name("m"), reflect.TypeFor[netip.Addr]()))
+	fmt.Printf("\n    %s\n", errOneLine(Compile[yMap[netip.Addr]](WithRegistry(NewRegistry()))))
 
 	fmt.Println(`
   It names the type, why the rule exists, and the exact remedy, and the
@@ -364,8 +368,8 @@ func runY8() {
   - #31 is untouched, and deliberately. map[time.Time]string collapses on
     core's OWN pre-seeded entry, which ADR-0009 says its opt-in
     "deliberately does not reach". R1 changes nothing there.
-  - R3 stays available as a BELT-AND-BRACES check and is worth its own
-    line in whatever ADR takes this: it is free, it is exact, and under R1
+  - R3 is NOT implemented. It stays available as a belt-and-braces check
+    and ADR-0007 records it: it is free, it is exact, and under R1
     the only types that can reach it are core's own and ones a registrant
     declared with .AsMapKey(). In other words R1 makes R3 the check that
     catches a WRONG .AsMapKey(), which is the case ADR-0009 currently
@@ -375,16 +379,13 @@ func runY8() {
     ADR, not a decision this measurement forces.`)
 }
 
-// yProposedDiag is the message R1 would need. It is written here rather than in
-// typeset.go because this suite adds probe files and nothing else.
-func yProposedDiag(p Path, k reflect.Type) error {
-	return fmt.Errorf(
-		"ferry: %s: %s may not key a map: ferry claims it through its text pair "+
-			"rather than through a registration, so nobody has declared its text "+
-			"injective over the key type, and two keys that render alike collapse "+
-			"into one address; register a codec and mark it usable as a key with "+
-			"ferry.TextCodec[%s](ferry.VString).AsMapKey()",
-		pathOrRoot(p), k, k)
+// shortenY keeps a refusal readable in a table column. The full text is printed
+// once, in Y8, and read out of the engine there.
+func shortenY(s string) string {
+	if len(s) > 26 {
+		return s[:23] + "..."
+	}
+	return s
 }
 
 var _ = context.Background

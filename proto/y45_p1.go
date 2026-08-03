@@ -59,8 +59,12 @@ func runY1() {
 	}
 
 	fmt.Println(`
-    Row three is the hole. Nobody was asked, and the way to reach it from
-    row one is to DELETE the registration rather than to add a word to it.`)
+    Row three WAS the hole: nobody was asked, and the way to reach it from
+    row one was to DELETE the registration rather than to add a word to it.
+    It is closed. ADR-0007 reversed its own sentence under #45 and keying a
+    map is registration-only, so row three now refuses with a message that
+    names the mechanism and the remedy and makes no claim about the type -
+    which Y3 is the reason for.`)
 
 	fmt.Println("\n  and the same three rows on the LEAF, where no obligation exists at all:")
 	for _, r := range []struct {
@@ -75,9 +79,15 @@ func runY1() {
 		fmt.Printf("    %-36s -> %s\n", r.what, errOneLine(err))
 	}
 	fmt.Println(`
-    So the opt-in is the ONLY place in ferry where registering a type makes
-    it less usable than not registering it. That is the shape of the defect,
-    stated without reference to injectivity at all.`)
+    The leaf rows are unchanged by the reversal, and that is the point of
+    printing them: the chain still claims netip.Addr everywhere except the
+    key position.
+
+    AS FOUND, the three key rows read REFUSED / compiles / compiles, so the
+    opt-in was the ONLY place in ferry where registering a type made it less
+    usable than not registering it. That was the shape of the defect, stated
+    without reference to injectivity at all, and it is what the reversal
+    repaired: the refusal is now lifted by ADDING .AsMapKey().`)
 }
 
 // yAddrReg builds ADR-0009's own example registration for netip.Addr, with and
@@ -206,8 +216,9 @@ func runY3() {
   So the stdlib types the chain claims are injective on every adversarial
   value the probe could build, INCLUDING the two that look like traps: a
   4-in-6 address and a zoned one both keep their distinction in the text.
-  That is worth stating plainly, because it means the hole is not currently
-  reachable through anything ferry ships.
+  That is worth stating plainly, because it is why the refusal ADR-0007
+  now carries must not accuse the type of anything: it refuses because
+  nobody can be ASKED, not because the answer would be no.
 
   main.YID is three distinct Go values and one text. Nothing about it is
   contrived: a case-insensitive identifier with a MarshalText written for
@@ -262,9 +273,23 @@ func runY4() {
 	v := yMap[YID]{M: map[YID]int{{"Prod"}: 1, {"prod"}: 2, {"PROD"}: 3}}
 
 	fmt.Printf("\n  Compile[struct{ M map[main.YID]int }] -> %s\n", errOneLine(Compile[yMap[YID]]()))
+	fmt.Println(`  ^ REFUSED, which is ADR-0007's reversal doing its job. Everything
+    below is what happens when that refusal is LIFTED, and under the decided
+    rule there is exactly one way to lift it: a registrant says .AsMapKey()
+    and is wrong. So this probe now measures the case ADR-0009 leaves
+    entirely to the registrant's own tests, rather than the case nobody was
+    asked about - and the numbers are the same, because it is the same
+    failure reached through a different door.`)
+
+	// Passed as an Option rather than install()ed: install() takes a mutex the
+	// entry points take again, so holding it across a Compile or a Dump
+	// deadlocks.
+	keyReg := WithRegistry(mustReg(NewRegistry(), TextCodec[YID](VString).AsMapKey()))
+	fmt.Printf("\n  with TextCodec[main.YID](VString).AsMapKey() registered:\n")
+	fmt.Printf("  Compile -> %s\n", errOneLine(Compile[yMap[YID]](keyReg)))
 	fmt.Printf("  the Go map holds %d keys\n", len(v.M))
 
-	got, derr := dumpTo(ctx, v)
+	got, derr := dumpTo(ctx, v, keyReg)
 	fmt.Printf("  ferry dumps %d address(es), err=%v\n", len(got), errOneLine(derr))
 	for _, p := range sortedAddrs(got) {
 		fmt.Printf("    %-12s %s\n", p.String(), got[p].GoString())
@@ -273,7 +298,7 @@ func runY4() {
 	fmt.Println("\n  WHICH entry survives, over 200 dumps of the same value:")
 	seen := map[string]int{}
 	for i := 0; i < 200; i++ {
-		g, _ := dumpTo(ctx, v)
+		g, _ := dumpTo(ctx, v, keyReg)
 		var parts []string
 		for _, p := range sortedAddrs(g) {
 			parts = append(parts, p.String()+"="+g[p].GoString())
@@ -290,14 +315,16 @@ func runY4() {
 		fmt.Printf("      %-24s %d/200\n", k, seen[k])
 	}
 
-	back, lerr := loadFrom(ctx, yMap[YID]{}, got)
+	back, lerr := loadFrom(ctx, yMap[YID]{}, got, keyReg)
 	fmt.Printf("\n  and loading it back: %d key(s), err=%v\n", len(back.M), errOneLine(lerr))
 	fmt.Println(`
   Two entries dropped, no error, and the winner decided by map iteration
   order. That is ADR-0001's determinism invariant broken and its
-  "never silently ignore" rule broken, in one dump, with nobody warned.
+  "never silently ignore" rule broken, in one dump.
 
-  This is the same failure ADR-0009 measured and refused for the registered
-  case. The only difference is that here the author never called Register,
-  so there was no diagnostic to read.`)
+  AS FOUND, this ran with NO registration at all, because ADR-0007's chain
+  claimed main.YID and keyed the map with nobody having been asked. That is
+  what ADR-0007 reversed. What survives is the narrower case above: a
+  registrant who said .AsMapKey() and was wrong, which ADR-0009 leaves to
+  their own tests and which Y6's R3 would catch for free.`)
 }

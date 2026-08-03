@@ -122,19 +122,26 @@ func validMapKey(k reflect.Type) bool {
 		}
 		return true
 	}
-	// A CHAIN-claimed type is not covered by the opt-in, and that is ADR-0007's
-	// decision rather than an oversight here: "A type the chain claims with
-	// declared kind String may key a map, on the same terms as a registered
-	// codec", with the obligation discharged in the harness because a chain arm
-	// "is a codec nobody registered" and so has no call site to say the word at.
-	// See the note in mapKeyRefusal for what that leaves open.
-	// The key lookup has to consult the same chain the leaf lookup does, or a
-	// type the chain admits as a leaf is still refused as a key. Two lookups
-	// answering the same question differently is what identity-before-kind
-	// exists to stop.
-	if c, ok := activeChainCodec(k); ok && c.kind == VString {
-		return true
-	}
+	// A CHAIN-claimed type MAY NOT key a map. ADR-0007 granted it - "a type the
+	// chain claims with declared kind String may key a map, on the same terms as
+	// a registered codec" - and reversed itself under #45, because the terms
+	// were not the same: ADR-0009 landed afterwards and made the terms for a
+	// registration an explicit `.AsMapKey()` opt-in, and a chain arm has no call
+	// site at which to say it.
+	//
+	// So the arm that used to sit here is gone. Note what that does NOT do: the
+	// chain still claims the type at a leaf, as a slice element, behind a
+	// pointer and as a map VALUE. Only the key position moves, which is the one
+	// position where a text form that is not injective costs a map ENTRY rather
+	// than legibility.
+	//
+	// The two-lookups-disagree objection this arm was added for still stands and
+	// is answered differently: the leaf lookup and the key lookup now ask
+	// DIFFERENT questions - "can ferry represent this" and "can two values of
+	// this collapse into one address" - so agreeing is not the property wanted.
+	// Y45=1 measures the inversion that made the old answer wrong: with the arm
+	// in place, registering a type left it LESS usable than not registering it,
+	// which is true nowhere else in ferry.
 	switch k.Kind() {
 	case reflect.String,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -154,13 +161,21 @@ func validMapKey(k reflect.Type) bool {
 // message below is ADR-0009's own, and it already existed - in walk.go, on the
 // engine the tip no longer uses.
 //
-// NOT CLOSED, and reported rather than resolved: `.AsMapKey()` binds only what
-// registration adds. A type carrying the text pair that nobody registered is
-// claimed by ADR-0007's chain and keys a map with no opt-in, so the obligation
-// is defeatable by not registering. ADR-0007 permits it in terms and ADR-0009
-// scopes its rule to "a registration", so neither closes it and this file is
-// not the place to decide it. R11e records the sibling case for core's own
-// pre-seeded entries.
+// CLOSED BY #45, which was open when the paragraph above was written: a type
+// carrying the text pair that nobody registered used to be claimed by
+// ADR-0007's chain and to key a map with no opt-in, so the obligation was
+// defeatable by NOT registering. ADR-0007 has since reversed its own sentence
+// and keying a map is registration-only, so that route is refused here with a
+// message of its own.
+//
+// The message must not accuse the type of anything. Measured (Y45=3), every
+// stdlib type the chain claims is injective on every adversarial value the
+// probe could build: the refusal is because nobody can be ASKED, not because
+// the answer would be no. So it names the mechanism and the remedy and makes
+// no claim about the text.
+//
+// R11e records the sibling case for core's own pre-seeded entries, which is
+// #31's and which neither this rule nor ADR-0009's reaches.
 func mapKeyRefusal(p Path, k reflect.Type) error {
 	if _, ok := identityLookup(k); ok && keyOptIn && activeReg != nil {
 		if _, own := activeReg.lookup(k); own && !registeredKeys[k] {
@@ -170,6 +185,15 @@ func mapKeyRefusal(p Path, k reflect.Type) error {
 					"into one address; add .AsMapKey() to the registration if it is",
 				pathOrRoot(p), k)
 		}
+	}
+	if c, ok := activeChainCodec(k); ok && c.kind == VString {
+		return fmt.Errorf(
+			"ferry: %s: %s may not key a map: ferry claims it through its text pair rather "+
+				"than through a registration, so nobody has declared its text injective over "+
+				"the key type, and two keys that render alike collapse into one address; "+
+				"register a codec and mark it usable as a key with "+
+				"ferry.TextCodec[%s](ferry.VString).AsMapKey()",
+			pathOrRoot(p), k, k)
 	}
 	return fmt.Errorf("ferry: %s: unsupported map key type %s", pathOrRoot(p), k)
 }

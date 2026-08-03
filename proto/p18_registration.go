@@ -98,6 +98,19 @@ func runRegistration() {
 				}
 				return net.ResolveTCPAddr("tcp", s[len("tcp://"):])
 			}),
+
+		// 5. THE ONE #45 ADDED, and it is the point of this probe rather than a
+		//    repair to it. This fixture is "the five registrations a real user
+		//    actually writes", and until #45 it was four: netip.Addr keyed the
+		//    Hosts map with nobody having registered it, because ADR-0007's chain
+		//    claimed it. ADR-0007 has since reversed that sentence - keying a map
+		//    is registration-only - so the fifth registration is one a real user
+		//    now HAS to write, and the compiler names it for them.
+		//
+		//    Note the shape: .AsMapKey() is ADR-0009's opt-in, and it is the only
+		//    thing in this list that is a claim about the type rather than a codec
+		//    for it.
+		TextCodec[netip.Addr](VString).AsMapKey(),
 	)
 	fmt.Printf("    Register(...) -> err=%v\n", err)
 

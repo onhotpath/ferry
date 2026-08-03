@@ -53,18 +53,26 @@ func runX1_7() {
 	fmt.Println("  which is the point: it is the only moment a registrant is guaranteed to")
 	fmt.Println("  read\".")
 
-	fmt.Println("\n  the third row is NOT the opt-in failing. It is the hole neither ADR")
-	fmt.Println("  closes, and it is reported rather than resolved:")
-	fmt.Println("    ADR-0007: \"A type the chain claims with declared kind String may key")
-	fmt.Println("      a map, on the same terms as a registered codec\", because \"a chain")
-	fmt.Println("      arm is a codec nobody registered\" and so has no call site to say")
-	fmt.Println("      .AsMapKey() at.")
-	fmt.Println("    ADR-0009 scopes its rule to \"a registration\".")
-	fmt.Println("    So for any type carrying the text pair, the obligation is defeatable")
-	fmt.Println("    by NOT registering it, and the refusal above is lifted by deleting a")
-	fmt.Println("    line rather than by adding one. R11e records the sibling case for")
-	fmt.Println("    core's own pre-seeded entries and hands it to #31; this one has no")
-	fmt.Println("    ticket. Not decided here.")
+	fmt.Println(`
+  the third row was NOT the opt-in failing. It was the hole neither ADR
+  closed, it was reported here rather than resolved, and it became #45:
+    ADR-0007: "A type the chain claims with declared kind String may key
+      a map, on the same terms as a registered codec", because "a chain
+      arm is a codec nobody registered" and so has no call site to say
+      .AsMapKey() at.
+    ADR-0009 scopes its rule to "a registration".
+    So for any type carrying the text pair, the obligation was defeatable
+    by NOT registering it, and the refusal above was lifted by deleting a
+    line rather than by adding one.
+
+  CLOSED. #45 measured it - Y45=1 through Y45=8 - and ADR-0007 reversed
+  its own sentence: keying a map is registration-only. As FOUND the third
+  row read "compiles, addrs [/limits]"; it now carries a refusal of its
+  own, which names the mechanism and the remedy and makes no claim about
+  the type, because Y45=3 measured every stdlib type the chain claims to
+  be injective. The refusal is because nobody can be ASKED.
+  R11e records the sibling case for core's own pre-seeded entries and
+  hands it to #31, which this does not touch.`)
 
 	fmt.Println("\n  keyOptIn stays connected, and the DEFAULT is what changed:")
 	fmt.Printf("    keyOptIn = %v (the decided rule)\n", keyOptIn)
@@ -73,7 +81,9 @@ func runX1_7() {
 	fmt.Println("    unreproducible. R11a's whole job is to run the rule ADR-0009 REFUSED")
 	fmt.Println("    and watch it drop a map entry, which is the argument for the opt-in,")
 	fmt.Println("    and that needs the seam. The defect was the default, not the seam.")
-	fmt.Println("    walk.go carries the same message behind the same switch, so the two")
+	fmt.Println("    walk.go now CALLS mapKeyRefusal rather than carrying a copy of the")
+	fmt.Println("    message, which #45 forced: it added a second diagnostic, and two")
+	fmt.Println("    hand-written copies would have told a user different things. So the two")
 	fmt.Println("    engines agree.")
 
 	fmt.Println("\n  and core's own key types are untouched, because their proof is core's:")

@@ -20,28 +20,51 @@ func runMapKey() {
 	defer func() { chainOrder, chainBeforeKind = nil, false }()
 
 	fmt.Println("\n--- P13a: a text-arm type as a map key ---")
+	m := map[netip.Addr]string{
+		netip.MustParseAddr("10.0.0.1"): "a",
+		netip.MustParseAddr("10.0.0.2"): "b",
+	}
+	ha := struct{ V map[netip.Addr]string }{m}
 	for _, before := range []bool{false, true} {
 		chainBeforeKind = before
-		m := map[netip.Addr]string{
-			netip.MustParseAddr("10.0.0.1"): "a",
-			netip.MustParseAddr("10.0.0.2"): "b",
-		}
-		h := struct{ V map[netip.Addr]string }{m}
-		a, err := compile(reflect.TypeOf(h))
+		a, err := compile(reflect.TypeOf(ha))
 		fmt.Printf("    beforeKind=%-6v compile %v err=%v\n", before, a, shorten2(fmt.Sprint(err), 60))
-		if err != nil {
-			continue
-		}
-		d, derr := dump(reflect.ValueOf(h))
-		fmt.Printf("                    dump    %s err=%v\n", fmtVals(d), derr)
+	}
+	fmt.Println("      ^ REFUSED under either order, and the order is not what decides it.")
+
+	fmt.Println("\n    and the same map with the type REGISTERED as a key:")
+	reg := mustReg(NewRegistry(), TextCodec[netip.Addr](VString).AsMapKey())
+	doneReg := reg.install()
+	a, err := compile(reflect.TypeOf(ha))
+	fmt.Printf("      compile %v err=%v\n", a, shorten2(fmt.Sprint(err), 60))
+	if err == nil {
+		d, derr := dump(reflect.ValueOf(ha))
+		fmt.Printf("      dump    %s err=%v\n", fmtVals(d), derr)
 		var back struct{ V map[netip.Addr]string }
 		lerr := load(d, reflect.ValueOf(&back).Elem())
-		fmt.Printf("                    load    %v err=%v\n", back.V, lerr)
+		fmt.Printf("      load    %v err=%v\n", back.V, lerr)
 	}
-	fmt.Println("    ^ validMapKey has to consult the chain, or a type the chain admits")
-	fmt.Println("      as a leaf is still refused as a key. That is one line, and")
-	fmt.Println("      forgetting it is the sort of divergence between two lookups that")
-	fmt.Println("      ADR-0005's identity-before-kind rule exists to prevent.")
+	doneReg()
+
+	fmt.Println(`
+    AS FOUND, both rows above compiled and round-tripped, because
+    validMapKey consulted the chain. The argument for that line was that
+    a type the chain admits as a LEAF should not be refused as a KEY -
+    two lookups answering the same question differently, which is what
+    ADR-0005's identity-before-kind rule exists to prevent.
+
+    #45 measured what that reasoning missed, and ADR-0007 reversed its
+    own sentence: the two lookups do not ask the same question. The leaf
+    lookup asks "can ferry represent this", and the key lookup asks "can
+    two values of this collapse into one address". ADR-0009 landed after
+    ADR-0007 and made the answer to the second an explicit .AsMapKey()
+    opt-in for a registration, and a chain arm has no call site at which
+    to say it - so the obligation was defeatable by NOT registering, and
+    the refusal was lifted by deleting a line rather than adding one.
+
+    So keying a map is registration-only, the capability is not lost -
+    it moved to the registration above - and P13b's obligation is now
+    carried by whoever writes .AsMapKey(). Y45 is the measurement.`)
 
 	fmt.Println("\n--- P13b: is the obligation real? a NON-injective text form ---")
 	fmt.Println("    time.Time is in core's identity table, its form is RFC 3339, and")
