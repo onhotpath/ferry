@@ -99,6 +99,19 @@ var ErrDriver = errors.New("driver")
 // ErrReadOnly is a plane that is writable in principle but not right now, and a
 // sink refuses with it when it opens for writing rather than at the first write
 // (ADR-0004). It is ADR-0011's family rather than an exception beside it.
+//
+// It is the only plane condition core names, and the reason is placement rather
+// than taxonomy. Throttled, unauthenticated and timed out are the driver's
+// knowledge and stay the driver's sentinels, reachable under ferry's wrapper. A
+// read-only refusal is different because ADR-0004 makes where it is raised a
+// clause of the contract: inside the open, not at Bind, which does no I/O and
+// cannot know, and not at the first Set, which has already half-written the
+// plane. A rule about placement needs a portable signal to be checked against,
+// or the conformance suite cannot hold a driver to it and the rule is prose.
+//
+// So a driver wraps both: this, so a caller and the suite can ask the question
+// without knowing which plane answered, and its own error underneath, so
+// errors.Is against the driver's sentinel keeps working.
 var ErrReadOnly = errors.New("plane is read only")
 
 // classRule maps a sentinel a driver or a codec may wrap onto the class it
