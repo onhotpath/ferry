@@ -637,16 +637,32 @@ register a codec and mark it usable as a key with
 ferry.TextCodec[netip.Addr](ferry.VString).AsMapKey()
 ```
 
-**One thing this reversal makes worth doing, which is not decided here.**
+**One thing this reversal makes worth doing.**
 Two Go keys collapsing into one address is detectable **exactly** at dump time, with no registrant, no value list and no injectivity proof, because the walk already renders every key to text and sorts by it - so the check is an adjacent-pair scan over a list that is already built.
-Measured at **0.55% to 0.64%** of work the walk already does, with zero extra allocations.
 It was rejected as an *answer* to #45 because it is a runtime refusal where ADR-0005's framing is schema-compile, and because it cannot see the Load side at all.
 It is worth keeping as a second line of defence, and under this reversal the only types that can reach it are core's own and ones a registrant declared with `.AsMapKey()` - so it becomes the check that catches a **wrong** `.AsMapKey()`, which ADR-0009 currently leaves entirely to the registrant's own tests.
-Whoever takes that decides it.
+It is now implemented, on `proto/tip`.
 
-**Untouched: [#31](https://github.com/onhotpath/ferry/issues/31).**
-`map[time.Time]string` collapses on core's **own** pre-seeded entry, which ADR-0009 says its opt-in "deliberately does not reach".
-This reversal changes nothing there.
+> **Corrected: this paragraph published a number that was measured on the wrong thing.**
+> As merged it read "**0.55% to 0.64%** of work the walk already does, with zero extra allocations".
+> That was benchmarked against a standalone helper scanning a slice **the benchmark had already built** - so the allocation under test was in the part the fixture did not run.
+> Measured through the shipped call site instead, the first implementation cost **one extra allocation and `len(keys)*24` bytes per map**, because it built an intermediate slice the caller then copied.
+>
+> | keys | before the check | first implementation | as merged |
+> | ---: | --- | --- | --- |
+> | 8 | 5197 ns, 768 B, 10 allocs | 1749 ns, 1088 B, **11** | 1589 ns, 768 B, **10** |
+> | 512 | 1106224 ns, 54528 B, 514 | 159408 ns, 76288 B, **515** | 164429 ns, 54528 B, **514** |
+>
+> The **speedup is real and was never in doubt** - rendering each key once replaces a comparator that re-rendered both sides on every comparison, and that is 3x at 8 keys and ~7x at 512 either way.
+> What was wrong was "zero extra allocations", and a second implementation arriving from [#31](https://github.com/onhotpath/ferry/issues/31) is what showed the cost was avoidable: it builds the member list in place. That is what shipped.
+>
+> This is worth recording rather than quietly editing, because it is the failure mode [#41](https://github.com/onhotpath/ferry/issues/41)'s own summary names - **a probe whose fixture could not have failed** - committed inside the amendment that records it. Treat every "costs nothing" in this repository as owing a measurement at the call site rather than at the helper.
+
+**And [#31](https://github.com/onhotpath/ferry/issues/31) turned out not to be untouched after all.**
+As merged this section said `map[time.Time]string` collapses on core's **own** pre-seeded entry, which ADR-0009's opt-in "deliberately does not reach", and that this reversal changes nothing there.
+The first half stands and the second no longer does.
+#31 landed a per-entry key declaration on core's table, and the two rules plus ADR-0009's compose as three **disjoint** arms over three populations - core's own entries, a registration, and a type only the chain claims - with the disjointness enforced by `Register`'s refusal to overwrite core's pinned set rather than by convention.
+After all three, there is no route to a map key nobody vouched for.
 
 Evidence: `Y45=all` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
 
