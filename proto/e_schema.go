@@ -16,11 +16,8 @@ package main
 // reproduces a divergence in it.
 
 import (
-	"cmp"
-	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"strings"
 )
 
@@ -98,13 +95,17 @@ func compileSchema2(t reflect.Type, o opts) (*schema, error) {
 	// through the other door, because a nil or empty root map or slice writes
 	// Null at its own address, which at the root IS the empty path.
 	if root != nil && !rootIsWalkedStruct(root) {
-		c.errs = append(c.errs, fmt.Errorf(
-			"ferry: the root type %s is not a struct ferry walks, so it can address the empty path "+
+		c.errs = append(c.errs, errNoLoc(mCompile, ErrSchema,
+			"the root type %s is not a struct ferry walks, so it can address the empty path "+
 				"and ADR-0003 says an address is non-empty; wrap it in a struct with a named field", t))
 	}
 	if len(c.errs) > 0 {
-		slices.SortFunc(c.errs, func(a, b error) int { return cmp.Compare(a.Error(), b.Error()) })
-		return nil, errors.Join(c.errs...)
+		// #41 D8's compiler half. This used to sort by the RENDERED string and
+		// hand the result to errors.Join, which ADR-0011 forbids by name: the
+		// result is invisible to Elements(), and sorting a rendering is the
+		// subtle bug ADR-0003 names. `join` sorts at construction on
+		// (moment, location, message) with CompareSegmentwise on the location.
+		return nil, join(c.errs...)
 	}
 	// ADR-0003's prefix-free rule, over the static tier.
 	if err := prefixFree(c.addrs); err != nil {
@@ -139,8 +140,8 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 		return &node{kind: nPtr, typ: t, shape: p, elem: e}
 	}
 	if c.stack[t] {
-		c.errs = append(c.errs, fmt.Errorf(
-			"ferry: %s: %s is recursive, so its address set is unbounded; register a codec for it", pathOrRoot(p), t))
+		c.errs = append(c.errs, errAt(mCompile, ErrSchema, p,
+			"%s is recursive, so its address set is unbounded; register a codec for it", t))
 		return nil
 	}
 	c.stack[t] = true
@@ -166,7 +167,7 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 				// above it." This is tier 1, so a field that fails it is not
 				// offered to applyOptions, which is tiers 2 and 3.
 				for _, e := range terrs {
-					c.errs = append(c.errs, fmt.Errorf("ferry: %s: %w", pathOrRoot(p.Name(f.Name)), e))
+					c.errs = append(c.errs, errAt(mCompile, ErrSchema, p.Name(f.Name), "%s", e).withCause(e))
 				}
 				fieldErr = true
 				continue
@@ -188,11 +189,11 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 				// address ADR-0003 says may not exist. That is ADR-0010's root
 				// rule reached through a door the root rule does not cover.
 				if f.Type.Kind() == reflect.Pointer {
-					c.errs = append(c.errs, fmt.Errorf(
-						"ferry: %s: %s is an embedded pointer with no %s tag, and a promoted field has "+
+					c.errs = append(c.errs, errAt(mCompile, ErrSchema, p.Name(f.Name),
+						"%s is an embedded pointer with no %s tag, and a promoted field has "+
 							"no address of its own for the pointer to be optional at; give it a %s tag "+
 							"to nest it, or %s:\"-\"",
-						pathOrRoot(p.Name(f.Name)), f.Type, c.o.tagKey, c.o.tagKey, c.o.tagKey))
+						f.Type, c.o.tagKey, c.o.tagKey, c.o.tagKey))
 					fieldErr = true
 					continue
 				}
@@ -201,10 +202,10 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 				// Without it an embedded time.Duration promotes to a LEAF at the
 				// parent address, which at the root is the empty path again.
 				if classify(f.Type) != shapeStruct {
-					c.errs = append(c.errs, fmt.Errorf(
-						"ferry: %s: %s is embedded and is not a struct ferry walks, so its fields cannot "+
+					c.errs = append(c.errs, errAt(mCompile, ErrSchema, p.Name(f.Name),
+						"%s is embedded and is not a struct ferry walks, so its fields cannot "+
 							"be promoted; give it a %s tag to nest it, or %s:\"-\"",
-						pathOrRoot(p.Name(f.Name)), f.Type, c.o.tagKey, c.o.tagKey))
+						f.Type, c.o.tagKey, c.o.tagKey))
 					fieldErr = true
 					continue
 				}
@@ -222,9 +223,8 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 		// ADR-0005's maps-no-address backstop, suppressed at any level that
 		// already reported a field error (ADR-0008's tier rule).
 		if c.minted == before && !fieldErr {
-			c.errs = append(c.errs, fmt.Errorf(
-				"ferry: %s: %s maps no address: it has no exported field ferry can address; register a codec for it",
-				pathOrRoot(p), t))
+			c.errs = append(c.errs, errAt(mCompile, ErrSchema, p,
+				"%s maps no address: it has no exported field ferry can address; register a codec for it", t))
 			return nil
 		}
 		return n
@@ -260,7 +260,7 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 		}
 		return &node{kind: nMap, typ: t, shape: p, elem: e}
 	}
-	c.errs = append(c.errs, unsupportedTypeError{p, t})
+	c.errs = append(c.errs, unsupportedType(p, t))
 	return nil
 }
 
@@ -274,8 +274,8 @@ func (c *compileCtx) applyOptions(n *node, tg tag, at Path) {
 	var bad []error
 	if tg.required {
 		if dyn {
-			bad = append(bad, fmt.Errorf("ferry: %s: required is not available on %s: a plane cannot report "+
-				"\"present and empty\" at a container address", at, n.typ))
+			bad = append(bad, errAt(mCompile, ErrSchema, at, "required is not available on %s: a plane cannot report "+
+				"\"present and empty\" at a container address", n.typ))
 		} else {
 			n.required = true
 		}
@@ -283,8 +283,8 @@ func (c *compileCtx) applyOptions(n *node, tg tag, at Path) {
 	if tg.hasDefault {
 		switch {
 		case n.kind != nLeaf && !(n.kind == nPtr && n.elem.kind == nLeaf):
-			bad = append(bad, fmt.Errorf("ferry: %s: %s is a composite, so it has no single address a default "+
-				"could sit at; seed the value instead", at, n.typ))
+			bad = append(bad, errAt(mCompile, ErrSchema, at, "%s is a composite, so it has no single address a default "+
+				"could sit at; seed the value instead", n.typ))
 		default:
 			leaf := n
 			if leaf.kind == nPtr {
@@ -295,7 +295,7 @@ func (c *compileCtx) applyOptions(n *node, tg tag, at Path) {
 			// with no value in hand - ADR-0006's assertability property.
 			probe := reflect.New(leaf.typ).Elem()
 			if err := decLeafWith(leaf.codec, v, probe); err != nil {
-				bad = append(bad, fmt.Errorf("ferry: %s: default %q is not a valid %s: %v", at, tg.def, leaf.typ, err))
+				bad = append(bad, errAt(mCompile, ErrSchema, at, "default %q is not a valid %s: %v", tg.def, leaf.typ, err))
 			} else {
 				n.def = &v
 			}
@@ -307,11 +307,11 @@ func (c *compileCtx) applyOptions(n *node, tg tag, at Path) {
 	// Contradictions only among the options that survived admissibility.
 	if len(bad) == 0 {
 		if tg.required && tg.hasDefault {
-			bad = append(bad, fmt.Errorf("ferry: %s: required and default contradict", at))
+			bad = append(bad, errAt(mCompile, ErrSchema, at, "required and default contradict"))
 		}
 		if tg.omitzero && n.def != nil && !isZeroDefault(n) {
-			bad = append(bad, fmt.Errorf("ferry: %s: omitzero and default=%s contradict: an explicit zero "+
-				"would be omitted and would load back as %s", at, tg.def, tg.def))
+			bad = append(bad, errAt(mCompile, ErrSchema, at, "omitzero and default=%s contradict: an explicit zero "+
+				"would be omitted and would load back as %s", tg.def, tg.def))
 		}
 	}
 	c.errs = append(c.errs, bad...)
@@ -401,7 +401,7 @@ func prefixFree(addrs []Path) error {
 	for _, a := range addrs {
 		s := a.String()
 		if seen[s] {
-			clash = append(clash, fmt.Errorf("ferry: two fields address %s", s))
+			clash = append(clash, errAt(mCompile, ErrSchema, a, "two fields address it"))
 		}
 		seen[s] = true
 	}
@@ -412,15 +412,14 @@ func prefixFree(addrs []Path) error {
 	for i := range sorted {
 		for j := i + 1; j < len(sorted); j++ {
 			if isSegmentPrefix(sorted[i], sorted[j]) {
-				clash = append(clash, fmt.Errorf(
-					"ferry: %s is a prefix of %s: a leaf and a subtree may not share a segment, "+
-						"because a tree plane cannot hold both", sorted[i], sorted[j]))
+				clash = append(clash, errAt(mCompile, ErrSchema, sorted[i],
+					"is a prefix of %s: a leaf and a subtree may not share a segment, "+
+						"because a tree plane cannot hold both", sorted[j]))
 			}
 		}
 	}
-	slices.SortFunc(clash, func(a, b error) int { return cmp.Compare(a.Error(), b.Error()) })
 	if len(clash) > 0 {
-		return errors.Join(clash...)
+		return join(clash...) // sorts segment-wise at construction; see compileSchema2
 	}
 	return nil
 }

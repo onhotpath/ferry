@@ -48,7 +48,7 @@ func runX1_4() {
 		s, err := compileSchema2(tc.t, defaultOpts())
 		if err != nil {
 			fmt.Printf("    %-42s REFUSED\n", tc.label)
-			for _, l := range splitLines(err.Error()) {
+			for _, l := range errLines(err) {
 				fmt.Printf("        %s\n", l)
 			}
 			continue

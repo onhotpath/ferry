@@ -538,7 +538,7 @@ func runA30() {
 		o := defaultOpts()
 		o.reg = NewRegistry()
 		_, err := compileOnce(reflect.TypeFor[A30Bad](), o)
-		seen[fmt.Sprint(err)]++
+		seen[strings.Join(errLines(err), "\n")]++
 	}
 	fmt.Printf("\n    distinct error strings over 300 compiles: %d\n", len(seen))
 	for s := range seen {

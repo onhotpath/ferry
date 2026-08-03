@@ -17,7 +17,6 @@ package main
 import (
 	"context"
 	"reflect"
-	"slices"
 	"strconv"
 )
 
@@ -350,13 +349,17 @@ func dumpDir(out map[Path]Value) direction {
 				}
 				return ms, nil
 			}
-			keys := v.MapKeys()
-			slices.SortFunc(keys, func(a, b reflect.Value) int {
-				return cmpStr(mapKeyText(a), mapKeyText(b))
-			})
-			ms := make([]member, 0, len(keys))
-			for _, k := range keys {
-				ms = append(ms, member{seg: Segment{Kind: Name, Text: mapKeyText(k)}, key: k})
+			// ADR-0007's R3, under #45: two Go keys rendering to one address is a
+			// lost entry, and it is observable exactly from the values in hand.
+			// Free, because rendering once and sorting the rendered pairs replaces
+			// a comparator that re-rendered both sides on every comparison.
+			keyed, dup := sortedMapKeys(v)
+			if dup >= 0 {
+				return nil, mapKeyCollapse(at, v.Type(), keyed[dup].text)
+			}
+			ms := make([]member, 0, len(keyed))
+			for _, k := range keyed {
+				ms = append(ms, member{seg: Segment{Kind: Name, Text: k.text}, key: k.key})
 			}
 			return ms, nil
 		},

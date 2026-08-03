@@ -36,7 +36,7 @@ func runX1_7() {
 		s, err := schemaFor(reflect.TypeFor[X1Limits](), o)
 		if err != nil {
 			fmt.Printf("    %-32s REFUSED\n", tc.label)
-			for _, l := range splitLines(err.Error()) {
+			for _, l := range errLines(err) {
 				fmt.Printf("        %s\n", l)
 			}
 			continue

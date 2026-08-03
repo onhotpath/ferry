@@ -10,19 +10,17 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
-	"sort"
 	"strconv"
 )
 
 // --- schema compile: the static address set, from the type alone ------------
 
-type unsupportedTypeError struct {
-	path Path
-	typ  reflect.Type
-}
-
-func (e unsupportedTypeError) Error() string {
-	return fmt.Sprintf("ferry: %s: unsupported type %s (kind %s)", e.path, e.typ, e.typ.Kind())
+// unsupportedType is a *ferry.Error like every other schema refusal, so it
+// carries the moment and the class the sort key and Elements() need. #41 D8's
+// compiler half: it used to be a bare struct with its own Error(), which
+// sorted as mNone and made a refusal indistinguishable from anything else.
+func unsupportedType(p Path, t reflect.Type) error {
+	return errAt(mCompile, ErrSchema, p, "unsupported type %s (kind %s)", t, t.Kind())
 }
 
 // compile walks the TYPE, with no value in hand, and returns the static
@@ -101,7 +99,7 @@ func compile(t reflect.Type) ([]Path, error) {
 				errs = append(errs, mapKeyRefusal(p, t.Key()))
 				return
 			}
-			errs = append(errs, unsupportedTypeError{p, t})
+			errs = append(errs, unsupportedType(p, t))
 		}
 	}
 	rec(t, Path{})
@@ -176,11 +174,15 @@ func dump(v reflect.Value) (map[Path]Value, error) {
 				out[p] = Null()
 				return nil
 			}
-			// Determinism is a package-wide invariant: sort the keys.
-			keys := v.MapKeys()
-			sort.Slice(keys, func(i, j int) bool { return mapKeyText(keys[i]) < mapKeyText(keys[j]) })
-			for _, k := range keys {
-				if err := rec(v.MapIndex(k), p.Name(mapKeyText(k))); err != nil {
+			// Determinism is a package-wide invariant: sort the keys. And the
+			// collapse check rides along, through the same helper the engine uses,
+			// so the two do not drift about what a lost map entry looks like.
+			keyed, dup := sortedMapKeys(v)
+			if dup >= 0 {
+				return mapKeyCollapse(p, v.Type(), keyed[dup].text)
+			}
+			for _, k := range keyed {
+				if err := rec(v.MapIndex(k.key), p.Name(k.text)); err != nil {
 					return err
 				}
 			}
@@ -192,7 +194,7 @@ func dump(v reflect.Value) (map[Path]Value, error) {
 		if v.Kind() == reflect.Map && !validMapKey(v.Type().Key()) {
 			return mapKeyRefusal(p, v.Type().Key())
 		}
-		return unsupportedTypeError{p, v.Type()}
+		return unsupportedType(p, v.Type())
 	}
 	if err := rec(v, Path{}); err != nil {
 		return nil, err
@@ -377,7 +379,7 @@ func load(vals map[Path]Value, dst reflect.Value) error {
 		if v.Kind() == reflect.Map && !validMapKey(v.Type().Key()) {
 			return mapKeyRefusal(p, v.Type().Key())
 		}
-		return unsupportedTypeError{p, v.Type()}
+		return unsupportedType(p, v.Type())
 	}
 	return rec(dst, Path{})
 }

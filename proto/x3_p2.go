@@ -228,10 +228,16 @@ func x3Report[T any](reg *Registry, pl Plane, label string, in T, eq func(a, b T
 	}
 }
 
+// x3One shows the FIRST element of a refusal, which is what a reader scanning a
+// table wants. It goes through errLines because a schema refusal is a ferry
+// aggregate since #41 D8's compiler half, and Error() on one is a summary.
 func x3One(err error) string {
-	s := err.Error()
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i] + " (+more)"
+	ls := errLines(err)
+	switch len(ls) {
+	case 0:
+		return "<nil>"
+	case 1:
+		return ls[0]
 	}
-	return s
+	return ls[0] + " (+more)"
 }

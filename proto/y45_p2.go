@@ -107,7 +107,7 @@ func runY6() {
 			c, ok := activeChainCodec(t)
 			return ok && c.kind == VString
 		}},
-		{"R3 detect the collapse at Dump", func(t reflect.Type) bool {
+		{"R3 detect the collapse at Dump (SHIPPED)", func(t reflect.Type) bool {
 			c, ok := activeChainCodec(t)
 			return ok && c.kind == VString
 		}},
@@ -145,7 +145,15 @@ func runY6() {
   R3 is the one nobody had costed, and it is the interesting one, because
   ferry can detect the collapse EXACTLY - with no registrant, no value
   list and no injectivity proof - simply by noticing that two keys of one
-  map produced one address.`)
+  map produced one address.
+
+  IT IS NOW SHIPPED, alongside R1 rather than instead of it, which is
+  what ADR-0007 records. Under R1 the only keys that reach a dump at all
+  are core's own and ones a registrant declared with .AsMapKey(), so R3
+  is the check that catches a WRONG .AsMapKey() - the case ADR-0009 says
+  it leaves to the registrant's own tests. The rule column below is
+  therefore what each rule ADMITS at compile; R3 admits what R0 does and
+  refuses later, which is why it reads the same.`)
 
 	fmt.Println("\n  (a) DOES IT CATCH THE CASE? Y4's map, through the same detection:")
 	for _, tc := range []struct {
@@ -368,8 +376,7 @@ func runY8() {
   - #31 is untouched, and deliberately. map[time.Time]string collapses on
     core's OWN pre-seeded entry, which ADR-0009 says its opt-in
     "deliberately does not reach". R1 changes nothing there.
-  - R3 is NOT implemented. It stays available as a belt-and-braces check
-    and ADR-0007 records it: it is free, it is exact, and under R1
+  - R3 IS implemented, alongside R1. It is free, it is exact, and under R1
     the only types that can reach it are core's own and ones a registrant
     declared with .AsMapKey(). In other words R1 makes R3 the check that
     catches a WRONG .AsMapKey(), which is the case ADR-0009 currently

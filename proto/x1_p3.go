@@ -34,7 +34,7 @@ func runX1_3() {
 		}
 		fmt.Printf("    %-44s %s\n", tc.label, status)
 		if err != nil {
-			for _, l := range splitLines(err.Error()) {
+			for _, l := range errLines(err) {
 				fmt.Printf("        %s\n", l)
 			}
 		}
@@ -53,7 +53,7 @@ func runX1_3() {
 		TextCodec[netip.AddrPort](VString),
 	)
 	fmt.Printf("    three at once, the middle one broken -> %d accepted, err lines %d\n",
-		len(r.byType), len(splitLines(x1ErrText(err))))
+		len(r.byType), len(errLines(err)))
 	var names []string
 	for t := range r.byType {
 		names = append(names, t.String())

@@ -179,23 +179,21 @@ func validMapKey(k reflect.Type) bool {
 func mapKeyRefusal(p Path, k reflect.Type) error {
 	if _, ok := identityLookup(k); ok && keyOptIn && activeReg != nil {
 		if _, own := activeReg.lookup(k); own && !registeredKeys[k] {
-			return fmt.Errorf(
-				"ferry: %s: %s has a registered codec but is not declared usable as a map key; "+
+			return errAt(mCompile, ErrSchema, p,
+				"%s has a registered codec but is not declared usable as a map key; "+
 					"a key codec's text must be injective over the key type, or two keys collapse "+
-					"into one address; add .AsMapKey() to the registration if it is",
-				pathOrRoot(p), k)
+					"into one address; add .AsMapKey() to the registration if it is", k)
 		}
 	}
 	if c, ok := activeChainCodec(k); ok && c.kind == VString {
-		return fmt.Errorf(
-			"ferry: %s: %s may not key a map: ferry claims it through its text pair rather "+
+		return errAt(mCompile, ErrSchema, p,
+			"%s may not key a map: ferry claims it through its text pair rather "+
 				"than through a registration, so nobody has declared its text injective over "+
 				"the key type, and two keys that render alike collapse into one address; "+
 				"register a codec and mark it usable as a key with "+
-				"ferry.TextCodec[%s](ferry.VString).AsMapKey()",
-			pathOrRoot(p), k, k)
+				"ferry.TextCodec[%s](ferry.VString).AsMapKey()", k, k)
 	}
-	return fmt.Errorf("ferry: %s: unsupported map key type %s", pathOrRoot(p), k)
+	return errAt(mCompile, ErrSchema, p, "unsupported map key type %s", k)
 }
 
 func classify(t reflect.Type) shape {

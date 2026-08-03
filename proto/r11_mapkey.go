@@ -58,8 +58,24 @@ func runR11() {
 			fmt.Printf("      %-8s %s\n", p, d[p].GoString())
 		}
 	})
-	fmt.Println("    ^ one entry silently dropped, no error, and which one survives is map")
-	fmt.Println("      iteration order. ADR-0001 rules out silently ignoring anything.")
+	fmt.Println(`    ^ AS FOUND this read ` + "`" + `ferry dumps 1 address(es), err=<nil>` + "`" + ` with
+      /M/api holding whichever of the two entries won: one silently
+      dropped, and which one survives decided by map iteration order.
+      ADR-0001 rules out silently ignoring anything, and this probe is
+      that rule being broken.
+
+      It is now a REFUSAL, which is ADR-0007's R3 under #45. The rule
+      the probe exists to argue against is unchanged - the implied rule
+      still admits the key - and what changed is that the LOSS is no
+      longer silent. R3 needs nothing from the registrant: two Go keys
+      rendering to one address is observable from the values in hand.
+
+      Note what that does to this measurement: R11a can no longer show
+      a dropped entry at all, so the argument for .AsMapKey() now rests
+      on R11b's - the obligation is about a PAIR of values, which no
+      proof over the key type alone can see - rather than on a silent
+      drop. That is the stronger of the two arguments and it was always
+      the real one.`)
 
 	fmt.Println("\n--- R11b: what a LEAF codec and a KEY codec are actually promising ---")
 	fmt.Println("    They are different obligations and the difference is measurable.")

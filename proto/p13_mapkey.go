@@ -83,9 +83,24 @@ func runMapKey() {
 	h := struct{ V map[time.Time]string }{mm}
 	d, err := dump(reflect.ValueOf(h))
 	fmt.Printf("      ferry dumps %d addresses: %s err=%v\n", len(d), fmtVals(d), err)
-	fmt.Println("    ^ two keys, one address, silently. That is ADR-0005's named hazard")
-	fmt.Println("      occurring inside CORE's own set rather than in a registered codec,")
-	fmt.Println("      and no probe in #7 reached it because none used a composite key.")
+	fmt.Println(`    ^ AS FOUND: two keys, one address, SILENTLY, and which entry
+      survived decided by map iteration order - this line was one of the
+      two in the whole suite that flipped between runs of the same
+      binary. That is ADR-0005's named hazard occurring inside CORE's
+      own set rather than in a registered codec, and no probe in #7
+      reached it because none used a composite key.
+
+      It is now a refusal, and the refusal is ADR-0007's R3 under #45
+      rather than anything aimed at this case. #31 stays OPEN and this
+      is worth being precise about: R3 does not amend the admissible
+      key set, which is what #31 asks for. map[time.Time]string still
+      COMPILES, and time.Time is still a key type core admits on core's
+      own proof. What R3 removes is the silence - a dump that would
+      lose an entry now says so, at the address it would have lost it
+      at. The narrower fix and the ticket are not the same thing.
+
+      Measured: with R3 this suite is byte-identical over 8 runs; the
+      same binary without it produced 2 distinct outputs over 8.`)
 
 	fmt.Println("\n--- P13c: so the rule has to be stated over the key set, not the codec ---")
 	fmt.Println("    An arm's text form is injective for netip.Addr and is not for")
@@ -93,4 +108,8 @@ func runMapKey() {
 	fmt.Println("    is not checkable in general, so the honest positions are: core ships")
 	fmt.Println("    only key types it has proved injective, and everything else is a")
 	fmt.Println("    registered key codec whose registrant carries the proof.")
+	fmt.Println(`    #45 added a third position that costs nothing and subsumes neither:
+    injectivity over a TYPE is undecidable, but a collapse between two
+    values IN HAND is not, so ferry checks the map it is actually
+    dumping. It proves nothing about the type and it loses no entry.`)
 }

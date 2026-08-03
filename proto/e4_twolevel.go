@@ -179,7 +179,10 @@ func runE4() {
 	fmt.Println("  For ferry the question is whether a compile ever performs a cache")
 	fmt.Println("  lookup for a type it is in the middle of compiling. Two facts:")
 	err := Compile[E4Node]()
-	fmt.Printf("\n    (i)  ADR-0005 refuses a recursive type at compile:\n         %v\n", err)
+	fmt.Println("\n    (i)  ADR-0005 refuses a recursive type at compile:")
+	for _, l := range errLines(err) {
+		fmt.Printf("         %s\n", l)
+	}
 	fmt.Println("\n    (ii) and the cache is keyed per ROOT type, not per visited type: a")
 	fmt.Println("         nested struct's addresses depend on the path from the root, so")
 	fmt.Println("         its subschema is not reusable under a different parent and is")

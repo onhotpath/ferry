@@ -59,7 +59,13 @@ func x3Classify(err error) x3Verdict {
 		return x3Verdict{label: "compiles"}
 	}
 	v := x3Verdict{full: err}
-	for _, line := range strings.Split(err.Error(), "\n") {
+	// Elements() rather than splitting Error() on newlines. #41 D8's compiler
+	// half brought schema refusals into ferry's own aggregate, which renders as
+	// a SUMMARY under %v - so splitting the rendering now finds one line saying
+	// "3 errors" and none of them. Elements() is the API ADR-0011 ships for
+	// exactly this, and using it here is the probe reading its own finding.
+	for _, el := range Elements(err) {
+		line := el.Error()
 		if strings.Contains(line, "carries no ferry tag") {
 			v.fieldRule = true
 			// "ferry: /v/IP: field IP carries no ferry tag: ..."
@@ -192,7 +198,7 @@ func runX3_1() {
 	} {
 		fmt.Printf("\n    struct{ V %s "+"`"+`ferry:"v"`+"`"+" }\n", r.name)
 		v := x3Compile(r.typ)
-		for _, l := range strings.Split(v.full.Error(), "\n") {
+		for _, l := range errLines(v.full) {
 			fmt.Printf("      %s\n", l)
 		}
 	}
@@ -214,7 +220,7 @@ func runX3_1() {
 	fmt.Println("    rule fires on all eleven of url.URL's exported fields, User among")
 	fmt.Println("    them, so url.Userinfo is never entered.")
 	uv := x3Compile(reflect.TypeFor[url.URL]())
-	fmt.Printf("      lines in the refusal: %d\n", len(strings.Split(uv.full.Error(), "\n")))
+	fmt.Printf("      lines in the refusal: %d\n", len(errLines(uv.full)))
 	fmt.Printf("      names url.Userinfo:   %v\n", strings.Contains(uv.full.Error(), "Userinfo"))
 	fmt.Println("    Same shape as the audit's D13 and D15: a published measurement the")
 	fmt.Println("    tip cannot reproduce. The outcome is unchanged - url.URL is refused")
@@ -228,7 +234,7 @@ func runX3_1() {
 	fmt.Println("    with its own fieldErr false, and adds a refusal that is true but")
 	fmt.Println("    misleading:")
 	iv := x3Compile(reflect.TypeFor[net.IPNet]())
-	for _, l := range strings.Split(iv.full.Error(), "\n") {
+	for _, l := range errLines(iv.full) {
 		if strings.Contains(l, "maps no address") {
 			fmt.Printf("      %s\n", l)
 		}
@@ -243,19 +249,19 @@ func runX3_1() {
 	fmt.Println("    field beside it and the advice disappears:")
 	one := x3Compile(reflect.TypeFor[net.IPNet]())
 	fmt.Println("\n      struct{ V net.IPNet `ferry:\"v\"` }")
-	for _, l := range strings.Split(one.full.Error(), "\n") {
+	for _, l := range errLines(one.full) {
 		fmt.Printf("        %s\n", l)
 	}
 	o := defaultOpts()
 	o.reg = NewRegistry()
 	_, two := compileOnce(reflect.TypeFor[x3Sibling](), o)
 	fmt.Println("\n      struct{ N net.IPNet `ferry:\"n\"`; Host string `ferry:\"host\"` }  <- one field added")
-	for _, l := range strings.Split(two.Error(), "\n") {
+	for _, l := range errLines(two) {
 		fmt.Printf("        %s\n", l)
 	}
 	fmt.Printf("\n      mentions `register a codec`: one field %v, with a sibling %v\n",
-		strings.Contains(one.full.Error(), "register a codec"),
-		strings.Contains(two.Error(), "register a codec"))
+		x3Mentions(one.full, "register a codec"),
+		x3Mentions(two, "register a codec"))
 	fmt.Println("    Both remedies the surviving message offers - name the segment, or")
 	fmt.Println("    ferry:\"-\" - are edits to net's own struct definition, so in the")
 	fmt.Println("    common shape the user is told only things they cannot do. The")
@@ -270,4 +276,16 @@ func runX3_1() {
 type x3Sibling struct {
 	N    net.IPNet `ferry:"n"`
 	Host string    `ferry:"host"`
+}
+
+// x3Mentions asks whether ANY element of a refusal carries a phrase. Error() on
+// an aggregate is a summary since #41 D8's compiler half, so searching the
+// rendering finds the address list and none of the messages.
+func x3Mentions(err error, phrase string) bool {
+	for _, l := range errLines(err) {
+		if strings.Contains(l, phrase) {
+			return true
+		}
+	}
+	return false
 }

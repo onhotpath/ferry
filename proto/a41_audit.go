@@ -462,23 +462,40 @@ func runA8() {
 	fmt.Printf("    DiffErrors(...)       : %v\n",
 		DiffErrors(verr, Want{Address: Path{}.Name("max_conns"), Class: ErrValue}))
 
-	fmt.Println("\n  and where errors.Join survives, which is the part still open.")
-	fmt.Println("  A schema with two independent refusals, so the aggregate is real:")
+	fmt.Println("\n  and the COMPILER path, which was the part still open:")
+	fmt.Println("  a schema with two independent refusals, so the aggregate is real:")
 	err := Compile[A8Multi]()
 	fmt.Printf("    Compile[A8Multi]()    -> %v\n", errOneLine(err))
 	fmt.Printf("    it is a *ferry aggregate     : %v\n", isErrorList(err))
 	fmt.Printf("    Elements() can range it      : %d of the 2 refusals above\n", len(Elements(err)))
-	fmt.Println("    errors.Join's result is invisible to Elements() and is ordered by")
-	fmt.Println("    construction, so ADR-0003's segment-wise rule does not reach it.")
+	fmt.Println("    As FOUND this read `it is a *ferry aggregate: false` and `Elements()")
+	fmt.Println("    can range it: 1 of the 2`, because e_schema.go called errors.Join,")
+	fmt.Println("    whose result is invisible to Elements() and is ordered by the")
+	fmt.Println("    RENDERED string - which is the subtle bug ADR-0003 names.")
+	fmt.Println("    Every schema refusal is now a *ferry.Error carrying the compile")
+	fmt.Println("    moment and ErrSchema, so it sorts before a walk error and after a")
+	fmt.Println("    registration one, segment-wise within the moment:")
+	for _, l := range errLines(err) {
+		fmt.Printf("      %s\n", l)
+	}
+	var fe2 *Error
+	if errors.As(Elements(err)[0], &fe2) {
+		fmt.Printf("    element 0: moment=%v  Is(ErrSchema)=%v  Address()=%v\n",
+			fe2.mom, errors.Is(fe2, ErrSchema), fe2.Address())
+	}
 
-	verdict("PARTLY", "#41 landed ADR-0011's model whole on the RUNTIME path:")
-	fmt.Println("           the type, Address(), five class sentinels, Elements(), ErrorAt()")
-	fmt.Println("           and DiffErrors() all exist and the runtime calls `join` rather")
-	fmt.Println("           than errors.Join. As FOUND none of them existed, because ADR-0011")
-	fmt.Println("           was measured on proto/9-errors, which is not an ancestor of this")
-	fmt.Println("           tip. What is still open is the COMPILER path: e_schema.go:107 and")
-	fmt.Println("           :423 still call errors.Join, so a schema refusal is invisible to")
-	fmt.Println("           Elements() and is ordered by construction rather than segment-wise.")
+	verdict("IMPLEMENTED", "#41 landed ADR-0011's model whole, on BOTH paths.")
+	fmt.Println("           The runtime half came first - the type, Address(), five class")
+	fmt.Println("           sentinels, Elements(), ErrorAt(), DiffErrors() and `join` in place")
+	fmt.Println("           of errors.Join. The compiler half came last and was the harder")
+	fmt.Println("           one, because it is not a swap: every schema refusal had to become")
+	fmt.Println("           a *Error carrying a moment, a class and an ADDRESS, or `join` has")
+	fmt.Println("           nothing to sort on and the result orders by rendered string again.")
+	fmt.Println("           As FOUND none of it existed, because ADR-0011 was measured on")
+	fmt.Println("           proto/9-errors, which is not an ancestor of this tip.")
+	fmt.Println("           errors.Join survives in e6_walkonce.go and e12_yield.go, which are")
+	fmt.Println("           PROBES of the alternatives, and in fdrv_yaml.go, where it joins a")
+	fmt.Println("           driver's own errors - ADR-0011 leaves a driver's tree alone.")
 }
 
 func isErrorList(err error) bool {
@@ -871,7 +888,37 @@ func errOneLine(err error) string {
 	if err == nil {
 		return "<nil>"
 	}
+	// An AGGREGATE renders under %v as a summary - `ferry: 3 errors: /a, /b` -
+	// with the elements only under %+v, which is ADR-0011's decision. #41 D8's
+	// compiler half brought schema refusals into that aggregate, and every probe
+	// using this helper is showing its refusals as evidence, so it wants the
+	// elements. A SINGLE error keeps Error(), because %+v on one would add the
+	// moment-and-class trailer the probes do not need.
+	if els := Elements(err); len(els) > 1 {
+		parts := make([]string, len(els))
+		for i, e := range els {
+			parts[i] = e.Error()
+		}
+		return strings.Join(parts, " | ")
+	}
 	return strings.ReplaceAll(err.Error(), "\n", " | ")
+}
+
+// errLines is the list form of errOneLine, and the reason both exist is #41
+// D8's compiler half. A schema refusal used to be errors.Join's newline-joined
+// text, so every probe that wanted the elements split Error() on "\n". It is now
+// a ferry aggregate rendering as a summary, so splitting the rendering finds one
+// line saying "3 errors" and none of them. Elements() is what ADR-0011 ships.
+func errLines(err error) []string {
+	if err == nil {
+		return nil
+	}
+	els := Elements(err)
+	out := make([]string, 0, len(els))
+	for _, e := range els {
+		out = append(out, e.Error())
+	}
+	return out
 }
 
 func countErrs(err error) int {

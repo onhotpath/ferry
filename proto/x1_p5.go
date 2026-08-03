@@ -128,7 +128,7 @@ func runX1_6() {
 		{"four fields, one of each", reflect.TypeFor[x1AllFour]()},
 	} {
 		_, err := compileSchema2(tc.t, defaultOpts())
-		lines := splitLines(errText2(err))
+		lines := errLines(err)
 		fmt.Printf("    %-48s %d error(s)\n", tc.label, count(err))
 		for _, l := range lines {
 			fmt.Printf("        %s\n", l)
@@ -233,7 +233,7 @@ func count(err error) int {
 	if err == nil {
 		return 0
 	}
-	return len(splitLines(err.Error()))
+	return len(errLines(err))
 }
 
 func errText2(err error) string {

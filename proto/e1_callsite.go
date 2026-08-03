@@ -23,7 +23,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 )
 
 type E1DB struct {
@@ -196,7 +195,9 @@ func indent(err error) string {
 		return "    <nil>"
 	}
 	out := ""
-	for _, l := range strings.Split(err.Error(), "\n") {
+	// errLines rather than splitting Error(): #41 D8's compiler half made a
+	// schema refusal a ferry aggregate, which renders as a summary under %v.
+	for _, l := range errLines(err) {
 		out += "    " + l + "\n"
 	}
 	return out[:len(out)-1]

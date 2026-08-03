@@ -220,6 +220,23 @@ func coreSet() []Proof {
 		Type("string", Eq[string], "", "a", "b,c", "\x00", "héllo", "  "),
 		Type("int", Eq[int], 0, 1, -1, math.MaxInt, math.MinInt),
 		Type("int8", Eq[int8], 0, math.MaxInt8, math.MinInt8),
+		// #41 D18: ADR-0005's completeness check was specified and never
+		// implemented. Implemented, it was RED on arrival - eighteen admitted
+		// members and eleven proof rows - and these seven are the difference.
+		// Every one is an integer width nobody would think to doubt, which is
+		// precisely why the check is worth having: the rows a human writes are
+		// the ones a human already suspects.
+		//
+		// The boundary values are the ones that distinguish a width from its
+		// neighbours, so a codec that silently truncates to a narrower type
+		// fails here rather than in production.
+		Type("int16", Eq[int16], 0, 1, -1, math.MaxInt16, math.MinInt16),
+		Type("int32", Eq[int32], 0, 1, -1, math.MaxInt32, math.MinInt32),
+		Type("int64", Eq[int64], 0, 1, -1, math.MaxInt64, math.MinInt64),
+		Type("uint", Eq[uint], 0, 1, math.MaxUint),
+		Type("uint8", Eq[uint8], 0, 1, math.MaxUint8),
+		Type("uint16", Eq[uint16], 0, 1, math.MaxUint16),
+		Type("uint32", Eq[uint32], 0, 1, math.MaxUint32),
 		Type("uint64", Eq[uint64], 0, math.MaxUint64),
 		Type("float64", BitEq[float64], 0, math.Copysign(0, -1), 0.1, 1.0/3.0,
 			math.MaxFloat64, math.SmallestNonzeroFloat64,

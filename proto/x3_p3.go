@@ -22,7 +22,6 @@ import (
 	"net/netip"
 	"os"
 	"reflect"
-	"strings"
 )
 
 // x3IPNetString is the obvious registration. It is what a user writes.
@@ -136,7 +135,7 @@ func runX3_3() {
 		}
 		fmt.Printf("\n    %-52s %s\n", c.label, st)
 		if err != nil {
-			for _, l := range strings.Split(err.Error(), "\n") {
+			for _, l := range errLines(err) {
 				fmt.Printf("      %s\n", l)
 			}
 		}

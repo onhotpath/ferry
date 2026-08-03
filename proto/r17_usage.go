@@ -429,7 +429,12 @@ func r17MapKey() {
 		}
 	})
 	keyOptIn = true
-	fmt.Println("      ^ one entry gone, no error, winner decided by map iteration order.")
+	fmt.Println(`      ^ AS FOUND: one entry gone, no error, winner by map iteration
+        order. Now a refusal - ADR-0007's R3 under #45 - so the implied
+        rule loses the entry LOUDLY rather than silently. The argument
+        for .AsMapKey() is unchanged and its shape moves: it is that the
+        obligation is about a pair of values and belongs to whoever knows
+        the type, not that the alternative is silent.`)
 	fmt.Println()
 	fmt.Println("    And the third option, which is additive rather than an alternative:")
 	fmt.Println("    ferrytest checks injectivity over the registrant's own value list,")

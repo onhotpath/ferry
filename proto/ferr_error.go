@@ -147,7 +147,13 @@ func (e *Error) Error() string {
 // is suppressed rather than printed once per element.
 func (e *Error) body(b *strings.Builder) {
 	if e.hasLoc {
-		b.WriteString(e.loc.String())
+		// pathOrRoot rather than loc.String(): the root Path renders as the empty
+		// string, and "ferry: : ..." is not a sentence. #41 D8's compiler half
+		// brought schema errors into this type, and those DO sit at the root -
+		// "the root type T is not a struct ferry walks" is one - so the two
+		// spellings had to become one. "(root)" is what the compiler already
+		// printed.
+		b.WriteString(pathOrRoot(e.loc))
 		b.WriteString(": ")
 	}
 	b.WriteString(e.msg)
@@ -364,7 +370,10 @@ func (l *errorList) Format(f fmt.State, verb rune) {
 func locLabel(err error) string {
 	var e *Error
 	if errors.As(err, &e) && e.hasLoc {
-		return e.loc.String()
+		// pathOrRoot, for the same reason body() uses it: a schema refusal can
+		// sit at the root, and a summary reading `2 errors: , /v/IP` names
+		// nothing at all for the first one.
+		return pathOrRoot(e.loc)
 	}
 	if errors.As(err, &e) {
 		return "(" + e.mom.String() + ")"

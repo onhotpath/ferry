@@ -125,7 +125,13 @@ func runE3() {
 	fmt.Println("      (10.4 ns precomputed against 109 ns per call). On the SCHEMA side")
 	fmt.Println("      the static address of a leaf is already in the node, and the only")
 	fmt.Println("      thing minted per call is a DYNAMIC one, which no cache can hold.")
-	leafNode := s.root.fields[0].node
+	// Looked up by ADDRESS rather than by position. #41: this read
+	// s.root.fields[0] and s.root.fields[5], so it depended on the fixture's
+	// declaration order matching the compiled field list - and #50's costing of
+	// a per-node sort found that index 5 would then be a node with a nil `def`,
+	// segfaulting this probe. n.fields order is load-bearing for anything that
+	// indexes it, and only a comment could have said so.
+	leafNode := e3FieldAt(s.root, "/name")
 	bench("read the compiled Path out of the leaf", func() { _ = leafNode.shape })
 	bench("re-mint /auth/user from segments", func() { _ = Path{}.Name("auth").Name("user") })
 
@@ -133,7 +139,7 @@ func runE3() {
 	fmt.Println("\n  (3) the default: ADR-0006 requires the TEXT to be re-decoded per load,")
 	fmt.Println("      because a cached Go value aliases across every load of one schema.")
 	fmt.Println("      What IS compiled is the text-to-Value step and its validation.")
-	defNode := s.root.fields[5].node
+	defNode := e3FieldAt(s.root, "/retries")
 	bench("declared default, already a Value", func() {
 		var i int
 		_ = decLeafWith(defNode.codec, *defNode.def, reflect.ValueOf(&i).Elem())
@@ -158,4 +164,16 @@ func runE3() {
 	fmt.Println("  The compile is the whole cost, and resolving the codec into the leaf is a")
 	fmt.Println("  smaller and separate win. ADR-0009 already said the performance is not the")
 	fmt.Println("  argument for resolving at compile; E4 and ADR-0009's staleness result are.")
+}
+
+// e3FieldAt finds a compiled child by the address it minted, which is the only
+// stable handle a probe has on one: the field list's ORDER is the walk's
+// business and may change without any address changing.
+func e3FieldAt(n *node, addr string) *node {
+	for _, f := range n.fields {
+		if f.node.shape.String() == addr {
+			return f.node
+		}
+	}
+	panic("e3: no compiled field at " + addr)
 }

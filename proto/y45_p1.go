@@ -298,7 +298,11 @@ func runY4() {
 	fmt.Println("\n  WHICH entry survives, over 200 dumps of the same value:")
 	seen := map[string]int{}
 	for i := 0; i < 200; i++ {
-		g, _ := dumpTo(ctx, v, keyReg)
+		g, err := dumpTo(ctx, v, keyReg)
+		if err != nil {
+			seen["REFUSED: "+errOneLine(err)]++
+			continue
+		}
 		var parts []string
 		for _, p := range sortedAddrs(g) {
 			parts = append(parts, p.String()+"="+g[p].GoString())
@@ -312,19 +316,27 @@ func runY4() {
 	sort.Strings(keys)
 	fmt.Printf("    %d distinct outcome(s) over 200 runs\n", len(seen))
 	for _, k := range keys {
-		fmt.Printf("      %-24s %d/200\n", k, seen[k])
+		fmt.Printf("      %-24s %d/200\n", shortenY(k), seen[k])
 	}
 
 	back, lerr := loadFrom(ctx, yMap[YID]{}, got, keyReg)
 	fmt.Printf("\n  and loading it back: %d key(s), err=%v\n", len(back.M), errOneLine(lerr))
 	fmt.Println(`
-  Two entries dropped, no error, and the winner decided by map iteration
-  order. That is ADR-0001's determinism invariant broken and its
-  "never silently ignore" rule broken, in one dump.
+  AS FOUND this read "ferry dumps 1 address, err=<nil>" with THREE
+  distinct outcomes over 200 runs - 152/200, 28/200, 20/200 - so two
+  entries were dropped, no error was raised, and the winner was decided by
+  map iteration order. That is ADR-0001's determinism invariant broken and
+  its "never silently ignore" rule broken, in one dump.
 
-  AS FOUND, this ran with NO registration at all, because ADR-0007's chain
-  claimed main.YID and keyed the map with nobody having been asked. That is
-  what ADR-0007 reversed. What survives is the narrower case above: a
-  registrant who said .AsMapKey() and was wrong, which ADR-0009 leaves to
-  their own tests and which Y6's R3 would catch for free.`)
+  BOTH halves are now closed, by two separate rules, and it is worth
+  keeping them apart:
+    ADR-0007's R1 means the case as found - NOTHING registered, the chain
+      claiming main.YID - does not compile. That is the first line of this
+      probe.
+    ADR-0007's R3 means the case that survives R1 - a registrant who said
+      .AsMapKey() and was wrong - loses the entry LOUDLY. That is the
+      200-run table, which is now one outcome instead of three.
+  R1 removes the population; R3 removes the silence. Neither subsumes the
+  other, and #31 needs the second because core's own time.Time key is out
+  of R1's reach by construction.`)
 }

@@ -39,18 +39,28 @@ type Want struct {
 // as data rather than as a test failure. A diff is also what actually helps -
 // "wanted /db/port value, got /db/port missing" is a sentence, and false is not.
 func DiffErrors(got error, want ...Want) []string {
+	// The key holds the PATH, not its rendering. #41 found this sorting by
+	// strings.Compare on the canonical bytes, so twelve indices came out
+	// 0 1 10 11 2 3 ... - which is verbatim what ADR-0003 calls "a subtle bug
+	// ... it will be a conformance-suite case", inside the helper ADR-0011
+	// describes as reporting "in segment-wise order", in one of ADR-0003's own
+	// three named places. A Path is comparable, so it can be the map key
+	// directly and CompareSegmentwise can do the sorting.
 	type key struct {
-		addr  string
+		addr  Path
 		class string
 	}
-	k := func(a Path, c error) key { return key{a.String(), className(c)} }
+	k := func(a Path, c error) key { return key{a, className(c)} }
 
 	have := map[key]int{}
 	order := []error{}
 	for _, e := range Elements(got) {
 		var fe *Error
 		if !errors.As(e, &fe) {
-			have[key{"(not a ferry error)", e.Error()}]++
+			// A non-ferry error has no address at all, so it sorts before every
+			// address rather than under a made-up one: the root Path is the
+			// smallest key segment-wise and renders as "(root)".
+			have[key{Path{}, "(not a ferry error) " + e.Error()}]++
 			order = append(order, e)
 			continue
 		}
@@ -75,7 +85,7 @@ func DiffErrors(got error, want ...Want) []string {
 		keys = append(keys, x)
 	}
 	slices.SortFunc(keys, func(a, b key) int {
-		if c := strings.Compare(a.addr, b.addr); c != 0 {
+		if c := CompareSegmentwise(a.addr, b.addr); c != 0 {
 			return c
 		}
 		return strings.Compare(a.class, b.class)
@@ -85,11 +95,11 @@ func DiffErrors(got error, want ...Want) []string {
 		switch {
 		case h == w:
 		case w == 0:
-			diffs = append(diffs, fmt.Sprintf("unwanted: %s %s (x%d)", x.addr, x.class, h))
+			diffs = append(diffs, fmt.Sprintf("unwanted: %s %s (x%d)", pathOrRoot(x.addr), x.class, h))
 		case h == 0:
-			diffs = append(diffs, fmt.Sprintf("missing:  %s %s (x%d)", x.addr, x.class, w))
+			diffs = append(diffs, fmt.Sprintf("missing:  %s %s (x%d)", pathOrRoot(x.addr), x.class, w))
 		default:
-			diffs = append(diffs, fmt.Sprintf("count:    %s %s got %d, want %d", x.addr, x.class, h, w))
+			diffs = append(diffs, fmt.Sprintf("count:    %s %s got %d, want %d", pathOrRoot(x.addr), x.class, h, w))
 		}
 	}
 	return diffs

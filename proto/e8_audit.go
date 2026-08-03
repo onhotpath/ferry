@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -171,7 +172,7 @@ func runE8() {
 		dd := o.reg.install()
 		_, e := compileSchema2(reflect.TypeFor[E8Bad](), o)
 		dd()
-		distinct[fmt.Sprint(e)]++
+		distinct[strings.Join(errLines(e), "\n")]++
 	}
 	fmt.Printf("  300 compiles of a type with four bad fields -> %d distinct error string(s)\n", len(distinct))
 	for k := range distinct {

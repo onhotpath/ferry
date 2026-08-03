@@ -10,23 +10,42 @@ import (
 	"time"
 )
 
+// TAGGED under #41. These two are the default `go run .` suite's fixture, and
+// they used to carry no ferry tags at all - which walk.go accepts, because
+// fieldName() invents the Go field name for an untagged field, and which
+// e_schema.go refuses, because ADR-0008 decided that "an exported, named struct
+// field with no ferry tag is a schema compile error. ferry never invents a
+// segment name."
+//
+// So the suite a reader runs FIRST was exercising the naming rule ADR-0008
+// refused, on a struct the current engine will not compile - measured at X3=4,
+// walk.go giving 13 addresses and e_schema giving 11 refusals for the same
+// type. The tags are the segment names walk.go was inventing, so every address
+// and every published number on this fixture is unchanged, and the two engines
+// now agree about it.
+//
+// This does NOT retire walk.go, and #41 records why: it is the engine
+// ADR-0003, ADR-0004, ADR-0005, ADR-0007 and ADR-0009's numbers were taken on,
+// 34 probe files call it, and X3-4c reproduces ADR-0005's published /IP and
+// /Mask row ON IT. Deleting it deletes the ability to reproduce published
+// evidence. What was wrong was the DEFAULT, not the file.
 type Inner struct {
-	User string
-	Pass string
+	User string `ferry:"User"`
+	Pass string `ferry:"Pass"`
 }
 
 type Conf struct {
-	Name    string
-	Port    int
-	Ratio   float64
-	On      bool
-	Timeout time.Duration
-	When    time.Time
-	Secret  []byte
-	Auth    Inner
-	Opt     *Inner
-	Tags    []string
-	Limits  map[string]int
+	Name    string         `ferry:"Name"`
+	Port    int            `ferry:"Port"`
+	Ratio   float64        `ferry:"Ratio"`
+	On      bool           `ferry:"On"`
+	Timeout time.Duration  `ferry:"Timeout"`
+	When    time.Time      `ferry:"When"`
+	Secret  []byte         `ferry:"Secret"`
+	Auth    Inner          `ferry:"Auth"`
+	Opt     *Inner         `ferry:"Opt"`
+	Tags    []string       `ferry:"Tags"`
+	Limits  map[string]int `ferry:"Limits"`
 }
 
 var runAtEnd = func() {}
