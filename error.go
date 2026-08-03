@@ -1,0 +1,609 @@
+package ferry
+
+import (
+	"cmp"
+	"errors"
+	"fmt"
+	"io"
+	"slices"
+	"strconv"
+	"strings"
+)
+
+// moment is when in a run a failure happened.
+//
+// It is a field on one error type rather than a family of types, because the
+// aggregate, the location, the sort and the formatter are identical work at
+// every moment, and a caller doing Load cannot avoid handling both halves of
+// the split anyway: a schema failure surfaces through the same call as a
+// missing key (ADR-0011).
+//
+// The order is load-bearing, because the moment is the first term of the sort
+// key: an open failure precedes the walk errors it caused, and a close failure
+// follows them rather than heading a report it had nothing to do with. There is
+// no accessor, because nobody branches on it; what it is for is that ordering
+// and the words ferry uses about a driver failure.
+type moment uint8
+
+const (
+	momentRegister moment = iota // registering a codec, before any schema exists
+	momentCompile                // schema compile, provable from the type alone
+	momentBind                   // a driver being handed the address set
+	momentOpen                   // opening the plane
+	momentWalk                   // the walk over the schema
+	momentCommit                 // committing a dump
+	momentClose                  // closing the plane
+	momentUnknown                // an element that did not come from ferry
+)
+
+// momentName is the moment set made mechanical, in moment order, and the
+// assertion under it stops the package compiling if a moment is added without a
+// name.
+var momentName = [...]string{
+	"register", "compile", "bind", "open", "walk", "commit", "close", "unknown",
+}
+
+var _ [len(momentName)]struct{} = [int(momentUnknown) + 1]struct{}{}
+
+// String names the moment in the spelling the report uses. A moment past the
+// end renders as itself rather than borrowing a neighbour's name.
+func (m moment) String() string {
+	if int(m) < len(momentName) {
+		return momentName[m]
+	}
+
+	return "moment(" + strconv.Itoa(int(m)) + ")"
+}
+
+// The vocabulary is sentinels and nothing else: there is no Kind enum and no
+// KindOf, because errors.Is is what the standard library already does for this
+// job and it costs ErrDriver nothing to be a second axis (ADR-0011).
+//
+// The sentinel text is load-bearing, and that was found by rendering rather
+// than by choosing. A driver declares its class by wrapping a sentinel, so the
+// sentinel's own text lands inside the driver's message: "plane" read as a
+// stray word in `...cannot contain a space: plane`, where "plane error" reads
+// as a sentence.
+
+// ErrSchema is a failure provable from the destination type plus the codec
+// registry, with no plane in sight. It is defined as what schema compile can
+// catch, which reuses ADR-0008's line rather than drawing a new one.
+var ErrSchema = errors.New("schema error")
+
+// ErrMissing is the plane being silent at an address the schema marks required.
+//
+// It is split from ErrValue because "these six keys are unset" and "these two
+// hold garbage" are different messages for different people, and collapsing
+// them makes an operator read the list one line at a time to find out which is
+// which.
+var ErrMissing = errors.New("missing")
+
+// ErrValue is the plane speaking and what it said not fitting the target type.
+var ErrValue = errors.New("invalid value")
+
+// ErrPlane is ferry being unable to talk to the plane, or a driver refusing the
+// address set it was bound to.
+var ErrPlane = errors.New("plane error")
+
+// ErrDriver is provenance rather than a class, and it crosses the other four:
+// it says the cause came from below, which is the thing ferry knows for
+// certain.
+//
+// There is no transient marker, because whether a backend's status code is
+// worth retrying is the driver's knowledge and core contains nothing that
+// requires knowing what a plane is for (ADR-0001). Provenance is the better
+// proxy for the same decision: retrying an ErrValue is always pointless, and
+// retrying a driver's read is sometimes not.
+var ErrDriver = errors.New("driver")
+
+// ErrReadOnly is a plane that is writable in principle but not right now, and a
+// sink refuses with it when it opens for writing rather than at the first write
+// (ADR-0004). It is ADR-0011's family rather than an exception beside it.
+//
+// It is the only plane condition core names, and the reason is placement rather
+// than taxonomy. Throttled, unauthenticated and timed out are the driver's
+// knowledge and stay the driver's sentinels, reachable under ferry's wrapper. A
+// read-only refusal is different because ADR-0004 makes where it is raised a
+// clause of the contract: inside the open, not at Bind, which does no I/O and
+// cannot know, and not at the first Set, which has already half-written the
+// plane. A rule about placement needs a portable signal to be checked against,
+// or the conformance suite cannot hold a driver to it and the rule is prose.
+//
+// So a driver wraps both: this, so a caller and the suite can ask the question
+// without knowing which plane answered, and its own error underneath, so
+// errors.Is against the driver's sentinel keeps working.
+var ErrReadOnly = errors.New("plane is read only")
+
+// classRule maps a sentinel a driver or a codec may wrap onto the class it
+// thereby declares.
+type classRule struct{ sentinel, class error }
+
+// classRules is the whole of what a driver can say about the class, and core
+// keeps its answer over the default for the moment. A driver can also be wrong
+// about it and nothing checks that, which is a conformance case in the same
+// family as ADR-0004's optional interfaces.
+//
+// The last two rows are the subordinate sentinels. ErrReadOnly is a kind of
+// ErrPlane and ErrWrongKind is a kind of ErrValue, so each composes with a
+// class rather than standing outside the vocabulary: an accessor's refusal
+// reaching a caller through core answers to errors.Is(err, ErrValue) as well as
+// to itself.
+var classRules = [...]classRule{
+	{ErrSchema, ErrSchema},
+	{ErrMissing, ErrMissing},
+	{ErrValue, ErrValue},
+	{ErrPlane, ErrPlane},
+	{ErrReadOnly, ErrPlane},
+	{ErrWrongKind, ErrValue},
+}
+
+// declaredClass is the class an error already declares, or nil where it
+// declares none and core's default for the moment stands.
+func declaredClass(err error) error {
+	for _, r := range classRules {
+		if errors.Is(err, r.sentinel) {
+			return r.class
+		}
+	}
+
+	return nil
+}
+
+// Error is a ferry failure. It carries four things and no more: the location,
+// the moment, the class and the cause.
+//
+// The name is exported so errors.AsType finds it through any wrapping; no field
+// is, so the struct can grow and a caller cannot build a switch over ferry's
+// internals. That is the whole answer to "how does a caller match a kind
+// without depending on concrete types": there is no concrete type to depend on,
+// and the accessor set is what ferry commits to (ADR-0011).
+//
+// The location is a Path holding two different spaces, and that is a rule
+// rather than two fields. At schema compile it is the Go field path, because a
+// field with no tag never named an address and the whole error is that it did
+// not. Everywhere else it is the plane address.
+//
+// The class is matched with errors.Is and there is no accessor for it, nor for
+// the moment. The cause stays in the chain, so errors.Is against a driver's own
+// sentinel or strconv.ErrRange still answers, and ferry never prints it: ferry's
+// own message text never contains a value the plane supplied, and ferry cannot
+// know which addresses hold secrets without knowing what the plane is for. What
+// ferry names instead is structure - the observed kind, the target type,
+// whether a failure was syntax or range, an array's length.
+//
+// Message text is not API. Match on the sentinels and on the address.
+type Error struct {
+	// loc is the location, and the zero Path is "no location": an address has
+	// at least one segment, so no flag is needed to tell them apart.
+	loc   Path
+	mom   moment
+	class error // one of the four, or nil where ferry claims none
+	// driver records that the cause came from below. It is what ErrDriver
+	// matches, and core supplies it so a driver cannot forge it.
+	driver bool
+	// msg is ferry's own text, and never the plane's.
+	msg string
+	// cause is reachable and, except for a driver's own error, never printed.
+	cause error
+}
+
+// Error() is on the pointer receiver, which is the whole of survey item 5.14's
+// fourth entry: declaring it on the value where a pointer is returned makes
+// both forms satisfy error, and the natural value-form errors.As is then a
+// silent false rather than a compile error.
+var _ error = (*Error)(nil)
+
+// Error renders the failure on one line, prefixed with "ferry: ", which is what
+// lands inside somebody else's fmt.Errorf("loading config: %w", err).
+func (e *Error) Error() string { return errPrefix + e.line() }
+
+// Unwrap returns the cause, so a driver's own error and a decode failure's
+// strconv sentinel both stay matchable through ferry's wrapper.
+func (e *Error) Unwrap() error { return e.cause }
+
+// Address is the one accessor. At schema compile it is the Go field path and
+// everywhere else it is the plane address; an error with no location, a close
+// failure among them, returns the zero Path.
+func (e *Error) Address() Path { return e.loc }
+
+// Is matches the class sentinel and the provenance marker. Neither is in the
+// unwrap chain, so this is what makes errors.Is the whole of the matching
+// mechanism.
+func (e *Error) Is(target error) bool {
+	if e.class != nil && target == e.class {
+		return true
+	}
+
+	return e.driver && target == ErrDriver
+}
+
+// Format renders %v as the one line, %+v as the full report, %s as the one line
+// and %q as it quoted.
+func (e *Error) Format(f fmt.State, verb rune) { writeVerb(f, verb, e) }
+
+// line is the error without the "ferry: " prefix, which is the form an
+// aggregate's report prints: the header already said "ferry", so the per-line
+// prefix is suppressed rather than repeated once per element.
+func (e *Error) line() string {
+	var b strings.Builder
+
+	if e.loc != (Path{}) {
+		b.WriteString(e.loc.String())
+		b.WriteString(": ")
+	}
+
+	b.WriteString(e.msg)
+
+	// A driver's own text is printed, and the obligation not to put plane
+	// values in it is the driver's - the same shape as every other driver
+	// obligation in ADR-0004. A decode cause is not printed, because ferry
+	// chose to call strconv and strconv's habit of quoting its input is
+	// therefore ferry's problem.
+	if e.driver && e.cause != nil {
+		b.WriteString(": ")
+		b.WriteString(e.cause.Error())
+	}
+
+	return b.String()
+}
+
+func (e *Error) oneLine() string { return e.Error() }
+
+// report is %+v for a single failure: the line, and under it the structure
+// ferry knows. It names no value the plane supplied either.
+func (e *Error) report() string {
+	var b strings.Builder
+
+	b.WriteString(e.Error())
+	b.WriteString(reportIndent)
+	b.WriteString(e.mom.String())
+
+	if e.class != nil {
+		b.WriteString(listSep)
+		b.WriteString(e.class.Error())
+	}
+
+	if e.driver {
+		b.WriteString(listSep)
+		b.WriteString(ErrDriver.Error())
+	}
+
+	return b.String()
+}
+
+const (
+	errPrefix    = "ferry: "
+	listSep      = ", "
+	reportIndent = "\n  "
+)
+
+// newError is core's own constructor, and the only party that mints a class,
+// a moment or a location is core.
+func newError(m moment, class error, loc Path, msg string) *Error {
+	return &Error{loc: loc, mom: m, class: class, msg: msg}
+}
+
+// withCause attaches a cause that stays reachable, and adopts a class the cause
+// already declares. That is where a driver or a codec holds its one opinion:
+// core supplies the default class for the moment unless the error it was handed
+// carries a ferry sentinel, in which case core keeps it.
+func (e *Error) withCause(cause error) *Error {
+	e.cause = cause
+
+	if class := declaredClass(cause); class != nil {
+		e.class = class
+	}
+
+	return e
+}
+
+// fromDriver wraps whatever a driver returned. Core supplies the address, the
+// moment and the provenance marker, and a driver can change none of them.
+//
+// Where core already knows the address, core's wins, so a driver cannot
+// misattribute a read at one address to another. Where core does not, an
+// address the driver named with ErrorAt is taken, and the carrier is then
+// unwrapped away: leaving it in the chain prints the address twice, once from
+// ferry's location and once from the carrier's own text.
+func fromDriver(m moment, loc Path, err error) *Error {
+	cause := err
+
+	if at, ok := errors.AsType[*atError](err); ok {
+		if loc == (Path{}) {
+			loc = at.at
+		}
+
+		cause = at.err
+	}
+
+	e := newError(m, ErrPlane, loc, driverMsg(m)).withCause(cause)
+	e.driver = true
+
+	return e
+}
+
+// driverMsg is what ferry says about a driver failure before the driver's own
+// text. It is the moment in words, which is ferry's own text and so always
+// safe, and it is what stops a location-less driver error rendering as the bare
+// word "driver".
+//
+// It is also why no direction is carried: what a driver failure wants is a
+// verb, and the call site supplies one without the error storing it.
+func driverMsg(m moment) string {
+	switch m {
+	case momentBind:
+		return "the driver refused the address set"
+	case momentOpen:
+		return "opening the plane"
+	case momentCommit:
+		return "committing"
+	case momentClose:
+		return "closing the plane"
+	default:
+		return "the driver failed"
+	}
+}
+
+// ErrorAt attaches an address to an error a driver is returning, for the case
+// core cannot supply one: a driver refusing over a whole address set knows
+// which member it disliked, and core does not.
+//
+// It attaches and never classifies, which is what stops it being a second
+// constructor of ferry errors: on its own it is not a *Error and matches no
+// class, and it is inert until core wraps it. It returns error rather than
+// *Error so that "return ferry.ErrorAt(a, f())" cannot smuggle a typed nil out
+// as a non-nil error. A nil err returns nil.
+func ErrorAt(addr Path, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return &atError{at: addr, err: err}
+}
+
+// atError is ErrorAt's carrier. It is unexported because a caller matches on
+// the sentinels and reads the address off ferry's own error, never off this.
+type atError struct {
+	at  Path
+	err error
+}
+
+func (a *atError) Error() string { return a.at.String() + ": " + a.err.Error() }
+
+func (a *atError) Unwrap() error { return a.err }
+
+// summaryMax is how many addresses the one-line form names before it elides.
+// Three is the rendering ADR-0011 measured: at forty errors the line is still
+// one line, and it states the count it did not name.
+//
+// The elision is a presentation cap and not a data one. %+v and Elements both
+// still hold everything, so ADR-0001's ban on dropping anything silently holds.
+const summaryMax = 3
+
+// errorList is the aggregate. It is flat and sorted at construction, and it is
+// unexported because Elements is the whole of what a caller needs from it and
+// two exported error types whose names differ by one letter is a trap.
+type errorList struct{ errs []error }
+
+var _ error = (*errorList)(nil)
+
+// Error is the one-line form: the count, then the addresses, eliding past
+// summaryMax with the rest stated as a number.
+func (l *errorList) Error() string { return l.oneLine() }
+
+// Unwrap is what makes errors.Is keep errors.Join's meaning on an aggregate:
+// it answers "at least one element is of this class". Counting is the caller's
+// range over Elements.
+func (l *errorList) Unwrap() []error { return l.errs }
+
+// Format renders %v as the one line and %+v as the report.
+func (l *errorList) Format(f fmt.State, verb rune) { writeVerb(f, verb, l) }
+
+func (l *errorList) oneLine() string {
+	var b strings.Builder
+
+	b.WriteString(errPrefix)
+	b.WriteString(strconv.Itoa(len(l.errs)))
+	b.WriteString(" errors: ")
+
+	named := min(len(l.errs), summaryMax)
+	for i, err := range l.errs[:named] {
+		if i > 0 {
+			b.WriteString(listSep)
+		}
+
+		b.WriteString(label(err))
+	}
+
+	if rest := len(l.errs) - named; rest > 0 {
+		b.WriteString(", and ")
+		b.WriteString(strconv.Itoa(rest))
+		b.WriteString(" more")
+	}
+
+	return b.String()
+}
+
+func (l *errorList) report() string {
+	var b strings.Builder
+
+	b.WriteString(errPrefix)
+	b.WriteString(strconv.Itoa(len(l.errs)))
+	b.WriteString(" errors:")
+
+	for _, err := range l.errs {
+		b.WriteString(reportIndent)
+		writeElement(&b, err)
+	}
+
+	return b.String()
+}
+
+// label is how an element names itself in the one-line summary. The address is
+// what an operator acts on, so it is what the summary names; an element with no
+// address names its moment instead.
+func label(err error) string {
+	e, ok := errors.AsType[*Error](err)
+
+	switch {
+	case !ok:
+		return "(unknown)"
+	case e.loc != (Path{}):
+		return e.loc.String()
+	default:
+		return "(" + e.mom.String() + ")"
+	}
+}
+
+// writeElement writes one line of a report, with a ferry element's own "ferry: "
+// prefix suppressed because the header already said it.
+func writeElement(b *strings.Builder, err error) {
+	if e, ok := errors.AsType[*Error](err); ok {
+		b.WriteString(e.line())
+
+		return
+	}
+
+	b.WriteString(err.Error())
+}
+
+// rendered is the pair of forms every ferry error has, so that the leaf and the
+// aggregate cannot drift in how they answer a verb.
+type rendered interface {
+	oneLine() string
+	report() string
+}
+
+func writeVerb(f fmt.State, verb rune, r rendered) {
+	switch verb {
+	case 'v':
+		if f.Flag('+') {
+			_, _ = io.WriteString(f, r.report())
+
+			return
+		}
+
+		fallthrough
+	case 's':
+		_, _ = io.WriteString(f, r.oneLine())
+	case 'q':
+		_, _ = io.WriteString(f, strconv.Quote(r.oneLine()))
+	default:
+		_, _ = fmt.Fprintf(f, "%%!%c(%T=%s)", verb, r, r.oneLine())
+	}
+}
+
+// join is ferry's one aggregate constructor, and ferry never calls errors.Join:
+// a Join result is invisible to Elements, is ordered by insertion, and renders
+// as the newline dump this model replaces.
+//
+// It is where sorting happens, and sorting at construction rather than in
+// Format is what makes the fix cover the programmatic reader. errors.AsType
+// returns the first match in tree order, so an aggregate ordered only at print
+// time hands two identical runs different elements while printing identically.
+//
+// One failure returns the leaf bare, as errors.Join does, and no aggregate ever
+// holds a nil element, which the errors package documents as invalid.
+func join(errs ...error) error {
+	out := make([]error, 0, len(errs))
+	for _, err := range errs {
+		out = appendElement(out, err)
+	}
+
+	switch len(out) {
+	case 0:
+		return nil
+	case 1:
+		return out[0]
+	default:
+		slices.SortStableFunc(out, compareErrors)
+
+		return &errorList{errs: out}
+	}
+}
+
+// appendElement adds one error to an aggregate under construction.
+//
+// ferry never nests ferry aggregates, so the pairwise tree is unrepresentable
+// rather than merely avoided, and the address already encodes the tree anyway.
+// A driver's own joined error is left alone and enters as one element with its
+// internal shape intact: ferry cannot attribute addresses to a third party's
+// children, and rewriting somebody else's error tree is not ferry's business.
+func appendElement(out []error, err error) []error {
+	if err == nil {
+		return out
+	}
+
+	if l, ok := errors.AsType[*errorList](err); ok {
+		return append(out, l.errs...)
+	}
+
+	return append(out, err)
+}
+
+// sortKey is the three-part key an element sorts on.
+type sortKey struct {
+	mom moment
+	loc Path
+	msg string
+}
+
+// compareErrors orders on moment, then location, then message.
+//
+// The moment is first because of close: a failed dump can hold field errors and
+// a close failure, and a close failure has no location and explains nothing, so
+// "location-less sorts first" alone would put it at the head of a report it had
+// nothing to do with. Within a moment the location-less element does sort
+// first, which falls out of Path.Compare ordering a prefix before what extends
+// it, and that is what puts an open failure above the errors it caused.
+//
+// The message tiebreak is not decoration: one field can produce two errors at
+// one address, so the address is not a key, and insertion order is not an
+// ordering that survives a concurrent walk.
+func compareErrors(a, b error) int {
+	ka, kb := sortKeyOf(a), sortKeyOf(b)
+
+	if c := cmp.Compare(ka.mom, kb.mom); c != 0 {
+		return c
+	}
+
+	if c := ka.loc.Compare(kb.loc); c != 0 {
+		return c
+	}
+
+	return strings.Compare(ka.msg, kb.msg)
+}
+
+// sortKeyOf reads the key off an element. An element ferry did not build sorts
+// last by moment and on its own text, which keeps the order total whatever a
+// driver hands back.
+func sortKeyOf(err error) sortKey {
+	if e, ok := errors.AsType[*Error](err); ok {
+		return sortKey{mom: e.mom, loc: e.loc, msg: e.line()}
+	}
+
+	return sortKey{mom: momentUnknown, msg: err.Error()}
+}
+
+// Elements is the reader's half of the error set, which ADR-0001 makes a
+// feature rather than diagnostics: deployment validation is a load followed by
+// reading this.
+//
+// It returns a one-element slice for a single failure, so a caller's loop reads
+// the same whether one field failed or forty, and nil for a nil error. The
+// slice is the caller's to keep.
+//
+//	for _, e := range ferry.Elements(err) {
+//	    if errors.Is(e, ferry.ErrMissing) { ... }
+//	}
+func Elements(err error) []error {
+	if err == nil {
+		return nil
+	}
+
+	if l, ok := errors.AsType[*errorList](err); ok {
+		return slices.Clone(l.errs)
+	}
+
+	return []error{err}
+}

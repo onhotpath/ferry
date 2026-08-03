@@ -176,6 +176,21 @@ func (v Value) Kind() VKind { return v.kind }
 // three document it as intentional, because their callers type-check first.
 // ferry's callers are third-party driver authors, so ferry does not get to make
 // that assumption (ADR-0004). Match it with errors.Is.
+//
+// Its message names both kinds, which ADR-0011 permits because a kind is
+// structure rather than a value the plane supplied. It carries no accessor for
+// them, because a caller holds both already: Kind reports the one in hand, and
+// the wanted kind is whichever accessor was called, since AsInt wants
+// KindNumber by definition. A typed error would return the call site its own
+// arguments.
+//
+// It is not a seventh class. It is subordinate to ErrValue in the same way
+// ErrReadOnly is subordinate to ErrPlane: an accessor's refusal that reaches a
+// caller through core answers to errors.Is(err, ErrValue) as well as to itself,
+// so a caller reading the error set by class never has to know it exists
+// (ADR-0011). What it is for is the finer question a codec asks - "I asked the
+// wrong accessor" rather than "the plane's value did not fit" - which the class
+// alone cannot answer.
 var ErrWrongKind = errors.New("value: wrong kind")
 
 // require is the single gate every accessor passes through, so that "wrong kind
