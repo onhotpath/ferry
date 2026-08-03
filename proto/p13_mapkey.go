@@ -58,8 +58,21 @@ func runMapKey() {
 	mm := map[time.Time]string{utc: "utc", fixed: "fixed"}
 	fmt.Printf("      Go map holds %d distinct keys\n", len(mm))
 	h := struct{ V map[time.Time]string }{mm}
-	d, err := dump(reflect.ValueOf(h))
-	fmt.Printf("      ferry dumps %d addresses: %s err=%v\n", len(d), fmtVals(d), err)
+	// #31 decided this: core's own table no longer admits time.Time as a key,
+	// and the walk refuses a duplicate address as it is minted. asShipped runs
+	// the world this probe was written against, and the outcome set replaces
+	// the single sample, which was the second of the two flaky lines the #41
+	// audit hands to this ticket.
+	asShipped(func() {
+		d, err := dump(reflect.ValueOf(h))
+		fmt.Printf("      ferry dumps %d addresses: %s err=%v\n", len(d), fmtVals(d), err)
+		outs := k31Outcomes(200, func() (map[Path]Value, error) { return dump(reflect.ValueOf(h)) })
+		fmt.Printf("      %d distinct outcome(s) over 200 dumps of one value\n", len(outs))
+	})
+	fmt.Println("      with #31's rule:")
+	fmt.Printf("      %v\n", Compile[struct {
+		V map[time.Time]string `ferry:"v"`
+	}]())
 	fmt.Println("    ^ two keys, one address, silently. That is ADR-0005's named hazard")
 	fmt.Println("      occurring inside CORE's own set rather than in a registered codec,")
 	fmt.Println("      and no probe in #7 reached it because none used a composite key.")

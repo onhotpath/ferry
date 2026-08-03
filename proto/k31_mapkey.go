@@ -67,6 +67,9 @@ func runK31(sel string) {
 	if pick("10") {
 		k31j()
 	}
+	if pick("11") {
+		k31k()
+	}
 }
 
 // asShipped runs f in the world the tip shipped: no key opt-in for core's own
@@ -189,11 +192,12 @@ func k31j() {
   Two addresses through the entry point and one through the probe, off one
   registry and one value. The probe is right and the entry point is wrong: the
   registrant said .AsMapKey(), the codec is what ferry promised to use, and the
-  walk used %v on a struct instead.
+  walk used the reflect fallback verb on a struct instead.
 
   Three things follow, and only the first is a bug fix.
 
-  (1) mapKeyText's last line is ` + "`fmt.Sprintf(\"%v\", k.Interface())`" + `, which is a
+  (1) mapKeyText's last line formats the key with the reflect fallback verb,
+      which is a
       representation nobody chose for a type nobody admitted. validMapKey and
       mapKeyText are two authorities over one question, which is the pattern
       ADR-0005's identity-before-kind rule and ADR-0007's declared-kind rule
@@ -1124,4 +1128,94 @@ func envKeyFunc(p Path) (string, error) {
 		return "", fmt.Errorf("empty address")
 	}
 	return b.String(), nil
+}
+
+// ---------------------------------------------------------------------------
+// K31=11  ADR-0001's determinism invariant already requires the refusal.
+// ---------------------------------------------------------------------------
+
+func k31k() {
+	hdr("K31=11  a colliding dump cannot be deterministic, so the invariant decides")
+
+	fmt.Println(`  ADR-0001 makes determinism a package-wide invariant, and ADR-0003 measured
+  it at 1 distinct error string over 300 runs. A collapsing map key breaks it,
+  and not as a side effect: which entry survives is which one the walk writes
+  last, and with two equal texts the order is Go's map iteration order.
+
+  So the choice is not "silent but stable" against "loud". There is no stable
+  option. 300 dumps of one value:`)
+
+	a := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	b := time.Date(2026, 1, 15, 12, 0, 0, 0, time.FixedZone("GMT", 0))
+	in := k31Times{map[time.Time]string{a: "a", b: "b"}}
+
+	count := func(label string) {
+		seen := map[string]int{}
+		for range 300 {
+			out, err := k31DumpMap(in)
+			var k string
+			if err != nil {
+				k = "err: " + err.Error()
+			} else {
+				k = fmtVals(out)
+			}
+			seen[k]++
+		}
+		keys := make([]string, 0, len(seen))
+		for k := range seen {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		fmt.Printf("\n    %s: %d distinct outcome(s) over 300 dumps\n", label, len(seen))
+		for _, k := range keys {
+			fmt.Printf("      %3d/300  %s\n", seen[k], shorten2(k, 78))
+		}
+	}
+
+	asShipped(func() { count("as the tip ships") })
+	withRule(func() { count("with the rule") })
+
+	fmt.Println(`
+  Two outcomes at 300 runs, split by nothing the program controls. That is
+  ADR-0001's invariant broken by a value rather than by an ordering bug, and
+  it is why P12 and P19 each carry a line the audit records as flaky across
+  runs of the same binary and attributes to this ticket.
+
+  The invariant is therefore an independent argument for the mint-time check,
+  and it is the stronger one, because it does not depend on anybody agreeing
+  that a lost entry matters:
+
+      A dump that collapses two keys has no deterministic answer to give, so
+      the only outcome consistent with ADR-0001 is a refusal.
+
+  Both of the audit's flaky lines are on walk.go, the superseded walk, which
+  the audit's own open list says is not retired. The tip's walk is now
+  deterministic on this input in the only way available to it.`)
+}
+
+// k31Outcomes is what a probe about a COLLAPSE has to print instead of one
+// sample. Which entry survives is Go's map iteration order, so a probe that
+// prints the winner is not byte-stable across runs of the same binary - which
+// is what the audit records for one line in P12 and one in P19 and attributes
+// to this ticket.
+//
+// The set of outcomes is stable and is also the better measurement: "2 distinct
+// outcomes over 200 runs" states the defect, where "/m/api number(2)" states
+// one draw from it.
+func k31Outcomes(n int, f func() (map[Path]Value, error)) []string {
+	seen := map[string]bool{}
+	for range n {
+		d, err := f()
+		s := fmtVals(d)
+		if err != nil {
+			s = "err=" + err.Error()
+		}
+		seen[strings.TrimSpace(s)] = true
+	}
+	out := make([]string, 0, len(seen))
+	for s := range seen {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
 }

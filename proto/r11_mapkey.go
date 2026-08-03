@@ -54,12 +54,21 @@ func runR11() {
 		d, derr := dump(reflect.ValueOf(c{m}))
 		fmt.Printf("    Go map holds %d keys -> ferry dumps %d address(es), err=%v\n",
 			len(m), len(d), derr)
-		for _, p := range sortedAddrs(d) {
-			fmt.Printf("      %-8s %s\n", p, d[p].GoString())
+		// #31. This line used to print the surviving entry, which is decided by
+		// Go's map iteration order, so it was not byte-stable across runs of
+		// the same binary - one of the two lines the #41 audit records as flaky
+		// and hands to this ticket. The outcome SET is stable, and it is the
+		// sharper statement: the drop has no deterministic answer to give.
+		outs := k31Outcomes(200, func() (map[Path]Value, error) { return dump(reflect.ValueOf(c{m})) })
+		fmt.Printf("      %d distinct outcome(s) over 200 dumps of one value:\n", len(outs))
+		for _, o := range outs {
+			fmt.Printf("        %s\n", o)
 		}
 	})
 	fmt.Println("    ^ one entry silently dropped, no error, and which one survives is map")
-	fmt.Println("      iteration order. ADR-0001 rules out silently ignoring anything.")
+	fmt.Println("      iteration order. ADR-0001 rules out silently ignoring anything, and")
+	fmt.Println("      its determinism invariant rules out this too: there is no stable")
+	fmt.Println("      answer a collapsing dump could give.")
 
 	fmt.Println("\n--- R11b: what a LEAF codec and a KEY codec are actually promising ---")
 	fmt.Println("    They are different obligations and the difference is measurable.")
