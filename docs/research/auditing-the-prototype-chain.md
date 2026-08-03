@@ -40,6 +40,14 @@ Twelve are new here.
 ADR-0005's "11 of 11 core types, 10 of 10 composites, on three planes" is a statement about the superseded walk.
 The walk every ADR from 0007 onward measured has never been round-trip property-tested.
 
+**And the deviations that reach an ADR rather than a prototype nearly all have one shape: a probe whose fixture could not have failed.**
+This was not visible when the census was written and emerged from remediating it, so it is stated here and evidenced in section 8.
+It is worth separating from "the prototypes drifted", because it is a different defect with a different remedy.
+A prototype that drifts stops doing something and a probe goes red; the fix is code.
+A fixture that cannot fail leaves the probe green while the sentence beside it becomes false, and no amount of re-running finds it.
+Five of the measurements this work moved are of that kind: ADR-0005's flattening-plane row taken against a `map -> map` transform rather than a plane, ADR-0005's completeness check with eleven proof rows against eighteen admitted members, ADR-0005's container-address row produced by `v, _ := r.Get(...)`, ADR-0008's splitter fixture with no tag carrying both an apostrophe and an option, and ADR-0010's `LoadOver` row whose zero-reading case called a helper that returns the seed.
+Every one is a green probe over a case its own fixture excluded.
+
 Nothing here reopens a decision.
 One finding is a candidate for an ADR amendment and is named as such rather than taken: ADR-0010's compile-cost sentence describes work the measurement did not do.
 
@@ -103,28 +111,34 @@ The first table is the deviations; the second is the statements that hold, which
 
 ### 3.1 Deviations
 
-| # | ADR | the statement | verdict | probe |
-| --- | --- | --- | --- | --- |
-| D1 | 0003 | the address set is prefix-free, not merely duplicate-free | not implemented | A1 |
-| D2 | 0005 | `uint8` is admitted by kind | not implemented | A2 |
-| D3 | 0007 | the text pair is consulted before kind admission | implemented, off | A3 |
-| D4 | 0009 | `Register` runs `dec(enc(zero))` and refuses on failure | not implemented | A4 |
-| D5 | 0009 | a key codec opts in with `AsMapKey()` | implemented, off | A5 |
-| D6 | 0011 | ferry aggregates, at every moment, in both directions | not implemented | A6 |
-| D7 | 0011 | ferry's own message text never carries a plane value | not implemented | A7 |
-| D8 | 0011 | one `Error` type, four classes, one aggregate constructor, never `errors.Join` | not implemented | A8 |
-| D9 | 0008 | core does not call `reflect.StructTag.Get` or `Lookup` | not implemented | A9 |
-| D10 | 0008 | a token is bare or single-quoted with the quote doubled | not implemented | A10 |
-| D11 | 0008 | a promoted embedded pointer is a schema compile error | not implemented | A11 |
-| D12 | 0006 | `required` at a struct or `*struct` means the plane supplied a child | not implemented | A12 |
-| D13 | 0005 | an index an array cannot hold is loud | not implemented | A13 |
-| D14 | 0004 / 0011 | `Close` always runs, and its failure is an element rather than discarded | partly | A14 |
-| D15 | 0005 | a container address reports `Absent`, with no error | not implemented | A15 |
-| D16 | 0001 / 0011 | the walk does not discard a `Reader`'s error | not implemented | B10 |
-| D17 | 0008 | three diagnostic tiers, edit distance, and a vocabulary table | not implemented | A16 |
+The `verdict` column is what the audit **measured**, and it is left as measured.
+The `fixed` column was added afterwards and is the only part of this table that is not dated evidence; section 8 records the remediation it points at.
+
+| # | ADR | the statement | verdict | probe | fixed |
+| --- | --- | --- | --- | --- | --- |
+| D1 | 0003 | the address set is prefix-free, not merely duplicate-free | not implemented | A1 | `854baef` |
+| D2 | 0005 | `uint8` is admitted by kind | not implemented | A2 | `7242ab5` |
+| D3 | 0007 | the text pair is consulted before kind admission | implemented, off | A3 | `2e22bbf` |
+| D4 | 0009 | `Register` runs `dec(enc(zero))` and refuses on failure | not implemented | A4 | `7242ab5` |
+| D5 | 0009 | a key codec opts in with `AsMapKey()` | implemented, off | A5 | `7242ab5`, corrected `ce65f41` |
+| D6 | 0011 | ferry aggregates, at every moment, in both directions | not implemented | A6 | `958d225` |
+| D7 | 0011 | ferry's own message text never carries a plane value | not implemented | A7 | `958d225` |
+| D8 | 0011 | one `Error` type, four classes, one aggregate constructor, never `errors.Join` | not implemented | A8 | `958d225`, **partly** |
+| D9 | 0008 | core does not call `reflect.StructTag.Get` or `Lookup` | not implemented | A9 | `7242ab5`, corrected `ce65f41` |
+| D10 | 0008 | a token is bare or single-quoted with the quote doubled | not implemented | A10 | `854baef` |
+| D11 | 0008 | a promoted embedded pointer is a schema compile error | not implemented | A11 | `7242ab5` |
+| D12 | 0006 | `required` at a struct or `*struct` means the plane supplied a child | not implemented | A12 | `958d225` |
+| D13 | 0005 | an index an array cannot hold is loud | not implemented | A13 | `958d225` |
+| D14 | 0004 / 0011 | `Close` always runs, and its failure is an element rather than discarded | partly | A14 | `958d225` |
+| D15 | 0005 | a container address reports `Absent`, with no error | not implemented | A15 | `854baef` |
+| D16 | 0001 / 0011 | the walk does not discard a `Reader`'s error | not implemented | B10 | `854baef` |
+| D17 | 0008 | three diagnostic tiers, edit distance, and a vocabulary table | not implemented | A16 | `7242ab5` |
 
 D1, D10, D12, D15 and D16 are `the-enabled-bucket.md`'s, re-run here against the tip.
 The other twelve are new.
+
+Sixteen of the seventeen are closed on `proto/tip`, and D8 is closed on the runtime path only: `e_schema.go` still calls `errors.Join` at two sites, so a **schema** refusal remains invisible to `Elements()` and is ordered by construction rather than segment-wise.
+Section 8 has the detail and the one further deviation the remediation itself uncovered.
 
 ### 3.2 Statements that hold
 
@@ -591,3 +605,71 @@ Both heuristics are biased toward finding deviations, and the hit rate - sevente
 It checks the tip against the ADRs.
 It does not check the ADRs against each other, and section 1 is the reason that matters: three ADRs were measured on a branch line that no later ADR could see, so a contradiction between ADR-0006 and ADR-0010 would be invisible to every probe on either branch.
 [`the-enabled-bucket.md`](the-enabled-bucket.md) found one of exactly that shape between ADR-0006 and ADR-0010, by asking a question neither ADR's prototype could answer.
+
+## 8. Resolution
+
+Added after the census was published, so that sections 1 to 7 stay a dated record of what was found rather than a changelog.
+Everything below happened on scratch branches; nothing here is library code.
+
+### 8.1 Where the code is now
+
+`proto/tip` is the single prototype tip and it is the reconciliation of `proto/25-binding` and `proto/14-15-10-enabled` plus four rounds of repair.
+Every other `proto/*` branch is history.
+
+| branch | what it carried | now |
+| --- | --- | --- |
+| `proto/25-binding` | ADR-0012's thirteen probes, and the audit's own `A41` | merged at `854baef` |
+| `proto/14-15-10-enabled` | `the-enabled-bucket.md`'s four fixes | merged at `854baef` |
+| `proto/41-compiler` | D2 D18 D4 D11 D9 D17 D5, then D3 | merged |
+| `proto/41-runtime` | D6 D7 D8 D12 D13 D14, the harness, the flattening plane | merged |
+| `proto/41-typeset-tag` | `X3`, ADR-0005's admitted set against ADR-0008's field rule | merged |
+| `proto/41-measure` | `X4`, ADR-0011's table and the `Get`-order question | merged |
+
+Sixteen of the seventeen deviations are closed.
+The seventeenth, D8, is closed on the runtime path and open on the compiler one.
+
+Every fix was regression-diffed against every suite, normalised for timings and heap addresses, and the whole set is byte-identical apart from the rows a fix was meant to move.
+`go test ./...` is red on one case, `TestCoreTypesComplete`, which is D18 below and is a finding rather than a regression.
+
+### 8.2 D18, which the remediation found rather than the audit
+
+ADR-0005 specifies a completeness check - "core's test iterates the identity table and the admitted kind list and asserts that every member has a proof in `CoreTypes()`" - and nothing implemented it.
+Implemented at `7242ab5`, it is **red on arrival**: eighteen admitted members, eleven proof rows, seven with none (`int16 int32 int64 uint uint8 uint16 uint32`).
+ADR-0005's published "11 of 11 core types" is eleven of eighteen.
+That is an ADR amendment and not a prototype fix, and it is one of the five fixture defects named in the summary.
+
+### 8.3 The audit's own two leaks
+
+Found in this file's probe source rather than in the engine, and fixed at `e6b6a2b`.
+
+`A3` and `A5` each drive a package-level switch and each restored a **hardcoded** pre-fix default rather than deferring the tip's own.
+So `A4` through `A31` ran with ADR-0007's chain off and ADR-0009's key opt-in off, and part of their output was an artefact of the probe above them.
+Both now `defer`.
+
+`A31` ranged `defaultRegistry.byType` unsorted, which is a live violation of ADR-0001's determinism invariant **inside the audit's own probe**.
+Two further probes printed live pointers, so `A41=all` was not byte-stable across runs of the same binary.
+All three fixed; `A41=all` is now identical over repeated runs.
+
+With the two leaks closed, thirteen `VERDICT:` strings in `A41` were describing a world that no longer exists and were reconciled against measured output, each keeping what was found as an "as FOUND" clause.
+All thirty-one probes now read `IMPLEMENTED`, except `A8`, which reads `PARTLY`.
+
+### 8.4 What is still open
+
+- **D8's compiler half.** `e_schema.go:107` and `:423` call `errors.Join`. Measured on a schema with two independent refusals: the result is not a ferry aggregate, and `Elements()` reports 1 of 2.
+- **`walk.go` is not retired.** The superseded walk and `e_schema.go` disagree about **12 of 26** named third-party types, including `Conf`, `main.go`'s own fixture, which compiles on one with 13 addresses and produces 11 refusals on the other. The default `go run .` suite therefore still exercises the naming rule ADR-0008 refused. Evidence: `X3=4`.
+- **`DiffErrors` sorts by `strings.Compare` on the canonical rendering**, so twelve indices come out `0 1 10 11 2 3 4 5 6 7 8 9`. That is verbatim what ADR-0003 calls "a subtle bug ... it will be a conformance-suite case", inside a helper ADR-0011 says reports in segment-wise order, in one of ADR-0003's own three named places. Fix: key the map by `Path` and compare with `CompareSegmentwise`.
+- **`e3_resolved.go` indexes `s.root.fields[5]` positionally** and dereferences its `def`. Any reordering of `n.fields` panics it.
+- **`P12` and `P19` each carry one line whose winner is decided by map iteration order**, flaky across runs of the same binary. Pre-existing, and [#31](https://github.com/onhotpath/ferry/issues/31)'s.
+- **[#45](https://github.com/onhotpath/ferry/issues/45), the `.AsMapKey()` gap.** ADR-0009 makes the injectivity obligation opt-in for a registration; ADR-0007 independently admits a chain-claimed `String` type as a map key with no call site at which to say the word. The refusal is lifted by deleting a line rather than adding one. Neither ADR closes it.
+- **The `Get`-order question.** ADR-0003 names three places ferry sorts segment-wise and a `Get` sequence is none of them. Measured over 200 runs the sequence is deterministic, which is what ADR-0001 asks for; and the extension is undeliverable anyway, because a promoted embedded struct contributes no segment and so has no sort key. Open for the repo owner. Evidence: `X4=6..11`.
+
+### 8.5 The four ADR amendments this produced
+
+| ADR | what moves | why it is not a quiet edit |
+| --- | --- | --- |
+| 0005 | the flattening-plane row, the completeness check, and a **how** column on the three-outcomes table | three published numbers change and three rows marked "admitted, round-trips" no longer compile |
+| 0008 | one phrase, "one per field" | the worked block's element count is right and its attribution is not |
+| 0010 | a footnote on the 47370 ns compile | the sentence beside it described work the measurement did not do; it does now |
+| 0011 | one sentence, and **no change to the table** | the row that moved is a counterfactual no importer can reach |
+
+Each lands as its own PR against its own ADR, so a reviewer sees one argument at a time.
