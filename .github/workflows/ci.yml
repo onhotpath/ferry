@@ -26,14 +26,18 @@ env:
   # ADR-0001 sets the floor at go 1.27, which is not GA yet: go1.27rc2 is what
   # exists. setup-go spells that release candidate '1.27.0-rc.2'.
   #
-  # TODO: move this to '1.27.x' once Go 1.27 is released. Three workarounds in
-  # this file expire on the same day: this pin, the toolchain guard in the
-  # GOWORK=off step, and the source build of golangci-lint.
+  # TODO: move this to '1.27.x' once Go 1.27 is released. Four workarounds
+  # expire on the same day: this pin, the toolchain guard in the GOWORK=off
+  # step, the source build of golangci-lint (now in the Makefile), and
+  # staticcheck being switched off in .golangci.yml because the version
+  # golangci-lint bundles cannot parse Go 1.27 source.
   GO_VERSION: '1.27.0-rc.2'
 
-  # Pinned rather than 'latest', so a lint failure is always this repository's
-  # doing and never a linter release nobody asked for.
-  GOLANGCI_VERSION: 'v2.12.2'
+  # The golangci-lint pin used to live here. It lives in the Makefile now, as
+  # GOLANGCI_LINT_VERSION, because the lint job runs `make lint` and there is no
+  # value in two files naming the same version. It is still a pin rather than
+  # 'latest', so a lint failure is always this repository's doing and never a
+  # linter release nobody asked for.
 
   # Near-total, because core is a library of pure logic with no I/O to plead.
   # See the coverage job for what makes this start biting.
@@ -340,7 +344,7 @@ jobs:
           echo "OK: core builds and tests with encoding/json/v2 excluded."
 
   format:
-    name: gofmt
+    name: gofmt and imports
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -349,22 +353,21 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: gofmt -l produces nothing
+      - name: make check
         run: |
           set -euo pipefail
-          # gofmt walks files, not modules, so one run from the root covers
-          # every module including any added later.
-          out=$(gofmt -l .)
-          if [ -n "$out" ]; then
-            echo "FAIL: these files are not gofmt'd:"
-            # shellcheck disable=SC2086  # one path per word is what is wanted
-            printf '  %s\n' $out
-            echo
-            # shellcheck disable=SC2086
-            gofmt -d $out
-            exit 1
-          fi
-          echo "OK: gofmt -l . printed nothing."
+          # `make check` is what a developer runs before pushing: go vet, the
+          # gofmt assertion, and the import-grouping assertion. Running the
+          # target rather than the commands is the point - the flags, the
+          # gofmt failure output and the gci section list all live in one place
+          # and CI cannot drift from a local run.
+          #
+          # gofmt and gci both walk files rather than modules, so one run from
+          # the root covers every module including any added later. `go vet` is
+          # per-module and overlaps the build job on purpose: the overlap costs
+          # a few seconds and means this target is the whole pre-push check
+          # rather than most of it.
+          make check
 
   lint:
     name: Lint ${{ matrix.module }}
@@ -381,37 +384,29 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Cache golangci-lint
+      - name: Cache the pinned tools
         uses: actions/cache@v6
         with:
-          path: ~/go/bin/golangci-lint
-          key: golangci-${{ env.GOLANGCI_VERSION }}-go${{ env.GO_VERSION }}
+          # `make lint` installs into .bin, never into $GOPATH/bin. The key is
+          # the Makefile's hash because the Makefile is where the version pin
+          # and the build recipe both live, so any change to either misses.
+          path: .bin
+          key: tools-${{ hashFiles('Makefile') }}-go${{ env.GO_VERSION }}
 
-      - name: Install golangci-lint ${{ env.GOLANGCI_VERSION }}
+      - name: make lint
         run: |
           set -euo pipefail
-          # Built from source rather than taken from a release, because every
-          # released golangci-lint binary is compiled with Go 1.26 and refuses a
-          # module targeting 1.27 outright:
-          #   "the Go language version (go1.26) used to build golangci-lint is
-          #    lower than the targeted Go version (1.27)"
-          # Forcing GOTOOLCHAIN to the pinned toolchain produces a binary that
-          # accepts the floor. Measured on v2.12.2 with go1.27rc2.
+          # The developer's command, with the module list narrowed to this
+          # matrix leg. Everything that used to be spelled out here - the
+          # pinned version, `config verify` before `run`, and the source build
+          # with GOTOOLCHAIN forced because every released golangci-lint binary
+          # is compiled with Go 1.26 and refuses a module targeting 1.27 - now
+          # lives in the Makefile, so `make lint` locally and this job cannot
+          # disagree about what "lint" means.
           #
           # TODO: revert to golangci/golangci-lint-action once a golangci-lint
           # release is built with Go 1.27, which cannot happen before 1.27 is GA.
-          if [ ! -x "$HOME/go/bin/golangci-lint" ]; then
-            GOTOOLCHAIN="$(go env GOVERSION)" \
-              go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_VERSION}"
-          fi
-          "$HOME/go/bin/golangci-lint" --version
-
-      - name: golangci-lint run
-        working-directory: ${{ matrix.module }}
-        run: |
-          set -euo pipefail
-          "$HOME/go/bin/golangci-lint" config verify
-          "$HOME/go/bin/golangci-lint" run ./...
+          make lint MODULES=${{ matrix.module }}
 
   race:
     name: Race detector on core

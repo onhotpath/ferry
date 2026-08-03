@@ -25,6 +25,11 @@ coverage.html
 /driver/kv/kv
 /driver/yaml/yaml
 
+# Pinned developer tools, installed by `make tools` into the repository rather
+# than into $GOPATH/bin so that building ferry cannot change the version of a
+# tool some other project uses.
+/.bin/
+
 # The workspace is checked in and no `replace` directive ever is (ADR-0002).
 # Its sum file is generated.
 go.work.sum

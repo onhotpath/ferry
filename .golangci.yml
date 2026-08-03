@@ -1,11 +1,282 @@
-# Minimal on purpose. This is the `standard` set golangci-lint ships with -
-# errcheck, govet, ineffassign, staticcheck and unused - and nothing else.
-# A large curated set is easy to write and hard to keep honest; the set here is
-# one that has actually been run against this tree.
+# ferry is greenfield, so the lint set is maximal on purpose.
 #
-# Adding a linter is a change somebody has to justify in review, which is the
-# point.
+# Every check a mature codebase switches off to make an incremental migration
+# survivable is switched on here from the first commit, because ferry has no
+# legacy to migrate and no debt to grandfather. The cost of a rule is paid once,
+# when the code is first written; the cost of turning one on later is paid over
+# every file that already exists. There is nothing here yet, so the price is
+# zero today and only ever goes up.
+#
+# THE STRUCTURAL LIMITS BELOW ARE FIXED. DO NOT RAISE THEM.
+#
+#   cognitive-complexity 7   cyclomatic 10        function-length 75/50
+#   max-control-nesting 4    argument-limit 5     function-result-limit 3
+#   line-length-limit 120
+#
+# They are not bug-catchers. They are the rules that decide how the code gets
+# written, and a limit that bites is the rule working, not the rule being wrong.
+# ferry's reflective walk, its schema compiler and its tag scanner are exactly
+# the three places that will hit them, and in every one of those cases the
+# correct response is to split the function. Raising a number here to make a
+# function fit is the one change this file exists to prevent: it turns a local
+# decision somebody reviews into a global one nobody does.
+#
+# Adding a linter is cheap and needs no ceremony. Removing one, or loosening a
+# limit, is a change somebody has to argue for in review.
+
 version: "2"
 
+run:
+  timeout: 10m
+
 linters:
-  default: standard
+  default: none
+  enable:
+    # Correctness - likely bugs.
+    - errcheck
+    - errorlint
+    - govet
+    - ineffassign
+    # - staticcheck
+    #
+    # TEMPORARILY OFF, AND THE ONLY LINTER HERE THAT IS. Re-enable it by
+    # deleting the comment marker above; nothing else has to change.
+    #
+    # staticcheck cannot run at all under go1.27rc2. Its IR builder
+    # (honnef.co/go/tools v0.7.0, which golangci-lint v2.12.2 bundles) fails to
+    # parse Go 1.27 standard-library source and takes the whole run down with
+    # it, not just its own findings:
+    #
+    #   buildir: panic during analysis: unexpected expr: *ast.KeyValueExpr
+    #   Running error: can't run linter goanalysis_metalinter
+    #
+    # Measured, not assumed: a single file whose only import is "fmt" is enough,
+    # because fmt reaches internal/poll, and the panic is raised while analysing
+    # that dependency's source. A tree with no imports at all - which is what
+    # this repository is today - never reaches it, so the failure would first
+    # appear on whichever pull request adds ferry's first import and would look
+    # like that author's fault. Hence off now, with the reason written down.
+    #
+    # Not fixable here: the analyser is compiled into golangci-lint, v2.12.2 is
+    # the newest release, and the newest honnef.co/go/tools is v0.8.0-rc.1,
+    # which no golangci-lint release bundles yet.
+    #
+    # TODO: re-enable with the golangci-lint bump that ships a staticcheck able
+    # to read Go 1.27 source. This expires with the same event as the
+    # workarounds in .github/workflows/ci.yml: Go 1.27 going GA. `unused` is
+    # unaffected and stays on.
+    - unused
+    - bodyclose        # driver/kv will speak HTTP to a KV backend (ADR-0002).
+    - copyloopvar
+    - depguard         # ADR-0002's forbidden imports, checked before CI does.
+    - makezero         # the walk allocates result slices by length, and append
+                       # to a make([]T, n) is the classic way to double them.
+    - nilerr
+    - noctx            # ADR-0004 puts ctx in every source and sink call, so an
+                       # HTTP request built without one is a dropped deadline.
+    - reassign
+    - unconvert
+    - unparam
+    - forcetypeassert  # ADR-0007's codec chain and ADR-0009's typed registry
+                       # both live on interface assertions, and an unchecked one
+                       # panics inside a user's Load.
+    - gocheckcompilerdirectives
+    - predeclared
+    # Readability and maintainability.
+    - revive
+    - gocritic
+    # misspell runs with no locale, which is a decision and not an oversight.
+    # There is no settings block for it below because the schema accepts only
+    # 'US' or 'UK' there, and ferry can live with neither: the ADRs and doc
+    # comments are written in British English (behaviour, serialisation,
+    # normalise, initialise) while the identifiers ferry has to name are
+    # American (context.Canceled, encoding.TextMarshaler, json.Marshaler).
+    # locale: UK would demand "Cancelled" in a sentence about context.Canceled;
+    # locale: US would rewrite the prose every ADR is written in. Unset, the
+    # US/UK word lists are never loaded and misspell reports only unambiguous
+    # misspellings, which is the whole of what ferry wants from it.
+    - misspell
+    - perfsprint
+    - nolintlint
+    # Security.
+    - gosec
+
+    # Not enabled: rowserrcheck and sqlclosecheck. They analyse database/sql
+    # usage. ferry maps structs to planes, no plane in this repository is a SQL
+    # database, and core takes no non-stdlib dependency at all (ADR-0002). A
+    # driver that one day wraps database/sql brings them back in the same
+    # commit. Every other linter above stays enabled even though the tree is
+    # empty today, because core grows a codec chain, a reflection walk and
+    # driver I/O, and the whole point is that they are never switched on
+    # against code that already exists.
+
+  settings:
+    revive:
+      enable-all-rules: true
+      rules:
+        # See the header. These seven are the file's reason for existing.
+        - name: argument-limit
+          arguments: [5]
+        - name: function-result-limit
+          arguments: [3]
+        - name: function-length
+          arguments: [75, 50]
+          # Excluded in tests only. House style is table-driven tests with named
+          # cases, and ADR-0014's conformance table alone is 57 of them. A table
+          # of cases is data, not control flow: splitting it in half to satisfy
+          # a line count makes the test harder to read and makes nothing
+          # simpler. The complexity limits below still apply to test bodies,
+          # because a test with branching in it is a test that needs its own
+          # test.
+          exclude: ["TEST"]
+        - name: cognitive-complexity
+          arguments: [7]
+        - name: cyclomatic
+          arguments: [10]
+        - name: max-control-nesting
+          arguments: [4]
+          exclude: ["TEST"]
+        - name: line-length-limit
+          arguments: [120]
+
+        - name: add-constant
+          arguments:
+            - maxLitCount: "3"
+              allowStrs: '""'
+              allowInts: "0,1,2"
+              allowFloats: "0.0,1.0"
+          # Same reason as function-length: a golden value in a case table is
+          # the assertion, and lifting it into a named constant moves the
+          # expectation away from the case it belongs to.
+          exclude: ["TEST"]
+
+        - name: max-public-structs
+          disabled: true
+          # The one rule here treated differently from the limits above, and
+          # deliberately so: it measures exported API surface, not complexity.
+          # ferry's surface is not an emergent property to be policed, it is
+          # fixed by ADR - four verbs and two Options in core, and nineteen
+          # exported names in ferrytest (ADR-0014: "Nineteen exported names, in
+          # one package"). Enabled, this rule can only ever argue for splitting
+          # into packages the design does not have, against a decision already
+          # taken in review. So it is dropped rather than tuned: no threshold
+          # makes a surface-area metric say anything true about ferry.
+
+        - name: unhandled-error
+          disabled: true
+          # errcheck owns this, with a configurable exclusion list. Two linters
+          # reporting one defect under different names means a nolint has to
+          # name both, and one of them quietly stops being enforced.
+
+        - name: unchecked-type-assertion
+          disabled: true
+          # The same rule as unhandled-error, applied to the same duplication:
+          # forcetypeassert above owns unchecked assertions, and measured on a
+          # deliberately bad file both linters reported the identical one. The
+          # dedicated linter is kept and revive's copy dropped, so a suppression
+          # names one linter and stays honest.
+
+        - name: file-header
+          disabled: true
+          # ferry carries no licence banner; the package doc comment is the
+          # header, and doc comments are enforced by package-comments instead.
+
+        - name: dot-imports
+          exclude: ["TEST"]
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+        - opinionated
+
+    depguard:
+      # ADR-0002: core must build under GOEXPERIMENT=nojsonv2, which is the
+      # consumer's switch and not ferry's, and naming either import is the one
+      # thing that breaks it. CI asserts this across every module already; the
+      # rule is stated here too so the failure arrives in the editor rather
+      # than on a pull request. encoding/json itself is allowed, and is not
+      # listed.
+      rules:
+        json-v2:
+          files:
+            - $all
+          deny:
+            - pkg: encoding/json/v2
+              desc: "ADR-0002: json/v2 is stdlib with an asterisk, and importing it breaks the build under GOEXPERIMENT=nojsonv2."
+            - pkg: encoding/json/jsontext
+              desc: "ADR-0002: jsontext is part of the json/v2 experiment and fails under GOEXPERIMENT=nojsonv2."
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+
+    errcheck:
+      # Kept deliberately short. In a data mapper the error on the way out is
+      # the result: a Dump that ignores a write error reports success for bytes
+      # that never landed, which is the worst failure this library has. So the
+      # fmt.Fprint family, (*os.File).Close and (io.Closer).Close are NOT
+      # excluded here even though they commonly are elsewhere, because on a
+      # Dump path any of them can be the only place the failure is visible. A
+      # read-side deferred close is spelled `defer func() { _ = f.Close() }()`,
+      # which costs one line and says out loud that the error was considered.
+      #
+      # What is left are the two writers documented never to return a non-nil
+      # error, where handling it is noise with no failure behind it.
+      exclude-functions:
+        - (*bytes.Buffer).WriteString
+        - (*strings.Builder).WriteString
+
+    gosec:
+      excludes:
+        # Unhandled errors. errcheck above does the same job with a real
+        # exclusion list and a better message, so gosec's copy only duplicates
+        # the report.
+        - G104
+
+  exclusions:
+    generated: strict
+    paths:
+      # Tool binaries, installed by `make tools`. Nothing else here is excluded
+      # by path: this repository has no vendor tree, no generated source and no
+      # third-party code.
+      - "^\\.bin/"
+    rules:
+      - path: _test\.go
+        linters:
+          # A test may ignore a write error, hardcode a path, and be written in
+          # a style that reads as a list of cases. This reaches _test.go files
+          # only: ferrytest is a shipped package rather than a test, so the full
+          # set applies to it, which is the point - it is the code every driver
+          # author runs.
+          - errcheck
+          - gosec
+          - gocritic
+
+issues:
+  # golangci-lint hides findings by default: at most 50 per linter, at most 3
+  # of any one message, and only the first finding on any given line. All three
+  # are switched off here. Measured on a deliberately bad file, the line filter
+  # alone swallowed cyclomatic, argument-limit, function-result-limit and
+  # function-length on a function that broke all four, because every one of
+  # those is reported at the function's opening line. A report that is capped is
+  # a report a contributor fixes to green and then finds is not green.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+formatters:
+  enable:
+    - gofmt
+    - gci
+  settings:
+    gci:
+      # Three groups: stdlib, everything else, then ferry itself. Core imports
+      # nothing but stdlib (ADR-0002), so in core the middle group is empty by
+      # construction and a line appearing in it is worth noticing in review.
+      sections:
+        - standard
+        - default
+        - prefix(github.com/onhotpath/ferry)

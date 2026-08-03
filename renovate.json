@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "minimumReleaseAge": "7 days",
+  "packageRules": [
+    {
+      "description": "Go module updates arrive as one pull request. Core carries no non-stdlib require at all (ADR-0002), so this is only ever driver dependencies and tooling, and reviewing them together is cheaper than reviewing them one at a time.",
+      "matchManagers": ["gomod"],
+      "groupName": "go modules"
+    },
+    {
+      "description": "Workflow action updates arrive as one pull request, for the same reason: CI is one artefact and its actions are reviewed as one.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    },
+    {
+      "description": "Never touch the Go language or toolchain version. ADR-0002 makes core's `go` directive a deliberate release decision - raising core's floor is never a patch release, because that line decides who can import ferry at all - and CI separately asserts that no driver module sits below core. The `toolchain go1.27rc2` pin lives in go.work and is intentional for as long as Go 1.27 is not GA. A routine bot bump of any of those three would break a policy nobody would see being broken, so this is a decision that stays with a human.",
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go"],
+      "matchDepTypes": ["golang", "toolchain"],
+      "enabled": false
+    }
+  ]
+}
