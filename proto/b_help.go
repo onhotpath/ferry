@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 )
 
 func typeOf[T any]() reflect.Type { return reflect.TypeFor[T]() }
@@ -33,7 +33,6 @@ func b1WriteYAML() (dir, path string) {
 }
 
 func b1Cleanup(dir string) { os.RemoveAll(dir) }
-
 
 // b1ReadRequest parses one ordinary GET off the wire, which is the smallest
 // honest unit of "a request happened".
@@ -74,4 +73,3 @@ func bKeysHeap(as *AddressSet, n int) int64 {
 }
 
 func valueOf[T any](v T) reflect.Value { return reflect.ValueOf(v) }
-

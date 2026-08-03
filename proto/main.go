@@ -62,6 +62,10 @@ func main() {
 		runX2(p)
 		return
 	}
+	if p := os.Getenv("X3"); p != "" {
+		runX3(p)
+		return
+	}
 	if p := os.Getenv("B25"); p != "" {
 		run25(p)
 		return
