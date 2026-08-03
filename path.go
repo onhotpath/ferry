@@ -194,6 +194,23 @@ func (p Path) Compare(q Path) int {
 	return cmp.Compare(len(a), len(b))
 }
 
+// isPrefixOf reports whether p is a prefix of q at a segment boundary. A path
+// is a prefix of itself, which is what makes ADR-0003's prefix-free rule
+// subsume exact duplicates rather than needing a second check beside it.
+//
+// It reads the renderings because escaping leaves no bare delimiter inside a
+// segment: a rendering that starts with another one and continues with a
+// delimiter continues at a boundary and never in the middle of a segment. That
+// is why /a-b is not under /a while /a/b is.
+func (p Path) isPrefixOf(q Path) bool {
+	rest, ok := strings.CutPrefix(q.rendered, p.rendered)
+	if !ok {
+		return false
+	}
+
+	return rest == "" || rest[0] == nameSep || rest[0] == indexSep
+}
+
 func compareSegments(a, b Segment) int {
 	if a.kind != b.kind {
 		return cmp.Compare(a.kind, b.kind)
