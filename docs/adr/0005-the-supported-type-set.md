@@ -57,7 +57,8 @@ Four questions this ADR had to answer that the ticket did not name, all of which
 **Three things this ADR does not close, stated here rather than left to the reader to notice.**
 
 - **A nil pointer cannot round-trip through a plane with no null.**
-  Measured: the composites pass 10 of 10 through the memory plane and the YAML driver, and 8 of 10 through a plane that reports `String` for everything, the two failures being `*int` and `*Cred` at nil.
+  Measured: the composites pass 10 of 10 through the memory plane and the YAML driver, and 10 of 10 through a plane that reports `String` for everything, with **13 values refused** by that plane's own declaration.
+  *(Amended under [#41](https://github.com/onhotpath/ferry/issues/41). As published this read "8 of 10 ... the two failures being `*int` and `*Cred` at nil". See [How round-trip is enforced](#how-round-trip-is-enforced) for what moved and why.)*
   This is driver fidelity rather than value fidelity, so ADR-0001 already puts it on the other side of the line, but it means core's guarantee is stated over the memory plane and a driver honours as much of it as its plane can carry.
   The consequence for the conformance suite is in [How round-trip is enforced](#how-round-trip-is-enforced) and it is new work that ADR-0004 did not anticipate.
 - **The nil-versus-empty distinction for a composite is not expressible at all**, by any type.
@@ -210,20 +211,39 @@ The error names registration ([#19](https://github.com/onhotpath/ferry/issues/19
 The framing so far is binary: a type is in the set or it is refused.
 Checked against fifteen types people actually reach for, that is false, and the third outcome is the one with the trade-off in it.
 
-| type | outcome | what lands on the plane |
-| --- | --- | --- |
-| `net.Addr` | refused, interface kind | |
-| `netip.Addr`, `netip.AddrPort`, `netip.Prefix` | refused, maps no address | |
-| `big.Int` | refused, maps no address | |
-| `url.URL` | refused, **via a nested `url.Userinfo`** | |
-| `net.IP` | **admitted, round-trips** | `bytes("\x00...\xff\xff\xc0\x00\x02\x01")` |
-| `UUID` as `[16]byte` | **admitted, round-trips** | sixteen raw bytes |
-| `net.IPNet` | **admitted, round-trips** | `/IP` and `/Mask`, two byte blobs |
-| `net.TCPAddr` | **admitted, round-trips** | a byte blob and a number |
-| `sql.NullString` | **admitted, round-trips** | `/String` and `/Valid` |
-| `json.RawMessage` | **admitted, round-trips** | `bytes("{\"a\":1}")` |
-| `type Port int` | **admitted, round-trips** | `number("8080")` |
-| `time.Duration`, `time.Time` | admitted, pinned representation | `string("1h30m0s")`, RFC 3339 |
+The **how** column names the mechanism that admits the type, because three of the rows below are admitted by one mechanism and refused by another, and a table with no such column cannot say so.
+
+| type | how | outcome | what lands on the plane |
+| --- | --- | --- | --- |
+| `net.Addr` | - | refused, interface kind | |
+| `netip.Addr`, `netip.AddrPort`, `netip.Prefix` | by chain | **admitted, round-trips** | `string("192.0.2.1")`, `string("192.0.2.1:80")`, `string("10.0.0.0/8")` |
+| `big.Int` | by chain | **admitted, round-trips** | `string("1099511627776")` |
+| `url.URL` | - | refused, **by the field rule**; see below | |
+| `net.IP` | by chain | **admitted, round-trips** | `string("192.0.2.1")` |
+| `UUID` as `[16]byte` | by kind | **admitted, round-trips** | sixteen raw bytes |
+| `net.IPNet` | **registered** | **admitted, round-trips**; refused unregistered | one address, `string("10.0.0.0/8")` |
+| `net.TCPAddr` | **registered** | **admitted, round-trips**; refused unregistered | one address, `string("192.0.2.1:80")` |
+| `sql.NullString` | **registered** | **admitted, round-trips**; refused unregistered | one address |
+| `json.RawMessage` | by kind | **admitted, round-trips** | `bytes("{\"a\":1}")` |
+| `type Port int` | by kind | **admitted, round-trips** | `number("8080")` |
+| `time.Duration`, `time.Time` | by identity | admitted, pinned representation | `string("1h30m0s")`, RFC 3339 |
+
+> **Amended under [#41](https://github.com/onhotpath/ferry/issues/41), which added the `how` column rather than correcting rows one at a time.**
+> Two later ADRs moved this table in opposite directions and neither could see it.
+>
+> [ADR-0007](0007-the-codec-chain-and-its-precedence.md)'s chain **shortened the refusal list**, which the chain table below already anticipates in terms: `netip.Addr`, `netip.AddrPort`, `netip.Prefix`, `big.Int` and `net.IP` are claimed on their text pair and land as legible strings.
+> Those five rows are stale by this ADR's own permission and are corrected above.
+>
+> [ADR-0008](0008-the-struct-tag-grammar.md)'s mandatory-name rule - "an exported, named struct field with no ferry tag is a schema compile error" - **lengthened it**, and that direction this ADR did not authorise and could not see, because ADR-0008 landed later.
+> `net.IPNet`, `net.TCPAddr` and `sql.NullString` are exported fields in other people's packages, so the rule fires on every one of them and none compiles.
+> Nor can a user fix it: the remedies the diagnostic offers are *name the segment* and `ferry:"-"`, and both are edits to a struct definition in `net` or `database/sql`.
+>
+> **Registration rescues all three cleanly**, which is what this ADR's own mechanism sentence predicts - "a codec collapses a type to a leaf, and a leaf needs no address set" - and it is verified end to end on all three planes.
+> Each mints **one** address at the field's own address rather than `/IP` and `/Mask`, so the registered representation is not the published one; it is a better one with a different address set.
+> The published `/IP` and `/Mask` row is reproducible only on the superseded walk that produced it.
+>
+> Measured over 26 named third-party types rather than the twelve rows above: 10 compile, 3 are refused for reasons unrelated to the field rule, and **13 are refused by ADR-0008's field rule**, including every `sql.Null*`, every `net.*Addr` and `tls.Config` - the shape every configuration struct has.
+> Evidence: `X3=all` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
 
 So:
 
@@ -232,7 +252,8 @@ So:
 3. **In the set by kind, with an unpinned representation nobody chose.**
 
 Category 3 is the honest cost of admitting types by `reflect.Kind`.
-The same rule that makes `type Port int` work for free writes an IP address into a YAML file as sixteen raw bytes, because `net.IP` is `[]byte` and `[]byte` is `Bytes`.
+The same rule that makes `type Port int` work for free writes a UUID into a YAML file as sixteen raw bytes, because `[16]byte` is `Bytes`.
+*(As published this named `net.IP`, which was the sharper example at the time. ADR-0007's chain now claims `net.IP` on its text pair and writes `string("192.0.2.1")`, so the example moved to `[16]byte`, which no chain arm claims. The argument is unchanged, and the fact that it needed a new example is the chain shortening the list exactly as intended.)*
 Value fidelity is **not** violated: every one of those round-trips exactly.
 What is violated is legibility, and ADR-0001 put legibility of the plane on the driver's side of the line, so nothing in core's guarantee catches it.
 
@@ -247,6 +268,11 @@ The mitigation is registration ([#19](https://github.com/onhotpath/ferry/issues/
 `url.URL` is worth its own line, because it is the case that will be reported as a bug.
 It is refused not for itself but because its `User *url.Userinfo` field maps no address, so the rule propagates out of a nested type the user did not choose.
 The error names `/V/User` and `url.Userinfo`, which is the right diagnosis, and it is still a type that "obviously should work" and does not.
+
+> **Amended under [#41](https://github.com/onhotpath/ferry/issues/41): the outcome stands and the diagnosis no longer reproduces.**
+> ADR-0008's field rule fires on all eleven of `url.URL`'s exported fields, `User` among them, so `url.Userinfo` is never entered and the refusal names none of it: twelve lines, none mentioning `url.Userinfo`.
+> `url.URL` is refused either way, so this is an evidence defect rather than a behaviour one - but the sentence "the error names `/V/User` and `url.Userinfo`, which is the right diagnosis" is no longer true of any ferry.
+> Evidence: `X3=1` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
 
 ### A recursive type does not compile
 
@@ -812,17 +838,27 @@ Three planes, because each catches a class the others cannot.
 
 - **The memory plane**, which preserves kinds exactly.
   This is where core's value-fidelity guarantee is stated, because it is the only plane that adds nothing of its own.
-  Measured: 11 of 11 core types, 10 of 10 composites.
+  Measured: 11 of 11 core types, 10 of 10 composites, nothing refused.
 - **A real driver**, which has a format and I/O.
-  Measured through the YAML driver: 11 of 11 and 10 of 10, and a fifteen-address struct with 0 of 15 addresses differing.
+  Measured through the YAML driver: 11 of 11 and 10 of 10, nothing refused, and a fifteen-address struct with 0 of 15 addresses differing.
   The memory plane alone would have proven nothing about base64, and it was the YAML driver's emitter that surfaced the `!!binary` defect.
 - **A flattening plane**, which reports `String` for everything and has no null.
   This is the plane whose absence hid the donor rule for two drafts, and it is not an exotic case: it is env, query and Consul, which is three of ADR-0004's four first-party drivers.
-  Measured: 11 of 11 core types, and **8 of 10 composites**.
+  Measured: 11 of 11 core types with **3 values refused**, and 10 of 10 composites with **13 values refused**.
 
-**The two failures on the flattening plane are the finding, and they are not a bug.**
-`*int` and `*Cred` at nil fail, because a nil pointer writes `Null` and a plane with no null cannot carry it.
-ADR-0004's own table says which planes those are: YAML and JSON can produce `Null`, and TOML, env, query params and opaque KV cannot.
+**The refusals on the flattening plane are the finding, and they are not a bug.**
+Every refused value is a nil or empty composite, which the walk writes as `Null` at the container address, and a plane with no null cannot carry it.
+Eight of the ten composite types have at least one such value - `map[string]int`, `map[int]string`, `*int`, `*Cred`, `[]Cred`, `[][]string`, `map[string][]string` and `[]time.Duration` - and so do two of the eleven core types, `[]byte` and `[]string`.
+ADR-0004's own table says which planes have a null: YAML and JSON can produce one, and TOML, env, query params and opaque KV cannot.
+
+> **Amended under [#41](https://github.com/onhotpath/ferry/issues/41), and the correction is worth more than the numbers.**
+> As published this section read "8 of 10 composites" with "the two failures being `*int` and `*Cred` at nil".
+> Both halves came from a probe that never touched a plane: the flattening plane was a `flatten` helper, a `map -> map` transform, and it mapped `Null` onto `String("")`.
+> That is not a plane with no null; it is **the silent mangling this section's own declaration rule exists to prevent**, so the only two values it reported as failing were the two whose Go type made the mangling visible on the way back.
+> Re-measured through `Dump` and `Load` against a real `Source`/`Sink` pair that declares its kinds, the composites pass **10 of 10** - every proof the plane can express - and thirteen values are refused loudly instead of two failing quietly.
+> The rule below is unchanged and is what makes the new numbers readable; what changed is that it is now actually exercised.
+> Evidence: `X2=7` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
+> A plane that *declares* it carries null and then refuses one is still a **failure** and not a refusal, which the same probe asserts.
 
 So the suite cannot simply demand that every plane pass every proof, and this is new work ADR-0004 did not anticipate:
 
@@ -838,6 +874,14 @@ Without the declaration the suite has only two options, both wrong: fail every f
 
 **A completeness check closes the loop**, because a table that can be added to without adding a row is a table that drifts.
 Core's test iterates the identity table and the admitted kind list and asserts that every member has a proof in `CoreTypes()`, so extending the set without extending the table fails CI rather than silently widening an unproven guarantee.
+
+> **Amended under [#41](https://github.com/onhotpath/ferry/issues/41): the check is red on arrival, and that is the point of it.**
+> No prototype had implemented it.
+> Written and run, it reports **eighteen admitted members, eleven proof rows, and seven with none**: `int16`, `int32`, `int64`, `uint`, `uint8`, `uint16` and `uint32`.
+> So the "11 of 11 core types" above is eleven of eighteen, and the seven integer widths that were never proved are exactly the ones nobody would think to doubt.
+> This is not a defect in the rule; it is the rule working the first time anybody ran it, and it is a green light for the check rather than against it.
+> Closing it means adding seven rows to `CoreTypes()`, which is [#35](https://github.com/onhotpath/ferry/issues/35)'s work and not this ADR's.
+> Evidence: `TestCoreTypesComplete` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
 
 ### What this ADR does not decide
 
