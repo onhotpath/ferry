@@ -36,9 +36,13 @@ func PtrEq[T any](eq func(a, b T) bool) func(a, b *T) bool {
 	}
 }
 
+// Cred is the harness's composite fixture. The tags are HARNESS DEFECT #1
+// again: the superseded walk fell back to the Go field name and the engine
+// refuses an untagged field per ADR-0008. The segment text is the field name,
+// so no address moves.
 type Cred struct {
-	User string
-	Pass string
+	User string `ferry:"User"`
+	Pass string `ferry:"Pass"`
 }
 
 func credEq(a, b Cred) bool { return a == b }
@@ -111,7 +115,7 @@ func runAudit() {
 	total, bad := 0, 0
 	for _, pr := range auditSet() {
 		total++
-		fails := pr.run(identityPlane)
+		fails := failsOn(pr, memoryPlane())
 		if len(fails) > 0 {
 			bad++
 			fmt.Printf("  FAIL %-22s\n", pr.Name())
@@ -127,7 +131,7 @@ func runAudit() {
 	fmt.Println("\n--- can the harness go red? inject a lossy float64 codec ---")
 	restore := breakFloat64()
 	f := Type("float64", BitEq[float64], 0.1, 1.0/3.0, math.MaxFloat64, math.NaN())
-	fails := f.run(identityPlane)
+	fails := failsOn(f, memoryPlane())
 	if len(fails) == 0 {
 		fmt.Println("  *** the harness stayed GREEN against a knowingly lossy codec ***")
 	} else {
@@ -139,7 +143,7 @@ func runAudit() {
 	restore()
 
 	fmt.Println("\n--- and does it stay green once the codec is restored? ---")
-	fmt.Printf("  restored float64 failures: %d\n", len(Type("float64", BitEq[float64], 0.1, math.NaN()).run(identityPlane)))
+	fmt.Printf("  restored float64 failures: %d\n", len(failsOn(Type("float64", BitEq[float64], 0.1, math.NaN()), memoryPlane())))
 
 	fmt.Println("\n--- determinism: is the dumped address order stable? ---")
 	m := map[string]int{"a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8}

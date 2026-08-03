@@ -142,7 +142,7 @@ func runAudit12() {
 		total, bad := 0, 0
 		for _, pr := range set.ps {
 			total++
-			if fails := pr.run(identityPlane); len(fails) > 0 {
+			if fails := failsOn(pr, memoryPlane()); len(fails) > 0 {
 				bad++
 				fmt.Printf("    FAIL %-14s %v\n", pr.Name(), fails)
 			}
