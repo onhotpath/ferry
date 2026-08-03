@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -113,8 +114,8 @@ func runA1() {
 	fmt.Println("\n  the exact-duplicate case, for contrast:")
 	fmt.Printf("    Compile[A1Dup]()   -> %v\n", errOneLine(Compile[A1Dup]()))
 
-	fmt.Println("\n  and what the un-refused schema does on the two plane classes, which")
-	fmt.Println("  is ADR-0003's own reason for making it a schema property:")
+	fmt.Println("\n  and what the schema does on the two plane classes, which is")
+	fmt.Println("  ADR-0003's own reason for making it a schema property:")
 	ctx := context.Background()
 	v := A1Clash{Flat: "scalar", Nested: A1Sub{Host: "h"}}
 
@@ -128,14 +129,14 @@ func runA1() {
 	store := NewStore()
 	kerr := Dump(ctx, v, BKVSink{Store: store, PerOpen: true})
 	fmt.Printf("    FLAT plane (kv)  : dump err=%v, keys=%v\n", errOneLine(kerr), store.Keys())
-	fmt.Println("    So the schema compiles, a flat plane takes it, and a tree plane")
-	fmt.Println("    cannot represent it - which is exactly the \"loadable from env and")
-	fmt.Println("    undumpable to YAML\" schema ADR-0003 refuses at compile so that no")
-	fmt.Println("    driver ever sees it.")
+	fmt.Println("    The refusal reaches both drivers as a compile error, so neither")
+	fmt.Println("    plane ever sees the schema - which is exactly the \"loadable from")
+	fmt.Println("    env and undumpable to YAML\" case ADR-0003 refuses at compile.")
 
-	verdict("NOT IMPLEMENTED", "prefixFree() in e_schema.go compares whole rendered")
-	fmt.Println("           addresses for equality, so it is duplicate detection. The prefix")
-	fmt.Println("           relation at a segment boundary is never asked.")
+	verdict("IMPLEMENTED", "#41 D2 made prefixFree() ask the prefix relation at a")
+	fmt.Println("           segment boundary. As FOUND it compared whole rendered addresses")
+	fmt.Println("           for equality, so it was duplicate detection and the clash above")
+	fmt.Println("           compiled, dumped to a flat plane and could not reach a tree one.")
 }
 
 // ---------------------------------------------------------------------------
@@ -182,10 +183,13 @@ func runA2() {
 			t, kindClassify(t) == shapeLeaf, kindLeaf(t))
 	}
 
-	verdict("NOT IMPLEMENTED", "uint8 is admitted by typeset.go and refused by")
-	fmt.Println("           e_schema.go's kindLeaf, which omits reflect.Uint8 from its case")
-	fmt.Println("           list. Two admission authorities disagreeing about one kind is")
-	fmt.Println("           ADR-0010's duplication axis 1 inside the type set.")
+	verdict("IMPLEMENTED", "#41 D18 put reflect.Uint8 back into e_schema.go's")
+	fmt.Println("           kindLeaf case list, so both admission authorities now give the")
+	fmt.Println("           same answer for every kind above. As FOUND uint8 was admitted by")
+	fmt.Println("           typeset.go and refused by kindLeaf, which is ADR-0010's")
+	fmt.Println("           duplication axis 1 inside the type set. The two authorities still")
+	fmt.Println("           disagree about 12 of 26 named third-party types (X3=4), for a")
+	fmt.Println("           different reason: ADR-0008's field rule is on one and not the other.")
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +212,12 @@ func runA3() {
 	says("ADR-0007", `"The text pair is consulted BEFORE reflect.Kind admission.
     A declaration beats an inference."`)
 
+	// This probe drives the two chain globals through both orders, so it must
+	// hand the tip's own defaults back. Restoring a hardcoded nil/false at the
+	// end - which is what it used to do - left every later probe running in the
+	// world before #41 D3 flipped the default.
+	defer func(o []string, b bool) { chainOrder, chainBeforeKind = o, b }(chainOrder, chainBeforeKind)
+
 	fmt.Printf("\n  the package defaults, as the tip ships them:\n")
 	fmt.Printf("    chainOrder      = %v (len %d)\n", chainOrder, len(chainOrder))
 	fmt.Printf("    chainBeforeKind = %v\n", chainBeforeKind)
@@ -229,14 +239,13 @@ func runA3() {
 		vals, _ := dumpTo(ctx, A3IP{IP: net.ParseIP("192.0.2.1")}, WithRegistry(NewRegistry()))
 		fmt.Printf("    %-20s net.IP        -> %s\n", "", vals[Path{}.Name("ip")].GoString())
 	}
-	chainOrder, chainBeforeKind = nil, false
 	fmt.Println("    ADR-0007's chosen column is string(\"...\") for all three.")
 
-	verdict("IMPLEMENTED, OFF", "the chain is implemented and both orders are")
-	fmt.Println("           switchable, but the tip's default is chainOrder=nil and")
-	fmt.Println("           chainBeforeKind=false, which is the world ADR-0007 rejected.")
-	fmt.Println("           No B25 probe sets either, so every ADR-0012 measurement was")
-	fmt.Println("           taken with ADR-0007's decision switched off.")
+	verdict("IMPLEMENTED, ON", "the chain is implemented, both orders are")
+	fmt.Println("           switchable, and #41 D3 made chainOrder=[text] and")
+	fmt.Println("           chainBeforeKind=true the tip's default, which is the world")
+	fmt.Println("           ADR-0007 chose. As FOUND the default was nil/false, so every")
+	fmt.Println("           ADR-0012 measurement was taken with the decision switched off.")
 }
 
 // ---------------------------------------------------------------------------
@@ -262,17 +271,29 @@ func runA4() {
 	fmt.Println("\n  the free function that does implement it, for contrast:")
 	fmt.Printf("    zeroCheck(g) -> %v\n", errOneLine(zeroCheck(g)))
 
-	fmt.Println("\n  and what the accepted registration then does, end to end:")
+	fmt.Printf("\n  the registry the refusal leaves behind: %d registration(s)\n", len(reg.byType))
+	fmt.Println("  so the dump below is answered by ADR-0007's chain, not by the codec:")
 	ctx := context.Background()
 	vals, derr := dumpTo(ctx, A4Conf{}, WithRegistry(reg))
 	fmt.Printf("    dump the zero value -> %s err=%v\n", vals[Path{}.Name("a")].GoString(), errOneLine(derr))
 	_, lerr := loadFrom(ctx, A4Conf{}, vals, WithRegistry(reg))
 	fmt.Printf("    load it back        -> err=%v\n", errOneLine(lerr))
 
-	verdict("NOT IMPLEMENTED", "zeroCheck exists in r16_zerocheck.go and")
-	fmt.Println("           (*Registry).Register never calls it. The rule is implemented")
-	fmt.Println("           beside the API rather than in it, which is ADR-0007's own third")
-	fmt.Println("           defect in a new place.")
+	fmt.Println("\n  and a codec that IS total over the zero value, for contrast:")
+	reg2 := NewRegistry()
+	fmt.Printf("    Register(TextCodec[netip.Addr](VString)) -> %v\n",
+		errOneLine(reg2.Register(TextCodec[netip.Addr](VString))))
+	vals2, derr2 := dumpTo(ctx, A4Conf{}, WithRegistry(reg2))
+	fmt.Printf("    dump the zero value -> %s err=%v\n", vals2[Path{}.Name("a")].GoString(), errOneLine(derr2))
+	_, lerr2 := loadFrom(ctx, A4Conf{}, vals2, WithRegistry(reg2))
+	fmt.Printf("    load it back        -> err=%v\n", errOneLine(lerr2))
+
+	verdict("IMPLEMENTED", "#41 D4 moved the check inside (*Registry).Register,")
+	fmt.Println("           where ADR-0009 puts it, and the refusal above is the ADR's own")
+	fmt.Println("           worked text. As FOUND zeroCheck lived in r16_zerocheck.go and")
+	fmt.Println("           Register never called it: the rule was implemented beside the API")
+	fmt.Println("           rather than in it. The half Register still cannot check is")
+	fmt.Println("           equality, which ADR-0005 keeps with the registrant (X3=3).")
 }
 
 // ---------------------------------------------------------------------------
@@ -288,20 +309,26 @@ func runA5() {
     StringCodec(...).AsMapKey(). A map[T]V whose key type is registered without
     it is a schema compile error."`)
 
+	// Same reason as A3: this probe drives keyOptIn, so it hands the tip's own
+	// default back rather than a hardcoded false.
+	defer func(k bool) { keyOptIn = k }(keyOptIn)
+
 	reg := mustReg(NewRegistry(), TextCodec[netip.Addr](VString))
 	fmt.Printf("\n  keyOptIn (the package default) = %v\n", keyOptIn)
 	fmt.Printf("  map[netip.Addr]int, codec registered WITHOUT .AsMapKey():\n")
 	fmt.Printf("    Compile[A5Conf](WithRegistry(reg)) -> %v\n", errOneLine(Compile[A5Conf](WithRegistry(reg))))
 
-	keyOptIn = true
-	fmt.Printf("\n  with keyOptIn switched on by hand, which is what R11 and R15 do:\n")
+	keyOptIn = false
+	fmt.Printf("\n  with keyOptIn switched OFF, which is the world as FOUND:\n")
 	reg2 := mustReg(NewRegistry(), TextCodec[netip.Addr](VString))
 	fmt.Printf("    Compile[A5Conf](WithRegistry(reg2)) -> %v\n", errOneLine(Compile[A5Conf](WithRegistry(reg2))))
-	keyOptIn = false
 
-	verdict("IMPLEMENTED, OFF", "the opt-in rule is a package-level switch")
-	fmt.Println("           defaulting to the rule ADR-0009 refused. Only R11, R15 and R17")
-	fmt.Println("           turn it on, and each reverts it.")
+	verdict("IMPLEMENTED, ON", "the opt-in rule is a package-level switch and")
+	fmt.Println("           #41 D5 made it default to the rule ADR-0009 chose. As FOUND it")
+	fmt.Println("           defaulted to the rule ADR-0009 refused, and only R11, R15 and")
+	fmt.Println("           R17 turned it on. #45 records the hole it still does not close:")
+	fmt.Println("           an unregistered type the chain claims at kind String keys a map")
+	fmt.Println("           with nobody asked, so the refusal is lifted by DELETING a line.")
 }
 
 // ---------------------------------------------------------------------------
@@ -334,13 +361,31 @@ func runA6() {
 	fmt.Printf("    errors reported: %d\n", countErrs(err))
 	fmt.Printf("    %v\n", err)
 
-	fmt.Println("\n  the scheduler every entry point on this tip is built with:")
-	fmt.Println("    Load, LoadOver, Dump, Binding.Load and SinkBinding.Dump all pass")
-	fmt.Println("    `sch: serial`, and serial returns on the first non-nil error.")
-	fmt.Println("    The aggregating scheduler exists, in e12_yield.go, and nothing")
-	fmt.Println("    outside that probe uses it.")
+	fmt.Println("\n  and the Dump direction, on a plane that refuses every address:")
+	derr := Dump(ctx, A6Conf{}, refuseAllSink{})
+	fmt.Printf("    errors reported: %d\n", countErrs(derr))
 
-	verdict("NOT IMPLEMENTED", "the tip is first-error in both directions.")
+	verdict("IMPLEMENTED", "#41 landed the aggregating scheduler on the entry")
+	fmt.Println("           points in both directions. As FOUND every entry point passed")
+	fmt.Println("           `sch: serial`, which returns on the first non-nil error, and the")
+	fmt.Println("           aggregating scheduler existed only inside e12_yield.go's probe.")
+	fmt.Println("           `serial` and `aggregating` are both unexported and WithSched takes")
+	fmt.Println("           an unexported parameter type, so no importer can select either")
+	fmt.Println("           (X4=5); aggregating is what ferry does, not what it offers.")
+}
+
+// refuseAllSink is the smallest plane that fails every Set, so A6 can ask the
+// Dump direction the question it asks the Load one.
+type refuseAllSink struct{}
+
+func (s refuseAllSink) Bind(*AddressSet) (FOpenWriterFunc, error) {
+	return func(context.Context) (FWriter, error) { return refuseAllWriter{}, nil }, nil
+}
+
+type refuseAllWriter struct{}
+
+func (refuseAllWriter) Set(context.Context, Path, Value) error {
+	return errors.New("this plane refuses everything")
 }
 
 // ---------------------------------------------------------------------------
@@ -362,36 +407,83 @@ func runA7() {
 	fmt.Printf("\n  the plane holds a secret at an int address.\n")
 	fmt.Printf("    ferry's message: %s\n", msg)
 	fmt.Printf("    contains the plane's own text: %v\n", strings.Contains(msg, secret))
+	fmt.Printf("    and the cause is still in the chain: errors.Is(err, strconv.ErrSyntax) = %v\n",
+		errors.Is(err, strconv.ErrSyntax))
 
-	verdict("NOT IMPLEMENTED", "loadDir wraps the stdlib error with %w and prints")
-	fmt.Println("           it, which is the naive form ADR-0011 measured 4 leaks in 5 for.")
+	verdict("IMPLEMENTED", "#41 gave ferry its own message text (ferr_msg.go) and")
+	fmt.Println("           kept the plane's own words in the cause without printing them.")
+	fmt.Println("           As FOUND loadDir wrapped the stdlib error with %w and printed it,")
+	fmt.Println("           which is the naive form ADR-0011 measured 4 leaks in 5 for.")
 }
 
 // ---------------------------------------------------------------------------
 // A8  ADR-0011's type, classes and aggregate
 // ---------------------------------------------------------------------------
 
+// A8Multi carries two independent schema refusals - an unknown option and a
+// default that does not parse - so the compiler is forced to build an aggregate
+// rather than return a single error bare.
+type A8Multi struct {
+	A string `ferry:"a,nope"`
+	B int    `ferry:"b,default=abc"`
+}
+
 func runA8() {
 	says("ADR-0011", `"type Error struct{ /* no exported fields */ }" with Address(), and
     "var ErrSchema, ErrMissing, ErrValue, ErrPlane error" plus ErrDriver;
     "ferry never calls errors.Join".`)
 
-	fmt.Println("\n  what the tip exports, found by asking for each name:")
-	fmt.Printf("    ferry.Error type      : absent (no such type in the package)\n")
-	fmt.Printf("    ErrSchema/ErrMissing/ErrValue/ErrPlane/ErrDriver : absent\n")
-	fmt.Printf("    ErrReadOnly           : present (%v), which is ADR-0004's\n", ErrReadOnly)
-	fmt.Printf("    Elements()/ErrorAt()/DiffErrors() : absent\n")
+	// Every name below is referenced rather than described, so this block is a
+	// compile-time proof that the identifier exists and a run-time measurement
+	// of what it does. As FOUND, none of them existed and these lines were
+	// literals reading `absent`.
+	fmt.Println("\n  what the tip exports, by using each name:")
+	ctx := context.Background()
+	_, verr := loadFrom(ctx, A7Conf{}, map[Path]Value{Path{}.Name("max_conns"): String("nope")})
+	var fe *Error
+	fmt.Printf("    *ferry.Error          : present, errors.As -> %v, Address() = %v\n",
+		errors.As(verr, &fe), func() Path {
+			if fe != nil {
+				return fe.Address()
+			}
+			return Path{}
+		}())
+	for _, c := range []struct {
+		name string
+		err  error
+	}{
+		{"ErrSchema", ErrSchema}, {"ErrMissing", ErrMissing}, {"ErrValue", ErrValue},
+		{"ErrPlane", ErrPlane}, {"ErrDriver", ErrDriver}, {"ErrReadOnly", ErrReadOnly},
+	} {
+		fmt.Printf("    %-21s : %q   this error Is it: %v\n", c.name, c.err, errors.Is(verr, c.err))
+	}
+	fmt.Printf("    Elements(err)         : %d element(s)\n", len(Elements(verr)))
+	fmt.Printf("    ErrorAt(/x, err)      : %v\n", errOneLine(ErrorAt(Path{}.Name("x"), verr)))
+	fmt.Printf("    DiffErrors(...)       : %v\n",
+		DiffErrors(verr, Want{Address: Path{}.Name("max_conns"), Class: ErrValue}))
 
-	fmt.Println("\n  and errors.Join is what the compiler uses:")
-	err := Compile[A1Dup]()
-	var joined interface{ Unwrap() []error }
-	fmt.Printf("    Compile[A1Dup]() unwraps to []error: %v\n", errors.As(err, &joined))
-	fmt.Printf("    sorted at construction: yes (compileSchema2 sorts before joining)\n")
+	fmt.Println("\n  and where errors.Join survives, which is the part still open.")
+	fmt.Println("  A schema with two independent refusals, so the aggregate is real:")
+	err := Compile[A8Multi]()
+	fmt.Printf("    Compile[A8Multi]()    -> %v\n", errOneLine(err))
+	fmt.Printf("    it is a *ferry aggregate     : %v\n", isErrorList(err))
+	fmt.Printf("    Elements() can range it      : %d of the 2 refusals above\n", len(Elements(err)))
+	fmt.Println("    errors.Join's result is invisible to Elements() and is ordered by")
+	fmt.Println("    construction, so ADR-0003's segment-wise rule does not reach it.")
 
-	verdict("NOT IMPLEMENTED", "no error type, no class sentinels, no aggregate")
-	fmt.Println("           constructor. ADR-0011 was measured on proto/9-errors, which is")
-	fmt.Println("           not an ancestor of this tip: its e_*.go probe files never")
-	fmt.Println("           reached it, and proto/16's own e_*.go files took those names.")
+	verdict("PARTLY", "#41 landed ADR-0011's model whole on the RUNTIME path:")
+	fmt.Println("           the type, Address(), five class sentinels, Elements(), ErrorAt()")
+	fmt.Println("           and DiffErrors() all exist and the runtime calls `join` rather")
+	fmt.Println("           than errors.Join. As FOUND none of them existed, because ADR-0011")
+	fmt.Println("           was measured on proto/9-errors, which is not an ancestor of this")
+	fmt.Println("           tip. What is still open is the COMPILER path: e_schema.go:107 and")
+	fmt.Println("           :423 still call errors.Join, so a schema refusal is invisible to")
+	fmt.Println("           Elements() and is ordered by construction rather than segment-wise.")
+}
+
+func isErrorList(err error) bool {
+	var l *errorList
+	return errors.As(err, &l)
 }
 
 // ---------------------------------------------------------------------------
@@ -433,9 +525,13 @@ func runA9() {
 	fmt.Printf("    and the json tag on the bare-quote field: %q\n",
 		reflect.TypeFor[A9BareQuote]().Field(0).Tag.Get("json"))
 
-	verdict("NOT IMPLEMENTED", "parseTag calls f.Tag.Lookup, so an invalid escape")
-	fmt.Println("           is indistinguishable from a field carrying no ferry tag, a bare")
-	fmt.Println("           quote truncates silently, and a duplicate key is not seen at all.")
+	verdict("IMPLEMENTED", "#41 D9 gave core its own scanner over the raw")
+	fmt.Println("           StructField.Tag, and all three failure modes are now named with")
+	fmt.Println("           a remedy. Read the Lookup column beside the Compile column: it is")
+	fmt.Println("           what a reflect.StructTag.Get-based core would have seen instead.")
+	fmt.Println("           As FOUND parseTag called f.Tag.Lookup, so an invalid escape was")
+	fmt.Println("           indistinguishable from a field carrying no ferry tag, a bare quote")
+	fmt.Println("           truncated silently, and a duplicate key was not seen at all.")
 }
 
 // ---------------------------------------------------------------------------
@@ -471,10 +567,12 @@ func runA10() {
 	fmt.Printf("    Compile -> %v\n", errOneLine(Compile[A10Conf]()))
 	fmt.Printf("    loaded  -> %+v err=%v\n", v, errOneLine(err))
 
-	verdict("NOT IMPLEMENTED", "splitTag treats a quote as significant only when")
-	fmt.Println("           it is the first byte of a token, so a quoted OPTION VALUE, which")
-	fmt.Println("           begins with `default=`, is not quoted at all and the comma")
-	fmt.Println("           inside it splits. The quoted NAME case does work.")
+	verdict("IMPLEMENTED", "#41 D9's splitter honours a quote wherever a token")
+	fmt.Println("           may start one, so ADR-0008's own three-line struct compiles and")
+	fmt.Println("           loads its defaults verbatim. As FOUND splitTag treated a quote as")
+	fmt.Println("           significant only as the first byte of a token, so a quoted OPTION")
+	fmt.Println("           VALUE - which begins with `default=` - was not quoted at all and")
+	fmt.Println("           the comma inside it split. Only the quoted NAME case worked.")
 }
 
 // ---------------------------------------------------------------------------
@@ -506,23 +604,24 @@ func runA11() {
 	got, lerr := loadFrom(ctx, A11Conf{}, map[Path]Value{Path{}.Name("name"): String("n")})
 	fmt.Printf("  load /name=string(\"n\") -> nil pointer: %v, value: %+v, err=%v\n",
 		got.A11Common == nil, got.A11Common, errOneLine(lerr))
-	fmt.Println("  ADR-0008 measured this as a silent total loss on ITS prototype;")
-	fmt.Println("  this tip's walk materialises the pointer from the promoted children's")
-	fmt.Println("  presence bit, so the Load case works and the refusal is still absent.")
+	fmt.Println("  The refusal is a SCHEMA one, so it reaches Load before any plane is")
+	fmt.Println("  opened, which is where ADR-0008 puts it.")
 
-	fmt.Println("\n  what the refusal exists to prevent shows up on Dump instead:")
+	fmt.Println("\n  and the same refusal on the Dump side, which is what it exists for:")
 	nilv, derr := dumpTo(ctx, A11Conf{Port: 8080})
 	fmt.Printf("    dump with the embedded pointer nil -> err=%v\n", errOneLine(derr))
 	for _, p := range sortedAddrs(nilv) {
 		fmt.Printf("      %-8q %s\n", p.String(), nilv[p].GoString())
 	}
-	fmt.Println("    The promoted pointer's own address IS THE EMPTY PATH, so a nil one")
-	fmt.Println("    writes Null at the address ADR-0003 says may not exist and ADR-0010's")
-	fmt.Println("    root rule refuses everywhere else.")
+	fmt.Println("    As FOUND this dumped Null at the EMPTY PATH - the promoted pointer")
+	fmt.Println("    has no address of its own - which is the address ADR-0003 says may")
+	fmt.Println("    not exist and ADR-0010's root rule refuses everywhere else.")
 
-	verdict("NOT IMPLEMENTED", "no refusal, and a nil promoted pointer mints the")
-	fmt.Println("           empty path, which is the hole ADR-0010's root-leaf rule closes")
-	fmt.Println("           reached through a door that rule does not cover.")
+	verdict("IMPLEMENTED", "#41 D11 added the refusal, in both directions and at")
+	fmt.Println("           schema compile. As FOUND there was none: Load materialised the")
+	fmt.Println("           pointer from the promoted children's presence bit and Dump wrote")
+	fmt.Println("           Null at the empty path, reaching the hole ADR-0010's root-leaf")
+	fmt.Println("           rule closes through a door that rule does not cover.")
 }
 
 // ---------------------------------------------------------------------------
@@ -559,13 +658,21 @@ func runA12() {
 	fmt.Println("  ADR-0006's measured line for both is:")
 	fmt.Println("    ferry: /auth: required, and the plane supplied nothing under it")
 
-	fmt.Println("\n  where the flag goes:")
-	fmt.Println("    applyOptions sets node.required on a struct and a pointer node, and")
-	fmt.Println("    e_walk.go reads n.required in exactly one place, direction.leaf.")
+	fmt.Println("\n  and the half the rule is defined against - one child present:")
+	one := map[Path]Value{Path{}.Name("auth").Name("user"): String("u")}
+	pv1, perr1 := loadFrom(ctx, A12Ptr{}, one)
+	// Dereferenced, because a printed pointer is a heap address and a regression
+	// diff over this suite has to be stable across runs (ADR-0001, determinism).
+	fmt.Printf("  *struct, one child   -> &%+v err=%v\n", *pv1.Auth, errOneLine(perr1))
+	vv1, verr1 := loadFrom(ctx, A12Val{}, one)
+	fmt.Printf("   struct, one child   -> %+v err=%v\n", vv1, errOneLine(verr1))
 
-	verdict("NOT IMPLEMENTED", "accepted at compile, enforced by nothing, which is")
-	fmt.Println("           the draft defect ADR-0006 records repairing. Independently")
-	fmt.Println("           found on proto/16-entry-point by the #10/#14/#15 session.")
+	verdict("IMPLEMENTED", "#41 made the composite read n.required, so both the")
+	fmt.Println("           pointer and the value form report ADR-0006's own line, and one")
+	fmt.Println("           present child satisfies it. As FOUND `required` on a non-pointer")
+	fmt.Println("           struct was accepted at compile and enforced by nothing, which is")
+	fmt.Println("           the draft defect ADR-0006 records repairing - independently found")
+	fmt.Println("           on proto/16-entry-point by the #10/#14/#15 session.")
 }
 
 // ---------------------------------------------------------------------------
@@ -589,10 +696,14 @@ func runA13() {
 	v7, e7 := loadFrom(ctx, A13Conf{}, over)
 	fmt.Printf("  index 7 only -> %q err=%v\n", v7.V, errOneLine(e7))
 
-	verdict("NOT IMPLEMENTED", "the walk visits exactly n.n static element")
-	fmt.Println("           addresses and never enumerates an array, so an index the array")
-	fmt.Println("           cannot hold is not read and not reported. ADR-0005's second row")
-	fmt.Println("           is a measurement the tip cannot produce.")
+	verdict("IMPLEMENTED", "#41 D17 made the walk enumerate the plane under an")
+	fmt.Println("           array address and report an index the array cannot hold, so both")
+	fmt.Println("           of ADR-0005's rows now reproduce. As FOUND the walk visited")
+	fmt.Println("           exactly n static element addresses and never enumerated, so the")
+	fmt.Println("           over-index was not read and not reported.")
+	fmt.Println("           One evidence detail: the address prints as /v and ADR-0005")
+	fmt.Println("           published /V, because the ADR's prototype invented the Go field")
+	fmt.Println("           name and ADR-0008's field rule since made the tag mandatory.")
 }
 
 // ---------------------------------------------------------------------------
@@ -658,9 +769,12 @@ func runA14() {
 		fmt.Printf("  %-12s err=%v\n", "", errOneLine(err))
 	}
 
-	verdict("PARTLY", "Commit-only-on-success and Close-always are implemented.")
-	fmt.Println("           A Close failure is discarded: SinkBinding.Dump defers rel.Close()")
-	fmt.Println("           without capturing its result, so `Close fails` reports nil.")
+	verdict("IMPLEMENTED", "all three: Commit only on success, Close always, and")
+	fmt.Println("           a Close failure joined as an element with no location - which is")
+	fmt.Println("           what `2 errors: /a, (close)` on the last row is. As FOUND")
+	fmt.Println("           SinkBinding.Dump deferred rel.Close() without capturing its")
+	fmt.Println("           result, so the `Close fails` row reported nil and ferry silently")
+	fmt.Println("           ignored a failure, which ADR-0001 forbids.")
 }
 
 // ---------------------------------------------------------------------------
@@ -690,15 +804,24 @@ func runA15() {
 	fmt.Printf("\n  Get(/tags) on `tags: [a, b]` -> %s, err=%v\n", v.GoString(), gerr)
 	fmt.Println("  ADR-0005's table says Absent with no error.")
 
-	fmt.Println("\n  and the reason no probe has ever noticed:")
+	fmt.Println("\n  and end to end, which is the half that used to hide it:")
 	got, lerr := Load[A15Conf](ctx, FYAMLSource{Path: path})
 	fmt.Printf("    Load[A15Conf] -> %+v err=%v\n", got, errOneLine(lerr))
-	fmt.Println("    loadDir's get() discards the error Reader.Get returned and")
-	fmt.Println("    substitutes Absent (B10), so the driver's wrong return value is")
-	fmt.Println("    invisible. Fixing either one alone surfaces the other.")
 
-	verdict("NOT IMPLEMENTED", "two deviations that cancel: the driver returns an")
-	fmt.Println("           error where the ADR measures Absent, and the walk deletes it.")
+	fmt.Println("\n  and the walk no longer deletes a driver error, so a plane that")
+	fmt.Println("  really does fail at this address is now distinguishable from Absent:")
+	// The message carries a temp path, so this asserts the CLASS rather than
+	// printing it: the suite is regression-diffed and a path is not stable.
+	_, ferr := Load[A15Conf](ctx, FYAMLSource{Path: filepath.Join(dir, "gone.yaml")})
+	fmt.Printf("    Load against a missing file -> non-nil: %v, Is(ErrPlane): %v, Is(ErrMissing): %v\n",
+		ferr != nil, errors.Is(ferr, ErrPlane), errors.Is(ferr, ErrMissing))
+
+	verdict("IMPLEMENTED", "both halves. #41 made the YAML driver return Absent")
+	fmt.Println("           with a nil error at a container address, which is ADR-0005's own")
+	fmt.Println("           row, and B10's fix stopped loadDir's get() from substituting")
+	fmt.Println("           Absent for a real driver error. As FOUND the two deviations")
+	fmt.Println("           cancelled: the driver returned an error where the ADR measures")
+	fmt.Println("           Absent, and the walk deleted it, so neither was visible alone.")
 }
 
 // ---------------------------------------------------------------------------
@@ -734,9 +857,10 @@ func runA16() {
 		fmt.Printf("    %-22s -> %v\n", r.name, errOneLine(r.err))
 	}
 
-	verdict("NOT IMPLEMENTED", "one generic `unknown option` message, no edit")
-	fmt.Println("           distance, no vocabulary table, no separate whitespace diagnosis,")
-	fmt.Println("           and no tier-1 well-formedness stage above them.")
+	verdict("IMPLEMENTED", "all three diagnostics: edit distance for the near")
+	fmt.Println("           miss, the neighbourhood vocabulary table for the foreign word,")
+	fmt.Println("           and a separate whitespace sentence. As FOUND there was one")
+	fmt.Println("           generic `unknown option` message and none of the three.")
 }
 
 // ---------------------------------------------------------------------------

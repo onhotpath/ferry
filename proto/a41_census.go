@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 )
@@ -121,6 +122,15 @@ type A19Conf struct {
 	Sl []string      `ferry:"sl"`
 }
 
+// nilOrSet renders a pointer by whether it is nil and what it points at, never
+// by its address, so a probe's output is stable across runs.
+func nilOrSet(p *int) string {
+	if p == nil {
+		return "nil"
+	}
+	return fmt.Sprintf("&%d", *p)
+}
+
 func runA19() {
 	says("ADR-0006", `"Null is admitted by exactly the Go types that have a null, and refused by
     every other leaf as a wrong kind." Its table: string/int/time.Duration refuse;
@@ -135,7 +145,10 @@ func runA19() {
 		if err != nil {
 			res = "REFUSED: " + errOneLine(err)
 		}
-		fmt.Printf("    Null at /%-3s -> %-52s %+v\n", addr, res, got)
+		// P is rendered as nil/non-nil rather than printed, because %+v on a
+		// live *int is a heap address and this suite is regression-diffed.
+		fmt.Printf("    Null at /%-3s -> %-52s {S:%s I:%d D:%v By:%v P:%s Sl:%v}\n",
+			addr, res, got.S, got.I, got.D, got.By, nilOrSet(got.P), got.Sl)
 	}
 
 	verdict("IMPLEMENTED", "every row matches ADR-0006's table, exercised here")
@@ -584,6 +597,13 @@ type A31Conf struct {
 	Addr netip.Addr `ferry:"addr"`
 }
 
+// A31Poll is the other type r18_freeze.go's init registers. It carries no text
+// pair, so ADR-0007's chain cannot claim it and the registry is the only thing
+// that can - which keeps A31's contrast visible at compile.
+type A31Poll struct {
+	P R18Poll `ferry:"p"`
+}
+
 func runA31() {
 	says("ADR-0009", `"The default registry's freeze point is safe by Go's own initialisation
     order, since every init completes before main.main." So a package init that
@@ -591,22 +611,54 @@ func runA31() {
 
 	fmt.Printf("\n  the default registry at the top of main(), before any probe runs:\n")
 	fmt.Printf("    registrations: %d\n", len(defaultRegistry.byType))
+	// Sorted, because ADR-0001's determinism invariant covers every map
+	// iteration reaching a user-visible artefact and an audit's own output is
+	// one. Ranging the map directly - which is what this line used to do - made
+	// the audit violate the rule it was auditing.
+	names := make([]string, 0, len(defaultRegistry.byType))
 	for t := range defaultRegistry.byType {
-		fmt.Printf("      %v\n", t)
+		names = append(names, fmt.Sprintf("%v", t))
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		fmt.Printf("      %s\n", n)
 	}
 	fmt.Println("    They come from two package init()s in r18_freeze.go, which exist to")
 	fmt.Println("    demonstrate exactly this property of ADR-0009's model.")
 
 	fmt.Println("\n  what that does to every probe that takes defaultOpts():")
+	ctx := context.Background()
 	fmt.Printf("    Compile[struct{ Addr netip.Addr }]()                    -> %v\n",
 		errOneLine(Compile[A31Conf]()))
 	fmt.Printf("    Compile[struct{ Addr netip.Addr }](WithRegistry(fresh)) -> %v\n",
 		errOneLine(Compile[A31Conf](WithRegistry(NewRegistry()))))
+	fmt.Println("    Both compile, and that is #41 D3's doing rather than the registry's:")
+	fmt.Println("    ADR-0007's chain claims netip.Addr on its text pair, so the fresh")
+	fmt.Println("    registry needs no registration and the two agree on the plane too:")
+	dv, _ := dumpTo(ctx, A31Conf{Addr: netip.MustParseAddr("192.0.2.1")})
+	fv, _ := dumpTo(ctx, A31Conf{Addr: netip.MustParseAddr("192.0.2.1")}, WithRegistry(NewRegistry()))
+	fmt.Printf("      default registry -> %s\n", dv[Path{}.Name("addr")].GoString())
+	fmt.Printf("      fresh registry   -> %s\n", fv[Path{}.Name("addr")].GoString())
+
+	fmt.Println("\n  The other registration is where the hazard survives. R18Poll carries")
+	fmt.Println("  no text pair, so the chain cannot claim it and only the registry can.")
+	fmt.Println("  It compiles either way - it is an int64 kind - and the two disagree")
+	fmt.Println("  about what the plane holds, silently:")
+	pd, _ := dumpTo(ctx, A31Poll{P: R18Poll(90 * time.Second)})
+	pf, _ := dumpTo(ctx, A31Poll{P: R18Poll(90 * time.Second)}, WithRegistry(NewRegistry()))
+	fmt.Printf("    Compile[struct{ P R18Poll }]()                    -> %v\n", errOneLine(Compile[A31Poll]()))
+	fmt.Printf("    Compile[struct{ P R18Poll }](WithRegistry(fresh)) -> %v\n", errOneLine(Compile[A31Poll](WithRegistry(NewRegistry()))))
+	fmt.Printf("      default registry -> %s\n", pd[Path{}.Name("p")].GoString())
+	fmt.Printf("      fresh registry   -> %s\n", pf[Path{}.Name("p")].GoString())
 
 	verdict("IMPLEMENTED", "and it is a measurement hazard rather than a defect:")
 	fmt.Println("           the registry ADR-0009 designed behaves exactly as designed, and")
 	fmt.Println("           the consequence is that E16's and B25's default-registry")
 	fmt.Println("           measurements were taken against a registry holding two codecs")
 	fmt.Println("           no probe in either suite asked for. A31 is why A3 uses a fresh")
-	fmt.Println("           registry to ask about the chain.")
+	fmt.Println("           registry to ask about the chain. As FOUND the netip.Addr rows")
+	fmt.Println("           differed at COMPILE; with the chain on that pair agrees and the")
+	fmt.Println("           hazard moves to R18Poll, where both registries compile and the")
+	fmt.Println("           plane holds a different value. That is the harder version: a")
+	fmt.Println("           compile error is loud and a changed representation is not.")
 }
