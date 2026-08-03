@@ -30,6 +30,11 @@ coverage.html
 # tool some other project uses.
 /.bin/
 
+# Agent worktrees. Each is a git worktree of this repository, so it appears to
+# the outer repo as an embedded git repository and `git add -A` will commit it
+# as a gitlink. Ignored rather than remembered.
+/.claude/
+
 # The workspace is checked in and no `replace` directive ever is (ADR-0002).
 # Its sum file is generated.
 go.work.sum

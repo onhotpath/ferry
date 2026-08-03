@@ -449,7 +449,7 @@ A named type with a registered codec, using ADR-0005's own mechanism - *"a codec
 
 ```go
 type MultiSZ []string
-reg.Register(ferry.ValueCodec(ferry.Bytes, encNULJoined, decNULJoined))
+reg.Register(ferry.ValueCodec(ferry.KindBytes, encNULJoined, decNULJoined))
 ```
 
 | | address set | plane holds | round trip |
