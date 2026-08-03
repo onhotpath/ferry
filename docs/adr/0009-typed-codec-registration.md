@@ -953,6 +953,13 @@ map[time.Time]int, 2 Go keys -> 1 ferry address
 
 `time.Time` is core's pre-seeded entry, not a registration, so the opt-in rule cannot reach it.
 Fixing that amends ADR-0005's admissible key set, which is #31's.
+
+**And there was a third case, which [#45](https://github.com/onhotpath/ferry/issues/45) found and [ADR-0007](0007-the-codec-chain-and-its-precedence.md) closed.**
+Nothing in this ADR changes: its rule is scoped to "a registration" and is correct as written.
+The gap was that ADR-0007 admitted a **chain-claimed** `String` type as a map key "on the same terms as a registered codec", and the terms were not the same, because a chain arm has no call site at which to say `.AsMapKey()`.
+So the opt-in was defeatable by **not registering**, which made this the only place in ferry where registering a type left it less usable than not registering it.
+ADR-0007 reversed its own sentence: keying a map is registration-only.
+This cross-reference exists because neither ADR was wrong on its own and the composition was, which is the failure mode a reader of one document cannot see.
 This is said explicitly because the two look like one bug and the opt-in rule would otherwise read as having fixed both.
 
 ### The proof is enabled, and can never be required

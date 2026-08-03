@@ -58,7 +58,7 @@ Four questions this ADR had to answer that the ticket did not name:
 | Not asked for, answered anyway | Where |
 | --- | --- |
 | which arms exist at all, given that xload has five and this ADR keeps one | [Only the text pair is recognised](#only-the-text-pair-is-recognised) |
-| whether a chain-admitted type may key a map, and who carries injectivity | [A chain-admitted type may key a map](#a-chain-admitted-type-may-key-a-map-and-core-cannot-check-the-obligation) |
+| whether a chain-admitted type may key a map, and who carries injectivity | [A chain-admitted type may key a map](#a-chain-admitted-type-may-key-a-map-and-core-cannot-check-the-obligation). Answered **yes** here and **reversed to no** under [#45](https://github.com/onhotpath/ferry/issues/45); keying a map is registration-only |
 | what the chain does to ADR-0005's completeness check | [What the chain costs the harness](#what-the-chain-costs-the-harness) |
 | what a pointer type does when it satisfies an arm in its own right | [Three defects found](#three-defects-found-by-running-the-decisions) |
 
@@ -561,7 +561,9 @@ Options visibility, which the survey raises alongside this ("ferry should decide
 ADR-0005 restricts a map key to `string`, the integer kinds, and a registered codec whose form is a `String`, and puts injectivity on the registrant.
 A chain arm is a codec nobody registered, so the obligation needs a home.
 
-> A type the chain claims with declared kind `String` may key a map, on the same terms as a registered codec.
+> ~~A type the chain claims with declared kind `String` may key a map, on the same terms as a registered codec.~~
+>
+> **Reversed under [#45](https://github.com/onhotpath/ferry/issues/45). A type the chain claims may not key a map. Keying a map is registration-only.**
 
 The key lookup must consult the same chain the leaf lookup does.
 Measured: without that one line, `map[netip.Addr]string` is refused as a key type while `netip.Addr` is admitted as a leaf - two lookups answering the same question differently, which is exactly what ADR-0005's identity-before-kind rule exists to prevent.
@@ -574,6 +576,79 @@ Injectivity is not checkable in general, so the position this ADR takes is the o
 
 > Core ships as key types only those it has proved injective.
 > Everything else - a chain-admitted type or a registered codec - is a proof obligation on whoever supplied it, discharged in the same harness.
+
+#### The reversal, and why it is this ADR's sentence that goes
+
+**"On the same terms" was the mistake, and it was this ADR's to make.**
+[ADR-0009](0009-typed-codec-registration.md) landed after this one and made the terms for a registration an explicit opt-in - `StringCodec(...).AsMapKey()`, with a `map[T]V` whose key is registered without it a schema compile error - and it said why in a sentence this ADR should have been read against: *"the diagnostic is where the obligation gets communicated, which is the point: it is the only moment a registrant is guaranteed to read"*.
+
+A chain arm has no such moment.
+So the two rules composed into an outcome neither ADR wrote down:
+
+| what the author does | may it key a map | who was asked about injectivity |
+| --- | --- | --- |
+| registers a codec, no `.AsMapKey()` | **no**, schema compile error | the registrant, loudly |
+| registers a codec with `.AsMapKey()` | yes | the registrant, loudly |
+| **registers nothing at all** | **yes**, via this ADR's text arm | **nobody** |
+
+**The refusal is lifted by deleting a line rather than by adding one**, which makes this the only place in ferry where registering a type leaves it *less* usable than not registering it.
+Measured: the same three registrations at a **leaf** all compile, so the inversion is specific to the key position.
+
+**What this reversal is not.** It is not a claim that the chain's text is lossy.
+Measured against adversarial value lists, every type the chain claims from the stdlib is injective, including the two that look like traps: a 4-in-6 address and a zoned one both keep their distinction in the text.
+
+```
+netip.Addr      5 distinct values -> 5 distinct texts  injective=true
+netip.Prefix    3 -> 3   injective=true      netip.AddrPort  2 -> 2   injective=true
+```
+
+The chain is reversed **because nobody can be asked**, not because the answer would be no.
+That distinction matters for the diagnostic, which has to name a type the author never mentioned and must therefore not accuse it of anything.
+
+**What it costs when the answer *is* no**, on the shape a user actually arrives in - a case-insensitive identifier whose `MarshalText` was written for logs:
+
+```
+Compile[struct{ M map[YID]int }] -> <nil>
+the Go map holds 3 keys;  ferry dumps 1 address, err=<nil>
+over 200 dumps of the same value: 3 distinct outcomes, 152/200 · 28/200 · 20/200
+```
+
+Two entries dropped, no error, and the winner decided by map iteration order.
+That is both halves of [ADR-0001](0001-what-ferry-supports.md) broken in one dump - nothing may be ignored silently, and no map iteration may reach a user-visible artefact - and it is the same failure ADR-0009 measured and refused for the registered case, with nobody warned.
+
+**The deciding argument is this ADR's own harness section, three headings down.**
+It already records that the text arm "admits an unbounded set with no proof and no completeness check", because the set of types implementing `encoding.TextMarshaler` is not enumerable and cannot be.
+At a leaf that costs fidelity for one value, which this ADR accepted with its eyes open.
+At a **key** it costs a whole map entry, silently, and ADR-0001 has no route to a guarantee: core's table does not cover the type, and there is no registration to carry the proof.
+Admitting the key admits a member whose proof cannot be written, which is ADR-0005's own phrase for what it refuses.
+
+**What the reversal costs, sized rather than asserted.**
+One position out of five.
+A chain-claimed type is still admitted at a leaf, as a slice element, behind a pointer and as a map **value**; only the key position moves.
+The remedy is one line, and it is the line ADR-0009 already asks for.
+
+The diagnostic, which is where ADR-0009 says the obligation lives:
+
+```
+ferry: /m: netip.Addr may not key a map: ferry claims it through its text pair
+rather than through a registration, so nobody has declared its text injective
+over the key type, and two keys that render alike collapse into one address;
+register a codec and mark it usable as a key with
+ferry.TextCodec[netip.Addr](ferry.VString).AsMapKey()
+```
+
+**One thing this reversal makes worth doing, which is not decided here.**
+Two Go keys collapsing into one address is detectable **exactly** at dump time, with no registrant, no value list and no injectivity proof, because the walk already renders every key to text and sorts by it - so the check is an adjacent-pair scan over a list that is already built.
+Measured at **0.55% to 0.64%** of work the walk already does, with zero extra allocations.
+It was rejected as an *answer* to #45 because it is a runtime refusal where ADR-0005's framing is schema-compile, and because it cannot see the Load side at all.
+It is worth keeping as a second line of defence, and under this reversal the only types that can reach it are core's own and ones a registrant declared with `.AsMapKey()` - so it becomes the check that catches a **wrong** `.AsMapKey()`, which ADR-0009 currently leaves entirely to the registrant's own tests.
+Whoever takes that decides it.
+
+**Untouched: [#31](https://github.com/onhotpath/ferry/issues/31).**
+`map[time.Time]string` collapses on core's **own** pre-seeded entry, which ADR-0009 says its opt-in "deliberately does not reach".
+This reversal changes nothing there.
+
+Evidence: `Y45=all` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
 
 ### What the chain costs the harness
 
