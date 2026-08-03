@@ -32,7 +32,7 @@ Every number below is from that prototype unless it cites the survey.
 
 | The ticket asked | Closed | Where |
 | --- | --- | --- |
-| the package's exported surface, as a list | **yes**, 19 names | [The surface](#the-surface) |
+| the package's exported surface, as a list | **yes**, 19 names *(20 since [#101](https://github.com/onhotpath/ferry/issues/101))* | [The surface](#the-surface) |
 | one entry point or two for the harness and the driver suite | **three**, and two of them are not what the ticket expected | [Three entry points, not five](#three-entry-points-not-five) |
 | how a registry reaches the harness | **as an Option**, and a parameter is refused on ADR-0004's own grounds | [How a registry reaches the harness](#how-a-registry-reaches-the-harness) |
 | whether the completeness check is one function over two tables | **yes, over three**, joined by `reflect.Type` | [One completeness check](#one-completeness-check-joined-by-type) |
@@ -90,14 +90,52 @@ This is the whole file.
 > Absent keeps no constructor: the zero `Value` already is it.
 > Verified before deciding, rather than assumed: a package-level `func String(string) Value` beside `VKind.String()` and `Path.String()` raises no `revive` `confusing-naming` finding under this repository's lint configuration.
 
+> **Amended under [#101](https://github.com/onhotpath/ferry/issues/101): `Open` returns an `Instance`, and the surface is twenty names.**
+> As published, `Plane.Open` was `func() (ferry.Source, ferry.Sink)`, and the call site below built its temp path inside that closure and never let it escape.
+> Nothing then handed a suite the plane's contents, so [`Driver` case 11](#the-case-lists-and-who-owns-each) - the golden artefact, and the only case that sees a representation - was specified and could not run.
+> [ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md) is why that is not cosmetic: a round trip tests a function against its own inverse, so it structurally cannot stand in for the case, and the compatibility promise ferry makes about what a plane holds had nothing behind it.
+> **`Open` now returns `ferrytest.Instance{Source, Sink, Contents}`**, where `Contents func() ([]byte, error)` yields that instance's raw contents, read after the dump has finished and after any `Committer` has committed.
+>
+> **Why not a field on `Plane` beside `Open`, or one on `Artefact` per row**, which is what the issue proposed.
+> `Open` mints a fresh, empty plane on every call, because this ADR's own rule is that every equivalence subtest gets a fresh destination.
+> The contents are therefore a property of an *instance* and not of the description, and a nullary function anywhere above the instance can only mean whichever one was minted last.
+> The only way to write either field honestly is to hoist the destination out of the `Open` closure into the enclosing scope, and the cost of that was measured rather than argued: two golden artefacts against a hoisted destination with no manual reset, and the second is compared against the first artefact's plane as well as its own.
+>
+> > The damage is not the failing golden case.
+> > It is that cases 1 to 10 are then running against a **shared destination**, which is the exact defect the fresh-destination rule exists to prevent, in the one package that publishes the rule.
+>
+> A struct minted inside `Open` has nowhere to hoist to, so the honest spelling is the only spelling.
+>
+> **A struct rather than a third return value**, which would be honest by the same construction and was built and compared.
+> Three reasons, and the third is the one that decides it: a positional third result is unlabelled at the call site; it puts `Open` exactly on this repository's fixed `function-result-limit` of three, so the next per-instance need is a second breaking change; and **a struct can gain a member in a minor release where a signature cannot**.
+> An optional interface asserted on the `Sink` was also built - it is the only candidate that breaks nothing - and refused because it makes a driver author write a wrapper type rather than a closure, and because a misspelled method name would silently delete the one case that sees a representation.
+>
+> **What `Want string` costs a plane that is not one document**, recorded here because `driver/kv` ([#86](https://github.com/onhotpath/ferry/issues/86)) is the first plane in that position and this is where the shape was chosen.
+> A key-value store is a set of pairs with no document behind them, so a single-string golden obliges such a driver to render its store before any row can be written against it.
+> That is defensible and it is stated as an obligation rather than solved: **a plane holding more than one storage unit must render deterministically and injectively over stores.**
+> It is the same obligation [ADR-0003](0003-how-a-leaf-addresses-a-plane.md) already puts on that driver's key function, for the same reason - a rendering two different stores share is a golden row that cannot see the difference, exactly as a plane key two addresses share is data loss.
+> If #86 measures the string golden genuinely insufficient, `Instance` gains a member in a minor release, and that optionality is part of why this shape was taken over the third-return-value one.
+>
+> **The memory plane needs no change and stays valid**: it mints an `Instance` with no `Contents`, because it stores the boundary `Value` itself and has no spelling to hand back, so case 11 is skipped for it rather than failed.
+> The signal for the skip is an empty `Golden` rather than a nil `Contents`, so the two cannot disagree and a plane that pins a spelling while yielding no way to read it is refused loudly rather than passing quietly.
+>
+> **Nothing about `Instance` reaches the root `ferry` package**: no core type, no core import of the shape, and no method on `ferry.Source` or `ferry.Sink`.
+> It is test apparatus, and it is admitted on that basis.
+> **The cost is a breaking change to the apparatus promise below**, which is ordinary semver API rather than the suites' looser one.
+> It is paid at v0, with one first-party call site and no external one, and ADR-0013's own reasoning is why it is paid now rather than later: cheap today, expensive after anything is stored.
+
 ```go
 func TestConformance(t *testing.T) {
     ferrytest.Driver(t, ferrytest.Plane{
         Name:  "yaml",
         Kinds: []ferry.VKind{ferry.KindAbsent, ferry.KindNull, ferry.KindBool, ferry.KindNumber, ferry.KindString, ferry.KindBytes},
-        Open: func() (ferry.Source, ferry.Sink) {
+        Open: func() ferrytest.Instance {
             p := filepath.Join(t.TempDir(), "c.yaml")
-            return yaml.Source{Path: p}, yaml.Sink{Path: p}
+            return ferrytest.Instance{
+                Source:   yaml.Source{Path: p},
+                Sink:     yaml.Sink{Path: p},
+                Contents: func() ([]byte, error) { return os.ReadFile(p) },
+            }
         },
         Golden: []ferrytest.Artefact{
             {Value: struct{ B []byte `ferry:"b"` }{[]byte("hi")}, Want: "b: !!binary aGk=\n"},
@@ -156,9 +194,12 @@ func TestMyConfig(t *testing.T) {
 
 Nineteen exported names, in **one package**.
 
+*(Twenty since [#101](https://github.com/onhotpath/ferry/issues/101), which added `Instance`.
+The amendment is at [the driver author's call site](#what-a-consumer-writes), where the shape is visible.)*
+
 | group | names |
 | --- | --- |
-| what a caller describes | `Plane`, `Artefact`, `T` |
+| what a caller describes | `Plane`, `Instance`, `Artefact`, `T` |
 | the proof | `Proof`, `Type`, `Case`, `At`, `Eq`, `BitEq`, `SliceEq`, `MapEq`, `PtrEq` |
 | the suites | `RoundTrip`, `Driver`, `Codec`, `Complete`, `Injective` |
 | the apparatus | `Static`, `Record` |
@@ -352,6 +393,13 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 Case 11 is the one that is new, and ADR-0013 gives the reason a round-trip case cannot stand in for it: a round trip tests a function against its own inverse, a spelling is a *choice* of function, and changing both halves together is invisible to any test that only composes them.
 The expected contents live on the `Plane` rather than being a parameter of the suite, because the spelling is the **driver's** statement about itself and ADR-0005 puts it on the driver's side of the line.
 
+> **Amended under [#101](https://github.com/onhotpath/ferry/issues/101).**
+> As published, this case had nothing to compare `Want` against: the *expected* contents were on the `Plane`, and the *actual* contents were unreachable, because `Open` minted the plane inside a closure and returned only its two halves.
+> They are now reached through `Instance.Contents`, minted alongside the instance they belong to.
+> **Nothing in the case moves**: the expectation is still the driver's own statement, still on the `Plane`, and still not a parameter of the suite.
+> A plane with no serialization format - the memory plane - pins no `Golden` and mints no `Contents`, and this case is skipped for it rather than failed.
+> The reasoning, the two rejected shapes and the measurement that rejected them are at [the driver author's call site](#what-a-consumer-writes).
+
 Case 12 is the Dump mirror of case 3, and it was added under [#56](https://github.com/onhotpath/ferry/issues/56), which measured two engines handing a driver two different static sets for one type.
 Case 3 asks what a driver answers at a container address; case 12 asks whether it was told to expect one at all.
 Without the second, a driver whose static table holds a wildcard shape instead of the container address passes every existing case and refuses a legal write, which is the shape case 9 already guards from the other side.
@@ -440,13 +488,15 @@ That is weaker than a compile-time signal and it is the only shape available, be
 - **Whether the suites take a `context.Context`.**
   They do not today; a driver whose conformance run needs cancellation is [#20](https://github.com/onhotpath/ferry/issues/20)'s.
 - **The exported verb names**, which ADR-0001 left open.
-  `Plane`, `Proof`, `Type`, `Case`, `At`, `RoundTrip`, `Driver`, `Codec`, `Complete`, `Injective`, `Static`, `Record`, `CoreTypes` and `T` are the working spellings; `At` and `T` are the two chosen on how they read rather than on a measurement.
+  `Plane`, `Instance`, `Proof`, `Type`, `Case`, `At`, `RoundTrip`, `Driver`, `Codec`, `Complete`, `Injective`, `Static`, `Record`, `CoreTypes` and `T` are the working spellings; `At` and `T` are the two chosen on how they read rather than on a measurement.
+  *(`Instance` added under [#101](https://github.com/onhotpath/ferry/issues/101), and it is a working spelling on the same terms as the rest.)*
 - **The seven admitted kinds' value lists.**
   This ADR gives them rows; whether their values are the right ones is ADR-0005's standing weakness, which it names itself: "the harness's coverage is exactly its value lists and its plane list".
 
 ## Consequences
 
 - **Nineteen exported names in one package**, which a contributor can read in one screen, and the case lists are internal so they can grow without the surface growing.
+  *(Twenty since [#101](https://github.com/onhotpath/ferry/issues/101), which added `Instance` so that `Driver` case 11 could reach the contents of the plane it had just dumped to.)*
 - **The golden column runs through the entry point for the first time.**
   ADR-0005 specified it, two prototypes implemented halves of it, and the half that ran through the engine could not see a representation.
   That is [ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md)'s promise acquiring the instrument it rests on.

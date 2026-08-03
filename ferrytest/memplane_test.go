@@ -20,9 +20,9 @@ import (
 func openPlane(t *testing.T) (ferry.Reader, ferry.Writer) {
 	t.Helper()
 
-	src, snk := ferrytest.MemPlane().Open()
+	inst := ferrytest.MemPlane().Open()
 
-	return openReader(t, src), openWriter(t, snk)
+	return openReader(t, inst.Source), openWriter(t, inst.Sink)
 }
 
 func openReader(t *testing.T, src ferry.Source) ferry.Reader {
@@ -258,7 +258,8 @@ func TestMemPlaneIsTheNegativeCaseForInjectivity(t *testing.T) {
 // Bind takes no context, keeps nothing from the set it is handed, and cannot
 // fail.
 func TestMemPlaneBindDoesNoIO(t *testing.T) {
-	src, snk := ferrytest.MemPlane().Open()
+	inst := ferrytest.MemPlane().Open()
+	src, snk := inst.Source, inst.Sink
 
 	// The set a schema determined is not what this plane keys on, and an
 	// address outside it is still writable and readable - which is what stops a
@@ -418,11 +419,30 @@ func TestMemPlaneDescription(t *testing.T) {
 	}
 
 	// Fresh per Open, or one suite's cases would refuse each other's writes.
-	_, firstSink := p.Open()
-	mustSet(t, openWriter(t, firstSink), ferry.At("x"), ferry.String("1"))
+	first := p.Open()
+	mustSet(t, openWriter(t, first.Sink), ferry.At("x"), ferry.String("1"))
 
-	secondSource, _ := p.Open()
-	if got := mustGet(t, openReader(t, secondSource), ferry.At("x")); got.Kind() != ferry.KindAbsent {
+	second := p.Open()
+	if got := mustGet(t, openReader(t, second.Source), ferry.At("x")); got.Kind() != ferry.KindAbsent {
 		t.Errorf("a second Open sees %#v at /x, want absent", got)
+	}
+}
+
+// TestMemPlaneYieldsNoContents is the memory plane's half of #101: a plane with
+// no serialization format hands back no way to read raw contents, which is what
+// makes the golden artefact case skipped for it rather than failed.
+//
+// It is asserted against the same instance the write half came from, because
+// [ferrytest.Instance] is the whole point of that ticket - the contents belong
+// to one minted plane and not to the description that minted it.
+func TestMemPlaneYieldsNoContents(t *testing.T) {
+	inst := ferrytest.MemPlane().Open()
+
+	if inst.Contents != nil {
+		t.Error("MemPlane mints an Instance with Contents, want none: it has no spelling to hand back")
+	}
+
+	if inst.Source == nil || inst.Sink == nil {
+		t.Errorf("MemPlane mints Source %v and Sink %v, want both halves", inst.Source, inst.Sink)
 	}
 }

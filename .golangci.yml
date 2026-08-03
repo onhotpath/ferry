@@ -155,9 +155,10 @@ linters:
           # The one rule here treated differently from the limits above, and
           # deliberately so: it measures exported API surface, not complexity.
           # ferry's surface is not an emergent property to be policed, it is
-          # fixed by ADR - four verbs and two Options in core, and nineteen
-          # exported names in ferrytest (ADR-0014: "Nineteen exported names, in
-          # one package"). Enabled, this rule can only ever argue for splitting
+          # fixed by ADR - four verbs and two Options in core, and the list of
+          # exported names in ferrytest that ADR-0014 enumerates and amends
+          # deliberately, twenty of them as of #101. Enabled, this rule can only
+          # ever argue for splitting
           # into packages the design does not have, against a decision already
           # taken in review. So it is dropped rather than tuned: no threshold
           # makes a surface-area metric say anything true about ferry.
