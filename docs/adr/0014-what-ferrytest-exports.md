@@ -18,6 +18,8 @@ What was not decided is what the package looks like, and two of the accumulated 
 
 Two later tickets then handed this one work rather than questions.
 [#41](https://github.com/onhotpath/ferry/issues/41)'s audit wrote its conformance-case list as thirty assertions "because a rule that no suite holds is a rule the next implementation can drop the same way", and found `TestCoreTypesComplete` red on arrival with seven admitted kinds having no proof row.
+*(#41 closed those seven on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip) at `0d86c00` while this ADR was in review, so the membership half is closed twice over.
+What that table still does not have is a golden column, which is the half this ADR is for.)*
 [ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md) then found that the golden column - the artefact it makes ferry's second compatibility promise - is on the wrong one of two proof types.
 
 This ADR is written from a throwaway prototype on branch `proto/35-ferrytest`, which never merges.
@@ -230,7 +232,9 @@ ADR-0012's `Observe` is Load-side only, so there is no other way to see what fer
 The recording sink ADR-0002 admitted as apparatus is what makes column three possible on a real driver, which is the first time that admission has been load-bearing rather than convenient.
 
 **What it costs, counted.**
-Nineteen rows, **57 cases each carrying a golden**, against eleven rows of bare values.
+Nineteen rows, **57 cases each carrying a golden**, against eighteen rows of bare values.
+*(As published this said "eleven rows", which was the count on the tip this prototype was cut from.
+[#41](https://github.com/onhotpath/ferry/issues/41) has since added seven, and none of them carries a golden.)*
 That is the point rather than the price, in ADR-0005's own words: "a contributor adding a type cannot avoid stating what it looks like on a plane".
 
 **A golden file was considered and refused.**
@@ -270,15 +274,19 @@ type Proof interface {
 The name then becomes a label for messages rather than a key, and the hand-written special case that spells `[N]byte` so a proof named `[]byte` can discharge an array member disappears.
 A kind is not a type, so the union names **one representative type per admitted kind**, and a new kind arriving with no representative panics rather than being silently skipped, which is the drift the check exists to catch.
 
-**And it closes [#41](https://github.com/onhotpath/ferry/issues/41)'s D18.**
+**And the completeness half of [#41](https://github.com/onhotpath/ferry/issues/41)'s D18 is closed here too.**
 
 ```
 D18, against the merged table       0 missing
-D18, against harness.go's table     7 members with no proof
 ```
 
-The seven were `int16`, `int32`, `int64`, `uint`, `uint8`, `uint16` and `uint32`.
-ADR-0013 states why that is not housekeeping: the promise is exactly as wide as the table, so an admitted member with no row is outside it by accident rather than by decision.
+> **Corrected under #41.**
+> As published this block also read `D18, against harness.go's table     7 members with no proof`, and named `int16`, `int32`, `int64`, `uint`, `uint8`, `uint16` and `uint32`.
+> That was true of the tip this ADR's prototype was cut from and is not true of [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip) at `0d86c00`, where `harness.go` carries **18 rows** and `go test ./...` is **green**: #41 closed the membership half independently.
+> So this ADR closes it a second time rather than first, and the comparison the block was making is withdrawn.
+> **What is not withdrawn is the reason the table is replaced anyway**, which was never the row count: `harness.go`'s proof has no golden column on `0d86c00` either, so the eighteen rows are eighteen rows of bare values and the measurement below stands unchanged.
+
+ADR-0013 states why the membership half is not housekeeping: the promise is exactly as wide as the table, so an admitted member with no row is outside it by accident rather than by decision.
 
 ### Three entry points, not five
 
@@ -426,8 +434,11 @@ That is weaker than a compile-time signal and it is the only shape available, be
 - **The golden column runs through the entry point for the first time.**
   ADR-0005 specified it, two prototypes implemented halves of it, and the half that ran through the engine could not see a representation.
   That is [ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md)'s promise acquiring the instrument it rests on.
-- **The table grew from eleven rows to nineteen and from bare values to 57 cases**, each carrying a golden.
-  [#41](https://github.com/onhotpath/ferry/issues/41)'s D18 is closed, and the cost is real: adding a type to core's set is now four columns of work.
+- **The table is nineteen rows and 57 cases, each carrying a golden**, where the one it replaces is eighteen rows of bare values.
+  The cost is real: adding a type to core's set is now four columns of work.
+  *(As published this read "grew from eleven rows to nineteen" and credited this ADR with closing [#41](https://github.com/onhotpath/ferry/issues/41)'s D18.
+  #41 closed the membership half itself, at `0d86c00`.
+  The golden column is what this table adds.)*
 - **A registry reaches the harness as an Option**, so the package adds no second way to say what `ferry.WithRegistry` says, and the proofs become a slice.
 - **The completeness check joins by `reflect.Type`**, so a proof's name is a label rather than a key and the `[N]byte` special case disappears.
   The prototype's own comment claimed the type could not be recovered; one method recovers it.

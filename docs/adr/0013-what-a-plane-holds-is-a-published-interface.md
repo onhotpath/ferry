@@ -178,9 +178,14 @@ Counted rather than described.
 | **nobody's** | nobody | **nobody, and the ADR says so** | nothing can |
 
 **Tier one is smaller than it looks**, and that is measured.
-`CoreTypes()` holds eleven rows against eighteen admitted members: `int16`, `int32`, `int64`, `uint`, `uint8`, `uint16` and `uint32` have none.
-That is [#41](https://github.com/onhotpath/ferry/issues/41)'s D18, red on the prototype today, and closing it is [#35](https://github.com/onhotpath/ferry/issues/35)'s.
+`CoreTypes()` holds **eighteen rows against eighteen admitted members**.
 It matters here because the promise is exactly as wide as the table: a member with no row is in tier three by accident rather than by decision.
+
+> **Corrected under [#41](https://github.com/onhotpath/ferry/issues/41), which closed while this ADR was in review.**
+> As published this read "eleven rows against eighteen admitted members: `int16`, `int32`, `int64`, `uint`, `uint8`, `uint16` and `uint32` have none", and called D18 "red on the prototype today", with closing it [#35](https://github.com/onhotpath/ferry/issues/35)'s.
+> Measured on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip) at `0d86c00`: `harness.go` carries **18 proof rows** and `go test ./...` is **green**, so D18 was closed on the tip independently and this ADR's prototype was cut before that landed.
+> **Nothing in the argument moves.** The count was evidence that the promise can be narrower than the admitted set by accident, and a count of zero missing members is the same rule with nothing currently failing it.
+> [ADR-0014](0014-what-ferrytest-exports.md)'s table closes it again, at nineteen rows, because it is a different table with a third column - which is the finding below, and that one is **unaffected**: the golden column is still absent from `harness.go`'s proof on `0d86c00`, so `CoreTypes()` is still the proof type that cannot see a representation.
 
 **Tier two transfers with the guarantee ADR-0001 already transfers**, and the mechanism is not ADR-0009's.
 
@@ -377,8 +382,9 @@ That it exists, and that a round-trip case cannot stand in for it, is this ADR's
 - **What `ferrytest` exports, and the shape of the merged proof**: [#35](https://github.com/onhotpath/ferry/issues/35).
   This ADR hands it two obligations rather than suggestions: the golden column must be on the proof that runs through the entry point, and the driver suite gains a golden artefact case.
   It does not decide either spelling.
-- **Closing the seven admitted kinds with no proof row**: [#35](https://github.com/onhotpath/ferry/issues/35), via [#41](https://github.com/onhotpath/ferry/issues/41)'s D18.
-  This ADR states why it is not housekeeping: an admitted member with no row is in tier three by accident.
+- ~~**Closing the seven admitted kinds with no proof row**: [#35](https://github.com/onhotpath/ferry/issues/35), via [#41](https://github.com/onhotpath/ferry/issues/41)'s D18.~~
+  *(Closed on the tip at `0d86c00` while this ADR was in review, and again by [ADR-0014](0014-what-ferrytest-exports.md)'s own table.)*
+  The reason it was not housekeeping stands: an admitted member with no row is in tier three by accident.
 - **Whether any golden row should change before v1.**
   This ADR makes changing one cheap now and expensive later; which ones are wrong is a question for whoever finds one.
 - **The migration tooling.**
@@ -396,7 +402,9 @@ That it exists, and that a round-trip case cannot stand in for it, is this ADR's
 - **A representation change costs a major version**, which is a heavy instrument for a one-line change and is the only instrument that works.
   Measured: `go get -u` moves a consumer across a minor and changes what their program writes; it cannot move them across a major, because that is a different import path.
 - **There is no second version number**, because nothing would read it and ferry cannot write it into a plane without making a format decision the plane-agnosticism veto forbids.
-- **The promise is exactly as wide as the golden column**, which is eleven rows against eighteen admitted members today, and structurally cannot cover the text arm at all.
+- **The promise is exactly as wide as the golden column**, and structurally cannot cover the text arm at all.
+  *(As published this said "eleven rows against eighteen admitted members today"; that count was closed on the tip at `0d86c00` while this ADR was in review.
+  The rule is unchanged and nothing currently fails it.)*
   ferry states three tiers instead of one promise, and the third tier's honest content is "nobody chose this".
 - **The golden column is reclassified**, from a test fixture to the published artefact.
   That costs nothing to build and changes what a contributor is doing when they edit one.
