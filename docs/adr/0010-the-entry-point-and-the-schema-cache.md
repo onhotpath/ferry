@@ -444,6 +444,16 @@ Measured on a twelve-leaf struct with two nested structs, which is research 5.3'
 | **compile once, walk, through `Load`** | **5673** | **3080** | **126** |
 | the compile alone | 47370 | 23384 | 1247 |
 
+> **Footnote added under [#41](https://github.com/onhotpath/ferry/issues/41): what this compile did and did not include.**
+> The figure was taken with ADR-0007's chain switched off - `chainOrder` was `nil` and `chainBeforeKind` was `false` on the prototype - so the sentence in [The cache is a two-level one, per registry](#the-cache-is-a-two-level-one-per-registry) calling it "a whole schema compile including ADR-0007's chain, which probes method sets per type" described work this measurement did not do.
+> Turning the chain on is **free** on this fixture: 44560 B and 2577 allocs with it off and with it on, identical to the byte, because the compiler already ran a recursive kind walk per leaf and three `reflect.Implements` probes cost the same.
+> So the sentence is now true rather than corrected.
+>
+> What did move the number is ADR-0003's prefix-free scan, which the prototype was not doing and now is: roughly a doubling, from ~52 us to ~93 us on the same fixture, and the current tip reads 90631 ns for the compile alone against 6962 ns for a cache hit.
+> **The ratio is what this section argues and the ratio got better**, from nine times to thirteen, so nothing here is weakened.
+> No number in the table above is edited, because the whole point of the two-level cache is that a compile happens once: optimising it is moot behind the cache, and a footnote is the right weight for a figure nobody should be tuning against.
+> Evidence: `E16=3` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip), and commit `2e22bbf` for the three-state comparison.
+
 Nine times, on this prototype, and the same shape on Dump: 54842 ns/op against 6505 ns/op.
 The absolute numbers are the prototype's and not ferry's - its chain is unmemoised and its `Path` allocates per segment - and research 5.3's own figures on xload are 3343 ns against 476 ns.
 What transfers is the ratio and its direction, and both reproduce.
