@@ -1,0 +1,11 @@
+# Minimal on purpose. This is the `standard` set golangci-lint ships with -
+# errcheck, govet, ineffassign, staticcheck and unused - and nothing else.
+# A large curated set is easy to write and hard to keep honest; the set here is
+# one that has actually been run against this tree.
+#
+# Adding a linter is a change somebody has to justify in review, which is the
+# point.
+version: "2"
+
+linters:
+  default: standard

@@ -1,0 +1,477 @@
+# CI is the deliverable, not a formality (#64).
+#
+# Every invariant ADR-0002 states gets a job or a step that fails when the
+# invariant is broken, because the whole point of the rules is that they hold
+# when nobody is looking. Each assertion prints what it checked and what it
+# found, so a red run is diagnosable from the log alone.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+      - 'driver/*/v*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # ADR-0001 sets the floor at go 1.27, which is not GA yet: go1.27rc2 is what
+  # exists. setup-go spells that release candidate '1.27.0-rc.2'.
+  #
+  # TODO: move this to '1.27.x' once Go 1.27 is released. Three workarounds in
+  # this file expire on the same day: this pin, the toolchain guard in the
+  # GOWORK=off step, and the source build of golangci-lint.
+  GO_VERSION: '1.27.0-rc.2'
+
+  # Pinned rather than 'latest', so a lint failure is always this repository's
+  # doing and never a linter release nobody asked for.
+  GOLANGCI_VERSION: 'v2.12.2'
+
+  # Near-total, because core is a library of pure logic with no I/O to plead.
+  # See the coverage job for what makes this start biting.
+  COVERAGE_MIN: '90'
+
+jobs:
+  # ADR-0002: "the directory is a CI predicate". driver/* is exactly the set of
+  # modules that must pass the conformance suite, expressed as a glob and never
+  # as a hand-maintained list, so a driver added later is picked up whether or
+  # not anyone edits this workflow. Every other job takes its module list from
+  # here, so there is one place where discovery happens.
+  modules:
+    name: Discover modules
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+      list: ${{ steps.discover.outputs.list }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Glob driver/* for module directories
+        id: discover
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          dirs=(.)
+          for f in driver/*/go.mod; do
+            dirs+=("${f%/go.mod}")
+          done
+
+          echo "modules discovered: ${#dirs[@]}"
+          printf '  %s\n' "${dirs[@]}"
+
+          # A glob that silently matches nothing is the failure mode this whole
+          # scheme has, so it is the one thing asserted about the glob itself.
+          if [ "${#dirs[@]}" -lt 2 ]; then
+            echo "FAIL: driver/*/go.mod matched nothing."
+            echo "      Either every driver module lost its go.mod, or the glob"
+            echo "      stopped working and this workflow was about to test core"
+            echo "      alone while reporting green."
+            exit 1
+          fi
+
+          matrix=$(printf '%s\n' "${dirs[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
+          echo "matrix=${matrix}"
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+          echo "list=${dirs[*]}" >> "$GITHUB_OUTPUT"
+
+  # The go.mod assertions. All of them read go.mod through `go mod edit -json`,
+  # which is the toolchain's own parser, so they see both the block form and the
+  # single-line form of every directive and have none of grep's blind spots.
+  invariants:
+    name: go.mod invariants
+    runs-on: ubuntu-latest
+    needs: modules
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: No replace directive is checked in (ADR-0002)
+        run: |
+          set -euo pipefail
+          fail=0
+          for m in ${{ needs.modules.outputs.list }}; do
+            n=$(go mod edit -json "$m/go.mod" | jq '(.Replace // []) | length')
+            echo "  $m/go.mod: $n replace directive(s)"
+            if [ "$n" -ne 0 ]; then
+              go mod edit -json "$m/go.mod" |
+                jq -r '(.Replace // [])[] | "      replace \(.Old.Path) => \(.New.Path)"'
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "FAIL: ADR-0002 - no replace directive is ever checked in."
+            echo "      go.work gives local development; a checked-in replace"
+            echo "      gives it permanently and means CI never once builds"
+            echo "      against the version consumers resolve."
+            exit 1
+          fi
+          echo "OK: no module carries a replace directive."
+
+      - name: No go.mod pins a toolchain (ADR-0002)
+        run: |
+          set -euo pipefail
+          fail=0
+          for m in ${{ needs.modules.outputs.list }}; do
+            t=$(go mod edit -json "$m/go.mod" | jq -r '.Toolchain // ""')
+            echo "  $m/go.mod: toolchain ${t:-<none>}"
+            [ -z "$t" ] || fail=1
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "FAIL: the toolchain pin belongs in go.work, which consumers"
+            echo "      never see. In a go.mod it names a release candidate at"
+            echo "      every consumer of ferry."
+            exit 1
+          fi
+          echo "OK: the only toolchain pin is go.work's."
+
+      - name: go.work uses every discovered module
+        run: |
+          set -euo pipefail
+          # Without this, a driver added under driver/ but not added to go.work
+          # fails the build job with "directory prefix . does not contain modules
+          # listed in go.work", which names neither the module nor the fix.
+          used=$(go work edit -json | jq -r '.Use[].DiskPath' | sed 's|^\./||' | sort)
+          # shellcheck disable=SC2086  # one module path per word is wanted
+          found=$(printf '%s\n' ${{ needs.modules.outputs.list }} | sort)
+          echo "go.work use: $(echo "$used" | tr '\n' ' ')"
+          echo "discovered:  $(echo "$found" | tr '\n' ' ')"
+          if [ "$used" != "$found" ]; then
+            echo "FAIL: go.work and the driver/* glob disagree."
+            diff <(echo "$used") <(echo "$found") || true
+            echo "      Add the module to go.work's use block."
+            exit 1
+          fi
+          echo "OK: go.work covers every module the glob found."
+
+      - name: Core's require block is empty (ADR-0002)
+        run: |
+          set -euo pipefail
+          n=$(go mod edit -json go.mod | jq '(.Require // []) | length')
+          echo "  go.mod: $n require(s)"
+          if [ "$n" -ne 0 ]; then
+            go mod edit -json go.mod |
+              jq -r '(.Require // [])[] | "      \(.Path) \(.Version)" + (if .Indirect then " // indirect" else "" end)'
+            echo "FAIL: ADR-0002 - core's go.mod carries no non-stdlib require."
+            echo "      Core's buildability must not depend on anything a"
+            echo "      consumer can switch off, and the empty require block is"
+            echo "      itself an adoption argument. A dependency ships in a"
+            echo "      driver module under driver/, not here."
+            exit 1
+          fi
+          echo "OK: core's require block is empty."
+
+      - name: No module's go directive is below core's (ADR-0002)
+        run: |
+          set -euo pipefail
+          core=$(go mod edit -json go.mod | jq -r '.Go // ""')
+          if [ -z "$core" ]; then
+            echo "FAIL: core's go.mod declares no go directive."
+            exit 1
+          fi
+          echo "  core: go $core"
+
+          fail=0
+          for m in ${{ needs.modules.outputs.list }}; do
+            [ "$m" = "." ] && continue
+            v=$(go mod edit -json "$m/go.mod" | jq -r '.Go // ""')
+            if [ -z "$v" ]; then
+              echo "  $m: no go directive  FAIL"
+              fail=1
+              continue
+            fi
+            # A version comparison, not a string one: sort -V puts 1.9 before
+            # 1.10, which a lexicographic compare gets backwards.
+            lowest=$(printf '%s\n%s\n' "$core" "$v" | sort -V | head -n1)
+            if [ "$v" != "$core" ] && [ "$lowest" = "$v" ]; then
+              echo "  $m: go $v  BELOW core's $core"
+              fail=1
+            else
+              echo "  $m: go $v  ok"
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "FAIL: ADR-0002 - the floor is transitive through imports, so a"
+            echo "      driver declaring a lower directive than core buys nobody"
+            echo "      anything. The lever only points up."
+            exit 1
+          fi
+          echo "OK: every module is at or above core's floor."
+
+      - name: No module imports encoding/json/v2 or encoding/json/jsontext (ADR-0002)
+        run: |
+          set -euo pipefail
+          # Direct, test and external-test imports only. `go list -deps` would
+          # false-positive here, because in Go 1.27 encoding/json is itself
+          # implemented over encoding/json/v2, so anything touching encoding/json
+          # shows it transitively. What ADR-0002 forbids is ferry naming the
+          # import itself, which is the only thing that makes GOEXPERIMENT=
+          # nojsonv2 fail for a consumer.
+          fail=0
+          for m in ${{ needs.modules.outputs.list }}; do
+            # shellcheck disable=SC2016  # a Go template, not a shell expansion
+            tmpl='{{$p := .ImportPath}}{{range .Imports}}{{$p}} -> {{.}}{{"\n"}}{{end}}{{range .TestImports}}{{$p}} -> {{.}}{{"\n"}}{{end}}{{range .XTestImports}}{{$p}} -> {{.}}{{"\n"}}{{end}}'
+            hits=$( (cd "$m" && go list -f "$tmpl" ./...) | grep -E ' -> encoding/json/(v2|jsontext)$' || true)
+            if [ -n "$hits" ]; then
+              echo "  $m: FORBIDDEN import"
+              printf '      %s\n' "$hits"
+              fail=1
+            else
+              echo "  $m: clean"
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "FAIL: ADR-0002 - json/v2 is stdlib with an asterisk. A package"
+            echo "      importing it fails under GOEXPERIMENT=nojsonv2, and that"
+            echo "      switch is the consumer's, not ferry's. This is the one"
+            echo "      thing that destroys ADR-0001's go 1.27 fallback."
+            exit 1
+          fi
+          echo "OK: no module names json/v2 or jsontext."
+
+  # Both resolution modes, per ADR-0002's measurement: the workspace resolves
+  # the sibling on disk, GOWORK=off resolves what a real consumer resolves.
+  # xtools' CI has never once built against the version it publishes, and this
+  # job is the reason ferry's does.
+  build:
+    name: Build ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    needs: modules
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.modules.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The GOWORK=off gate reads the tag list, so it needs the tags.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Workspace mode - build, vet, test
+        working-directory: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          echo "module: ${{ matrix.module }}   go: $(go env GOVERSION)   GOWORK: $(go env GOWORK)"
+          go build ./...
+          go vet ./...
+          go test ./...
+
+      - name: GOWORK=off - build, vet, test
+        working-directory: ${{ matrix.module }}
+        run: |
+          set -uo pipefail
+
+          # Gate 1: core has no tag, so nothing on the proxy can be resolved.
+          # ADR-0002 defers this mode until core is tagged. Read from the repo
+          # rather than hardcoded, so the first `git tag v0.1.0` turns it on.
+          tags=$(git -C "$GITHUB_WORKSPACE" tag -l 'v*')
+          if [ -z "$tags" ]; then
+            echo "SKIPPED: GOWORK=off build of ${{ matrix.module }}"
+            echo "  why: core carries no v* tag, so a driver's require on core"
+            echo "       has no version to resolve from the proxy. ADR-0002"
+            echo "       defers this mode until core is tagged."
+            echo "  clears: the first time core is tagged v0.x.y."
+            exit 0
+          fi
+          echo "core tags present: $(echo "$tags" | tr '\n' ' ')"
+
+          # Gate 2: outside the workspace there is no toolchain line, by design,
+          # so the go directive has to be satisfiable by a released toolchain.
+          # While the floor is 1.27 and only go1.27rc2 exists, it is not.
+          if ! probe=$(GOWORK=off go list -m 2>&1); then
+            case "$probe" in
+              *toolchain*|*"requires go >="*)
+                echo "SKIPPED: GOWORK=off build of ${{ matrix.module }}"
+                echo "  why: $probe"
+                echo "       go.work carries 'toolchain go1.27rc2' and no go.mod"
+                echo "       does (ADR-0002), so outside the workspace the go"
+                echo "       directive resolves to a Go 1.27 that is not released."
+                echo "  clears: when GO_VERSION moves to 1.27.x."
+                exit 0
+                ;;
+            esac
+            echo "FAIL: GOWORK=off module resolution failed, and not for a"
+            echo "      toolchain reason. This is the failure this job exists"
+            echo "      to catch."
+            echo "$probe"
+            exit 1
+          fi
+
+          set -e
+          export GOWORK=off
+          echo "module: ${{ matrix.module }}   GOWORK=off"
+          go build ./...
+          go vet ./...
+          go test ./...
+
+  # ADR-0002 keeps ADR-0001's go 1.27 fallback alive by construction rather than
+  # by anyone remembering to check, and this job is the construction.
+  nojsonv2:
+    name: Core builds under GOEXPERIMENT=nojsonv2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: GOEXPERIMENT=nojsonv2 go build ./...
+        run: |
+          set -euo pipefail
+          echo "core, with the consumer's json/v2 escape hatch pulled:"
+          GOEXPERIMENT=nojsonv2 go build ./...
+          GOEXPERIMENT=nojsonv2 go test ./...
+          echo "OK: core builds and tests with encoding/json/v2 excluded."
+
+  format:
+    name: gofmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: gofmt -l produces nothing
+        run: |
+          set -euo pipefail
+          # gofmt walks files, not modules, so one run from the root covers
+          # every module including any added later.
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "FAIL: these files are not gofmt'd:"
+            # shellcheck disable=SC2086  # one path per word is what is wanted
+            printf '  %s\n' $out
+            echo
+            # shellcheck disable=SC2086
+            gofmt -d $out
+            exit 1
+          fi
+          echo "OK: gofmt -l . printed nothing."
+
+  lint:
+    name: Lint ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    needs: modules
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.modules.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache golangci-lint
+        uses: actions/cache@v6
+        with:
+          path: ~/go/bin/golangci-lint
+          key: golangci-${{ env.GOLANGCI_VERSION }}-go${{ env.GO_VERSION }}
+
+      - name: Install golangci-lint ${{ env.GOLANGCI_VERSION }}
+        run: |
+          set -euo pipefail
+          # Built from source rather than taken from a release, because every
+          # released golangci-lint binary is compiled with Go 1.26 and refuses a
+          # module targeting 1.27 outright:
+          #   "the Go language version (go1.26) used to build golangci-lint is
+          #    lower than the targeted Go version (1.27)"
+          # Forcing GOTOOLCHAIN to the pinned toolchain produces a binary that
+          # accepts the floor. Measured on v2.12.2 with go1.27rc2.
+          #
+          # TODO: revert to golangci/golangci-lint-action once a golangci-lint
+          # release is built with Go 1.27, which cannot happen before 1.27 is GA.
+          if [ ! -x "$HOME/go/bin/golangci-lint" ]; then
+            GOTOOLCHAIN="$(go env GOVERSION)" \
+              go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_VERSION}"
+          fi
+          "$HOME/go/bin/golangci-lint" --version
+
+      - name: golangci-lint run
+        working-directory: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          "$HOME/go/bin/golangci-lint" config verify
+          "$HOME/go/bin/golangci-lint" run ./...
+
+  race:
+    name: Race detector on core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: go test -race ./...
+        run: |
+          set -euo pipefail
+          # Core is where the walk, the schema cache and the memoised error
+          # live, so core is where a data race would be.
+          go test -race ./...
+
+  coverage:
+    name: Coverage gate on core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: go test -coverprofile, then gate at ${{ env.COVERAGE_MIN }}%
+        run: |
+          set -euo pipefail
+          go test -covermode=atomic -coverprofile=cover.out ./...
+
+          # cover.out lines after the mode header are:
+          #   file.go:from.col,to.col numstmt count
+          # so summing field 2 gives the number of coverable statements. Core is
+          # a package clause and a doc comment today, which is zero of them, and
+          # a percentage over zero statements is meaningless rather than perfect.
+          #
+          # The gate therefore says so out loud and passes. It starts biting the
+          # moment core gains its first function body, which is #65, and from
+          # then on it is an ordinary threshold with no special case left.
+          stmts=$(awk 'NR > 1 { n += $2 } END { print n + 0 }' cover.out)
+          echo "core: $stmts coverable statement(s)"
+
+          if [ "$stmts" -eq 0 ]; then
+            echo "SKIPPED: coverage gate (threshold ${COVERAGE_MIN}%)"
+            echo "  why: core has no statements, so there is no ratio to gate."
+            echo "  clears: the first function body that lands in core."
+            exit 0
+          fi
+
+          go tool cover -func=cover.out
+          total=$(go tool cover -func=cover.out | awk '/^total:/ { print $3 }' | tr -d '%')
+          echo "core coverage: ${total}%   threshold: ${COVERAGE_MIN}%"
+
+          awk -v t="$total" -v m="$COVERAGE_MIN" 'BEGIN { exit !(t + 0 >= m + 0) }' || {
+            echo "FAIL: coverage ${total}% is below the ${COVERAGE_MIN}% gate."
+            echo "      Core is pure logic with no I/O to plead, so the gate is"
+            echo "      near-total on purpose."
+            exit 1
+          }
+          echo "OK: coverage gate passed."

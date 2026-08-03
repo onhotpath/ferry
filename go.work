@@ -1,0 +1,18 @@
+// ADR-0002: no `replace` directive is ever checked in. This workspace is what
+// gives local development the sibling-on-disk resolution instead, and flipping
+// GOWORK=off exercises the resolution a real consumer gets.
+//
+// The `toolchain` line is here and in no go.mod on purpose. ADR-0001 sets the
+// floor at go 1.27, which is not yet GA; go1.27rc2 is what exists. A consumer
+// resolves the floor with whatever toolchain they have, and only this
+// repository needs the release candidate named.
+go 1.27
+
+toolchain go1.27rc2
+
+use (
+	.
+	./driver/env
+	./driver/kv
+	./driver/yaml
+)
