@@ -42,6 +42,12 @@ type Proof interface {
 	// check joins on.
 	Type() reflect.Type
 
+	// run discharges the proof against one plane, and it is a method here
+	// rather than a loop inside [RoundTrip] because the cases are typed by a
+	// parameter no suite can name. Its implementation is in roundtrip.go, with
+	// the suite it belongs to.
+	run(h *harness)
+
 	// proof keeps [Type] the only constructor.
 	proof()
 }
