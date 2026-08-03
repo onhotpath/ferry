@@ -48,5 +48,4 @@ Use the `gh` CLI.
 - In Markdown, put each sentence on its own line. Keep normal Markdown structure otherwise.
 - Never add a `Co-Authored-By` trailer to commit messages.
 - Never put Claude Code session URLs in PR descriptions or commit messages.
-- Do not commit or push unless explicitly asked.
 - Be concise. Favour quality, simplicity, and long-term maintainability over speed.

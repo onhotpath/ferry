@@ -1,23 +1,33 @@
-# During the design effort only docs/ merges to main, and prototypes are
-# scratch-only and never merge (AGENTS.md, issue #1). So this file denies the
-# repository root by default and allows back what belongs there.
+# Ordinary Go ignores.
 #
-# The reason it is an allowlist and not a list of binary patterns: a Go test
-# binary is named after its module and carries no extension, so `ferryproto5`
-# matches no pattern anyone would think to write. A 4.3 MB one reached main in
-# PR #24 and had to be purged by history rewrite.
-/*
-!/.gitignore
-!/AGENTS.md
-!/CLAUDE.md
-!/docs/
+# This replaced a root allowlist that existed only for the design effort, which
+# ended when ADR-0001 through ADR-0014 were all Accepted. That file denied the
+# repository root by default, so it would have rejected a go.mod (#64).
 
-# Belt and braces, for anyone working in a subdirectory or on a proto branch.
-/proto/
+# Build and test output.
 *.test
 *.out
+*.prof
 *.exe
+*.dll
 *.so
 *.dylib
 *.a
-*.prof
+coverage.html
+
+# A binary named after its own directory carries no extension, so no pattern
+# anyone would think to write catches it: a 4.3 MB one reached main in PR #24
+# and had to be purged by a history rewrite. That is what the allowlist existed
+# for, and the replacement is to name the ones this repository can produce.
+# Adding a module means adding a line here.
+/ferry
+/driver/env/env
+/driver/kv/kv
+/driver/yaml/yaml
+
+# The workspace is checked in and no `replace` directive ever is (ADR-0002).
+# Its sum file is generated.
+go.work.sum
+
+# Prototypes are scratch and never merge (AGENTS.md, issue #1).
+/proto/
