@@ -51,6 +51,14 @@ type node struct {
 	fields []sfield // nStruct
 	elem   *node    // nPtr, nSlice, nArray, nMap
 	n      int      // nArray
+
+	// key is nMap's own RESOLVED BEHAVIOUR, in the sense the header states:
+	// the pair that spells a key and reads it back, found by the same lookup
+	// that admitted the key type and carried from here rather than re-derived
+	// per call. #58: it was the one codec lookup this schema did not carry,
+	// and the walk reached a package global to redo it - one the two
+	// caller-facing entry points do not install.
+	key keyConv // nMap
 }
 
 type sfield struct {
@@ -249,7 +257,11 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 		}
 		return &node{kind: nSlice, typ: t, shape: p, elem: e}
 	case reflect.Map:
-		if !validMapKey(t.Key()) {
+		// One lookup, two answers: whether the key type is admitted and how a
+		// key of it is spelled. Both are taken HERE, where the caller's
+		// registry is installed, and the second is carried on the node.
+		kc, ok := resolveMapKey(t.Key())
+		if !ok {
 			c.errs = append(c.errs, mapKeyRefusal(p, t.Key()))
 			return nil
 		}
@@ -258,7 +270,7 @@ func (c *compileCtx) rec(t reflect.Type, p Path) *node {
 		if e == nil {
 			return nil
 		}
-		return &node{kind: nMap, typ: t, shape: p, elem: e}
+		return &node{kind: nMap, typ: t, shape: p, elem: e, key: kc}
 	}
 	c.errs = append(c.errs, unsupportedType(p, t))
 	return nil

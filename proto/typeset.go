@@ -127,23 +127,73 @@ const (
 	shapeUnsupported
 )
 
+// keyConv is a map key's conversion pair, RESOLVED: the text half and the
+// parse half, both already bound to whichever of the three admission routes
+// claimed the type. It is e_schema.go's own header rule -
+//
+//	a leaf holds RESOLVED BEHAVIOUR - a codec function pointer, a fully
+//	resolved address shape, a compiled default - rather than data to be
+//	re-derived per call
+//
+// - applied at the key position, which is the one place it was not.
+//
+// DEFECT FOUND BY #58, and it is the same defect ADR-0007 names as its third:
+// two lookups for one decision is how a chain drifts. `validMapKey` ran at
+// COMPILE, with the caller's registry installed, and the text was derived
+// again at WALK time, where it is not: `SinkBinding.Dump` and
+// `Binding.LoadOver` install nothing, because ADR-0009's whole point is that
+// they should not have to. So a registered key codec was admitted by one
+// authority and then not called by the other, and the address a caller got was
+// `fmt.Sprintf("%v", ...)` - which consults `fmt.Stringer`, the one interface
+// ADR-0005 refuses outright and by name.
+//
+// It is a pair rather than a `leafCodec` because a leafCodec cannot express
+// all three routes: a kind-admitted key (`string`, the integer widths) has no
+// codec at all. One shape that covers identity, chain and kind uniformly is
+// what makes ONE authority possible.
+//
+// text returns an error rather than falling back. A key type reaching here was
+// already admitted by resolveMapKey, so a failure is the encoder's, and the
+// fallback that used to stand in for it is what #58 is about.
+type keyConv struct {
+	text  func(reflect.Value) (string, error)
+	parse func(string, reflect.Value) error
+}
+
 // validMapKey: core ships string and the integer kinds, and a registered
 // codec extends the set exactly as it extends the leaf set.
+//
+// It is now resolveMapKey with the pair discarded, so admission and rendering
+// cannot disagree about a type: there is one function and it answers both.
+func validMapKey(k reflect.Type) bool {
+	_, ok := resolveMapKey(k)
+	return ok
+}
+
 // keyProvedOnly is #31's seam. When it is on, an identity-table entry keys a
 // map only if the entry says so, which is the rule this ticket decides. Off, it
 // is the rule the tip shipped: anything in the table keys a map, which is how
 // map[time.Time]string collapses.
 var keyProvedOnly = true
 
-func validMapKey(k reflect.Type) bool {
+// resolveMapKey answers "may this type key a map, and if so how is a key
+// spelled" in ONE lookup. It runs at COMPILE, and what it returns is stored on
+// the compiled node, so the walk carries the answer rather than re-deriving it
+// against whatever registry happens to be installed.
+//
+// The four arms below are the three-arm rule the #31/#45 merge documents, plus
+// kind admission, and they stay in ADR-0005's identity-before-kind order. #58
+// changes none of them: it changes only that each now hands back the pair that
+// spells a key, so the admission and the rendering cannot be two authorities.
+func resolveMapKey(k reflect.Type) (keyConv, bool) {
 	// CORE's own pre-seeded table first, because #31's rule is about core
 	// exempting itself. The entry declares key admissibility; membership of the
 	// table confers none.
 	if c, ok := byIdentity[k]; ok {
-		if keyProvedOnly {
-			return c.asKey && c.kind == VString
+		if keyProvedOnly && !(c.asKey && c.kind == VString) {
+			return keyConv{}, false
 		}
-		return true
+		return codecKeyConv(k, c.kind, c.enc, c.dec), true
 	}
 	if c, ok := identityLookup(k); ok {
 		// ADR-0009's opt-in, unchanged. A REGISTERED type has to say so, which
@@ -152,10 +202,22 @@ func validMapKey(k reflect.Type) bool {
 		// ADR-0009 refused, which is the measurement that decision rests on.
 		if keyOptIn && activeReg != nil {
 			if _, own := activeReg.lookup(k); own {
-				return registeredKeys[k] && c.kind == VString
+				if !registeredKeys[k] || c.kind != VString {
+					return keyConv{}, false
+				}
 			}
 		}
-		return true
+		return codecKeyConv(k, c.kind, c.enc, c.dec), true
+	}
+	// The CHAIN supplies a conversion and never an admission - see the
+	// paragraph below. Under the decided chain-after-kind order this arm is
+	// reachable only when P4's seam puts the chain first, and then it must win,
+	// because that is what "the chain claims this type" means everywhere else.
+	if kindKeysAMap(k) {
+		if c, ok := activeChainCodec(k); ok && c.kind == VString {
+			return codecKeyConv(k, c.kind, c.enc, c.dec), true
+		}
+		return kindKeyConv(k), true
 	}
 	// A CHAIN-claimed type MAY NOT key a map. ADR-0007 granted it - "a type the
 	// chain claims with declared kind String may key a map, on the same terms as
@@ -187,6 +249,18 @@ func validMapKey(k reflect.Type) bool {
 	//   (3) a type only the chain claims             - #45, refused outright
 	// Arm (3) is this deletion. After the merge there is no route to a map key
 	// nobody vouched for.
+	//
+	// #58 adds no fourth population. What it adds is that all three arms, and
+	// kind admission below them, return the SAME resolved shape - so there is
+	// one authority over the key text rather than a rule here and a cascade in
+	// the walk that could disagree with it.
+	return keyConv{}, false
+}
+
+// kindKeysAMap is the last route: core ships string and the integer widths,
+// which are exactly the kinds whose text form ferry can spell and re-read with
+// no codec and no registrant.
+func kindKeysAMap(k reflect.Type) bool {
 	switch k.Kind() {
 	case reflect.String,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -194,6 +268,55 @@ func validMapKey(k reflect.Type) bool {
 		return true
 	}
 	return false
+}
+
+// codecKeyConv binds a codec - from the identity table or from the chain - into
+// the pair. A key is only ever segment text, so a codec serves as a key exactly
+// when its form is a String, and the obligation it takes on is stronger than a
+// leaf codec's: the text must be INJECTIVE over the key type, or two distinct
+// keys collapse into one address. ferr_mapkeys.go is where a wrong claim is
+// caught.
+func codecKeyConv(t reflect.Type, kind VKind, enc func(reflect.Value) (Value, error), dec func(Value, reflect.Value) error) keyConv {
+	return keyConv{
+		text: func(k reflect.Value) (string, error) {
+			v, err := enc(k)
+			if err != nil {
+				return "", err
+			}
+			if v.Kind() != VString {
+				// The codec declared String at registration and produced
+				// something else here. Loud, because the alternative is the
+				// silent substitution #58 is about.
+				return "", fmt.Errorf("codec for %s declared kind %v but produced %v for a map key", t, kind, v.Kind())
+			}
+			return v.Text(), nil
+		},
+		parse: func(s string, dst reflect.Value) error { return dec(String(s), dst) },
+	}
+}
+
+// kindKeyConv is the no-codec pair. It is a conversion in one direction and a
+// decode in the other, which is why the admissible key set is not "any
+// comparable": only a string key is a conversion, and everything else has to be
+// parsed.
+func kindKeyConv(t reflect.Type) keyConv {
+	switch t.Kind() {
+	case reflect.String:
+		return keyConv{
+			text:  func(k reflect.Value) (string, error) { return k.String(), nil },
+			parse: func(s string, dst reflect.Value) error { dst.SetString(s); return nil },
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return keyConv{
+			text:  func(k reflect.Value) (string, error) { return strconv.FormatInt(k.Int(), 10), nil },
+			parse: func(s string, dst reflect.Value) error { return decLeaf(Number(s), dst) },
+		}
+	default:
+		return keyConv{
+			text:  func(k reflect.Value) (string, error) { return strconv.FormatUint(k.Uint(), 10), nil },
+			parse: func(s string, dst reflect.Value) error { return decLeaf(Number(s), dst) },
+		}
+	}
 }
 
 // mapKeyRefusal is the diagnostic half of ADR-0009's opt-in, and the ADR is

@@ -245,11 +245,33 @@ func yBigMapCached(n int) reflect.Value {
 	return v
 }
 
+// yKeyTexts asks THE CHAIN, by name, for the text it would give a key.
+//
+// It used to call the engine's `mapKeyText`, which reached a package global to
+// run the identity/chain/kind cascade at walk time. #58 deleted that: the key
+// text is now `resolveMapKey`'s pair, taken at compile and carried on the
+// compiled node. Routing this probe through `resolveMapKey` would make it
+// measure nothing, because ADR-0007's #45 reversal refuses a chain-claimed key
+// outright and both YID and YPair are exactly that.
+//
+// And measuring nothing is the wrong answer here: R3's cost is the cost of the
+// render-and-sort the walk already does, and the counterfactual R0 needs the
+// text a chain arm WOULD have produced. So the probe names its own source
+// rather than borrowing the engine's, which is also what stops it silently
+// re-becoming a second authority over the key text.
 func yKeyTexts(m reflect.Value) []string {
+	c, ok := activeChainCodec(m.Type().Key())
+	if !ok {
+		panic(fmt.Sprintf("y45: %s is not chain-claimed, so there is no counterfactual to measure", m.Type().Key()))
+	}
 	keys := m.MapKeys()
 	texts := make([]string, len(keys))
 	for i, k := range keys {
-		texts[i] = mapKeyText(k)
+		v, err := c.enc(k)
+		if err != nil {
+			panic(err)
+		}
+		texts[i] = v.Text()
 	}
 	slices.Sort(texts)
 	return texts

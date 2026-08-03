@@ -349,7 +349,12 @@ func dumpDir(out map[Path]Value) direction {
 				}
 				return ms, nil
 			}
-			return sortedMapMembers(v, at)
+			// n.key and not a lookup. #58: the compiled node carries the pair
+			// the caller's registry resolved, so this renders what the
+			// registrant's codec says whether or not anything is installed -
+			// which is what makes the collapse check above reachable through
+			// `Dump` at all.
+			return sortedMapMembers(v, at, n.key)
 		},
 	}
 }
@@ -490,8 +495,11 @@ func loadDir(r FReader, ctx context.Context, o opts) direction {
 					ms = append(ms, member{seg: last, idx: i})
 					continue
 				}
+				// The Load half of the same pair, from the same node. Without
+				// it a Dump that wrote the codec's text could not be read back
+				// by the entry point that wrote it.
 				key := reflect.New(n.typ.Key()).Elem()
-				if err := decMapKey(last.Text, key); err != nil {
+				if err := n.key.parse(last.Text, key); err != nil {
 					return nil, errAt(mWalk, ErrValue, at.Name(last.Text),
 						"is not a valid %s map key", n.typ.Key()).withCause(err)
 				}
@@ -526,10 +534,16 @@ func plural(n int) string {
 	return "ies"
 }
 
-// keyCodecInstalled is #31's seam for K31=10: off, the two caller-facing entry
-// points walk with no registry installed, which is the world as the tip
-// shipped and means a registered key codec's text is not what Dump writes.
-var keyCodecInstalled = true
+// GONE UNDER #58: `keyCodecInstalled`, #31's seam for K31=10, which switched
+// the stopgap install around the two caller-facing walks on and off.
+//
+// A seam is only worth its cost while both sides of it are reachable, and after
+// #58 neither is: the walk consults no registry for a key at all, so there is
+// no "installed" world and no "not installed" world to compare. K31=10 keeps
+// its finding by reproducing the OLD RESOLUTION directly rather than by
+// steering the engine into a state the engine no longer has - which is also the
+// honest shape, because the defect was in where the answer came from and not in
+// a flag.
 
 // keyCollisionCheck is #31's seam: off, the walk overwrites and an entry
 // vanishes with a nil error, which is the world as the tip shipped.

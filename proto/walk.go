@@ -177,7 +177,19 @@ func dump(v reflect.Value) (map[Path]Value, error) {
 			// Determinism is a package-wide invariant: sort the keys. And the
 			// collapse check rides along, through the same helper the engine uses,
 			// so the two do not drift about what a lost map entry looks like.
-			ms, merr := sortedMapMembers(v, p)
+			//
+			// This engine has no compiled schema to hang the pair on, so it
+			// resolves per map - but through the SAME function e_schema.go
+			// calls, so the two engines cannot drift about what a key is
+			// spelled as. classify() already refused a map this declines, so
+			// the second return is a consistency assertion rather than a
+			// branch a user reaches, which is the property #58 asks for out
+			// loud.
+			kc, ok := resolveMapKey(v.Type().Key())
+			if !ok {
+				return mapKeyRefusal(p, v.Type().Key())
+			}
+			ms, merr := sortedMapMembers(v, p, kc)
 			if merr != nil {
 				return merr
 			}
@@ -202,52 +214,22 @@ func dump(v reflect.Value) (map[Path]Value, error) {
 	return out, nil
 }
 
-// decMapKey turns a Name segment's text back into a map key. It is a decode
-// and not a conversion: only a string key is a conversion, and everything else
-// has to be parsed, which is why the admissible key set is not "any comparable".
-func decMapKey(text string, dst reflect.Value) error {
-	// A registered codec whose form is a String serves as a key, because a
-	// key is only ever segment text. The obligation it carries is stronger
-	// than a leaf codec's: the text must be INJECTIVE over the key type, or
-	// two distinct keys collapse into one address.
-	if c, ok := identityLookup(dst.Type()); ok {
-		return c.dec(String(text), dst)
-	}
-	if c, ok := activeChainCodec(dst.Type()); ok {
-		return c.dec(String(text), dst)
-	}
-	switch dst.Kind() {
-	case reflect.String:
-		dst.SetString(text)
-		return nil
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return decLeaf(Number(text), dst)
-	}
-	return fmt.Errorf("ferry: unsupported map key type %s", dst.Type())
-}
-
-func mapKeyText(k reflect.Value) string {
-	if c, ok := identityLookup(k.Type()); ok {
-		if v, err := c.enc(k); err == nil && v.Kind() == VString {
-			return v.Text()
-		}
-	}
-	if c, ok := activeChainCodec(k.Type()); ok {
-		if v, err := c.enc(k); err == nil && v.Kind() == VString {
-			return v.Text()
-		}
-	}
-	switch k.Kind() {
-	case reflect.String:
-		return k.String()
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return strconv.FormatInt(k.Int(), 10)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return strconv.FormatUint(k.Uint(), 10)
-	}
-	return fmt.Sprintf("%v", k.Interface())
-}
+// GONE UNDER #58: `mapKeyText` and `decMapKey` used to sit here, each with its
+// own copy of the identity/chain/kind cascade and its own tail for a type none
+// of the three claimed - `fmt.Sprintf("%v", k.Interface())` on the Dump side
+// and an "unsupported map key type" error on the Load side.
+//
+// Neither tail was reachable by decision: `classify` refuses a map whose key
+// `validMapKey` declines, so a type arriving here had already been admitted.
+// The `%v` line was therefore either dead or proof that the two authorities
+// disagreed - and it was the second, which is #58. Deleting it is not a
+// tidy-up: `%v` consults `fmt.Stringer`, which ADR-0005 refuses outright and by
+// name, for two measured reasons that apply at the key position unchanged.
+//
+// Both halves are now `resolveMapKey`'s single pair. This engine has no
+// compiled schema to hang it on, so it resolves per map rather than per
+// schema - but through the SAME function, so the two engines cannot drift
+// about what a key is spelled as.
 
 // --- load: map[Path]Value -> value -----------------------------------------
 
@@ -357,6 +339,10 @@ func load(vals map[Path]Value, dst reflect.Value) error {
 				v.Set(reflect.Zero(v.Type()))
 				return nil
 			}
+			kc, ok := resolveMapKey(v.Type().Key())
+			if !ok {
+				return mapKeyRefusal(p, v.Type().Key())
+			}
 			m := reflect.MakeMapWithSize(v.Type(), len(kids))
 			for _, k := range kids {
 				segs := k.Segments()
@@ -365,7 +351,7 @@ func load(vals map[Path]Value, dst reflect.Value) error {
 					return err
 				}
 				key := reflect.New(v.Type().Key()).Elem()
-				if err := decMapKey(segs[len(segs)-1].Text, key); err != nil {
+				if err := kc.parse(segs[len(segs)-1].Text, key); err != nil {
 					return err
 				}
 				m.SetMapIndex(key, elem)

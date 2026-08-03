@@ -73,24 +73,62 @@ func runK31(sel string) {
 }
 
 // asShipped runs f in the world the tip shipped: no key opt-in for core's own
-// table, no mint-time collision check, and no registry installed for the walk.
+// table and no mint-time collision check.
 //
 // It defers the TIP's OWN values rather than hardcoded ones, which is the leak
 // section 8.3 of the audit found in A3 and A5 and which made thirteen verdicts
 // describe a world that did not exist.
+//
+// The third seam it used to carry - keyCodecInstalled, the stopgap install
+// around the two caller-facing walks - is gone under #58, which resolved the
+// key codec into the compiled node so there is no registry for the walk to
+// install and no second world to switch to. k31LegacyKeyText below is how that
+// finding stays reproducible.
 func asShipped(f func()) {
-	defer func(a, b, c bool) { keyProvedOnly, keyCollisionCheck, keyCodecInstalled = a, b, c }(
-		keyProvedOnly, keyCollisionCheck, keyCodecInstalled)
-	keyProvedOnly, keyCollisionCheck, keyCodecInstalled = false, false, false
+	defer func(a, b bool) { keyProvedOnly, keyCollisionCheck = a, b }(keyProvedOnly, keyCollisionCheck)
+	keyProvedOnly, keyCollisionCheck = false, false
 	f()
 }
 
 // withRule runs f with #31's decision on, which is also the package default.
 func withRule(f func()) {
-	defer func(a, b, c bool) { keyProvedOnly, keyCollisionCheck, keyCodecInstalled = a, b, c }(
-		keyProvedOnly, keyCollisionCheck, keyCodecInstalled)
-	keyProvedOnly, keyCollisionCheck, keyCodecInstalled = true, true, true
+	defer func(a, b bool) { keyProvedOnly, keyCollisionCheck = a, b }(keyProvedOnly, keyCollisionCheck)
+	keyProvedOnly, keyCollisionCheck = true, true
 	f()
+}
+
+// k31LegacyKeyText is walk.go's deleted `mapKeyText`, verbatim, kept HERE so
+// K31=10's finding stays reproducible after #58 deleted the function it is
+// about.
+//
+// It is the three-step cascade run at WALK time - identity table, then the
+// chain, then kind - with a last line that formats the key using the reflect
+// fallback verb. That last line is the defect: it consults fmt.Stringer, which
+// ADR-0005 refuses outright and by name, for a type nobody admitted through it.
+//
+// It lives in the probe rather than in the engine because a probe reproducing a
+// deleted behaviour is evidence, and an engine retaining one is a second
+// authority - which is the whole of what #58 removed.
+func k31LegacyKeyText(k reflect.Value) string {
+	if c, ok := identityLookup(k.Type()); ok {
+		if v, err := c.enc(k); err == nil && v.Kind() == VString {
+			return v.Text()
+		}
+	}
+	if c, ok := activeChainCodec(k.Type()); ok {
+		if v, err := c.enc(k); err == nil && v.Kind() == VString {
+			return v.Text()
+		}
+	}
+	switch k.Kind() {
+	case reflect.String:
+		return k.String()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(k.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(k.Uint(), 10)
+	}
+	return fmt.Sprintf("%v", k.Interface())
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +137,7 @@ func withRule(f func()) {
 // ---------------------------------------------------------------------------
 
 func k31j() {
-	hdr("K31=10  a registered key codec's text is not what Dump writes")
+	hdr("K31=10  a registered key codec's text is not what Dump writes - FIXED under #58")
 
 	fmt.Println(`  Found by K31=6 route (3): a registered codec whose text is deliberately
   non-injective produced TWO addresses instead of one. It is not that the
@@ -108,13 +146,19 @@ func k31j() {
   ADR-0009 resolves a codec into the compiled schema, and ADR-0007's own third
   defect is "the declared kind must live INSIDE the identity-table entry, not
   beside it ... two lookups for one decision is how a chain drifts". The key
-  text is a THIRD lookup: mapKeyText consults the identity table, then the
+  text WAS a THIRD lookup: mapKeyText consulted the identity table, then the
   chain, then the kind, at walk time, off the package-level activeReg.
 
   compileOnce installs the registry. dumpTo and loadFrom install it. The two
   entry points that a caller actually reaches - SinkBinding.Dump and
-  Binding.LoadOver - do not, because the schema was supposed to carry
-  everything the walk needs.`)
+  Binding.LoadOver - did not, because the schema was supposed to carry
+  everything the walk needs.
+
+  FILED AS #58 AND FIXED THERE. resolveMapKey now answers admission and
+  rendering in one lookup and the compiled node carries the pair, so the walk
+  reaches no registry for a key at all. The old resolution is reproduced below
+  by k31LegacyKeyText - walk.go's deleted mapKeyText, verbatim - so the finding
+  survives the function it was about.`)
 
 	ctx := context.Background()
 	reg := NewRegistry()
@@ -159,10 +203,10 @@ func k31j() {
 	fmt.Printf("    identical address sets: %v\n", same)
 
 	fmt.Println(`
-  Both happen to be legible here, because netip.Addr's kind fallback in
-  mapKeyText is unreachable and its ADR-0007 chain arm is off, so the two
-  routes agree by luck. The type that shows it is one whose registered text
-  differs from what the fallback produces:`)
+  Both were always legible here, because netip.Addr's kind fallback was
+  unreachable and its ADR-0007 chain arm is off, so the two routes agreed by
+  luck. The type that shows it is one whose registered text differs from what
+  the fallback produces:`)
 
 	reg2 := NewRegistry()
 	_ = reg2.Register(StringCodec(
@@ -172,6 +216,22 @@ func k31j() {
 		V map[k31Host]int `ferry:"v"`
 	}
 	hin := hostMap{map[k31Host]int{{"api", 80}: 1, {"api", 443}: 2}}
+
+	// THE OLD RESOLUTION, run directly. With no registry installed - which is
+	// the state the two entry points walked in - the cascade fell through to its
+	// last line and formatted the struct with the reflect fallback verb.
+	fmt.Println("\n    what the walk USED to resolve, with no registry installed:")
+	for _, h := range []k31Host{{"api", 80}, {"api", 443}} {
+		fmt.Printf("      k31LegacyKeyText(%v) -> %q\n", h, k31LegacyKeyText(reflect.ValueOf(h)))
+	}
+	fmt.Println("      ^ two distinct texts, so the collapse check saw no collision")
+	fmt.Println("    what the registrant's codec says, and what ferry resolves now:")
+	dn := reg2.install()
+	for _, h := range []k31Host{{"api", 80}, {"api", 443}} {
+		fmt.Printf("      k31Text(%v) -> %q\n", h, k31Text(h))
+	}
+	dn()
+	fmt.Println("      ^ one text for both, which is the collision the registrant created")
 
 	he := map[Path]Value{}
 	var err error
@@ -189,29 +249,33 @@ func k31j() {
 	}
 
 	fmt.Println(`
-  Two addresses through the entry point and one through the probe, off one
-  registry and one value. The probe is right and the entry point is wrong: the
+  Both routes now write the codec's text, off one registry and one value.
+  Before #58 the entry point wrote two addresses and the probe wrote one: the
   registrant said .AsMapKey(), the codec is what ferry promised to use, and the
   walk used the reflect fallback verb on a struct instead.
 
-  Three things follow, and only the first is a bug fix.
+  Three things followed, and only the first was a bug fix.
 
-  (1) mapKeyText's last line formats the key with the reflect fallback verb,
-      which is a
-      representation nobody chose for a type nobody admitted. validMapKey and
-      mapKeyText are two authorities over one question, which is the pattern
-      ADR-0005's identity-before-kind rule and ADR-0007's declared-kind rule
-      each exist to stop. The key codec belongs in the compiled node.
+  (1) The last line above formats the key with the reflect fallback verb, which
+      is a representation nobody chose for a type nobody admitted - and it is
+      worse than that, because the verb consults fmt.Stringer, which ADR-0005
+      refuses outright and by name. validMapKey and mapKeyText were two
+      authorities over one question, which is the pattern ADR-0005's
+      identity-before-kind rule and ADR-0007's declared-kind rule each exist to
+      stop. The key codec belongs in the compiled node. IT IS THERE NOW, and
+      both authorities are one function, resolveMapKey.
 
   (2) EVERY injectivity statement about a registered or chain-admitted key type
-      is a statement about the wrong function until it is. .AsMapKey() gates a
-      codec the walk does not call.
+      was a statement about the wrong function until it was. .AsMapKey() gated a
+      codec the walk did not call.
 
   (3) It is the reason a key proof cannot take a format function from the
       prover. It has to ask ferry what ferry writes - see K31=7.
 
-  With the walk given the registry, both routes agree and the collision the
-  registrant's own codec creates is loud:`)
+  And the second-order effect, which is why this mattered beyond a wrong
+  string: the collapse check operates on that text, so with the fallback text
+  being accidentally injective where the codec is not, the check was UNREACHABLE
+  through Dump for exactly the class of type it was built for. It fires now:`)
 	withRule(func() {
 		out := map[Path]Value{}
 		fmt.Printf("    %v\n", Dump(ctx, hin, MemSink{out}, WithRegistry(reg2)))
@@ -520,18 +584,44 @@ func k31d() {
   set the walk hands over.`)
 }
 
+// k31Conv is ferry's own key rendering, asked the way the engine asks it.
+//
+// UPDATED UNDER #58, which deleted `mapKeyText`. The key text is now
+// `resolveMapKey`'s resolved pair, taken once where the key type is admitted
+// and carried on the compiled node, rather than a three-step cascade re-run per
+// key against a package global the caller-facing entry points do not install.
+// Every probe here that asked `mapKeyText` asks this, so "what ferry writes"
+// stays ONE function and a probe still cannot disagree with the engine.
+//
+// It resolves per call so the benchmarks below keep their shape: what they
+// compare is rendering per COMPARISON against rendering once per KEY, and
+// hoisting the resolution out of them would erase the axis being measured.
+func k31TextOf(k reflect.Value) string {
+	if kc, ok := resolveMapKey(k.Type()); ok {
+		if s, err := kc.text(k); err == nil {
+			return s
+		}
+	}
+	// The type is not an admissible key under the rules currently in force,
+	// which for map[time.Time]V is #31's own fix. Several probes below run in
+	// exactly that state on purpose and still need the text the collapse was
+	// MADE of, so this falls back to the resolution the tip shipped rather than
+	// refusing to answer a question about history.
+	return k31LegacyKeyText(k)
+}
+
 // k31Text is the walk's own key text, so a probe cannot disagree with it.
-func k31Text(v any) string { return mapKeyText(reflect.ValueOf(v)) }
+func k31Text(v any) string { return k31TextOf(reflect.ValueOf(v)) }
 
 // k31MintCheck is ADR-0003's dynamic tier applied where the walk mints, using
 // the sort the walk already does.
 func k31MintCheck(m reflect.Value) (dup bool, first, second string) {
 	keys := m.MapKeys()
 	slices.SortFunc(keys, func(a, b reflect.Value) int {
-		return cmpStr(mapKeyText(a), mapKeyText(b))
+		return cmpStr(k31TextOf(a), k31TextOf(b))
 	})
 	for i := 1; i < len(keys); i++ {
-		if mapKeyText(keys[i]) == mapKeyText(keys[i-1]) {
+		if k31TextOf(keys[i]) == k31TextOf(keys[i-1]) {
 			return true, fmt.Sprintf("%v", keys[i-1]), fmt.Sprintf("%v", keys[i])
 		}
 	}
@@ -543,21 +633,21 @@ type k31Member struct {
 	key  reflect.Value
 }
 
-// k31AsShips is the tip's member step: mapKeyText inside the comparator.
+// k31AsShips is the tip's member step: the key text inside the comparator.
 func k31AsShips(v reflect.Value) []reflect.Value {
 	keys := v.MapKeys()
 	slices.SortFunc(keys, func(a, b reflect.Value) int {
-		return cmpStr(mapKeyText(a), mapKeyText(b))
+		return cmpStr(k31TextOf(a), k31TextOf(b))
 	})
 	return keys
 }
 
-// k31Precomputed sorts (text, key) pairs, so mapKeyText runs once per key.
+// k31Precomputed sorts (text, key) pairs, so the render runs once per key.
 func k31Precomputed(v reflect.Value) []k31Member {
 	keys := v.MapKeys()
 	ms := make([]k31Member, len(keys))
 	for i, k := range keys {
-		ms[i] = k31Member{mapKeyText(k), k}
+		ms[i] = k31Member{k31TextOf(k), k}
 	}
 	slices.SortFunc(ms, func(a, b k31Member) int { return cmpStr(a.text, b.text) })
 	return ms
@@ -770,7 +860,7 @@ func (k keyProof[T]) check() []string {
 	done := k.reg.install()
 	defer done()
 	for _, v := range k.values {
-		t := mapKeyText(reflect.ValueOf(v))
+		t := k31TextOf(reflect.ValueOf(v))
 		if prev, dup := byText[t]; dup && prev.v != v {
 			bad = append(bad, fmt.Sprintf("%s: %#v and %#v both address %q", k.name, prev.v, v, t))
 			continue
@@ -867,7 +957,7 @@ func k31g() {
 		fmt.Printf("\n      registrant's own format:  %q and %q\n",
 			hosts[0].String(), hosts[1].String())
 		fmt.Printf("      ferry's mapKeyText:       %q and %q\n",
-			mapKeyText(reflect.ValueOf(hosts[0])), mapKeyText(reflect.ValueOf(hosts[1])))
+			k31TextOf(reflect.ValueOf(hosts[0])), k31TextOf(reflect.ValueOf(hosts[1])))
 		done()
 	}
 	fmt.Println(`

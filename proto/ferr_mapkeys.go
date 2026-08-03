@@ -45,11 +45,24 @@ import (
 // Rendering once is both the check and an optimisation: the comparator used to
 // re-render both sides on every comparison. Measured at the shipped call site,
 // 3x faster at 8 keys and ~7x at 512.
-func sortedMapMembers(v reflect.Value, at Path) ([]member, error) {
+//
+// It takes the RESOLVED pair rather than looking one up per key. #58: reading a
+// package global here is what made this check unreachable through `Dump`, and
+// for exactly the class of type it was built for - the fallback text was
+// accidentally injective where the registrant's codec was not, so the two keys
+// that collapse rendered distinct and nothing fired. Taking the pair as a
+// parameter keeps the signature honest about where the answer comes from, and
+// it makes the render one call rather than a three-step cascade per key.
+func sortedMapMembers(v reflect.Value, at Path, kc keyConv) ([]member, error) {
 	keys := v.MapKeys()
 	ms := make([]member, len(keys))
 	for i, k := range keys {
-		ms[i] = member{seg: Segment{Kind: Name, Text: mapKeyText(k)}, key: k}
+		t, err := kc.text(k)
+		if err != nil {
+			return nil, errAt(mWalk, ErrValue, at,
+				"%s: a key could not be rendered as an address segment", v.Type()).withCause(err)
+		}
+		ms[i] = member{seg: Segment{Kind: Name, Text: t}, key: k}
 	}
 	slices.SortFunc(ms, func(a, b member) int { return cmpStr(a.seg.Text, b.seg.Text) })
 	if !keyCollisionCheck {
