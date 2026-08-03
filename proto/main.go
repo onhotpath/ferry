@@ -58,6 +58,10 @@ func main() {
 		runA41(p)
 		return
 	}
+	if p := os.Getenv("Z35"); p != "" {
+		runZ35(p)
+		return
+	}
 	if p := os.Getenv("X2"); p != "" {
 		runX2(p)
 		return
