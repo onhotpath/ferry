@@ -82,6 +82,28 @@ The two orders also disagree on plain names, because a separator byte sorts agai
 So wherever ferry enumerates addresses, in dumped output, in error reports, and in the conformance suite, it sorts segment-wise.
 The canonical rendering is for identity, not for ordering.
 
+**The three places are the whole list, and the sequence in which core asks a `Reader` for addresses is deliberately unspecified.**
+It is not a fourth place and it is not an oversight: the walk is free to visit in whatever order it likes, and to visit in no order at all once [#20](https://github.com/onhotpath/ferry/issues/20) makes it concurrent.
+[ADR-0011](0011-the-error-model.md) already assumes this when it says "the walk may emit in any order".
+
+*(Clause added under [#41](https://github.com/onhotpath/ferry/issues/41), which asked whether "wherever" covers a `Get` sequence, and answered no from measurement rather than from taste.)*
+
+Four things were measured before deciding, and each on its own would be enough.
+
+- **Nothing ferry produces exposes the sequence.**
+  ADR-0006's presence observation is a **mapping** from address to `Value`, so a lookup cannot see an order; the error report sorts at construction, verified by running two `Get` sequences that are reverses of each other and getting one identical report; the dumped output is sorted at the write loop and does not go through `Get` at all; and the conformance harness compares values at addresses and has no sequence assertion.
+  A lazy driver sees its own call order, which is the driver's, and the batch branch of the same driver has no per-`Get` call to order.
+- **ADR-0001's determinism invariant is already satisfied, and by the property it actually asks for.**
+  Over 200 runs across eight shapes the sequence is single-valued every time - 1 distinct sequence per shape - including a map of structs, whose members come from `Children`.
+  Determinism and sortedness are different properties and ADR-0001 asks only for the first.
+- **The extension cannot be delivered in full.**
+  A promoted embedded struct contributes **no segment**, so it has no sort key, and sorting a parent's field list cannot interleave a promoted block into it: measured, the per-node sort gives `/env /name /alpha /zeta` where segment-wise is `/alpha /env /name /zeta`, and no key produces the latter.
+  A dynamic composite's members come from the driver's `Children`, which core does not sort, so a map would stay in the driver's order whatever the walk did.
+- **A partial promise is worse than none**, because this ADR's own wording would make it a conformance case, and it would collide with #20 the moment the walk goes concurrent.
+
+The one address list that does cross the driver boundary as a list - the static address set handed to `Bind` - **is** sorted segment-wise, which is what lets a driver that wants locality sort for itself.
+Evidence: `X4=6..11` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
+
 ### The case rule: core never folds, confirmed
 
 Core compares segment text by exact byte equality.
