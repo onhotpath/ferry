@@ -32,7 +32,7 @@ This table is the answer to each, so a reader can check the ADR against the ask 
 
 | The ticket asked | Closed | Where |
 | --- | --- | --- |
-| the enumerated set of Go types core supports | **yes** | [The enumerated set](#the-enumerated-set) |
+| the enumerated set of Go types core supports | **yes** | [The enumerated set](#the-enumerated-set), and the key set is amended by [#31](https://github.com/onhotpath/ferry/issues/31) in [The map key rule, restated](#the-map-key-rule-restated) |
 | what happens to a type outside it, at what point it is detected | **yes**, at schema compile from `reflect.TypeFor[T]()` alone | [A type outside the set](#a-type-outside-the-set-is-refused-at-schema-compile-and-every-violation-is-reported) |
 | how round-trip is enforced in CI | **yes**, one table run against three planes plus a completeness check | [How round-trip is enforced](#how-round-trip-is-enforced) |
 | what "adding a type means adding its proof" looks like concretely | **yes**, a proof is a triple and none of the three is derivable from the others | [A proof is a triple](#a-proof-is-a-triple-because-the-property-alone-is-blind-to-representation) |
@@ -66,6 +66,13 @@ Four questions this ADR had to answer that the ticket did not name, all of which
   That claim was false and the probe that killed it is recorded below, because the shape of the mistake is the point.
 - **A named type over `time.Duration` still dumps nanoseconds.**
   Narrower than xload's hole, and registration is the answer, and it is not closed.
+  *(Closed since, by [ADR-0009](0009-typed-codec-registration.md)'s `DurationLike[T ~int64]()`, at one line per named type.)*
+
+**And one this ADR did not know it was leaving open**, added under [#31](https://github.com/onhotpath/ferry/issues/31):
+
+- **Core's admissible map key set was not injective, so `map[time.Time]V` lost keys silently.**
+  This ADR states the injectivity obligation for a *registered* key codec and does not apply it to its own identity table, which the implementation admitted wholesale.
+  Closed by [The map key rule, restated](#the-map-key-rule-restated): key admissibility is declared per entry, the obligation is under Go's `==`, `time.Time` is dropped as a key type, and a collision is refused as the address is minted.
 
 ### The set is resolved by type identity first, and by `reflect.Kind` second
 
@@ -150,16 +157,28 @@ ferry does not follow it, because an absent address leaving a zero value is the 
 ADR-0003 said that if this ticket admitted no indexed composite, the kind would simply go unused.
 Slices and arrays are admitted, so it is used, and ADR-0003's measured reason for kinding segments at all stands: an emitter that guesses list-versus-map from base-10 text turns `map[string]int{"0": ...}` into a YAML sequence and destroys the key.
 
-**A map key type is restricted to `string`, the integer kinds, and any type with a registered codec whose form is a `String`.**
+**A map key type is restricted to `string`, the integer kinds, and any type with a registered codec whose form is a `String` that says `.AsMapKey()`.**
 A key becomes segment text on the way out and must be parsed back on the way in, so a key type is a decode and not a conversion.
 The prototype's first draft converted the segment text straight to the key type and panicked on `map[int]string` with `value of type string cannot be converted to type int`, which is how the restriction was found rather than assumed.
 Float keys are excluded because the mapping is not injective: two distinct `NaN` payloads both format as `NaN`.
+
+**Membership of the identity table confers nothing here.**
+Key admissibility is declared per entry, and core's own entries declare it like anybody else's.
+`time.Duration` does; **`time.Time` does not**, so `map[time.Time]V` is a schema compile error.
+
+> **Amended under [#31](https://github.com/onhotpath/ferry/issues/31).**
+> As published this read "any type with a registered codec whose form is a `String`", and the implementation admitted anything in the identity table wholesale.
+> `time.Time` is in that table, and its RFC 3339 text is not injective over it, so `map[time.Time]V` silently lost keys - the exact hazard this ADR states three sections below for a *registered* key codec, occurring inside the set core ships and guarantees.
+> [ADR-0007](0007-the-codec-chain-and-its-precedence.md) found it, [ADR-0009](0009-typed-codec-registration.md) recorded that its own opt-in "deliberately does not reach" it, and neither could fix it, because the fix amends this ADR.
+> The `.AsMapKey()` clause is [ADR-0009](0009-typed-codec-registration.md)'s, added here so the restriction reads as one rule rather than two.
+> See [The map key rule, restated](#the-map-key-rule-restated) for what changed and why the refusal is forced rather than chosen.
+> Evidence: `K31=<n|all>` on [`proto/31-mapkey`](https://github.com/onhotpath/ferry/tree/proto/31-mapkey).
 
 **Refused, at schema compile.**
 Sorted below into what actually limits each, because only four of these are permanent.
 
 - `complex64`, `complex128`, `chan`, `func`, `interface`, `uintptr`, `unsafe.Pointer`.
-- A map whose key type is not `string`, an integer kind, or a registered codec.
+- A map whose key type is not `string`, an integer kind, or a registered key codec. *(Amended under [#31](https://github.com/onhotpath/ferry/issues/31): as published this read "or a registered codec", which admitted `time.Time` through the identity table.)*
 - A struct that maps no address, which is its own section below.
 - A recursive type, which is its own section below.
 
@@ -320,11 +339,17 @@ The recursive row is the same trick: a codec terminates the walk that would othe
 
 **A registered codec may also serve as a map key**, which is what lifts the last row, and it carries a stronger obligation than a leaf codec:
 
-> A key codec's text must be **injective** over the key type.
+> A key codec's text must be **injective** over the key type, under Go's `==`.
 
 Two distinct keys producing one text collapse into one address, silently.
 Core ships `string` and the integer kinds because both are trivially injective; `float64` is excluded because two distinct `NaN` payloads both format as `NaN`.
 Injectivity is not checkable in general, so it is a proof obligation on the registrant, discharged over their supplied value list in the same harness.
+
+> **Amended under [#31](https://github.com/onhotpath/ferry/issues/31): "under Go's `==`" is new, and it is the whole ticket.**
+> As published the obligation named no relation, and this ADR makes the equality relation **per type and required** two sections later, so the omission was not neutral: read under the type's own proof relation, `time.Time`'s RFC 3339 text *is* injective, because `.Equal` says the two colliding values are one.
+> Read under `==` it is not, and `==` is the one that decides, because `==` is what the Go map's key identity is and therefore what decides how many entries the map holds.
+> A weaker relation cannot see an entry disappear, because under it the entry was never there.
+> The consequence is that a key type must satisfy a **stricter** relation than its own leaf proof, so a type can be a legal leaf and an illegal key, and `time.Time` is the first instance.
 
 **(c) Refused by policy, not by constraint.**
 `complex64`, `complex128`, `uintptr`.
@@ -358,6 +383,157 @@ This ADR does not decide the chain, so it states the interaction as a constraint
 
 If #12 puts `TextMarshaler` ahead of kind, this ADR's refusal list gets shorter and nothing in it becomes wrong.
 If #12 puts it after, `net.IP` keeps landing as sixteen raw bytes and that is a decision someone took rather than one that happened.
+
+### The map key rule, restated
+
+*Added under [#31](https://github.com/onhotpath/ferry/issues/31), which is a defect in this ADR's admissible key set rather than in anything built on it.*
+*Evidence: `K31=<n|all>` on [`proto/31-mapkey`](https://github.com/onhotpath/ferry/tree/proto/31-mapkey), eleven probes, every one through the entry point.*
+
+> **A type keys a map only if it is declared usable as one, and the declaration is per entry.**
+> Core's identity table declares it, a registration declares it with `.AsMapKey()`, and nothing else confers it.
+>
+> **The obligation is injectivity under Go's `==`**, and core admits only what it has proved.
+>
+> **A collision is refused as the address is minted**, before the write it belongs to, naming the address and the key type.
+
+Three things, and the third is what makes the first two safe.
+
+#### Core exempted itself from its own rule, and `time.Time` is what that cost
+
+`validMapKey` admitted anything in the identity table, so `time.Time` keyed a map on the strength of being owned rather than of being injective.
+Measured through `Dump`, in three shapes rather than the one [ADR-0007](0007-the-codec-chain-and-its-precedence.md) reported, because they are not equally exotic:
+
+| pair | `a == b` | `a.Equal(b)` | same text | Go keys -> ferry addresses |
+| --- | --- | --- | --- | --- |
+| `time.UTC` against `FixedZone("GMT", 0)` | false | true | true | 2 -> 1, nil error |
+| `time.Now()` against `time.Now().Round(0)` | false | true | true | 2 -> 1, nil error |
+| two `FixedZone("UTC", 0)` calls | false | true | true | 2 -> 1, nil error |
+
+The second row is the ordinary one: a monotonic reading is what `time.Now()` returns and stripping it is what storing it does.
+
+#### There is no injective text form for `time.Time`, so "keep it with a caveat" has nothing behind it
+
+"Drop it, or keep it with a stated caveat" is the choice the ticket named, and keeping it is only available if some codec could discharge the obligation.
+None can, and the reason is a property of the type rather than of RFC 3339:
+
+> `time.Time` is `{wall uint64, ext int64, loc *Location}`, and `==` compares the `loc` **pointer**.
+> No text carries a pointer.
+
+`time.FixedZone` allocates a fresh `*Location` on every call, so two calls with the same name and the same offset produce two values that are distinct under `==` and identical under every encoding the standard library has.
+Measured, on `go1.27rc2`, over the two such values:
+
+```
+MarshalText  MarshalJSON  MarshalBinary  GobEncode  Format(RFC3339Nano)  Format(...MST)
+UnixNano     String()     GoString()     %#v        Location().String()  Zone()
+
+0 of 12 encodings distinguish them
+```
+
+So the refusal is **forced rather than chosen**, and it is forced in the same sense the nil-versus-empty collision above is: there is no design that avoids it, only designs that hide it.
+It also fixes the diagnostic, because a message reading "register an injective codec for it" would be naming a remedy that does not exist:
+
+```
+ferry: /v: time.Time is in core's own set and is not usable as a map key: its
+       text is not injective over the type, so two distinct keys collapse into
+       one address; key the map by a type that is, or convert the key yourself
+```
+
+**What the refusal costs is one real use case**, a map keyed by an instant, and the three available remedies were run rather than asserted.
+`map[int64]V` keyed by `UnixNano` works and drops the zone, which is exactly the information no text could have carried.
+`map[string]V` keyed by RFC 3339 works and puts the collapse in the user's own code where it is visible.
+And a named type over `time.Time` with a registered codec saying `.AsMapKey()` **is accepted**, which is a user defeating the refusal with a claim nobody can check - the same shape as [#45](https://github.com/onhotpath/ferry/issues/45), arriving from the other side, where the refusal is lifted by deleting a registration rather than by adding a keyword.
+Neither is a hole in the compile-time rule.
+Both are why the compile-time rule cannot be the only rule.
+
+#### The mint-time check is the second half, and it is the one that is complete
+
+[ADR-0003](0003-how-a-leaf-addresses-a-plane.md) names two dynamic collision checks and only one of them can see this.
+
+The **driver-side** check asks whether two addresses collapse into one plane key, and it is keyed by `Path`.
+Two Go map keys collapse into one `Path` *before* the driver is asked anything, so the driver sees one address once and answers correctly.
+Measured: `Key(/v/2026-01-15T12:00:00Z)` twice, two nil errors, and there cannot be an error, because the collision is upstream of the only check that existed.
+
+The **core-side** check is prefix-freeness run "as each is minted, before the write it belongs to", and a repeated address is a prefix of itself, so the rule already covered this case in terms and no implementation ran it.
+Implemented at the walk's map member step:
+
+```
+ferry: /v: map keys of type time.Time are not injective: /v/2026-01-15T12:00:00Z
+       is addressed more than once, and 1 entry would be lost
+```
+
+**It arrives with a speedup**, which is worth stating because "and it is cheap" is usually a concession.
+This ADR's own determinism invariant already requires a map's members to be sorted by key text, and the walk was calling the key-text function *inside the comparator*, so a key's text was recomputed `O(n log n)` times and no two texts were ever compared for equality.
+Computing it once per key is what a duplicate check needs anyway:
+
+| keys | as the tip shipped | text computed once | + the duplicate check |
+| --- | --- | --- | --- |
+| 8 | 4436 ns | 1713 ns | 1599 ns |
+| 64 | 94017 ns | 16328 ns | 16381 ns |
+| 512 | 1146337 ns | 158116 ns | 157189 ns |
+
+**And the check is a complete backstop rather than a partial one**, for a structural reason: a plane's addresses are already a set, so enumeration cannot hand the walk one address twice.
+A key collision can only be *created* where keys are minted, and keys are only minted on Dump.
+What it is not is sufficient on its own, and the ADR says which: it fires on the plane being written, and by then the artefact the user loaded from has already lost the entry.
+
+#### ADR-0001's determinism invariant is an independent argument for the refusal
+
+The choice is not "silent but stable" against "loud".
+There is no stable option, because which entry survives is which one the walk writes last, and with two equal texts that is Go's map iteration order.
+Measured, 300 dumps of one value:
+
+```
+as shipped   2 distinct outcomes over 300 dumps    34/300 and 266/300
+with the rule  1 distinct outcome over 300 dumps   300/300, the refusal
+```
+
+> A dump that collapses two keys has no deterministic answer to give, so the only outcome consistent with [ADR-0001](0001-what-ferry-supports.md) is a refusal.
+
+That argument does not depend on anybody agreeing that a lost entry matters, which is what makes it the stronger of the two.
+It is also the resolution of the two lines the [#41](https://github.com/onhotpath/ferry/issues/41) audit records as flaky across runs of the same binary and hands to this ticket: both are probes whose subject *is* the collapse, so neither is made deterministic by a fix, and both are now stated as an outcome **set** over 200 dumps rather than as one draw from it.
+
+#### What core has actually proved, which is less than the set it admits
+
+The completeness question [#41](https://github.com/onhotpath/ferry/issues/41) asked of the leaf set, asked of the key set, run through `validMapKey` itself:
+
+| admitted as a key by | injective under `==` |
+| --- | --- |
+| `string` and the integer kinds, by kind | **proved**: the text is the value, or base 10 is a bijection on the width |
+| `time.Duration`, by identity | **bounded**: no collision over 2^20 random values plus the extremes |
+| `time.Time`, by identity | **disproved**, and no codec can fix it |
+| a registered codec that said `.AsMapKey()` | the registrant's claim |
+
+A randomised hunt is what turns a claim into either a counterexample or a bound, and the ADR states what each is worth.
+A hit is a proof of non-injectivity and is the strongest result available; `time.Time` needed two values.
+A miss over 2^20 is a bound and not a proof, which is what a registrant may honestly say and what core should not have to.
+`string` and the integer kinds need no hunt at all, and that is the difference: they are the only two rows core can prove, and they are exactly the two this ADR named in the first place.
+
+#### What this hands the harness
+
+A key type needs a fourth thing that a value proof structurally cannot supply.
+
+> A value proof asks whether this value survives a round trip.
+> A key proof asks whether these two values stay two.
+
+No value proof can see the second, because the collision is *between* values and every case in a value proof runs alone.
+Measured: core's `time.Time` proof passes on all three planes, today, with the defect live.
+
+Two corrections to the helper [ADR-0009](0009-typed-codec-registration.md) proposes, `Injective[T any](format func(T) string, values ...T) error`, both measured:
+
+- `T` is unconstrained, so it compiles for a type Go cannot key a map with and has no `==` to test distinctness under.
+  `comparable` is the constraint that makes the signature state the obligation.
+- The prover supplies `format`, and **ferry does not call it**.
+  What addresses the plane is the key-text function, which consults the identity table, then the chain, then the kind.
+  Measured on one type through both routes: the registrant's own `String()` gives `"api:80"` and `"api:443"`, and ferry writes `"api"` and `"api"`.
+  A registrant who proves their own function injective has proved nothing about what ferry writes, so the check has to take the registry and ask ferry - which is the correction [ADR-0007](0007-the-codec-chain-and-its-precedence.md) already made once, for the declared kind: one lookup, not two.
+
+What that costs `ferrytest` in exported surface is [#35](https://github.com/onhotpath/ferry/issues/35)'s, and this ADR hands it the shape rather than the spelling.
+
+#### One defect found on the way, which is not this ADR's
+
+`.AsMapKey()` was gating a codec the walk never called.
+The two caller-facing entry points walked with no registry installed, so a registered key codec's text was not what `Dump` wrote: measured, one registry and one value producing two addresses through the entry point and one through a probe that installs it.
+The key text is the only codec lookup the compiled schema does not carry, which is [ADR-0007](0007-the-codec-chain-and-its-precedence.md)'s third defect - "two lookups for one decision is how a chain drifts" - recurring at the key position.
+It belongs to [#16](https://github.com/onhotpath/ferry/issues/16)'s compiled schema rather than here, and it is named because every injectivity statement about a registered or chain-admitted key type is a statement about the wrong function until it is fixed.
 
 ### A type outside the set is refused at schema compile, and every violation is reported
 
@@ -896,6 +1072,7 @@ Core's test iterates the identity table and the admitted kind list and asserts t
   Where that is detected, and whether it is a refusal or a narrower guarantee, is #12's.
 - The registration API, including how a named type over `time.Duration` is rescued: [#19](https://github.com/onhotpath/ferry/issues/19).
   This ADR hands #19 two obligations it would not otherwise have: a codec collapses a type to a leaf, which is what makes an interface and a recursive type expressible, and a key codec's text must be injective over the key type or two keys collapse into one address.
+  *(Amended under [#31](https://github.com/onhotpath/ferry/issues/31): the second obligation is under Go's `==`, it binds core's own table identically, and it is now backed by a mint-time refusal rather than resting on the registrant alone.)*
 - **What counts as a breaking change to plane contents**: [#28](https://github.com/onhotpath/ferry/issues/28), filed from this ADR.
   The golden column pins `30s` and RFC 3339 and shortest-float text into every artefact a user has stored, and changing one of them breaks data while the Go API stays stable, which semver does not describe and no tool can see.
   ADR-0002 versioned modules and said nothing about values, because until this ADR nothing had pinned them.
@@ -955,6 +1132,18 @@ Core's test iterates the identity table and the admitted kind list and asserts t
   ferry's `time.Time` loses the zone name, identically to the stdlib.
   Both are documented properties rather than bugs, and both are conformance cases.
 - The type set does not consume ADR-0001's `go 1.27` fallback, verified by building it at `go 1.26` under `GOEXPERIMENT=nojsonv2`.
+- **A type can be a legal leaf and an illegal key**, because a key type's obligation is stated under `==` and a leaf's under the type's own relation, and `==` is the stricter of the two by construction whenever the two differ.
+  `time.Time` is the first instance and it is the reason the distinction had to be written down; before [#31](https://github.com/onhotpath/ferry/issues/31) the design had no place to say it.
+  *(Added under #31.)*
+- **`map[time.Time]V` no longer compiles**, which costs a use case somebody wants and is forced rather than chosen: no text form is injective over `time.Time`, because `==` compares a `*Location` and no text carries a pointer.
+  The remedy is the user's own conversion, and the diagnostic says so rather than offering a codec that cannot exist.
+  *(Added under #31.)*
+- **Key admissibility is declared per entry and is never inherited**, for core's table and for a registration alike.
+  That is one rule where there were two, and it is the same shape [ADR-0007](0007-the-codec-chain-and-its-precedence.md) arrived at independently under [#45](https://github.com/onhotpath/ferry/issues/45) when it reversed its own chain-key sentence: nobody keys a map without somebody having said so.
+  *(Added under #31.)*
+- **A colliding dump is refused as the address is minted**, and it is the one place in this design where a check is both free and faster than what it replaces, because the determinism invariant had already paid for the sort and the walk was recomputing the key text inside the comparator.
+  It is a complete backstop, because keys are only minted on Dump, and it is not sufficient alone, because it fires on the plane being written.
+  *(Added under #31.)*
 
 ## Items from the xload survey
 
