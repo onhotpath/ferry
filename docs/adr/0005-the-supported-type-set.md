@@ -872,6 +872,11 @@ Without the declaration the suite has only two options, both wrong: fail every f
 
 - **A registrant** runs their own proofs against the memory plane, which is how ADR-0001's "registration carries the proof" is discharged in the registrant's own tests.
 
+> **Amended under [#35](https://github.com/onhotpath/ferry/issues/35): the shape of this section is now [ADR-0014](0014-what-ferrytest-exports.md)'s, and two things in it were wrong.**
+> `RoundTrip`'s signature takes Options rather than a `*Registry`, which is where [ADR-0009](0009-typed-codec-registration.md)'s and this ADR's two spellings reconcile.
+> And the proof this ADR specifies - values, a relation, and a golden `Value` - had been built twice and never once as specified: the implementation that ran through the entry point had no golden column, and the one with the column ran through a superseded walk.
+> ADR-0014 merges them, and the table grows from eleven rows of bare values to nineteen rows and 57 cases, which also closes [#41](https://github.com/onhotpath/ferry/issues/41)'s D18.
+
 **A completeness check closes the loop**, because a table that can be added to without adding a row is a table that drifts.
 Core's test iterates the identity table and the admitted kind list and asserts that every member has a proof in `CoreTypes()`, so extending the set without extending the table fails CI rather than silently widening an unproven guarantee.
 

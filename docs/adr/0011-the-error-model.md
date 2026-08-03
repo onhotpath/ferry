@@ -736,6 +736,8 @@ A contains-assertion passes straight through it.
 **Three consumers need this and none is an ordinary user test**: core's own tests over `Validate[T]()`, the conformance suite's "refused loudly" which is currently prose, and a registrant discharging ADR-0009's proof.
 
 **It ships in `ferrytest` only, and [#35](https://github.com/onhotpath/ferry/issues/35) owns whether that is where it stays.**
+*([ADR-0014](0014-what-ferrytest-exports.md) keeps it there, and generalises this section's own reasoning: every suite reports through a two-method `T` that `*testing.T` satisfies, and the two checks that answer a question rather than run cases return `[]string`.
+The trigger for promotion is a use that is not a test, and nothing has one.)*
 Promotion to the root package is a later call, and nothing stops a user importing `ferrytest` from production code meanwhile.
 This ADR fixes the semantics, exact-set over `(address, class)` with no message assertion at any level, and leaves the package's surface to #35.
 
