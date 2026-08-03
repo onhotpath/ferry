@@ -210,6 +210,12 @@ ADR-0001 made ferry's tag vocabulary effectively frozen at v1, because strict re
 v0 is the only place semver allows taking a tag word back.
 The trigger for v1 is named rather than left to drift: [#11](https://github.com/onhotpath/ferry/issues/11)'s grammar surviving real use, across at least one first-party driver and one external adopter.
 
+> **Amended under [#28](https://github.com/onhotpath/ferry/issues/28): the trigger gains a second input, and this ADR gains a second promise.**
+> [ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md) states **plane compatibility** separately from the API compatibility this section decides, because what a module writes into a plane is a published interface that semver does not describe and no tool in the Go toolchain can see.
+> Measured: two modules differing only in the text a function returns are clean under `go build`, `go vet`, `gofmt` and `apidiff`, and the consumer's own round-trip test passes on both.
+> The instrument is the same one: a change to [ADR-0005](0005-the-supported-type-set.md)'s golden column is a **major** version of the module that owns the row, because a major version is the only release a consumer cannot receive without editing a line - measured against a real `GOPROXY`, where `go get -u` crosses a minor and changes what the program writes, and cannot cross a major.
+> So the second input to the v1 trigger is the golden column: at v1 every pinned representation becomes a promise with a major version behind it.
+
 Major versions beyond v1 are not decided here.
 
 ## Consequences

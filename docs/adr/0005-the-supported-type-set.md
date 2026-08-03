@@ -1074,6 +1074,8 @@ Core's test iterates the identity table and the admitted kind list and asserts t
   This ADR hands #19 two obligations it would not otherwise have: a codec collapses a type to a leaf, which is what makes an interface and a recursive type expressible, and a key codec's text must be injective over the key type or two keys collapse into one address.
   *(Amended under [#31](https://github.com/onhotpath/ferry/issues/31): the second obligation is under Go's `==`, it binds core's own table identically, and it is now backed by a mint-time refusal rather than resting on the registrant alone.)*
 - **What counts as a breaking change to plane contents**: [#28](https://github.com/onhotpath/ferry/issues/28), filed from this ADR.
+  *(Closed since, by [ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md).
+  It reclassifies the golden column below from a test fixture to the published artefact, and it found that the column is on the wrong one of two proof types: the one `CoreTypes()` uses has never checked a representation.)*
   The golden column pins `30s` and RFC 3339 and shortest-float text into every artefact a user has stored, and changing one of them breaks data while the Go API stays stable, which semver does not describe and no tool can see.
   ADR-0002 versioned modules and said nothing about values, because until this ADR nothing had pinned them.
 - Where the compiled schema is cached and what the generic entry point looks like: [#16](https://github.com/onhotpath/ferry/issues/16).
