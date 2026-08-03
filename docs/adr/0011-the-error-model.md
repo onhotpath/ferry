@@ -198,9 +198,50 @@ Counting is the caller's range loop:
 
 ```go
 for _, e := range ferry.Elements(err) {
-    if errors.Is(e, ferry.ErrMissing) { missing = append(missing, ferry.Address(e)) }
+    if !errors.Is(e, ferry.ErrMissing) {
+        continue
+    }
+
+    if fe, ok := errors.AsType[*ferry.Error](e); ok {
+        missing = append(missing, fe.Address())
+    }
 }
 ```
+
+> **Amended under [#105](https://github.com/onhotpath/ferry/issues/105): the loop is eight lines and as published it was three, because it called an accessor that does not exist.**
+> As published the body read `if errors.Is(e, ferry.ErrMissing) { missing = append(missing, ferry.Address(e)) }`, spelling the accessor as a free `ferry.Address(err error)`.
+> The accessor this ADR declares is `func (*Error) Address() Path`, a method, and it is the only spelling.
+> **No free `ferry.Address` is added and none is planned**, because it would have to return the zero `Path` for anything that is not a `*ferry.Error`, and one value meaning both "no address" and "not ferry's error" is a worse ambiguity than the type step it saves.
+> `Elements` returns `[]error`, so reaching the method needs `errors.AsType[*ferry.Error]` first, and the loop above is what that costs.
+>
+> **The argument the loop is cited for survives, and the shorthand was hiding where the cost comes from rather than hiding a cost.**
+> The departure declined above is about what `errors.Is` *answers* on an aggregate, and at either meaning it answers a bool, so it never yields an address.
+> A caller who wants the addresses ranges under both readings, and every line the honest loop adds is charged to the method-only accessor set instead: that is the cost [the type section](#the-type-one-exported-name-no-exported-fields) already names as "the least idiomatic of the three shapes available" and already accepts.
+> So this is one cost showing up twice, not a second cost the departure would have avoided, and the comparison between the two readings of `errors.Is` is unmoved by it.
+> What the published loop did do is make an already-priced cost look free at the one place a reader would copy it, which is why the honest form replaces it rather than being noted beside it.
+
+> **Added under [#105](https://github.com/onhotpath/ferry/issues/105): what the `ok` branch is, which the published loop never had to say.**
+>
+> **Every element of an aggregate ferry constructs is a `*ferry.Error`.**
+> Core is the only party that mints one, and a driver's error is wrapped rather than admitted, so a foreign error is always a **cause under** a ferry element and never an element beside one.
+> A driver's own joined error is one such cause with its internal shape intact, which is the flatness promise below, not a counterexample to this one.
+>
+> **`Elements` is not defined over that aggregate; it is defined over any `error`**, because what a caller has in hand is whatever `Load` returned, possibly wrapped in a sentence of their own.
+> So the element is a bare `*ferry.Error` only where ferry's error arrived unwrapped, and `errors.AsType` rather than a type assertion is what covers the rest.
+> Measured over the five shapes a caller can reach:
+>
+> ```
+>  Elements(err)                                    elements   AsType[*ferry.Error] on each
+>    an aggregate                                      2       ok, and each element is one outright
+>    one failure, bare                                 1       ok, outright
+>    one failure inside fmt.Errorf("...: %w", err)     1       ok, through the wrapper
+>    an aggregate inside fmt.Errorf                    2       ok, and each element is one outright
+>    an error ferry never built                        1       not ok
+> ```
+>
+> Only the last row takes the `ok` branch, and it is reachable exactly when the caller hands `Elements` an error with no ferry error anywhere in its tree.
+> **What it means is "an element ferry did not build", and what the caller does with it is read it as an error and not as an address**, which is what ferry itself does with one: it sorts under the `unknown` moment, names itself `(unknown)` in the one-line summary, and prints its own `Error()` in the report.
+> The branch is therefore not a bug path and not ceremony, and a caller who wants no branch may pass the error to `errors.Is` alone, which needs no type at all.
 
 ### What an error carries, and the one accessor
 
@@ -747,6 +788,11 @@ This ADR fixes the semantics, exact-set over `(address, class)` with no message 
   A contributor adding a refusal picks a moment and a class rather than a type.
 - **There is no concrete type to depend on**, so the ticket's hardest ask is answered structurally.
   The cost is that the idiomatic `errors.As` into a named error type does not compile, and the package doc has to teach the accessor form.
+- **The accessor is a method and there is no free function beside it**, so the caller's counting loop is eight lines rather than three: `Elements` returns `[]error` and `errors.AsType[*ferry.Error]` is the step between.
+  That cost is the accessor set's, already priced above, and not the aggregate's, so the reading of `errors.Is` this ADR keeps is unaffected by it.
+  *(Amended under [#105](https://github.com/onhotpath/ferry/issues/105); the published loop called a free `ferry.Address(err)` that was never decided and does not exist.)*
+- **Every element of an aggregate ferry constructs is a `*ferry.Error`**, because core is the only party that mints one and a driver's error enters as a cause rather than as an element.
+  `Elements` is wider than that aggregate by design, so its element is a bare one only where ferry's error arrived unwrapped, and an element ferry did not build reads as an error with no address.
 - The vocabulary is five words and it is frozen at v1 like every other public name.
   Thirty-three of fifty-five refusals are one class, which is a strong hint that the interesting axis is the address rather than the classification.
 - **A driver can hold an opinion about the class and about nothing else.**

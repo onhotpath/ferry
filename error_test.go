@@ -260,6 +260,56 @@ func checkBareLeaf(t *testing.T, got error, want *Error) {
 	}
 }
 
+// TestElementsAreFerryErrorsWhereFerryBuiltThem is ADR-0011's answer to what the
+// ok branch of the caller's counting loop is for.
+//
+// Every element of an aggregate ferry constructs is a *Error outright, because
+// core is the only party that mints one and a driver's error enters as a cause.
+// Elements is wider than that aggregate by design, so the branch is reachable,
+// and it is reachable only for an error with no ferry error anywhere in its
+// tree.
+func TestElementsAreFerryErrorsWhereFerryBuiltThem(t *testing.T) {
+	one := valueErr(At("db", "port"), "is not a valid int")
+	two := valueErr(At("tls", "cert"), "is not a valid string")
+
+	// No element of ferry's own aggregate needs unwrapping to reach the type.
+	for _, e := range Elements(join(one, two)) {
+		if reflect.TypeOf(e) != reflect.TypeFor[*Error]() {
+			t.Fatalf("an element of ferry's own aggregate is %T, want *Error outright", e)
+		}
+	}
+
+	for _, c := range []reachCase{
+		{"an aggregate", join(one, two), true},
+		{"one failure, bare", join(one), true},
+		{"one failure inside a wrapper", fmt.Errorf("loading: %w", join(one)), true},
+		{"an aggregate inside a wrapper", fmt.Errorf("loading: %w", join(one, two)), true},
+		{"an error ferry never built", errors.New("kv: down"), false},
+	} {
+		t.Run(c.name, func(t *testing.T) { checkElementsReachAFerryError(t, c) })
+	}
+}
+
+// reachCase is one shape a caller can hand Elements, and whether AsType reaches
+// a *Error through every element of it.
+type reachCase struct {
+	name  string
+	err   error
+	reach bool
+}
+
+// checkElementsReachAFerryError asserts what the ok branch of the counting loop
+// answers for every element of one error.
+func checkElementsReachAFerryError(t *testing.T, c reachCase) {
+	t.Helper()
+
+	for _, e := range Elements(c.err) {
+		if _, ok := errors.AsType[*Error](e); ok != c.reach {
+			t.Fatalf("AsType found a *Error = %v in %v, want %v", ok, e, c.reach)
+		}
+	}
+}
+
 // TestAggregateIsFlat covers both halves of the promise: ferry never nests
 // ferry aggregates, and it never rewrites a driver's tree.
 func TestAggregateIsFlat(t *testing.T) {
