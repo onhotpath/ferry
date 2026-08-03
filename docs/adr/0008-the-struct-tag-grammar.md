@@ -661,8 +661,14 @@ tier 1   H string `ferry:"h,requird"`               1 error
 tier 2   O []string `ferry:"o,required,default=v"`  2 errors, both inadmissible, no contradiction reported
 tier 3   S string `ferry:"s,required,default=x"`    1 error, the contradiction
 
-four fields, one of each                            3 errors, one per field
+four fields, one of each                            4 errors: 1 + 2 + 1
 ```
+
+> **Amended under [#41](https://github.com/onhotpath/ferry/issues/41): the last line read "3 errors, one per field".**
+> Measured through the compiler, the four-field struct reports **4 elements and 4 lines under `%+v`**, because the tier-2 field contributes two - which is what the tier-2 row directly above already says, and what ADR-0006's "admissibility is checked before contradictions" requires.
+> "One per field" is the phrase that produced the wrong count: the tiers are per field, and the errors within a tier are not.
+> No rule changes; the arithmetic beside it does.
+> Evidence: `X1=6` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
 
 ADR-0006's five refusals all fire, driven by this grammar rather than by the placeholder that stood in for it:
 
