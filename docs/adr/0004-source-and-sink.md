@@ -266,6 +266,13 @@ The remaining case, a flat plane holding a whole list in one value as `TAGS=a,b,
 
 So every address in a compiled schema is a leaf, and a group arm would be an arm no address can be at.
 
+> **Corrected under [#56](https://github.com/onhotpath/ferry/issues/56): two sentences above were overtaken by [ADR-0005](0005-the-supported-type-set.md), which landed after this ADR.**
+> Something does ask the plane for the value at `/servers`, and not every address in a compiled schema is a leaf: a composite with no elements writes `Null` at its own address, `Get` at a container address is a driver conformance case in [ADR-0014](0014-what-ferrytest-exports.md), and `Children` takes that same address as its prefix.
+> **The decision is unaffected**, and becomes easier to state rather than harder: a container address carries `Absent` or `Null` and nothing else, so there is still no arm for a group to arrive in and still no value at `/servers` for one to hold.
+> What was wrong is the reason and not the answer.
+> [ADR-0003](0003-how-a-leaf-addresses-a-plane.md) carries the corrected model.
+> Evidence: `X3=4b` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
+
 **One case this forecloses, stated because it is the strongest objection and it survives.**
 Mapping a structured subtree onto a single Go field opaquely - a YAML `servers:` block into a `json.RawMessage` - is not expressible, because the driver would have to re-serialise the subtree without knowing the target wants bytes, and it refuses instead.
 The neighbouring case is unaffected: a Consul key or an env var *holding* an encoded blob is already a scalar and arrives as `Bytes`, which is section 4f's actual motivating example.
@@ -400,6 +407,11 @@ The static table is written once and never again, so reading it takes no lock:
 
 Concurrency is [#20](https://github.com/onhotpath/ferry/issues/20)'s and this ADR decides none of it.
 It records only that the two-tier split is what makes a lock-free static path available, so #20 inherits a choice rather than a constraint.
+
+*(Amended under [#56](https://github.com/onhotpath/ferry/issues/56): the static set is every leaf address the type determines **plus every container address**, and it never contains a wildcard shape.
+Stating that is [ADR-0003](0003-how-a-leaf-addresses-a-plane.md)'s and it is stated there.
+It bears on this section directly, because a container address is one the walk calls `Get` and `Set` at.
+A static set built from leaves alone forces `Set(/limits, Null)` for an empty map down the minting path, where the address it needs was known from the type all along, and gives a batch source no way to know a subtree is coming.)*
 
 ### Sources compose, and composition needs no core surface
 
@@ -558,6 +570,8 @@ It blocks nothing in this ADR; the contract above is the same either way.
   Someone will ask for them in core, and the answer has to be ADR-0001's bucket rule rather than a technical one.
 - The caller-facing lifecycle is now load-bearing and unowned.
   Until the proposed ticket lands, the per-request use case xload was pitched at has no worked answer, and the `query` driver's place on the first-party list is weaker for it.
+- The set handed to `Bind` is not a set of leaves.
+  It holds a container address for every nillable composite and optional section, which is what makes a batch fetch, a legality check and an injectivity check reach those addresses before any I/O rather than at the first `Get`.
 
 ## Items from the xload survey
 

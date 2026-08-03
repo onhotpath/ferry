@@ -323,7 +323,7 @@ That removes twenty cases from the surface and leaves the package three verbs.
 
 Written as assertions rather than prose, which is [#41](https://github.com/onhotpath/ferry/issues/41)'s own convention and the reason the list is countable.
 
-**`Driver`, eleven cases.**
+**`Driver`, twelve cases.**
 
 1. Every proof the plane can express, and a **loud refusal** for every one it declared it cannot carry ([ADR-0005](0005-the-supported-type-set.md), [ADR-0004](0004-source-and-sink.md)).
 2. `Bind` succeeds against an **unreachable** plane, and the refusal lands inside the open ([ADR-0004](0004-source-and-sink.md)).
@@ -336,9 +336,14 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 9. A sink accepts a **dynamic** address its static table never held.
 10. A driver reading its plane from the context refuses at open when it is absent, with `ErrPlane` ([ADR-0012](0012-the-caller-held-binding.md)).
 11. A **golden artefact**: a fixed value, dumped, compared against fixed expected plane contents ([ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md)).
+12. A sink accepts `Set` of a `Null` at a **container address** - a nil composite, an empty composite, and a nil optional section - and that address was in the set its `Bind` received ([ADR-0003](0003-how-a-leaf-addresses-a-plane.md), [ADR-0005](0005-the-supported-type-set.md)).
 
 Case 11 is the one that is new, and ADR-0013 gives the reason a round-trip case cannot stand in for it: a round trip tests a function against its own inverse, a spelling is a *choice* of function, and changing both halves together is invisible to any test that only composes them.
 The expected contents live on the `Plane` rather than being a parameter of the suite, because the spelling is the **driver's** statement about itself and ADR-0005 puts it on the driver's side of the line.
+
+Case 12 is the Dump mirror of case 3, and it was added under [#56](https://github.com/onhotpath/ferry/issues/56), which measured two engines handing a driver two different static sets for one type.
+Case 3 asks what a driver answers at a container address; case 12 asks whether it was told to expect one at all.
+Without the second, a driver whose static table holds a wildcard shape instead of the container address passes every existing case and refuses a legal write, which is the shape case 9 already guards from the other side.
 
 **`Codec`, six cases.**
 
@@ -449,6 +454,9 @@ That is weaker than a compile-time signal and it is the only shape available, be
   ADR-0009's constraint that `ferrytest` needs nothing from a `Reg` survives intact; a registry is not a registration.
 - **The recording sink stops being a convenience.**
   It is the only way to see what ferry encoded before a driver spelled it, because ADR-0012's `Observe` is Load-side only, so ADR-0002's admission of it as apparatus is load-bearing for the first time.
+- **The `Driver` list is twelve cases**, the twelfth asserting that a container address reached the driver's `Bind`.
+  It is the first case that pins what the static set *contains* rather than how a driver behaves once handed one, and it is there because two engines disagreed about that and nothing was red.
+  *(Added under [#56](https://github.com/onhotpath/ferry/issues/56).)*
 
 ## Items from the xload survey
 

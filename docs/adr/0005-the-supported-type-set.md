@@ -643,6 +643,9 @@ Tags []string, {"a","b"}    mints  /Tags#0  /Tags#1
 ADR-0003's prefix-free rule holds per realised address set and is not violated by either shape, but the static tier cannot treat a composite's own address and its element addresses as a static prefix clash.
 This is a constraint on how the static check is written, not a change to the rule, and it is named here so it is not rediscovered as a bug.
 
+*(Followed up under [#56](https://github.com/onhotpath/ferry/issues/56), which found the constraint had never reached ADR-0003's own wording, and two engines minting two different static sets as a result.
+[ADR-0003](0003-how-a-leaf-addresses-a-plane.md) now states prefix-freeness over leaf addresses and admits the container address to the static set by name.)*
+
 ### On Load, `String` is the universal donor, and nothing else coerces
 
 The tables above say which `Value` kind a Go type **produces** on Dump.

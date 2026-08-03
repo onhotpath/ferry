@@ -356,6 +356,10 @@ looked up by the address shape     ->  Servers=map[a:{h1 8080}]  Pool=[{h2 8080}
 The first row is not an error, it is every default under a map or a slice silently not applying.
 So the walk carries two paths: the realised one it asks the plane about, and the static one it looks declarations up by.
 
+*(Clarified under [#56](https://github.com/onhotpath/ferry/issues/56): the shape is the walk's own lookup key and is never handed to a driver.
+[ADR-0003](0003-how-a-leaf-addresses-a-plane.md) states why, and states that `/Tags` and `/Opt` are addresses where `/Tags/*` is not.
+The presence bit this ADR reads at an optional section depends on the second half of that: an explicit `Null` at `/Opt` is an observation at an address, and it is unwritable if the section has none.)*
+
 #### A default fills a hole in a section, and never conjures the section
 
 A `*T` where `T` is a composite is materialised exactly when something under it was present on the plane.

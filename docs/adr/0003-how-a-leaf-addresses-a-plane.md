@@ -104,6 +104,9 @@ Four things were measured before deciding, and each on its own would be enough.
 The one address list that does cross the driver boundary as a list - the static address set handed to `Bind` - **is** sorted segment-wise, which is what lets a driver that wants locality sort for itself.
 Evidence: `X4=6..11` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
 
+*(Under [#56](https://github.com/onhotpath/ferry/issues/56): what that list **contains** is settled in [An address is a place a `Value` can be](#an-address-is-a-place-a-value-can-be-and-a-container-has-one).
+It is every leaf address the type determines plus every container address, and it is never a wildcard shape.)*
+
 ### The case rule: core never folds, confirmed
 
 Core compares segment text by exact byte equality.
@@ -127,8 +130,19 @@ Whether the tag grammar offers a per-field case option is [#11](https://github.c
 
 ### The collision rule, core side: the address set is prefix-free
 
-> A compiled schema's address set contains no address that is a prefix of another.
+> A compiled schema's **leaf** addresses contain no address that is a prefix of another.
 > A path is a prefix of itself, so this subsumes exact duplicates.
+> A **container** address is a proper prefix of what is under it by construction, which is what makes it a container, and it is exempt.
+> It must still be distinct from every leaf address.
+
+> **Amended under [#56](https://github.com/onhotpath/ferry/issues/56): the rule is over the leaf addresses, and as published it was over all of them.**
+> As published this read "A compiled schema's address set contains no address that is a prefix of another", written before [ADR-0005](0005-the-supported-type-set.md) established that a composite has an address of its own.
+> Taken literally the unqualified rule refuses every schema ADR-0005 requires: `/Tags` is a prefix of `/Tags#0`, and `/Opt` of `/Opt/User`.
+> ADR-0005 saw half of it and called it "a constraint on how the static check is written, not a change to the rule".
+> It is the rule's wording, and it is corrected here.
+> **Nothing in the argument moves.**
+> The hazard the rule exists for is a leaf and a subtree sharing a segment, measured on a tree emitter, and a container address is the node the subtree hangs from rather than a second value competing with it.
+> Evidence: `X3=4b` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
 
 Violation is a schema compilation failure listing every clash.
 For the part of the address set the type determines, it is checked from `reflect.TypeFor[T]()` alone, with no plane reachable, no value in hand, and identically in both directions, which is the same assertability ADR-0001 claims for tag rejection.
@@ -191,6 +205,58 @@ Load does not, so a dynamic address is only reachable if the source can enumerat
 Two consequences #5 has to take as given rather than decide freely: the source contract has to hand a driver the whole address set before I/O, because the driver-side rule is unrunnable otherwise, and dynamic segments on Load are gated on enumeration existing at all.
 If #5 concludes that sources never enumerate, then map-keyed and indexed addresses are Dump-only, which is a real asymmetry and belongs in #5's ADR rather than being discovered later.
 
+### An address is a place a `Value` can be, and a container has one
+
+*(Section added under [#56](https://github.com/onhotpath/ferry/issues/56), which measured two prototype engines producing two different static sets for one compiling type and asked which is the published one.)*
+
+The split above says which addresses the type determines and which the value does.
+It does not say what makes something an address at all, and two later ADRs answered that question without noticing they were answering it.
+
+> An address is a place a plane can be asked for a `Value`, or handed one.
+> Nothing else is an address, whatever else the compiler knows about it.
+
+"Derivable from `reflect.TypeFor[T]()` alone" is necessary and it is not sufficient.
+A map field's element shape is derivable from the type too, and there is nothing at it.
+
+**A composite has an address of its own, and it is in the static set.**
+[ADR-0005](0005-the-supported-type-set.md) decided that a composite with no elements writes `Null` at its own address, and measured `Get(/tags)` and `Children(/tags)` at that same address through a real YAML plane.
+[ADR-0006](0006-defaults-and-zero-values.md) reads presence there, and [ADR-0014](0014-what-ferrytest-exports.md) makes both a driver conformance case.
+So a driver is asked about `/Tags` in both directions.
+A driver that was never shown `/Tags` at `Bind` cannot precompute its key, cannot include it in a batch fetch, and cannot check legality or injectivity for it before any I/O, which is what this ADR's two-check rule exists for.
+
+**A container address carries `Absent` or `Null` and never anything else**, which is why admitting it costs this ADR nothing else.
+It is not a group arm, which [ADR-0004](0004-source-and-sink.md) refused and still refuses.
+Both of its possible observations mean "there is nothing under here", so it is never realised at the same time as anything beneath it and can never compete with a child for a value.
+That is also why it is exempt from prefix-freeness above.
+
+**Which Go types get one is read off the type**, and the test is whether the value at that address can be nil:
+
+| field type | container address | why |
+| --- | --- | --- |
+| `[]T`, `map[K]V` | **yes** | nil and empty are one observation there, ADR-0005 |
+| `*struct`, `*[]T`, `*map[K]V` | **yes**, exactly one | a pointer adds no second bit, ADR-0005 |
+| `struct` | **no** | it cannot be nil, so `Null` at it is refused and `Absent` at it says nothing its fields do not |
+| `[N]T`, `[N]byte` | **no** | an array has no nil, ADR-0006's own row |
+| `[]byte` | **no**, it is a leaf | admitted at kind `Bytes`, so its address is a leaf address that happens to accept `Null` |
+
+The line between `struct` and `*struct` is not a nicety.
+ADR-0006 makes `required` on a `*Cred` satisfied by `auth: null`, and materialises the pointer from a presence bit that an explicit `Null` at `/auth` clears.
+Both are statements about a value at `/auth`, and neither is writable if `/auth` is not an address.
+A non-pointer `Auth Cred` gets none for the same reason read the other way.
+And an address appearing in a **diagnostic** is not thereby in the set: ADR-0006's `ferry: /auth: required, and the plane supplied nothing under it` names a path whether or not a driver was ever shown one.
+
+**A wildcard is not an address, and it never crosses the driver boundary.**
+ADR-0006 attaches a declaration to the static address *shape*, `/servers/*/port`, and [ADR-0010](0010-the-entry-point-and-the-schema-cache.md) has a compiled leaf hold one.
+That is a schema-internal lookup key and it is the walk's own, exactly as ADR-0006 describes it: "the walk carries two paths, the realised one it asks the plane about, and the static one it looks declarations up by".
+Only the first is an address.
+
+Handing a shape to a driver is wrong three ways, and the third is silent.
+There is nothing at it to fetch, so a batch source spends a round trip on a key that cannot exist.
+There is nothing at it to write, so a sink's precomputed table holds an entry for the shape and none for the container address the walk calls `Set` at for an empty composite.
+And `*` is ordinary segment text under this ADR's own escaping model rather than a marker, so a schema whose map genuinely holds the key `*` renders one plane key for two members of the set, and the injectivity check either reports a collision that is not one or misses one that is.
+
+Evidence: `X3=4b` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
+
 ### The collision rule, driver side: the key function is injective over the address set
 
 Keeping the address structured does not abolish flattening collisions.
@@ -198,6 +264,9 @@ It relocates them to the only place that has the information to resolve them, an
 
 > A driver's mapping from ferry address to plane key must be injective over the address set of the schema it was given.
 > If it is not, the driver fails before any I/O.
+
+*(Clarified under [#56](https://github.com/onhotpath/ferry/issues/56): "the address set" here is the whole static set, container addresses included, and it is **not** narrowed the way the core-side prefix rule above is.
+Two containers rendering to one plane key return one merged subtree from `Children`, which is the same silent merge this rule exists to catch.)*
 
 The conformance suite ADR-0002 puts in core checks it, which is what stops it being prose.
 This one rule covers separator collisions, case folding, and any normalization a driver invents, because all three are the same failure: a non-injective map out of the address set.
@@ -374,6 +443,11 @@ ADR-0002 shipped it as the place this decision becomes executable, so this ADR s
   The mitigation is that it is about ten lines, it is checked by the conformance suite, and it runs once per schema rather than per key.
 - Core is strictly less permissive than a flat key space, in exactly one way: a leaf and a subtree may not share a segment.
   A schema that xload accepted and that no tree plane can represent will now be rejected.
+- The static address set handed to `Bind` contains container addresses as well as leaf addresses, and prefix-freeness is a rule about the leaves only.
+  A driver therefore sees `/Tags` and `/Opt` and never `/Tags/*`, so every address it is handed is one it can fetch, write, name and check.
+  The cost is that the prefix-free check has to know which of its members are containers, which is one bit per address the compiler already holds.
+- What makes something an address is now stated, and it is not "the compiler knows about it".
+  That test admits a wildcard shape, which is derivable from the type and has nothing at it, and the two prototype engines split on exactly that.
 - ferry's address is comparable and its ordering is segment-wise, so both the determinism invariant and the map-key use are satisfied by the same type.
   Sorting the rendering instead is a subtle bug that produces `0 1 10 11 2`, and it will be a conformance-suite case.
 - The address model does not consume ADR-0001's `go 1.27` fallback, verified by building it at `go 1.26` under `GOEXPERIMENT=nojsonv2`.
