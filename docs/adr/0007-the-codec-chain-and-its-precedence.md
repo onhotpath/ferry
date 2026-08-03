@@ -658,6 +658,32 @@ It is now implemented, on `proto/tip`.
 >
 > This is worth recording rather than quietly editing, because it is the failure mode [#41](https://github.com/onhotpath/ferry/issues/41)'s own summary names - **a probe whose fixture could not have failed** - committed inside the amendment that records it. Treat every "costs nothing" in this repository as owing a measurement at the call site rather than at the helper.
 
+> **Amended under [#58](https://github.com/onhotpath/ferry/issues/58): the check was implemented and, through `Dump`, unreachable.**
+>
+> The paragraph says this check "becomes the check that catches a **wrong** `.AsMapKey()`", and that it is now implemented.
+> The first half was not true through the entry point a caller reaches, and the reason is not in this check at all.
+>
+> The check compares the text the walk renders each key to.
+> That text was **not** the registrant's codec: `validMapKey` resolved the key type at compile with the caller's registry installed, and the walk re-derived the text at walk time against a package-level registry that `SinkBinding.Dump` and `Binding.LoadOver` do not install.
+> With nothing installed the cascade fell through to `fmt.Sprintf("%v", …)`, which is **accidentally injective over a struct** where the registrant's codec is not - so two keys the codec collapses rendered distinct, and nothing fired.
+> It fired correctly through `dumpTo`, a probe helper that does install.
+> So every measurement of it was honest and the guarantee a caller got was not the one measured.
+>
+> Worse than a wrong ratio: `%v` consults `fmt.Stringer`, which [ADR-0005](0005-the-supported-type-set.md) refuses **outright and by name**, for two measured reasons that apply at the key position unchanged.
+> And the dump succeeded, so the failure landed at Load against a plane already written - this ADR's own named failure shape, reintroduced at the one position the pair rule does not reach.
+>
+> **The fix is not in this check.**
+> #58 resolved the key's `{text, parse}` pair into the compiled node, alongside the leaf codec [ADR-0009](0009-typed-codec-registration.md) already resolves there, and made one function answer both admission and rendering.
+> The three disjoint arms named in the next paragraph are unchanged; what changed is that each now hands back the pair, so the walk consults no registry for a key.
+>
+> **The ratio in the table above moves again, and the reason is the denominator.**
+> The scan is unchanged - 35 ns, 262 ns and 2192 ns over 8, 64 and 512 keys, against 34, 266 and 2063 before, with zero allocations either way.
+> Rendering a key no longer runs an identity lookup and a chain probe per key, so the render-and-sort it rides on fell from 4881 ns and 42 allocations to 2358 ns and 28 allocations over 8 keys, and proportionally at 64 and 512.
+> The scan is therefore **1.14% to 1.48%** of a smaller number where it was 0.57% to 0.70% of a larger one.
+> The paragraph's argument - that the check is free because the walk already did the work - is unweakened, and the correction above stands: it is a measurement at the call site, and the call site got cheaper.
+>
+> Evidence: `Y45=6` and `TestDumpCollapseCheckFiresThroughEntryPoint` on [`proto/58-mapkey`](https://github.com/onhotpath/ferry/tree/proto/58-mapkey).
+
 **And [#31](https://github.com/onhotpath/ferry/issues/31) turned out not to be untouched after all.**
 As merged this section said `map[time.Time]string` collapses on core's **own** pre-seeded entry, which ADR-0009's opt-in "deliberately does not reach", and that this reversal changes nothing there.
 The first half stands and the second no longer does.
