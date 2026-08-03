@@ -1,0 +1,81 @@
+# Coverage reporting for ferry.
+#
+# This file is the single place the core threshold is written. The gate in
+# .github/workflows/ci.yml reads the number out of the line marked
+# `ferry-core-threshold` below rather than carrying its own copy, so the two can
+# never disagree and there is no second place to edit.
+#
+# Codecov reports; it does not gate. The workflow keeps its own check, because a
+# third-party outage must not be able to make an untested branch mergeable.
+
+codecov:
+  require_ci_to_pass: true
+  notify:
+    # Every module uploads on every run, so a report is only complete once all
+    # of them have arrived.
+    wait_for_ci: true
+
+coverage:
+  precision: 1
+  round: down
+  range: "70...100"
+
+  status:
+    project:
+      # No aggregate status. Averaging a driver into core would let a
+      # well-tested driver hide a gap in core, and ADR-0002 versions and
+      # releases the two independently, so a driver's coverage says nothing
+      # about core's.
+      default: false
+
+      core:
+        flags: [core]
+        target: 90%  # ferry-core-threshold
+        # The ratchet: coverage may not drop, at all. Core is pure logic with no
+        # I/O to plead, and this is a library other people's correctness rests
+        # on, so an untested branch is visible by construction.
+        threshold: 0%
+
+      drivers:
+        flags: [driver-env, driver-kv, driver-yaml]
+        # Drivers do real I/O against real planes and are held to their own
+        # standard rather than to core's. `auto` compares against the base
+        # commit, so a driver may not regress even though it carries no fixed
+        # number.
+        target: auto
+        threshold: 0%
+
+    patch:
+      # What a pull request adds is held to core's bar whatever it touches.
+      # This is the check that makes the red-green step visible per ticket: it
+      # reports on the lines the ticket introduced, not on the repository
+      # average, which a large tree would otherwise dilute to nothing.
+      default:
+        target: 90%
+        threshold: 0%
+
+flags:
+  core:
+    paths:
+      - /
+    carryforward: false
+  driver-env:
+    paths:
+      - driver/env
+    carryforward: false
+  driver-kv:
+    paths:
+      - driver/kv
+    carryforward: false
+  driver-yaml:
+    paths:
+      - driver/yaml
+    carryforward: false
+
+comment:
+  layout: "condensed_header, diff, flags, condensed_files"
+  behavior: default
+  require_changes: false
+
+ignore:
+  - "**/doc.go"
