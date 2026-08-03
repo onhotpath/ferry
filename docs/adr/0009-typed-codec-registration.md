@@ -69,6 +69,9 @@ Five questions this ADR had to answer that the ticket did not name:
   Stated as an accepted cost with the case that would reopen it named, not solved.
 - **`map[time.Time]string` still collapses two distinct keys into one address.**
   That is [#31](https://github.com/onhotpath/ferry/issues/31), it is core's own set rather than a registration, and the opt-in rule below deliberately does not reach it.
+  *(Closed since, by [ADR-0005](0005-the-supported-type-set.md)'s [The map key rule, restated](0005-the-supported-type-set.md#the-map-key-rule-restated), under #31.
+  It reached the same shape this ADR did and applied it to core: key admissibility is declared per entry and is never inherited from the identity table.
+  `time.Time` is dropped as a key type, because no text form is injective over it under `==`.)*
 - **Whether the schema cache lives on the registry or beside it** is [#16](https://github.com/onhotpath/ferry/issues/16)'s.
   This ADR fixes the one property #16 has to preserve and measures what happens without it.
 
@@ -928,6 +931,13 @@ It is three lines, and it runs:
 ```go
 func Injective[T any](format func(T) string, values ...T) error
 ```
+
+> **Amended under [#31](https://github.com/onhotpath/ferry/issues/31): the signature is wrong in two ways, both measured.**
+> `T` must be `comparable`, because injectivity is over Go's `==` and an unconstrained `T` compiles for a type Go cannot key a map with.
+> And `format` is not what ferry calls: what addresses the plane is the key-text lookup, so a registrant proving their own function injective has proved nothing about what ferry writes.
+> Measured, one type through both routes: the registrant's `String()` gives `"api:80"` and `"api:443"`, and ferry writes `"api"` and `"api"`.
+> The check takes the registry and asks ferry, which is this ADR's own one-lookup-not-two rule applied to the key position.
+> The spelling is [#35](https://github.com/onhotpath/ferry/issues/35)'s.
 
 ```
 Injective(netip.Addr.String, 10.0.0.1, 10.0.0.2, 2001:db8::1)  ->  nil
