@@ -1056,12 +1056,14 @@ Without the declaration the suite has only two options, both wrong: fail every f
 **A completeness check closes the loop**, because a table that can be added to without adding a row is a table that drifts.
 Core's test iterates the identity table and the admitted kind list and asserts that every member has a proof in `CoreTypes()`, so extending the set without extending the table fails CI rather than silently widening an unproven guarantee.
 
-> **Amended under [#41](https://github.com/onhotpath/ferry/issues/41): the check is red on arrival, and that is the point of it.**
+> **Amended under [#41](https://github.com/onhotpath/ferry/issues/41): the check was red on arrival, and that is the point of it.**
 > No prototype had implemented it.
-> Written and run, it reports **eighteen admitted members, eleven proof rows, and seven with none**: `int16`, `int32`, `int64`, `uint`, `uint8`, `uint16` and `uint32`.
-> So the "11 of 11 core types" above is eleven of eighteen, and the seven integer widths that were never proved are exactly the ones nobody would think to doubt.
-> This is not a defect in the rule; it is the rule working the first time anybody ran it, and it is a green light for the check rather than against it.
-> Closing it means adding seven rows to `CoreTypes()`, which is [#35](https://github.com/onhotpath/ferry/issues/35)'s work and not this ADR's.
+> Written and run, it reported **eighteen admitted members, eleven proof rows, and seven with none**: `int16`, `int32`, `int64`, `uint`, `uint8`, `uint16` and `uint32`.
+> So the "11 of 11 core types" above was eleven of eighteen, and the seven integer widths that had never been proved are exactly the ones nobody would think to doubt.
+> That is not a defect in the rule; it is the rule working the first time anybody ran it, and it is a green light for the check rather than against it.
+>
+> **Closed at `0d86c00`**, which is later than the paragraph above and is why this one is in the past tense: the seven rows are in `CoreTypes()`, each carrying the boundary values that distinguish its width from its neighbours, so a codec that silently truncates to a narrower type fails here rather than in production.
+> **11 of 11 is 18 of 18**, and `go test ./...` is green.
 > Evidence: `TestCoreTypesComplete` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
 
 ### What this ADR does not decide
