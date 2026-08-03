@@ -79,11 +79,22 @@ func TestCore(t *testing.T) {
 This is the whole file.
 `driver/*` is a CI glob ([ADR-0002](0002-core-and-sub-modules.md)), so it has to be one call, and a suite a driver author can partially adopt is a suite that measures nothing.
 
+> **Amended under [#95](https://github.com/onhotpath/ferry/issues/95): the kind constants take a `Kind` prefix, and the `Value` constructors take the plain words.**
+> As published, the three call sites below wrote `[]ferry.VKind{ferry.Absent, ferry.Null, ferry.Bool, ferry.Number, ferry.String, ferry.Bytes}` for the kinds, and `ferry.Str("")` and `ferry.Num("8080")` for the values.
+> Those two spellings are the same six words, spent twice: Go has one package namespace, the constants took the plain names first, and `Str` and `Num` are what was left after they did.
+> Writing them side by side in one ADR is what made it visible, and #66 found the rest of the pattern was `Nul`, `Boo` and `Byt`, which is not an API this project is willing to publish.
+> **The constants move rather than the constructors**, because a constructor is written far more often than a kind constant is named, so the shorter spelling belongs on the constructor.
+> `log/slog` disambiguates both sides at once, `slog.KindString` beside `slog.StringValue`, and pays for the collision twice; only one side needs to move.
+> **Nothing in the decision moves.**
+> The kinds are still called Absent, Null, Bool, Number, String and Bytes, the set is still closed at six, and [ADR-0004](0004-source-and-sink.md) needs no amendment because it names the kinds and says "constructors per kind" without spelling one.
+> Absent keeps no constructor: the zero `Value` already is it.
+> Verified before deciding, rather than assumed: a package-level `func String(string) Value` beside `VKind.String()` and `Path.String()` raises no `revive` `confusing-naming` finding under this repository's lint configuration.
+
 ```go
 func TestConformance(t *testing.T) {
     ferrytest.Driver(t, ferrytest.Plane{
         Name:  "yaml",
-        Kinds: []ferry.VKind{ferry.Absent, ferry.Null, ferry.Bool, ferry.Number, ferry.String, ferry.Bytes},
+        Kinds: []ferry.VKind{ferry.KindAbsent, ferry.KindNull, ferry.KindBool, ferry.KindNumber, ferry.KindString, ferry.KindBytes},
         Open: func() (ferry.Source, ferry.Sink) {
             p := filepath.Join(t.TempDir(), "c.yaml")
             return yaml.Source{Path: p}, yaml.Sink{Path: p}
@@ -101,12 +112,12 @@ ADR-0009 measured that this has to be about four lines or nobody writes it.
 ```go
 func TestCodec(t *testing.T) {
     reg := ferry.NewRegistry()
-    _ = reg.Register(ferry.TextCodec[netip.Addr](ferry.String).AsMapKey())
+    _ = reg.Register(ferry.TextCodec[netip.Addr](ferry.KindString).AsMapKey())
 
     proofs := []ferrytest.Proof{
         ferrytest.Type("netip.Addr", ferrytest.Eq[netip.Addr],
-            ferrytest.At(netip.Addr{}, ferry.Str("")),
-            ferrytest.At(netip.MustParseAddr("192.0.2.1"), ferry.Str("192.0.2.1")),
+            ferrytest.At(netip.Addr{}, ferry.String("")),
+            ferrytest.At(netip.MustParseAddr("192.0.2.1"), ferry.String("192.0.2.1")),
         ),
     }
     ferrytest.RoundTrip(t, ferrytest.MemPlane(), proofs, ferry.WithRegistry(reg))
@@ -132,8 +143,8 @@ ADR-0002 admitted the memory plane on exactly this ground: "xload ships `MapLoad
 ```go
 func TestMyConfig(t *testing.T) {
     cfg, err := ferry.Load[Config](ctx, ferrytest.Static(map[ferry.Path]ferry.Value{
-        ferry.At("port"):    ferry.Num("8080"),
-        ferry.At("timeout"): ferry.Str("30s"),
+        ferry.At("port"):    ferry.Number("8080"),
+        ferry.At("timeout"): ferry.String("30s"),
     }))
     ...
     // and: what did my struct actually map to?

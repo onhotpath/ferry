@@ -80,6 +80,12 @@ Five questions this ADR had to answer that the ticket did not name:
 This section is first, because every decision below is a decision about this file.
 It is [ADR-0008](0008-the-struct-tag-grammar.md)'s tag grammar throughout, and the whole of it was run against the prototype's walk, a real `Path`, a real `Value` and a real YAML plane.
 
+> **Amended under [#95](https://github.com/onhotpath/ferry/issues/95): the kind constants take a `Kind` prefix, and the `Value` constructors take the plain words.**
+> Every call site below that names a boundary kind read `ferry.String`, `ferry.Number` or `ferry.Bytes` as published, and reads `ferry.KindString`, `ferry.KindNumber` and `ferry.KindBytes` here; `ferry.Num(...)` reads `ferry.Number(...)`.
+> The argument is [ADR-0014](0014-what-ferrytest-exports.md)'s, where the collision was visible because that ADR writes a kind and a constructor side by side, and it is not repeated here.
+> **Nothing in this ADR's decision moves**: a codec still declares a boundary kind, and that kind is still one of the same six.
+> Left unamended this ADR would have been the trap, because `ferry.String` here means the kind constant and `ferry.String` in the code now means the constructor, so the two would have read alike and meant different things.
+
 ```go
 package main
 
@@ -106,7 +112,7 @@ func init() {
     err := ferry.Register(
         // 1. The type declares its own inverse. ferry uses it, and the only
         //    thing you supply is the boundary kind.
-        ferry.TextCodec[netip.AddrPort](ferry.String),
+        ferry.TextCodec[netip.AddrPort](ferry.KindString),
 
         // 2. You declare the inverse, as two functions.
         ferry.StringCodec(
@@ -124,8 +130,8 @@ func init() {
 
         // 4. You declare the inverse AND the kind, because big.Int's text is a
         //    run of digits and a YAML plane reports it as Number.
-        ferry.ValueCodec(ferry.Number,
-            func(x big.Int) (ferry.Value, error) { return ferry.Num(x.String()), nil },
+        ferry.ValueCodec(ferry.KindNumber,
+            func(x big.Int) (ferry.Value, error) { return ferry.Number(x.String()), nil },
             func(v ferry.Value) (big.Int, error) {
                 var x big.Int
                 s, err := v.AsNumber()
@@ -894,7 +900,7 @@ What a consumer writes and what they get:
 
 ```go
 func init() {
-    ferry.Register(ferry.TextCodec[netip.Addr](ferry.String))
+    ferry.Register(ferry.TextCodec[netip.Addr](ferry.KindString))
 }
 
 type Config struct {
@@ -909,7 +915,7 @@ ferry: /limits: netip.Addr has a registered codec but is not declared usable as 
        collapse into one address; add .AsMapKey() to the registration if it is
 ```
 
-The fix is one method call, `ferry.TextCodec[netip.Addr](ferry.String).AsMapKey()`, after which the schema compiles to `[/limits/*]`.
+The fix is one method call, `ferry.TextCodec[netip.Addr](ferry.KindString).AsMapKey()`, after which the schema compiles to `[/limits/*]`.
 
 The refusal is at schema compile from `reflect.TypeFor[T]()` alone, which is the same assertability every other refusal in this design has.
 And the diagnostic is where the obligation gets communicated, which is the point: it is the only moment a registrant is guaranteed to read.
