@@ -77,18 +77,22 @@ var byIdentity = map[reflect.Type]leafCodec{
 
 var byteSlice = reflect.TypeFor[[]byte]()
 
-// keyOptIn was R11's seam between its two candidate rules, and ADR-0009 closed
+// keyOptIn is R11's seam between its two candidate rules, and ADR-0009 closed
 // it: "A registration is usable as a map key only if it says so:
 // StringCodec(...).AsMapKey(). A map[T]V whose key type is registered without it
 // is a schema compile error."
 //
-// DEFECT FOUND BY #41 (D5): it was a package-level bool defaulting to FALSE, so
-// the tip shipped the rule ADR-0009 refused, and every measurement not taken by
-// a probe that set it by hand was taken in the world the ADR rejected.
-// validMapKey no longer consults it - the decided rule is the behaviour rather
-// than a switch. It survives as a variable only because walk.go, r11, r15, r17
-// and a41 still read or write it, and its value is now the decided one so those
-// reads report the decision rather than the seam.
+// DEFECT FOUND BY #41 (D5): it defaulted to FALSE, so the tip shipped the rule
+// ADR-0009 refused, and every measurement not taken by a probe that set it by
+// hand was taken in the world the ADR rejected. THE DEFAULT IS THE DEFECT, not
+// the seam: R11a's whole job is to run the implied rule and watch it drop a map
+// entry, which is ADR-0009's argument FOR the opt-in, and that needs the seam.
+//
+// So the default is the decided rule and validMapKey still consults it. A first
+// pass at #41 disconnected it instead, which left R11 steering a control that
+// was no longer wired to anything and made both of ADR-0009's published rows
+// unreproducible. The probe and the engine have to agree about what drives the
+// behaviour, and this is that agreement.
 var keyOptIn = true
 
 type shape int
@@ -106,16 +110,24 @@ const (
 // codec extends the set exactly as it extends the leaf set.
 func validMapKey(k reflect.Type) bool {
 	if c, ok := identityLookup(k); ok {
-		// ADR-0009's opt-in, unconditionally. Core's own entries key a map on
-		// core's proof; a REGISTERED type has to say so, which is where the
-		// injectivity obligation is communicated.
-		if activeReg != nil {
+		// ADR-0009's opt-in. Core's own entries key a map on core's proof; a
+		// REGISTERED type has to say so, which is where the injectivity
+		// obligation is communicated. keyOptIn defaults to the decided rule and
+		// R11a turns it off to run the rule ADR-0009 refused, which is the
+		// measurement the decision rests on.
+		if keyOptIn && activeReg != nil {
 			if _, own := activeReg.lookup(k); own {
 				return registeredKeys[k] && c.kind == VString
 			}
 		}
 		return true
 	}
+	// A CHAIN-claimed type is not covered by the opt-in, and that is ADR-0007's
+	// decision rather than an oversight here: "A type the chain claims with
+	// declared kind String may key a map, on the same terms as a registered
+	// codec", with the obligation discharged in the harness because a chain arm
+	// "is a codec nobody registered" and so has no call site to say the word at.
+	// See the note in mapKeyRefusal for what that leaves open.
 	// The key lookup has to consult the same chain the leaf lookup does, or a
 	// type the chain admits as a leaf is still refused as a key. Two lookups
 	// answering the same question differently is what identity-before-kind
@@ -141,8 +153,16 @@ func validMapKey(k reflect.Type) bool {
 // netip.Addr`, which communicates no obligation at all and names no remedy. The
 // message below is ADR-0009's own, and it already existed - in walk.go, on the
 // engine the tip no longer uses.
+//
+// NOT CLOSED, and reported rather than resolved: `.AsMapKey()` binds only what
+// registration adds. A type carrying the text pair that nobody registered is
+// claimed by ADR-0007's chain and keys a map with no opt-in, so the obligation
+// is defeatable by not registering. ADR-0007 permits it in terms and ADR-0009
+// scopes its rule to "a registration", so neither closes it and this file is
+// not the place to decide it. R11e records the sibling case for core's own
+// pre-seeded entries.
 func mapKeyRefusal(p Path, k reflect.Type) error {
-	if _, ok := identityLookup(k); ok && activeReg != nil {
+	if _, ok := identityLookup(k); ok && keyOptIn && activeReg != nil {
 		if _, own := activeReg.lookup(k); own && !registeredKeys[k] {
 			return fmt.Errorf(
 				"ferry: %s: %s has a registered codec but is not declared usable as a map key; "+

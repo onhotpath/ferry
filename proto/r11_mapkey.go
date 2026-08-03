@@ -81,10 +81,22 @@ func runR11() {
 	keyOptIn = true
 	defer func() { keyOptIn = false }()
 
+	// TextCodec rather than StringCodec(netip.Addr.String, netip.ParseAddr),
+	// CHANGED BY #41 (D4): Register now runs the codec against the zero value,
+	// and the String/Parse pair is not total over it - it encodes to
+	// "invalid IP" and fails to decode that back. So that registration is
+	// refused, netip.Addr never enters the table, and both rows below then
+	// compiled through ADR-0007's chain instead, which made neither of
+	// ADR-0009's two published rows reproducible. TextCodec is the spelling
+	// ADR-0009's own remedy sentence names.
 	optOut := NewRegistry()
-	_ = optOut.Register(StringCodec(netip.Addr.String, netip.ParseAddr))
+	if err := optOut.Register(TextCodec[netip.Addr](VString)); err != nil {
+		fmt.Println("    register err:", err)
+	}
 	optIn := NewRegistry()
-	_ = optIn.Register(StringCodec(netip.Addr.String, netip.ParseAddr).AsMapKey())
+	if err := optIn.Register(TextCodec[netip.Addr](VString).AsMapKey()); err != nil {
+		fmt.Println("    register err:", err)
+	}
 
 	type m struct{ M map[netip.Addr]int }
 	for _, tc := range []struct {

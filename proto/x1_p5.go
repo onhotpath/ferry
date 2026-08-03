@@ -185,6 +185,41 @@ func runX1_6() {
 	}
 	fmt.Println("    A41=16 measured the before as `unknown option \" required\"`.")
 
+	fmt.Println("\n  and only a LEADING quote is significant, which is the half of")
+	fmt.Println("  ADR-0008 that proto/11's own splitter does not implement:")
+	fmt.Printf("    %-34s %-22s %s\n", "tag", "name", "options seen")
+	for _, v := range []string{
+		"it's,required",
+		"it's",
+		"home,default=it's here",
+		"greeting,default='Hello, world'",
+		"brokers,default='h1:9092,h2:9092'",
+		"'a,b',required",
+		"'a''b'",
+	} {
+		d, errs := parseFerryTag(v, "ferry")
+		var opts []string
+		if d.required {
+			opts = append(opts, "required")
+		}
+		if d.omitzero {
+			opts = append(opts, "omitzero")
+		}
+		if d.hasDefault {
+			opts = append(opts, "default="+d.def)
+		}
+		note := fmt.Sprintf("%v", opts)
+		if len(errs) > 0 {
+			note = "REFUSED: " + trimTo(errs[0].Error(), 46)
+		}
+		fmt.Printf("    %-34q %-22q %s\n", v, d.name, note)
+	}
+	fmt.Println("    proto/11's splitFieldsQ reads row 1 as ONE token named")
+	fmt.Println("    \"it's,required\" and swallows the option with no diagnostic, which is")
+	fmt.Println("    the failure ADR-0008 rejected the `,,` doubling model for, occurring")
+	fmt.Println("    in the model it chose. The tip's splitTag is the decision and is now")
+	fmt.Println("    the only splitter.")
+
 	fmt.Println("\n  the tag key is an Option, and the vocabulary is not:")
 	o := defaultOpts()
 	o.tagKey = "json"

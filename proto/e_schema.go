@@ -536,6 +536,14 @@ func parseTag(f reflect.StructField, key string) (tag, []error) {
 // `unknown option "world'"`. Every fixture on this branch used a default with
 // no comma in it, which is the shape ADR-0008 measured as 3.9% of real
 // free-text tag values and singled out as the case that has to read well.
+//
+// AND IT IS NOW THE ONLY SPLITTER (#41). x1_tag.go's ported grammar arrived
+// with proto/11's splitFieldsQ, which toggles quote state on ANY quote and so
+// reads `it's,required` as one token named `it's,required` with the option
+// swallowed. This function's condition - a quote is significant only at the
+// start of a comma-separated part or immediately after `=` - is exactly
+// ADR-0008's "only a LEADING quote is significant", so the ADR's decision is
+// this line and #11's implementation was not it.
 func splitTag(s string) []string {
 	var out []string
 	var cur strings.Builder

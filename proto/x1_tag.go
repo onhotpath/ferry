@@ -21,6 +21,11 @@ package main
 // branch and a package-level `tagKeyName` on #11's, so every function here
 // takes the key rather than reading a global. ADR-0008 makes the key an Option,
 // so the parameter is the ADR's own model and the global was the prototype's.
+//
+// One thing is DELIBERATELY NOT PORTED: the splitter. #11's splitFieldsQ does
+// not implement the rule ADR-0008 decided, and the tip's splitTag does. See the
+// note above unquoteQ. Porting it wholesale would have regressed
+// `ferry:"it's,required"` from two tokens to one.
 
 import (
 	"fmt"
@@ -149,36 +154,34 @@ func truncTag(s string) string {
 // doubled inside it. Only a LEADING quote is significant, so an apostrophe
 // inside a bare token is just an apostrophe. There is no escape character.
 
-// splitFieldsQ splits on commas that are outside a single-quoted run.
-// The tip's splitTag is this function with the quote state derived from a
-// suffix test rather than tracked, which is why #14 had to repair it; tracking
-// it is the ported form and needs no repair.
-func splitFieldsQ(s string) []string {
-	var out []string
-	var cur strings.Builder
-	inQ := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '\'' && inQ && i+1 < len(s) && s[i+1] == '\'':
-			cur.WriteString("''")
-			i++
-		case c == '\'':
-			inQ = !inQ
-			cur.WriteByte(c)
-		case c == ',' && !inQ:
-			out = append(out, cur.String())
-			cur.Reset()
-		default:
-			cur.WriteByte(c)
-		}
-	}
-	out = append(out, cur.String())
-	return out
-}
+// The splitter is NOT ported from proto/11. Its splitFieldsQ toggles quote
+// state on ANY quote, which is not what ADR-0008 decided:
+//
+//	"A bare token carries no escapes at all, and only a leading quote is
+//	 significant. Because only a leading quote is significant, an apostrophe
+//	 inside a bare token is just an apostrophe, and `default=it's here` needs
+//	 no quoting."
+//
+// Measured, the difference, on a tag proto/11's fixtures never contained:
+//
+//	ferry:"it's,required"   splitFieldsQ  ->  ["it's,required"]
+//	                                          one address /it's,required
+//	                                          and `required` silently swallowed
+//	                        splitTag      ->  ["it's", "required"]
+//
+// That is the failure ADR-0008 rejected the `,,` doubling model FOR - "a stray
+// comma becomes a wrongly-named address with no diagnostic" - occurring in the
+// model it chose. proto/11 could not see it because no fixture put an
+// apostrophe and an option on one tag.
+//
+// splitTag in e_schema.go already implements the decision: a quote is
+// significant only at the start of a comma-separated part or immediately after
+// `default=`, which is exactly "the start of a token". It is the single
+// splitter, and this grammar calls it.
 
 // unquoteQ reads one token. A token that begins with ' is quoted and must be
-// terminated; anything else is bare and carries no escapes at all.
+// terminated; anything else is bare and carries no escapes at all, which is
+// the same "only a leading quote is significant" rule the splitter obeys.
 func unquoteQ(s string, what string) (string, error) {
 	if !strings.HasPrefix(s, "'") {
 		return s, nil
@@ -346,7 +349,7 @@ func parseFerryTag(value, key string) (tag, []error) {
 		return d, nil
 	}
 
-	fields := splitFieldsQ(value)
+	fields := splitTag(value)
 
 	// --- the name ---
 	rawName := fields[0]
