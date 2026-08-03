@@ -517,10 +517,30 @@ jobs:
           else
             flag=${m//\//-}
           fi
-          echo "module '$m' uploads under flag '$flag'"
           echo "name=$flag" >> "$GITHUB_OUTPUT"
 
+          # A module with no test file produces a cover.out holding nothing but
+          # the `mode:` header. That is the absence of tests rather than a
+          # measurement of zero, and Codecov cannot tell the difference: it
+          # rejects the upload as REPORT_EMPTY, which is the same state a
+          # genuinely broken upload lands in and which errors the whole commit.
+          # #98 is what that ambiguity costs, so the empty case is named here
+          # and skipped, and "no tests yet" is a line in this log instead.
+          records=$(awk 'NR > 1' "$m/cover.out" | wc -l)
+          if [ "$records" -eq 0 ]; then
+            echo "SKIPPED: Codecov upload for flag '$flag'"
+            echo "  why: $m has no test file, so cover.out carries no record."
+            echo "       An empty upload reports as an error, indistinguishable"
+            echo "       from a broken one."
+            echo "  clears: the first _test.go under $m."
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "module '$m' uploads $records record(s) under flag '$flag'"
+            echo "upload=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload to Codecov
+        if: steps.flag.outputs.upload == 'true'
         uses: codecov/codecov-action@v5
         with:
           flags: ${{ steps.flag.outputs.name }}
