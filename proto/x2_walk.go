@@ -396,3 +396,256 @@ func x2Parallel(tasks []func() error) error {
 	wg.Wait()
 	return join(errs...)
 }
+
+// --- X10 ----------------------------------------------------------------------
+//
+// ADR-0003's segment-wise rule, and the boundary of what it covers.
+
+// The eight shapes, field order deliberately unrelated to address order.
+
+type X2OFlat struct {
+	Zeta  string `ferry:"zeta"`
+	Alpha string `ferry:"alpha"`
+	Mid   string `ferry:"mid"`
+}
+
+type X2OInner struct {
+	Yankee string `ferry:"yankee"`
+	Alpha  string `ferry:"alpha"`
+}
+
+type X2ONested struct {
+	Zeta  string   `ferry:"zeta"`
+	Inner X2OInner `ferry:"inner"`
+	Alpha string   `ferry:"alpha"`
+}
+
+type X2OSlice struct {
+	Zeta  string   `ferry:"zeta"`
+	Items []string `ferry:"items"`
+	Alpha string   `ferry:"alpha"`
+}
+
+type X2OArray struct {
+	Zeta  string    `ferry:"zeta"`
+	Items [2]string `ferry:"items"`
+	Alpha string    `ferry:"alpha"`
+}
+
+type X2OPtr struct {
+	Zeta  string    `ferry:"zeta"`
+	Inner *X2OInner `ferry:"inner"`
+	Alpha string    `ferry:"alpha"`
+}
+
+// X2Common is promoted, so its own address IS its parent's and its children
+// address as the parent's siblings.
+type X2Common struct {
+	Env  string `ferry:"env"`
+	Name string `ferry:"name"`
+}
+
+type X2OPromoted struct {
+	Zeta string `ferry:"zeta"`
+	X2Common
+	Alpha string `ferry:"alpha"`
+}
+
+type X2OMapStruct struct {
+	Zeta  string              `ferry:"zeta"`
+	Mid   map[string]X2OInner `ferry:"mid"`
+	Alpha string              `ferry:"alpha"`
+}
+
+type X2OTwoLevel struct {
+	Zeta  string    `ferry:"zeta"`
+	Deep  X2ONested `ferry:"deep"`
+	Alpha string    `ferry:"alpha"`
+	Ptr   *X2OInner `ferry:"ptr"`
+}
+
+func runX2j() {
+	ctx := context.Background()
+	saysX2("ADR-0003", `"So wherever ferry enumerates addresses, in dumped output, in error
+	reports, and in the conformance suite, it sorts segment-wise.
+	The canonical rendering is for identity, not for ordering."`)
+	saysX2("ADR-0004", `"Commit runs only when the walk succeeded, Close always runs." The
+	position on Committer, Releaser and Enumerator is LIFECYCLE: none of the
+	three is given any say over which addresses ferry visits, or in what
+	order.`)
+
+	fmt.Println("  Dump, eight shapes, plain sink against a Committer sink that differs")
+	fmt.Println("  from it in exactly one method:")
+	fmt.Println()
+	fmt.Printf("  %-22s %-14s %-18s %s\n", "fixture", "plain sorted", "Committer sorted", "agree")
+	rows := []struct {
+		name string
+		run  func() ([]Path, []Path)
+	}{
+		{"flat, 3 fields", x2OrdPair(X2OFlat{"z", "a", "m"})},
+		{"nested structs", x2OrdPair(X2ONested{"z", X2OInner{"y", "a"}, "a"})},
+		{"slice + leaf", x2OrdPair(X2OSlice{"z", []string{"s0", "s1"}, "a"})},
+		{"array + leaf", x2OrdPair(X2OArray{"z", [2]string{"a0", "a1"}, "a"})},
+		{"pointer + leaf", x2OrdPair(X2OPtr{"z", &X2OInner{"y", "a"}, "a"})},
+		{"promoted embedded", x2OrdPair(X2OPromoted{"z", X2Common{"e", "n"}, "a"})},
+		{"map of structs", x2OrdPair(X2OMapStruct{"z", map[string]X2OInner{
+			"m2": {"y", "a"}, "m1": {"y", "a"}}, "a"})},
+		{"two levels", x2OrdPair(X2OTwoLevel{"z", X2ONested{"z", X2OInner{"y", "a"}, "a"}, "a", &X2OInner{"y", "a"}})},
+	}
+	allOK := true
+	for _, r := range rows {
+		plain, comm := r.run()
+		ps, cs := x2IsSorted(plain), x2IsSorted(comm)
+		agree := fmt.Sprint(plain) == fmt.Sprint(comm)
+		allOK = allOK && ps && cs && agree
+		fmt.Printf("  %-22s %-14v %-18v %v\n", r.name, ps, cs, agree)
+	}
+	fmt.Printf("\n  eight of eight sorted on both paths, and agreeing: %v\n", allOK)
+
+	fmt.Println("\n  BEFORE this fix, on this branch, the Committer column was FALSE on")
+	fmt.Println("  eight of eight and the two paths agreed on none of them:")
+	fmt.Println("    plain sink (no Committer) [/alpha /beta /mid/x /mid/y /zeta]")
+	fmt.Println("    Committer sink            [/zeta /alpha /mid/x /mid/y /beta]")
+	fmt.Println("  because ADR-0011's Committer branch was implemented as STREAMING - a")
+	fmt.Println("  Set folded into the walk's leaf - and a walk visits fields in reflect")
+	fmt.Println("  source order. So an optional interface was changing what ferry does")
+	fmt.Println("  and not only when, and ferry's flagship yaml driver, which implements")
+	fmt.Println("  Committer and Releaser both, was the one on the unsorted path.")
+
+	fmt.Println("\n  The map keys were already right on both paths, and stay right, because")
+	fmt.Println("  dumpDir.members sorts them. The fix left members alone:")
+	pm, cm := x2OrdPair(X2OMapStruct{"z", map[string]X2OInner{"m2": {"y", "a"}, "m1": {"y", "a"}}, "a"})()
+	fmt.Printf("    plain     %v\n", pm)
+	fmt.Printf("    Committer %v\n", cm)
+
+	fmt.Println("\n  What the fix changed is the GATE and not the buffering. Both branches")
+	fmt.Println("  now encode into one map and write through one sortedAddrs loop; the")
+	fmt.Println("  Committer's exemption is that an encode failure does not stop it")
+	fmt.Println("  learning the plane's refusals too, which is the BETTER ERROR SET the")
+	fmt.Println("  ADR measured rather than the streaming. ADR-0011 lists \"whether Dump's")
+	fmt.Println("  encode phase buffers its values or re-walks\" under what it does not")
+	fmt.Println("  decide, and a Committer buffers anyway - staging is what it means.")
+
+	fmt.Println("\n  --- and the boundary, MEASURED and deliberately NOT acted on ---")
+	fmt.Println()
+	fmt.Println("  Load's Get sequence is not segment-wise, and never has been on any")
+	fmt.Println("  branch. Dump was masking the same walk order by collecting into a map")
+	fmt.Println("  and sorting on the way out; Load has no such step.")
+	fmt.Println()
+	for _, r := range []struct {
+		name string
+		get  []Path
+	}{
+		{"flat, 3 fields", x2GetOrder(ctx, X2OFlat{"z", "a", "m"})},
+		{"nested structs", x2GetOrder(ctx, X2ONested{"z", X2OInner{"y", "a"}, "a"})},
+		{"two levels", x2GetOrder(ctx, X2OTwoLevel{"z", X2ONested{"z", X2OInner{"y", "a"}, "a"}, "a", &X2OInner{"y", "a"}})},
+	} {
+		fmt.Printf("    %-18s %v\n", r.name, r.get)
+		fmt.Printf("    %-18s segment-wise=%v\n", "", x2IsSorted(r.get))
+	}
+	fmt.Println()
+	fmt.Println("  ADR-0003 enumerates exactly three places, and a Get sequence is none")
+	fmt.Println("  of them:")
+	fmt.Println("      \"wherever ferry enumerates addresses, IN DUMPED OUTPUT, IN ERROR")
+	fmt.Println("       REPORTS, and IN THE CONFORMANCE SUITE, it sorts segment-wise\"")
+	fmt.Println("    - dumped output   : covered, and that is the eight-shape table above.")
+	fmt.Println("    - error reports   : covered regardless of walk order, because")
+	fmt.Println("                        ADR-0011 sorts the error set AT CONSTRUCTION.")
+	fmt.Println("    - conformance     : the harness compares values, not sequences.")
+	fmt.Println("    ADR-0003's memory-plane obligation is about Enumerate, not Get.")
+	fmt.Println()
+	fmt.Println("  So this is an OPEN QUESTION for the repo owner and not a defect, and")
+	fmt.Println("  it is left exactly as found. Recorded here because a driver author")
+	fmt.Println("  reading ADR-0003 could reasonably expect Get to be ordered too, and")
+	fmt.Println("  because a fix is cheap and total if it is ever wanted: sorting the")
+	fmt.Println("  compiled node's field list once per schema orders both directions.")
+	_, e := Load[X2OFlat](ctx, x2FixedSource{map[Path]Value{
+		Path{}.Name("zeta"): Null(), Path{}.Name("alpha"): Null(), Path{}.Name("mid"): Null(),
+	}})
+	fmt.Printf("\n  the error set, which IS one of the three named places: %v\n", e)
+}
+
+// x2OrdPair returns a thunk giving the Set order for the plain and the
+// Committer sink over one value.
+func x2OrdPair[T any](v T) func() ([]Path, []Path) {
+	return func() ([]Path, []Path) {
+		ctx := context.Background()
+		var plain, comm []Path
+		_ = Dump(ctx, v, x2OrderSink{&plain})
+		_ = Dump(ctx, v, x2OrderCommitSink{&comm})
+		return plain, comm
+	}
+}
+
+// x2GetOrder records the sequence a Load asks the plane for.
+func x2GetOrder[T any](ctx context.Context, v T) []Path {
+	var written []Path
+	_ = Dump(ctx, v, x2OrderSink{&written})
+	vals := map[Path]Value{}
+	for _, p := range written {
+		vals[p] = String("")
+	}
+	var seen []Path
+	_, _ = Load[T](ctx, x2OrderSource{vals, &seen})
+	return seen
+}
+
+func x2IsSorted(ps []Path) bool {
+	for i := 1; i < len(ps); i++ {
+		if CompareSegmentwise(ps[i-1], ps[i]) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+type x2OrderSink struct{ seen *[]Path }
+
+func (s x2OrderSink) Bind(*AddressSet) (FOpenWriterFunc, error) {
+	return func(context.Context) (FWriter, error) { return x2OrderWriter{s.seen}, nil }, nil
+}
+
+type x2OrderWriter struct{ seen *[]Path }
+
+func (w x2OrderWriter) Set(_ context.Context, p Path, _ Value) error {
+	*w.seen = append(*w.seen, p)
+	return nil
+}
+
+// x2OrderCommitSink differs from x2OrderSink in exactly one method.
+type x2OrderCommitSink struct{ seen *[]Path }
+
+func (s x2OrderCommitSink) Bind(*AddressSet) (FOpenWriterFunc, error) {
+	return func(context.Context) (FWriter, error) { return &x2OrderCommitWriter{s.seen}, nil }, nil
+}
+
+type x2OrderCommitWriter struct{ seen *[]Path }
+
+func (w *x2OrderCommitWriter) Set(_ context.Context, p Path, _ Value) error {
+	*w.seen = append(*w.seen, p)
+	return nil
+}
+func (w *x2OrderCommitWriter) Commit(context.Context) error { return nil }
+
+type x2OrderSource struct {
+	vals map[Path]Value
+	seen *[]Path
+}
+
+func (s x2OrderSource) Bind(*AddressSet) (FOpenFunc, error) {
+	return func(context.Context) (FReader, error) { return x2OrderReader{s.vals, s.seen}, nil }, nil
+}
+
+type x2OrderReader struct {
+	vals map[Path]Value
+	seen *[]Path
+}
+
+func (r x2OrderReader) Get(_ context.Context, p Path) (Value, error) {
+	*r.seen = append(*r.seen, p)
+	return r.vals[p], nil
+}
+
+func (r x2OrderReader) Children(_ context.Context, p Path) ([]Path, error) {
+	return children(r.vals, p), nil
+}

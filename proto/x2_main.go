@@ -44,6 +44,7 @@ var x2 = []struct {
 	{"X7", "the round-trip harness, through the engine, on three planes", runX2g},
 	{"X8", "Dump's two phases, and the Committer interleaving", runX2h},
 	{"X9", "ADR-0010's and ADR-0012's concurrency claims under the new default", runX2i},
+	{"X10", "ADR-0003's segment-wise rule, and the interface that was changing it", runX2j},
 }
 
 func runX2(which string) {

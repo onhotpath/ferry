@@ -19,7 +19,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -144,17 +143,61 @@ func BindSink[T any](sink FSink, options ...Option) (*SinkBinding[T], error) {
 // did not extend to aggregating the encode failures, because `serial` abandoned
 // the walk at the first one. The Committer branch was not implemented at all.
 //
-// What the Committer branch buys is not an optimisation, which is what the
-// ADR's own draft assumed: the staging sink gets a BETTER ERROR SET, because
-// interleaving lets it learn both failure kinds in one run. On a sink that
-// cannot stage, two-phase is a fail-fast BETWEEN phases, so a flat sink pays
-// for the untouched plane in round trips and a Committer pays for neither.
+// WHAT THE TWO BRANCHES DIFFER IN, and it is one thing: whether an encode
+// failure GATES the write phase.
+//
+// A first attempt here read "interleaved" as "stream, writing at each leaf",
+// and folded the Set into a third `direction`. That reproduced the ADR's error
+// sets, and it was wrong for a reason the ADR does not discuss and ADR-0003 and
+// ADR-0004 both do. Writing during the walk inherits the walk's order, which is
+// `reflect` source order, so a `Committer` sink got addresses in a different
+// sequence from a plain one:
+//
+//	plain sink (no Committer):  [/alpha /beta /mid/x /mid/y /zeta]
+//	Committer sink:             [/zeta /alpha /mid/x /mid/y /beta]
+//
+// measured unsorted on eight of eight shapes. That breaks ADR-0003's "wherever
+// ferry enumerates addresses, in dumped output ... it sorts segment-wise", and
+// worse, it makes an OPTIONAL INTERFACE change what ferry does rather than only
+// when. ADR-0004's whole position on `Committer`, `Releaser` and `Enumerator`
+// is lifecycle - "Commit runs only on success, Close always" - and none of the
+// three is supposed to touch the address sequence. ferry's own flagship driver,
+// yaml, implements two of the three, so the reference driver was the one on the
+// unsorted path.
+//
+// So BOTH branches buffer and both write through one sorted loop. The ADR
+// sanctions the buffer explicitly: "Whether Dump's encode phase buffers its
+// values or re-walks to produce them" is listed under what it does not decide,
+// priced at 546 KB against 521 ms over ten thousand addresses. And a
+// `Committer` buffers anyway - staging is what the interface means.
+//
+// What the Committer still gets is the thing the ADR actually measured, which
+// is the BETTER ERROR SET rather than the streaming: an encode failure does not
+// stop it learning the plane's refusals too, so both failure kinds arrive in
+// one run. It is safe precisely because `Commit` runs only on success, so the
+// plane is untouched on failure without needing the gate. On a sink that cannot
+// stage, the gate makes two-phase a fail-fast BETWEEN phases, so a flat sink
+// pays for the untouched plane in round trips and a `Committer` pays for
+// neither. That is the ADR's own argument for implementing `Committer`.
 func (b *SinkBinding[T]) Dump(ctx context.Context, v T) (err error) {
-	// The open is first in both branches, because the sink cannot be asked
-	// whether it can stage until there is a Writer to ask.
+	// Phase one: encode every address, writing nothing. This walk touches no
+	// plane, so aggregating its failures costs the plane exactly nothing -
+	// which is the distinction the ADR's first draft missed by measuring a sink
+	// that could only refuse a write.
+	out := map[Path]Value{}
+	w := &walker{dir: dumpDir(out), sch: b.o.sch, ctx: ctx}
+	_, encErr := w.walk(b.s.root, valueOf(v), Path{})
+
+	// The open comes next in BOTH branches, because "Dump asks the sink whether
+	// it can stage" is a question about the Writer, and there is no Writer
+	// until the open. Opening is not writing: ADR-0004 put ErrReadOnly at
+	// OpenWriter on the reasoning that "failing at open costs nothing, and
+	// failing at the first Set has already half-written the plane", so a
+	// writer that is opened and closed without a Set leaves the plane
+	// untouched, which is the property ADR-0011 states.
 	wr, oerr := b.open(ctx)
 	if oerr != nil {
-		return fromDriver(mOpen, Path{}, false, oerr)
+		return join(encErr, fromDriver(mOpen, Path{}, false, oerr))
 	}
 	// #41 D14. `defer rel.Close()` dropped the result outright; ADR-0011 makes
 	// it an element with the moment first in the sort key.
@@ -165,38 +208,20 @@ func (b *SinkBinding[T]) Dump(ctx context.Context, v T) (err error) {
 			}
 		}()
 	}
+	// THE GATE, and it is the whole difference between the two branches.
 	c, staging := wr.(FCommitter)
-
-	if staging {
-		// Interleaved: one walk, encoding and writing at each leaf, both
-		// failure kinds aggregated by the one scheduler.
-		w := &walker{dir: writeDir(ctx, wr), sch: b.o.sch, ctx: ctx}
-		if _, werr := w.walk(b.s.root, valueOf(v), Path{}); werr != nil {
-			return werr
-		}
-		// Commit runs ONLY on success, which is what makes the plane untouched
-		// on failure without an encode phase.
-		if cerr := c.Commit(ctx); cerr != nil {
-			return fromDriver(mCommit, Path{}, false, cerr)
-		}
-		return nil
+	if encErr != nil && !staging {
+		return encErr
 	}
 
-	// Phase one: encode every address, writing nothing. This walk touches no
-	// plane, so aggregating its failures costs the plane exactly nothing -
-	// which is the distinction the ADR's first draft missed by measuring a sink
-	// that could only refuse a write.
-	out := map[Path]Value{}
-	w := &walker{dir: dumpDir(out), sch: b.o.sch, ctx: ctx}
-	if _, werr := w.walk(b.s.root, valueOf(v), Path{}); werr != nil {
-		return werr
-	}
-	// Phase two. The realised set is iterated here, and the driver mints what
-	// the static table does not hold: ADR-0004's two tiers on the write path.
-	// The Set half aggregates, because a token with write access to some paths
-	// and not others must report both refused addresses, and taking that away
-	// on Dump alone would be an asymmetry between the directions about the
-	// same fact.
+	// Phase two. sortedAddrs is ADR-0003's segment-wise order, and it is the
+	// ONE write loop, so both sink kinds see one sequence.
+	//
+	// The realised set is iterated here, and the driver mints what the static
+	// table does not hold: ADR-0004's two tiers on the write path. The Set half
+	// aggregates, because a token with write access to some paths and not
+	// others must report both refused addresses, and taking that away on Dump
+	// alone would be an asymmetry between the directions about the same fact.
 	addrs := sortedAddrs(out)
 	tasks := make([]func() error, 0, len(addrs))
 	for _, p := range addrs {
@@ -207,45 +232,18 @@ func (b *SinkBinding[T]) Dump(ctx context.Context, v T) (err error) {
 			return nil
 		})
 	}
-	return b.o.sch(tasks)
-}
-
-// writeDir is dumpDir with the Set folded into the leaf, which is the whole of
-// the interleaved branch. It is not a second walk: it is a third `direction`
-// over the one walk in e_walk.go, which is what #16's "write the walk exactly
-// once" constraint is for.
-func writeDir(ctx context.Context, wr FWriter) direction {
-	set := func(at Path, val Value) error {
-		if err := wr.Set(ctx, at, val); err != nil {
-			return fromDriver(mWalk, at, true, err)
-		}
-		return nil
+	setErr := b.o.sch(tasks)
+	if all := join(encErr, setErr); all != nil {
+		return all
 	}
-	d := dumpDir(nil)
-	d.name = "dump/staged"
-	d.leaf = func(n *node, v reflect.Value, at Path) (bool, error) {
-		if n.omitzero && v.IsZero() {
-			return false, nil
+	// Commit runs ONLY on success, which is ADR-0004's protocol and is what
+	// leaves a staging plane untouched for an encode failure with no gate.
+	if staging {
+		if cerr := c.Commit(ctx); cerr != nil {
+			return fromDriver(mCommit, Path{}, false, cerr)
 		}
-		val, err := encLeafWith(n.codec, v)
-		if err != nil {
-			return false, errAt(mWalk, ErrValue, at, "%s", safeEncodeMsg(n.typ)).withCause(err)
-		}
-		return true, set(at, val)
 	}
-	d.container = func(n *node, v reflect.Value, at Path) (bool, bool, error) {
-		if n.kind == nPtr {
-			if v.IsNil() {
-				return true, true, set(at, Null())
-			}
-			return false, false, nil
-		}
-		if v.Len() == 0 {
-			return true, true, set(at, Null())
-		}
-		return false, false, nil
-	}
-	return d
+	return nil
 }
 
 // --- the probe ---------------------------------------------------------------

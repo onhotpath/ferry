@@ -241,6 +241,16 @@ func runX2h() {
 	fmt.Println("  the other two rows are run through the same engine by selecting the")
 	fmt.Println("  scheduler and, for the interleaved row, the staging code path.")
 	fmt.Println()
+	fmt.Println("  READ THE FAIL-FAST ROW WITH ITS CAVEAT. It is a policy ferry does not")
+	fmt.Println("  implement, and it is the only row whose numbers depend on WRITE ORDER,")
+	fmt.Println("  because it stops at the first refusal. ADR-0011 measured it on a Dump")
+	fmt.Println("  that wrote in walk order and published 2/1/1 in columns two and four;")
+	fmt.Println("  ferry now writes segment-wise per ADR-0003, so a fail-fast policy")
+	fmt.Println("  refuses at /Bucket rather than at /Region and the counterfactual reads")
+	fmt.Println("  1/0/1 and 2/1/2. The two rows that describe policies ferry can actually")
+	fmt.Println("  be put in - interleaved and two-phase - are order-independent and")
+	fmt.Println("  reproduce the ADR exactly in all eight cells.")
+	fmt.Println()
 	cols := []struct {
 		name   string
 		v      X2Eight
