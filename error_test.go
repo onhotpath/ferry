@@ -564,10 +564,11 @@ func TestErrorAtAttachesAndNeverClassifies(t *testing.T) {
 		t.Fatal("the driver's own error is not reachable through the carrier")
 	}
 
-	// On its own it renders as what it is, an address and a cause, with no
-	// ferry prefix and no class word: it is a driver's value until core takes
-	// it.
-	const want = "/db/host name: kv: a key may not contain a space"
+	// On its own it renders as the error it carries, with no ferry prefix, no
+	// class word and no address: the address is data for core to read, and a
+	// carrier that printed it too would print it twice under every driver that
+	// wrapped one in a sentence of its own (#213).
+	const want = "kv: a key may not contain a space"
 
 	if got := carrier.Error(); got != want {
 		t.Fatalf("the carrier renders as %q, want %q", got, want)
@@ -579,8 +580,8 @@ func TestErrorAtAttachesAndNeverClassifies(t *testing.T) {
 }
 
 // TestCoreTakesTheAddressFromErrorAt covers what core does with the carrier:
-// it takes the address only where it has none, and unwraps the carrier away so
-// the address prints once.
+// it takes the address only where it has none, and the address prints once
+// because ferry's location is the only thing that prints it.
 func TestCoreTakesTheAddressFromErrorAt(t *testing.T) {
 	inner := errors.New("kv: a key may not contain a space")
 
@@ -847,6 +848,191 @@ func aPlainDriverErrorIsUnchanged(t *testing.T) {
 
 	if !errors.Is(err, errDenied) || !errors.Is(err, ErrDriver) {
 		t.Errorf("the plain driver error lost its chain or its provenance:\n%+v", err)
+	}
+}
+
+// errFlush and flushErr are a driver's own sentence around a failure, with a
+// sentinel and a concrete type of their own. They are what makes "the driver's
+// context survived" an assertion about the whole chain and not only about the
+// text, because neither is anything ferry knows about.
+var errFlush = errors.New("kv: the write buffer did not flush")
+
+type flushErr struct{ err error }
+
+func (f *flushErr) Error() string { return "flushing the write buffer: " + f.err.Error() }
+
+func (f *flushErr) Unwrap() error { return f.err }
+
+func (*flushErr) Is(target error) bool { return target == errFlush }
+
+// TestADriversOwnContextAroundAnAddressSurvives is #213: a driver that gives
+// its own context as well as an address keeps both, and the address still
+// prints once.
+//
+// The last three subtests are the cost and the bound: a sentence over several
+// failures is dropped rather than attributed to each, a sentence over a mixed
+// join still splits, and a driver naming one address inside another's sentence
+// cannot get its address printed where core has one of its own.
+func TestADriversOwnContextAroundAnAddressSurvives(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the sentence reaches the report and the chain", aSentenceAroundOneAddress)
+	t.Run("two levels of wrapping", twoSentencesAroundOneAddress)
+	t.Run("a carrier inside a carrier", anAddressInsideAnAddress)
+	t.Run("a sentence over a join is dropped", aSentenceOverAJoin)
+	t.Run("a sentence over a join that is not all addresses", aSentenceOverAMixedJoin)
+	t.Run("core's address wins, and the driver's is not printed", aSentenceNamingAnotherAddress)
+}
+
+func aSentenceAroundOneAddress(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.closeErr = &flushErr{err: ErrorAt(At("q"), &refusal{addr: "/q", why: "the socket is gone"})}
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	mustKeepTheSentence(t, err, "flushing the write buffer")
+}
+
+func twoSentencesAroundOneAddress(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.closeErr = fmt.Errorf("closing the writer: %w",
+		&flushErr{err: ErrorAt(At("q"), &refusal{addr: "/q", why: "the socket is gone"})})
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	mustKeepTheSentence(t, err, "closing the writer", "flushing the write buffer")
+}
+
+// mustKeepTheSentence is the whole of what #213 asks for: one failure at the
+// driver's address, every sentence it wrote on the way out, the address once,
+// and both of the driver's own vocabularies still reachable.
+func mustKeepTheSentence(t *testing.T, err error, want ...string) {
+	t.Helper()
+
+	els := Elements(err)
+	if len(els) != 1 {
+		t.Fatalf("a driver's sentence around one address gave %d elements, want 1:\n%+v", len(els), err)
+	}
+
+	mustBeLocatedRefusal(t, els[0], "/q")
+
+	report := fmt.Sprintf("%+v", err)
+	for _, sentence := range want {
+		if !strings.Contains(report, sentence) {
+			t.Errorf("the report lost %q:\n%s", sentence, report)
+		}
+	}
+
+	if n := strings.Count(report, "/q"); n != 1 {
+		t.Errorf("the address appears %d times in the report, want 1:\n%s", n, report)
+	}
+
+	if !errors.Is(err, errFlush) {
+		t.Errorf("the sentinel on the driver's own sentence is not reachable:\n%+v", err)
+	}
+
+	if _, ok := errors.AsType[*flushErr](err); !ok {
+		t.Errorf("the type of the driver's own sentence is not reachable:\n%+v", err)
+	}
+}
+
+// anAddressInsideAnAddress is the shape a driver reaches by attaching an
+// address to an error that already had one. The outer address is the one core
+// takes, and the inner one is not text either.
+func anAddressInsideAnAddress(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.closeErr = ErrorAt(At("q"), ErrorAt(At("r"), &refusal{addr: "/r", why: "the only failure"}))
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	if n := len(Elements(err)); n != 1 {
+		t.Fatalf("one address inside another gave %d elements, want 1:\n%+v", n, err)
+	}
+
+	e, ok := errors.AsType[*Error](err)
+	if !ok || e.Address() != At("q") {
+		t.Fatalf("core did not take the outer address from %v", err)
+	}
+
+	if !errors.Is(err, errDenied) {
+		t.Errorf("the driver's own sentinel is not reachable through ferry:\n%+v", err)
+	}
+
+	if report := fmt.Sprintf("%+v", err); strings.Contains(report, "/r") {
+		t.Errorf("the inner address reached the report:\n%s", report)
+	}
+}
+
+// aSentenceOverAJoin is the cost of the rule, pinned rather than assumed: a
+// sentence standing over two failures describes both, so it is dropped rather
+// than printed under each address beside the other address's failure.
+func aSentenceOverAJoin(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.closeErr = &flushErr{err: locatedPair()}
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	mustReportBothAddresses(t, err)
+
+	if report := fmt.Sprintf("%+v", err); strings.Contains(report, "flushing the write buffer") {
+		t.Errorf("a sentence over two failures was attributed to one of them:\n%s", report)
+	}
+}
+
+// aSentenceOverAMixedJoin is the same bound where only one member carries an
+// address: the split is by failure and not by address, so the sentence is
+// context for both of them and belongs to neither.
+func aSentenceOverAMixedJoin(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.closeErr = fmt.Errorf("closing the writer: %w", errors.Join(
+		ErrorAt(At("q"), &refusal{addr: "/q", why: "the located failure"}),
+		errors.New("kv: flush failed"),
+	))
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	els := Elements(err)
+	if len(els) != 2 {
+		t.Fatalf("a join of one address and one plain error gave %d elements, want 2:\n%+v", len(els), err)
+	}
+
+	if e, ok := errors.AsType[*Error](els[0]); !ok || e.Address() != (Path{}) {
+		t.Errorf("the member with no address did not report as one: %v", els[0])
+	}
+
+	mustBeLocatedRefusal(t, els[1], "/q")
+}
+
+// aSentenceNamingAnotherAddress is ADR-0011's own measured property with a
+// driver's sentence wrapped round it: core's address wins, and the address the
+// driver named does not reach the message either.
+func aSentenceNamingAnotherAddress(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.fail[At("host")] = &flushErr{
+		err: ErrorAt(At("somewhere", "else"), &refusal{addr: "/somewhere/else", why: "the socket is gone"}),
+	}
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	e, ok := errors.AsType[*Error](err)
+	if !ok || e.Address() != At("host") {
+		t.Fatalf("the driver overrode core's address: %v", err)
+	}
+
+	if report := fmt.Sprintf("%+v", err); strings.Contains(report, "somewhere") {
+		t.Errorf("the address the driver named reached the report:\n%s", report)
 	}
 }
 

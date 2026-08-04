@@ -191,6 +191,10 @@ A driver refusing over a whole address set may join one of these per member it d
 Core reports **one failure per address**, each keeping its own cause and its own class, so `ferry.Elements` ranges one element per address.
 An error returned with no address on it stays whole and is one element with none.
 
+A sentence of the driver's own around one of these is kept, so `fmt.Errorf("flushing the write buffer: %w", ferry.ErrorAt(addr, err))` reports one failure at `addr` with the sentence in the report and the whole chain still matchable.
+A sentence around a join of them is dropped, because it describes all of them and the failures are reported one address at a time.
+The result of `ErrorAt` renders as the error it carries and never as the address, which is what keeps the address printed once.
+
 A driver returns any error.
 Core wraps it and supplies the address, the moment, and the `ErrDriver` marker, and a driver can change none of them.
 Core supplies the default class for that moment **unless** the driver's error already carries a ferry class sentinel, in which case core keeps it.
