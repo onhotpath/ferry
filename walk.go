@@ -75,7 +75,20 @@ type spot struct {
 // Everything else is written once and lives on [walker]: which nodes exist and
 // in what order, where the context is checked, and where the scheduler sits.
 type direction interface {
+	// omitted is ADR-0006's omission rule asked once, before anything at this
+	// position is read, written or converted. It is a Dump-side question whose
+	// Load-side answer is always no, and it is asked here rather than per node
+	// kind because omitzero is the one option admissible at every type.
+	omitted(s spot) bool
+
 	atLeaf(ctx context.Context, s spot) error
+
+	// atStatic is a composite whose members come from the type - a struct or an
+	// array - walked through into. It is a hook rather than a bare descent
+	// because Load has one question to ask around it: required at such an
+	// address means the plane supplied at least one of its static children,
+	// which is the presence bit read over the subtree that just ran.
+	atStatic(ctx context.Context, s spot, into descend) error
 
 	// atNullable is the container question, at a composite that can be nil.
 	// Dump answers it from the value and Load from the plane, and into is the
@@ -142,6 +155,13 @@ func (w *walker) walk(ctx context.Context, s spot) error {
 		return newError(momentWalk, nil, s.at, ctxEndedMsg).withCause(err)
 	}
 
+	// Omission is asked before the kind, because it is one question about the
+	// Go value and the answer is the same at all six: this position is not
+	// written at all, and nothing beneath it is either.
+	if w.dir.omitted(s) {
+		return nil
+	}
+
 	switch s.n.kind {
 	case nodeLeaf:
 		return w.dir.atLeaf(ctx, s)
@@ -152,13 +172,13 @@ func (w *walker) walk(ctx context.Context, s spot) error {
 			return err
 		}
 
-		return w.run(w.tasks(ctx, s))
+		return w.dir.atStatic(ctx, s, w.into(ctx, s))
 	case nodeSlice:
 		return w.dir.atSlice(ctx, s, w.element(ctx, s))
 	case nodeMap:
 		return w.dir.atMap(ctx, s, w.element(ctx, s))
 	default:
-		return w.run(w.tasks(ctx, s))
+		return w.dir.atStatic(ctx, s, w.into(ctx, s))
 	}
 }
 
@@ -254,6 +274,11 @@ type loadFrom struct {
 
 var _ direction = loadFrom{}
 
+// omitted is nothing on Load. omitzero decides whether an address is written
+// and Load writes none, which is ADR-0008's direction table rather than an
+// omission here.
+func (loadFrom) omitted(spot) bool { return false }
+
 // atLeaf reads one address and decides what the observation means to the field.
 func (l loadFrom) atLeaf(ctx context.Context, s spot) error {
 	got, err := l.r.Get(ctx, s.at)
@@ -265,22 +290,91 @@ func (l loadFrom) atLeaf(ctx context.Context, s spot) error {
 		return fromDriver(momentWalk, s.at, err)
 	}
 
-	// ADR-0006: Absent means ferry does not write to the field, so a seeded
-	// value keeps what it had and a fresh one keeps its zero.
 	if got.Kind() == KindAbsent {
-		return nil
+		return l.absent(s)
 	}
 
-	// Which kinds this leaf takes and how it reads their text is the leaf's,
-	// resolved at compile and held on the node, so the walk decides nothing
-	// about a type here (ADR-0005).
-	if err := s.n.codec.decode(s.v, got); err != nil {
-		return newError(momentWalk, ErrValue, s.at, err.Error()).withCause(err)
+	if err := l.apply(s, got); err != nil {
+		return err
 	}
 
 	*l.wrote++
 
 	return nil
+}
+
+// absent is what an address the plane does not have means to a leaf, and it is
+// the only place a declaration is consulted for a value.
+//
+// ADR-0006's one rule stands under all three arms: Absent means ferry does not
+// write what the plane said, because it said nothing. A declared default is
+// applied there and only there, so an explicit empty beats a non-zero default
+// and a seeded field keeps what it had. required refuses there and only there,
+// because it is a presence test and nothing else, satisfied by any observation
+// other than Absent - including a String("") and a Null a type can hold.
+//
+// The two cannot both be set: a default answers the absence required forbids,
+// and schema compile refuses the pair.
+func (l loadFrom) absent(s spot) error {
+	switch {
+	case s.n.hasDef:
+		// Not counted as presence. A default fills a hole in a section and
+		// never conjures the section, or no *T with a default anywhere beneath
+		// it could ever be nil.
+		return l.apply(s, s.n.def)
+	case s.n.required:
+		return newError(momentWalk, ErrMissing, s.at, "required, and the plane holds nothing at this address")
+	default:
+		return nil
+	}
+}
+
+// apply hands one observation to the leaf's own codec.
+//
+// A declared default travels this path and no other, which is the whole of
+// ADR-0006's load-bearing claim: a default is indistinguishable at the boundary
+// from what a flat plane would have reported, so ferry has one conversion
+// authority rather than two and a registered codec's type gets defaults for
+// nothing. The Value on the node is text, decoded fresh here on every load
+// rather than cached as a Go value, because a cached one aliases across loads.
+//
+// Which kinds this leaf takes and how it reads their text is the leaf's own,
+// resolved at compile and held on the node, so the walk decides nothing about a
+// type here (ADR-0005).
+func (loadFrom) apply(s spot, got Value) error {
+	if err := s.n.codec.decode(s.v, got); err != nil {
+		return newError(momentWalk, ErrValue, s.at, err.Error()).withCause(err)
+	}
+
+	return nil
+}
+
+// atStatic walks a struct or an array and then answers required at its address.
+func (l loadFrom) atStatic(_ context.Context, s spot, into descend) error {
+	before := *l.wrote
+
+	if err := into(s.v, s.at); err != nil {
+		return err
+	}
+
+	return l.supplied(s, before)
+}
+
+// supplied is required at a composite address: satisfied by the plane having
+// supplied at least one of the address's static children (ADR-0006).
+//
+// It is the presence bit read over the subtree that just ran, which gives one
+// meaning on a tree plane and a flat plane alike - the only row where the two
+// could differ is an explicit null at the container's own address, which a flat
+// plane cannot express, so the divergence cannot arise. A declared default
+// beneath the address is not presence, so a section whose every field carries
+// one is still refused.
+func (l loadFrom) supplied(s spot, before int) error {
+	if !s.n.required || *l.wrote > before {
+		return nil
+	}
+
+	return newError(momentWalk, ErrMissing, s.at, "required, and the plane supplied nothing under it")
 }
 
 // atNullable materialises a pointer exactly where the plane spoke under it.
@@ -354,7 +448,7 @@ func (l loadFrom) materialise(s spot, into descend) error {
 		s.v.Set(fresh)
 	}
 
-	return nil
+	return l.supplied(s, before)
 }
 
 // atArray refuses a plane holding an index this array cannot.
@@ -611,6 +705,26 @@ type dumpTo struct {
 }
 
 var _ direction = dumpTo{}
+
+// omitted is ADR-0006's omission rule, whole: a comparison against the Go zero
+// value, evaluated before anything converts it, which is omitzero's shape in
+// encoding/json/v2 and not omitempty's.
+//
+// It is not a comparison against the default. A field holding its declared
+// default is dumped like any other, for two independent reasons: ferry cannot
+// tell "still at its default" from "explicitly set to the same value", because
+// they are the same bits, and omitting it would make the stored artefact
+// under-specified, so what it denotes would be decided by whichever version of
+// the code reads it.
+//
+// An omission is the absence of a Set call rather than a Set carrying nothing,
+// which is what keeps Absent a Reader-side kind and Writer at one method.
+func (dumpTo) omitted(s spot) bool { return s.n.omitzero && s.v.IsZero() }
+
+// atStatic walks a struct or an array, which have nothing of their own to write
+// at their address: a struct has no address at all, and an array's membership
+// is the type's.
+func (dumpTo) atStatic(_ context.Context, s spot, into descend) error { return into(s.v, s.at) }
 
 // atLeaf writes one address. It never writes an Absent, which is a Reader-side
 // kind: an omitted address is one that gets no Set call at all rather than one
