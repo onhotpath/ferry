@@ -134,6 +134,24 @@ nojsonv2: ## Assert core still builds and tests with encoding/json/v2 excluded.
 	@cd $(PROJECT_DIR) && GOEXPERIMENT=nojsonv2 go test ./...
 	@echo "OK: core builds and tests with encoding/json/v2 excluded."
 
+.PHONY: godoc-check
+godoc-check: ## Assert no published doc comment cites an ADR or an issue number.
+	@# godoc is written for the person using ferry, and a reader on pkg.go.dev
+	@# has no ADR open and cannot resolve the reference. The reasoning lives in
+	@# docs/adr/. Unexported and inline comments keep their citations, which is
+	@# why this greps what `go doc` prints rather than the source: that is
+	@# exactly the boundary. See CONTRIBUTING.md.
+	@echo "==> go doc -all, every published package"
+	@hits=$$(for m in $(MODULES); do \
+		(cd $(PROJECT_DIR)/$$m && go list ./... | grep -v '/internal/'); \
+	done | xargs -n1 go doc -all 2>/dev/null | grep -nE 'ADR-[0-9]|\(#[0-9]+\)' || true); \
+	if [ -n "$$hits" ]; then \
+		echo "$$hits"; \
+		echo "FAIL: a published doc comment cites a design record. See CONTRIBUTING.md."; \
+		exit 1; \
+	fi
+	@echo "OK: no published doc comment cites an ADR or an issue."
+
 ## ---- housekeeping ----------------------------------------------------------
 
 .PHONY: tidy

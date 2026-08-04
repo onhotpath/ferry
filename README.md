@@ -155,8 +155,7 @@ No benchmark results have been published yet.
 
 ## Contributing
 
+[`CONTRIBUTING.md`](CONTRIBUTING.md) explains how the repository is organised and what the conventions mean: what the ADRs are and how they are amended, what belongs in a doc comment and what does not, why examples live in `example_test.go`, and where benchmarks go.
+
 `make help` lists the developer targets.
 `make check` and `make lint` are what CI runs, and both must be green.
-
-Read the ADR that owns a decision before proposing a change to it.
-A proposal that contradicts an accepted ADR should say so out loud rather than quietly overriding it.
