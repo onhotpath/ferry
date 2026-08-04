@@ -308,6 +308,9 @@ So:
 - **Use `ferry.ErrorAt(addr, err)` to attach an address.**
   It attaches and never classifies, so it is inert until core wraps it, and where core already knows the address, core's wins.
   It returns `error` and not `*ferry.Error`, which is what makes `return ferry.ErrorAt(a, f())` safe to write.
+- **Name every address you disliked, not just the first.**
+  A refusal over a whole address set may carry one `ErrorAt` per member, joined together, and core reports one failure per address with its own cause and its own class.
+  What you return without an address on it stays whole and is reported as one failure with none.
 
 Do not put a value the plane supplied into an error message.
 ferry's own text never does, which is what stops a plane holding secrets from leaking into a log through ferry.

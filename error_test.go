@@ -17,6 +17,20 @@ import (
 // value failure at an address.
 func valueErr(loc Path, msg string) *Error { return newError(momentWalk, ErrValue, loc, msg) }
 
+// sole is the one leaf a driver failure naming at most one address becomes.
+// fromDriver reports one failure per address the driver named, so a case that
+// wants the leaf asserts that there is exactly one of them first.
+func sole(t *testing.T, err error) *Error {
+	t.Helper()
+
+	e, ok := errors.AsType[*Error](err)
+	if !ok || len(Elements(err)) != 1 {
+		t.Fatalf("want one ferry error, got %d elements: %v", len(Elements(err)), err)
+	}
+
+	return e
+}
+
 // distinct counts how many different strings a run produced, which is the shape
 // every determinism assertion in ADR-0011 is measured in.
 func distinct(got []string) []string {
@@ -570,7 +584,7 @@ func TestErrorAtAttachesAndNeverClassifies(t *testing.T) {
 func TestCoreTakesTheAddressFromErrorAt(t *testing.T) {
 	inner := errors.New("kv: a key may not contain a space")
 
-	bound := fromDriver(momentBind, Path{}, ErrorAt(At("db", "host"), inner))
+	bound := sole(t, fromDriver(momentBind, Path{}, ErrorAt(At("db", "host"), inner)))
 	if bound.Address() != At("db", "host") {
 		t.Fatalf("core did not take the driver's address, it has %s", bound.Address())
 	}
@@ -585,13 +599,254 @@ func TestCoreTakesTheAddressFromErrorAt(t *testing.T) {
 
 	// Where core already knows the address, core's wins, so a driver cannot
 	// misattribute a read at one address to another.
-	got := fromDriver(momentWalk, At("db", "port"), ErrorAt(At("somewhere", "else"), inner))
+	got := sole(t, fromDriver(momentWalk, At("db", "port"), ErrorAt(At("somewhere", "else"), inner)))
 	if got.Address() != At("db", "port") {
 		t.Fatalf("the driver overrode core's address with %s", got.Address())
 	}
 
 	if strings.Contains(got.Error(), "somewhere") {
 		t.Fatalf("the driver's address reached the message: %q", got.Error())
+	}
+}
+
+// errDenied is a driver's own sentinel, and refusal is its own concrete type.
+// Neither is anything ferry knows about, which is what makes them the assertion
+// that a member's whole chain survived and not only the first member's.
+//
+// The text names no address, so a report that prints the address twice is
+// visible as one.
+var errDenied = errors.New("kv: denied to this token")
+
+type refusal struct{ addr, why string }
+
+func (r *refusal) Error() string { return "kv: " + r.why }
+
+func (*refusal) Unwrap() error { return errDenied }
+
+// locatedPair is the shape #211 reports: one refusal naming two addresses,
+// which is what a driver refusing over a whole address set produces when it
+// dislikes more than one member of it.
+func locatedPair() error {
+	return errors.Join(
+		ErrorAt(At("q"), &refusal{addr: "/q", why: "the first failure"}),
+		ErrorAt(At("r"), &refusal{addr: "/r", why: "the second failure"}),
+	)
+}
+
+// TestEveryAddressADriverNamesIsReported is ADR-0011's aggregation rule at the
+// one place ErrorAt is for: every located failure a driver reported survives,
+// each keeping its own address, its own cause and its own declared class.
+//
+// The two moments are the ones #211 reproduces, and the last three subtests are
+// the cases that must not move: one carrier, no carrier in a join, and no
+// carrier at all.
+func TestEveryAddressADriverNamesIsReported(t *testing.T) {
+	t.Parallel()
+
+	t.Run("at close", locatedPairAtClose)
+	t.Run("at bind", locatedPairAtBind)
+	t.Run("each member declares its own class", eachMemberDeclaresItsOwnClass)
+	t.Run("one carrier is unchanged", oneCarrierIsUnchanged)
+	t.Run("a carrier inside the driver's own wrapper", aCarrierInsideAWrapper)
+	t.Run("a join with no carrier is unchanged", aJoinWithNoCarrierIsUnchanged)
+	t.Run("a plain error is unchanged", aPlainDriverErrorIsUnchanged)
+}
+
+func locatedPairAtClose(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.closeErr = locatedPair()
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	mustReportBothAddresses(t, err)
+}
+
+func locatedPairAtBind(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.bindErr = locatedPair()
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	mustReportBothAddresses(t, err)
+}
+
+// mustReportBothAddresses is the whole of what a caller gets: two elements, one
+// per address, each carrying the driver's own error for that address and none
+// of them carrying the other's.
+func mustReportBothAddresses(t *testing.T, err error) {
+	t.Helper()
+
+	els := Elements(err)
+	if len(els) != 2 {
+		t.Fatalf("a driver naming two addresses reported %d elements, want 2:\n%+v", len(els), err)
+	}
+
+	for i, want := range []string{"/q", "/r"} {
+		mustBeLocatedRefusal(t, els[i], want)
+	}
+
+	if !errors.Is(err, errDenied) {
+		t.Errorf("the driver's own sentinel is not reachable through ferry:\n%+v", err)
+	}
+}
+
+func mustBeLocatedRefusal(t *testing.T, el error, want string) {
+	t.Helper()
+
+	e, ok := errors.AsType[*Error](el)
+	if !ok || e.Address().String() != want {
+		t.Fatalf("the element is %v, want a ferry error at %s", el, want)
+	}
+
+	if !errors.Is(e, ErrPlane) || !errors.Is(e, ErrDriver) {
+		t.Errorf("the failure at %s lost its class or its provenance:\n%+v", want, e)
+	}
+
+	own, ok := errors.AsType[*refusal](e)
+	if !ok || own.addr != want {
+		t.Errorf("the driver's own error at %s is not reachable through ferry: %v", want, el)
+	}
+}
+
+// eachMemberDeclaresItsOwnClass is the extension rule read per failure: a
+// driver holds an opinion about the class, and a join carries one opinion per
+// member rather than the first member's for all of them.
+func eachMemberDeclaresItsOwnClass(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.closeErr = errors.Join(
+		ErrorAt(At("q"), fmt.Errorf("%w: the document does not parse", ErrValue)),
+		ErrorAt(At("r"), &refusal{addr: "/r", why: "the second failure"}),
+	)
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	els := Elements(err)
+	if len(els) != 2 {
+		t.Fatalf("a driver naming two addresses reported %d elements, want 2:\n%+v", len(els), err)
+	}
+
+	if !errors.Is(els[0], ErrValue) {
+		t.Errorf("the first member's declared class was dropped:\n%+v", els[0])
+	}
+
+	if !errors.Is(els[1], ErrPlane) || errors.Is(els[1], ErrValue) {
+		t.Errorf("the second member took the first member's class:\n%+v", els[1])
+	}
+}
+
+// oneCarrierIsUnchanged is the common case, and it is asserted rather than
+// assumed because it is the one the split must not move: core takes the address
+// and unwraps the carrier away, so the address prints once.
+func oneCarrierIsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.closeErr = ErrorAt(At("q"), &refusal{addr: "/q", why: "the only failure"})
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	if n := len(Elements(err)); n != 1 {
+		t.Fatalf("one located failure gave %d elements, want 1:\n%+v", n, err)
+	}
+
+	e, ok := errors.AsType[*Error](err)
+	if !ok || e.Address() != At("q") {
+		t.Fatalf("core did not take the driver's address from %v", err)
+	}
+
+	if n := strings.Count(e.Error(), "/q"); n != 1 {
+		t.Errorf("the address appears %d times in %q", n, e.Error())
+	}
+}
+
+// aCarrierInsideAWrapper is the other step of the walk: a driver that put its
+// own sentence around ErrorAt is still read for the address, which is what a
+// carrier reached through a single Unwrap has always done.
+func aCarrierInsideAWrapper(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.closeErr = fmt.Errorf("flushing: %w", ErrorAt(At("q"), &refusal{addr: "/q", why: "the only failure"}))
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	if n := len(Elements(err)); n != 1 {
+		t.Fatalf("one wrapped carrier gave %d elements, want 1:\n%+v", n, err)
+	}
+
+	mustBeLocatedRefusal(t, Elements(err)[0], "/q")
+}
+
+// TestUnwrappedIsOneStepOfTheTree covers the step driverErrors walks with,
+// including the arm no driver error reaches: the walk asks it only where
+// errors.AsType has already found a carrier below, so a leaf answering nothing
+// is the contract stated rather than a path core takes.
+func TestUnwrappedIsOneStepOfTheTree(t *testing.T) {
+	t.Parallel()
+
+	leaf := errors.New("kv: flush failed")
+	if got := unwrapped(leaf); got != nil {
+		t.Errorf("an error wrapping nothing stepped to %v, want nothing", got)
+	}
+
+	if got := unwrapped(fmt.Errorf("flushing: %w", leaf)); len(got) != 1 || !errors.Is(got[0], leaf) {
+		t.Errorf("a wrapper stepped to %v, want the one error it wraps", got)
+	}
+
+	if got := unwrapped(errors.Join(leaf, errDenied)); len(got) != 2 {
+		t.Errorf("a join stepped to %d errors, want 2", len(got))
+	}
+}
+
+// aJoinWithNoCarrierIsUnchanged is the control #211 reports beside the defect:
+// ferry cannot attribute addresses to a third party's children, so a join with
+// no address in it stays whole and enters as one element.
+func aJoinWithNoCarrierIsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.closeErr = errors.Join(errors.New("kv: flush failed"), errors.New("kv: the socket is gone"))
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	if n := len(Elements(err)); n != 1 {
+		t.Fatalf("a join with no address in it gave %d elements, want 1:\n%+v", n, err)
+	}
+
+	report := fmt.Sprintf("%+v", err)
+	for _, want := range []string{"flush failed", "the socket is gone"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("the report lost %q:\n%s", want, report)
+		}
+	}
+}
+
+func aPlainDriverErrorIsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.closeErr = &refusal{addr: "/q", why: "the only failure"}
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	els := Elements(err)
+	if len(els) != 1 {
+		t.Fatalf("a plain driver error gave %d elements, want 1:\n%+v", len(els), err)
+	}
+
+	e, ok := errors.AsType[*Error](els[0])
+	if !ok || e.Address() != (Path{}) {
+		t.Fatalf("a driver error naming no address reported %v", els[0])
+	}
+
+	if !errors.Is(err, errDenied) || !errors.Is(err, ErrDriver) {
+		t.Errorf("the plain driver error lost its chain or its provenance:\n%+v", err)
 	}
 }
 
@@ -804,7 +1059,7 @@ func TestDriverDeclaresTheClass(t *testing.T) {
 		t.Fatalf("the driver's declared class was overridden: %v", declared)
 	}
 
-	for _, e := range []*Error{plain, declared} {
+	for _, e := range []error{plain, declared} {
 		if !errors.Is(e, ErrDriver) {
 			t.Fatalf("provenance is core's and cannot be given up: %v", e)
 		}
@@ -883,7 +1138,7 @@ func TestFormatVerbs(t *testing.T) {
 func TestLeafReportNamesTheStructure(t *testing.T) {
 	for _, c := range []struct {
 		name string
-		err  *Error
+		err  error
 		want string
 	}{
 		{"a class and no driver", valueErr(At("a"), "is not a valid int"),
@@ -990,7 +1245,7 @@ func TestAddressIsTheOneAccessor(t *testing.T) {
 		t.Fatalf("Address() = %s, want /db/port", got)
 	}
 
-	shut := fromDriver(momentClose, Path{}, errors.New("kv: flush failed"))
+	shut := sole(t, fromDriver(momentClose, Path{}, errors.New("kv: flush failed")))
 	if got := shut.Address(); got != (Path{}) {
 		t.Fatalf("a close failure has address %s, want the zero Path", got)
 	}

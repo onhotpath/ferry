@@ -187,6 +187,10 @@ A driver or a codec that panics panics through ferry, with its own stack intact.
 `ferry.ErrorAt(addr, err)` is the one constructor ferry exports.
 It **attaches and never classifies**, so it is inert until core wraps it, and where core already knows the address, core's wins.
 
+A driver refusing over a whole address set may join one of these per member it disliked.
+Core reports **one failure per address**, each keeping its own cause and its own class, so `ferry.Elements` ranges one element per address.
+An error returned with no address on it stays whole and is one element with none.
+
 A driver returns any error.
 Core wraps it and supplies the address, the moment, and the `ErrDriver` marker, and a driver can change none of them.
 Core supplies the default class for that moment **unless** the driver's error already carries a ferry class sentinel, in which case core keeps it.
