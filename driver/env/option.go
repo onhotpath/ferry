@@ -9,19 +9,17 @@ import (
 )
 
 // ErrOption reports a driver option this source cannot be built with: a
-// separator no environment variable name can hold, a canonical form outside the
-// closed set below, or no environment to read.
+// separator no environment variable name can hold, a [Form] outside the two
+// this package declares, or no environment to read.
 //
-// It is a refusal about the driver's own configuration rather than about the
-// schema, and it lands at Bind because that is the first moment the driver is
-// asked for anything. It wraps [ferry.ErrPlane], which is the class for a driver
-// refusing to serve the address set it was bound to, and it stays reachable
-// under ferry's wrapper so that errors.Is answers for it through [ferry.Load].
+// [New] takes options and returns no error, so this lands at Bind, which is the
+// first moment the driver is asked for anything. It wraps [ferry.ErrPlane] and
+// stays reachable under ferry's wrapper, so errors.Is answers for it on what
+// [ferry.Load] returned.
 var ErrOption = errors.New("env: unusable driver option")
 
-// Option configures a [Source]. It is an interface with an unexported method,
-// so the set of options is this package's and a caller cannot mint one that
-// reaches inside.
+// Option configures a [Source]. The set is closed at three: [Separator],
+// [Canonical] and [Environ].
 type Option interface {
 	apply(*config)
 }
@@ -44,11 +42,11 @@ type config struct {
 // DefaultSeparator is the join a [Source] uses when no [Separator] is given.
 //
 // It is the spelling every operator already reads, and it is deliberately not
-// the safest one: at "_" the addresses /metric/http/port and /metric/http_port
-// render one name and the schema naming both is refused at Bind. The wider "__"
-// buys a bigger margin and never a guarantee, because a segment may itself
-// contain "__" (ADR-0003), so the default is the readable one and the check is
-// what makes either safe.
+// the safest one: at "_" the fields metric.http.port and metric.http_port want
+// one name, and a schema naming both is refused at Bind. A wider "__" buys a
+// bigger margin and never a guarantee, since a field name may itself contain
+// "__", so the default is the readable one and the check at Bind is what makes
+// either safe.
 const DefaultSeparator = "_"
 
 // defaults is the configuration a [Source] starts from.
@@ -56,71 +54,61 @@ func defaults() config {
 	return config{sep: DefaultSeparator, canon: Lower, environ: os.Environ}
 }
 
-// Separator sets the string the segments of an address are joined with.
+// Separator sets the string nested fields are joined with.
 //
-// No separator is universally safe, which is why this is an option rather than
-// a constant: segment text is the user's, so the only honest guarantee is one
-// checked against the schema in hand (ADR-0003). Whatever is chosen, a set of
-// addresses the join collapses is refused before any I/O, naming both.
+//	src := env.New(env.Separator("__")) // db.host reads DB__HOST
+//
+// It is the way out when two fields want one variable name and neither can be
+// renamed: at "__" the fields db.host and db_host stay apart. No separator is
+// safe for every schema, because a field name may contain the separator itself,
+// so whatever is chosen, two fields the join would collapse are still refused at
+// Bind before any I/O.
 //
 // It must be a non-empty run of the bytes an environment variable name may
-// hold, spelled as they appear in the name: A-Z, 0-9 and _.
+// hold: A-Z, 0-9 and _.
 func Separator(sep string) Option {
 	return optionFunc(func(c *config) { c.sep = sep })
 }
 
-// Form is the canonical spelling this driver returns a dynamic segment in, and
-// the set is closed at two.
+// Form is the case a map key comes back in, and the set is closed at two.
 type Form uint8
 
 const (
-	// Lower spells a dynamic segment in lower case, and it is the default.
-	//
-	// It is the inverse of the uppercase fold for the spellings people write in
-	// a config value: a map key is ordinarily lower case, and an environment
-	// variable name is ordinarily upper case, so lower is the choice under which
-	// the common key round-trips unchanged.
+	// Lower spells a map key in lower case, and it is the default. Map keys are
+	// ordinarily lower case and environment variable names are ordinarily upper
+	// case, so this is the choice under which the common key comes back
+	// unchanged.
 	Lower Form = iota
 
-	// Upper spells a dynamic segment in upper case, which is what a schema whose
+	// Upper spells a map key in upper case, which is what a configuration whose
 	// map keys are themselves environment variable names wants.
 	Upper
 )
 
-// Canonical names the form a dynamic segment comes back in, and it exists
-// because this driver's key function is not invertible.
+// Canonical chooses the case a map key comes back in.
 //
-// The fold is many-to-one over segment text: /limits/http, /limits/HTTP and
-// /limits/Http all render LIMITS_HTTP. Dump does not care, but Load does,
-// because [Source] enumerates and Children has to hand back an address - and the
-// fold has already destroyed which of the three it was. The static tier is
-// unaffected, since a tagged field's address is in the compiled set and is
-// recovered from it exactly; a map key's is not, so this option decides it.
+//	src := env.New(env.Canonical(env.Upper)) // LIMITS_HTTP fills the key "HTTP"
 //
-// # It buys determinism and not totality
+// A map's keys come from the environment rather than from the struct, and the
+// name was upper-cased on the way in with no way to know which case it started
+// as. So LIMITS_HTTP fills a map[string]string under the key http by default,
+// and under HTTP with [Upper]. Tagged fields are unaffected: their names are in
+// the struct, so their own spelling is recovered exactly.
 //
-// No inverse round-trips every segment, because no inverse of a many-to-one map
-// exists. What this option chooses is which subset does. The guarantee is
-// therefore stated over canonical keys, and a key outside them comes back
-// changed. At Lower and the default separator, over a map at /limits:
+// A key comes back unchanged when it is already in the chosen case and holds no
+// byte an environment variable name cannot hold. Otherwise it comes back changed
+// either way, because there is no way back from a fold that has already
+// happened. At [Lower] and the default separator, for a map at limits:
 //
-//	key "http"       ->  LIMITS_HTTP       ->  "http"   round-trips
-//	key "HTTP"       ->  LIMITS_HTTP       ->  "http"   changed by the fold
-//	key "http-port"  ->  LIMITS_HTTP_PORT  ->  "http"   changed by the transform
+//	key "http"       ->  LIMITS_HTTP       ->  "http"   unchanged
+//	key "HTTP"       ->  LIMITS_HTTP       ->  "http"   changed by the case fold
+//	key "http-port"  ->  LIMITS_HTTP_PORT  ->  "http"   changed by the "-"
 //	key "http_port"  ->  LIMITS_HTTP_PORT  ->  "http"   changed by the join
 //
-// A segment round-trips exactly when the fold leaves it alone: it is already in
-// the chosen form, it holds no byte an environment variable name cannot hold,
-// and it does not contain the [Separator]. The last of those is the join and not
-// this option: LIMITS_HTTP_PORT is what a map key "http_port" renders to and
-// also what a nested /limits/http/port renders to, and the enumeration resolves
-// it as the nesting, because a driver that refused it could not load a map of
-// maps at all. A wider separator moves the boundary and never removes it.
-//
-// Making that total means refusing a dynamic segment that is not already
-// canonical, at the moment it is written. There is nothing here to refuse:
-// this package ships no sink, so the refusal belongs to the first env-family
-// sink - a .env file or an environ slice - and it is deferred to it.
+// The last row is the [Separator] and not this option: LIMITS_HTTP_PORT is also
+// what the nested limits.http.port renders to, and it is read as the nesting,
+// because a driver reading it the other way could not load a map of maps at all.
+// Use env.Separator("__") if your keys contain underscores.
 func Canonical(f Form) Option {
 	return optionFunc(func(c *config) { c.canon = f })
 }
@@ -128,13 +116,14 @@ func Canonical(f Form) Option {
 // Environ names the function a load reads its environment from, in the
 // "KEY=value" form [os.Environ] returns. It defaults to [os.Environ].
 //
-// It is an option because reading the real process environment is a hazard in a
-// test: testing.T.Setenv forbids t.Parallel, and a test that mutates the process
-// environment is not hermetic. It is also what makes an environ captured
-// elsewhere - a child process's, a .env file already parsed - loadable through
-// the same driver.
+//	src := env.New(env.Environ(func() []string { return []string{"NAME=checkout"} }))
 //
-// It is called once per open, so one load sees one consistent snapshot and a
+// It is what makes a test hermetic, since testing.T.Setenv forbids t.Parallel
+// and mutating the process environment is visible to everything else in the
+// binary. It is also how an environ captured elsewhere - a child process's, a
+// .env file already parsed - is loaded through this driver.
+//
+// It is called once per load, so one load sees one consistent snapshot and a
 // later change to the environment reaches the next load rather than half of this
 // one.
 func Environ(fn func() []string) Option {

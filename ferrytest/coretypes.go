@@ -7,59 +7,36 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// CoreTypes is core's supported type set, discharged: nineteen rows and 57
-// cases, each row carrying the equality relation its type round-trips under and
+// CoreTypes is ferry's own supported type set, discharged: nineteen rows and 57
+// cases, each row carrying the equality relation its type comes back under and
 // each case carrying the boundary [ferry.Value] ferry must produce for it.
+//
+//	ferrytest.RoundTrip(t, ferrytest.MemPlane(), ferrytest.CoreTypes())
+//
+// A driver author runs it through [Driver] rather than directly. A codec author
+// appends their own proofs to it, which is why this is a function returning a
+// fresh slice rather than a variable:
+//
+//	proofs := append(ferrytest.CoreTypes(), mine...)
 //
 // # It is a published artefact and not a test fixture
 //
-// ADR-0013 makes what a plane holds ferry's second compatibility promise, and
-// this table is that promise in executable form. The text in the third column
-// is what ends up in every user's config files, KV stores and secret backends,
-// and it is the only thing their stored data consists of. Changing one of these
-// strings breaks that data while the Go API stays stable, so no tool in the Go
-// toolchain can see it: measured, apidiff, go vet, gofmt and the consumer's own
-// round-trip test all report nothing across a release that moves time.Duration
-// from "30s" to a nanosecond count.
+// The third column is what ends up in every user's config files, key-value
+// stores and secret backends, and it is the only thing their stored data
+// consists of. Changing one of these strings breaks that data while the Go API
+// stays stable, so no tool in the Go toolchain can see it: apidiff, go vet,
+// gofmt and a consumer's own round-trip test all report nothing across a release
+// that moves a duration from "30s" to a nanosecond count.
 //
 // So a change to a row here is a major version of the module that owns it, and
 // it ships with a written migration. Editing one is not editing a test.
 //
-// The promise is exactly as wide as this table. An admitted member with no row
-// is not covered by decision, it is uncovered by accident, which is why the
-// completeness check joins the table against core's own set rather than trusting
-// the count: run for the first time, that check reported eighteen admitted
-// members against eleven rows, and the seven with no coverage were the integer
-// widths nobody would think to doubt.
-//
-// # A golden file was considered and refused
-//
-// Writing the third column to testdata and comparing would be the same table
-// with a better diff, and a reviewer would see a representation change as a file
-// change - which is exactly what ADR-0013 wants. It is refused because a golden
-// file grows an -update flag within one release, and then the change ADR-0013
-// exists to make visible is a flag. ADR-0002's "the harness is a table, not a
-// generator" is the same instinct one level up, and it is also why no golden
-// below is computed: a golden produced by strconv.FormatInt would assert that
-// FormatInt agrees with FormatInt.
-//
-// # The values are part of the decision
-//
-// The harness is exactly as good as its value lists, and that is measured rather
-// than feared: against a knowingly lossy float64 codec formatting at six digits,
-// a four-value float row caught one value, because six digits happens to be
-// lossless for the other three. So ADR-0005 fixes the lists rather than leaving
-// them to whoever writes the test, and every row below carries its type's zero
-// value, its extremes, and the values that historically break it. For floats
-// that is 0, -0, 0.1, 1.0/3.0, the largest and the smallest non-zero magnitude,
-// both infinities and NaN; for integers the zero and both bounds of the width;
-// for strings the empty string, an embedded NUL, non-UTF-8 bytes and text
-// containing a separator; for composites nil and empty.
-//
-// A caller appends to the result, which is why it is a function returning a
-// fresh slice rather than a package-level variable:
-//
-//	ferrytest.RoundTrip(t, ferrytest.MemPlane(), ferrytest.CoreTypes())
+// Every row carries its type's zero value, its extremes and the values that
+// historically break it. For floats that is 0, -0, 0.1, 1.0/3.0, the largest and
+// the smallest non-zero magnitude, both infinities and NaN; for integers the
+// zero and both bounds of the width; for strings the empty string, an embedded
+// NUL, non-UTF-8 bytes and text containing a separator; for composites nil and
+// empty.
 func CoreTypes() []Proof {
 	out := make([]Proof, 0, coreRows)
 

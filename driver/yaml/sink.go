@@ -28,15 +28,18 @@ var (
 // than mangled.
 const indent = 2
 
-// Sink writes a struct's addresses into a YAML file.
+// Sink writes a struct's fields into a YAML file.
 //
-// A dump is a merge into whatever document is already at the path: the
-// addresses ferry maps are replaced, and everything else - comments, key order,
-// keys no struct field names - is left as it was. That is what makes a
+// A save is a merge into whatever document is already at the path: the keys
+// your struct maps are replaced, and everything else - comments, key order, and
+// every key no field of yours maps - is left as it was. That is what makes a
 // hand-maintained config file survive being loaded and written back.
 //
-// It is a separate type from [Source] for the reason recorded there, and it
-// implements [ferry.Committer] and [ferry.Releaser] because it stages.
+// The write is atomic. A temporary file beside yours is renamed into place once
+// everything has been written, and a save that fails leaves your file byte for
+// byte as it was with no temporary left behind.
+//
+// It is a separate type from [Source] for the reason recorded there.
 type Sink struct {
 	path string
 }
@@ -44,16 +47,16 @@ type Sink struct {
 // NewSink returns a sink over the YAML file at path.
 //
 // It touches nothing, and in particular it does not check that the path can be
-// written. A sink over an unwritable directory is legal to build and legal to
-// bind, and refuses when a dump opens it (ADR-0004).
+// written. A sink over an unwritable directory is legal to build, and the save
+// refuses when it starts.
 func NewSink(path string) Sink { return Sink{path: path} }
 
 // Bind takes the address set and reads nothing out of it, for the reason
-// [Source.Bind] records: this driver walks segments and builds no plane key.
+// [Source.Bind] records.
 //
-// It does no I/O, so a plane that cannot be written is not refused here. The
-// refusal lands inside the open, which is after zero writes, rather than at the
-// first Set, which has already half-written the plane.
+// It does no I/O, so a file that cannot be written is not refused here. The
+// refusal lands when the save starts, which is before anything has been
+// written, rather than part way through.
 func (s Sink) Bind(_ *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 	path := s.path
 

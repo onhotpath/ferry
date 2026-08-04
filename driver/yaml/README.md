@@ -108,4 +108,4 @@ This is a known limitation and is tracked in [#156](https://github.com/onhotpath
 
 ## More
 
-The package documentation explains the reasoning behind each of the above, and the design records that decided them are in [`docs/adr/`](../../docs/adr/).
+The [package documentation](https://pkg.go.dev/github.com/onhotpath/ferry/driver/yaml) is the reference for everything above, and the design records behind it are in [`docs/adr/`](../../docs/adr/).

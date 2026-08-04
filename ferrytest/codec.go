@@ -24,55 +24,45 @@ import (
 //	    ferrytest.Codec(t, reg)
 //	}
 //
-// It takes no [context.Context], for [Driver]'s reason, and every case cites the
-// ADR sentence it executes.
+// It takes no [context.Context], for [Driver]'s reason.
 //
 // # What it promises, exactly
 //
 // Two things, and the second is bounded in a way worth reading before relying
 // on it.
 //
-// The registration machinery works in this build of core. The generic wrapper
-// is the single piece of reflection the registration API owns, it exists so
-// that a registrant never writes a reflect.Value, and a defect in it is a
-// defect in every codec anybody ever registers. Two such defects were found
-// three prototypes in, both one token wide, and neither was catchable by any
-// proof a registrant could write, because the codec itself was correct
-// (ADR-0009). Cases 2 and 3 are those two, and they run against probes declared
-// here, because what they assert is a property of the machinery rather than of
-// any one registration.
+// That ferry's registration machinery works in this build. A defect in the piece
+// of reflection every registration goes through is a defect in every codec
+// anybody ever registers, and it is one no proof a registrant could write would
+// catch, because their codec is correct.
 //
-// And every codec in reg survives its own zero value. For each type the
-// registry holds, the suite builds an annotated root around that type and walks
-// it: the zero value encodes, what ferry wrote loads back, encoding what came
-// back writes the same thing again, and the same text spelled String loads
-// identically, which is core's donation seen end to end. The zero value is the
-// bound because it is the only value core holds without being handed one.
+// And that every codec in reg survives its own zero value. For each type the
+// registry holds, the suite builds an annotated struct around that type and
+// walks it: the zero value encodes, what ferry wrote loads back, encoding what
+// came back writes the same thing again, and the same text read as a plain
+// string loads identically. The zero value is the bound because it is the only
+// value this suite has without being handed one.
 //
 // # What it does not promise
 //
 // It does not check your codec away from its zero value, and most of what makes
-// a codec wrong lives there. A lossy codec, a constant codec and a codec that
-// declares one kind and emits another all pass every case here, because all
-// three are correct at the zero value. So do two keys that fold to one address,
-// which need two values to see at all.
+// a codec wrong lives there. A lossy codec, a constant codec, and a codec that
+// declares one kind and emits another, all pass every case here, because all
+// three are correct at the zero value. So do two map keys that fold to one
+// address, which need two values to see at all.
 //
-// Cases 4 and 6 stay on this package's probes for that reason rather than for
-// want of reach: they need a value away from the zero and two distinct keys
-// respectively, and nothing core holds supplies either.
+// What closes that gap is [RoundTrip], which drives your own values through the
+// real engine, [Injective] over the values you will use as map keys, and
+// [Complete], which reports a registered type you wrote no [Proof] for. Run all
+// four. A green Codec on its own says the machinery is sound and your codec is
+// sound at one value, and that is the whole of it.
 //
-// The gate that closes this is [Complete], which reports every registered type
-// with no [Proof] against it, and [RoundTrip], which drives the registrant's own
-// values through the real engine. Run all three. A green Codec on its own says
-// the machinery is sound and your codec is sound at one value, and that is the
-// whole of it.
-//
-// # It compiles against reg
+// # It freezes reg
 //
 // A registry freezes at its first retained schema compile, and this suite
-// performs one for every type reg holds. So reg is frozen when Codec returns,
-// and every [ferry.Registry.Register] call must happen before the call to
-// Codec rather than after it.
+// performs one for every type reg holds. So every
+// [ferry.Registry.Register] call has to happen before the call to Codec rather
+// than after it.
 func Codec(t T, reg *ferry.Registry, opts ...ferry.Option) {
 	t.Helper()
 

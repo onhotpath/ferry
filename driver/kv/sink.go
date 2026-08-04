@@ -11,19 +11,16 @@ import (
 
 // Sink is the write half of a key-value plane.
 //
-// It stages every write and performs them at Commit, so it implements
-// [ferry.Committer] and not [ferry.Releaser]: there is nothing to release,
-// because the client is the sink's and outlives every open of it. That pairing
-// is the axis ADR-0004 admits this driver for - a transactional store commits
-// with nothing to release, where a staging file sink needs both - and it is why
-// neither method takes a cause: Commit runs only where the walk succeeded, and
-// closed-without-Commit is the abort signal a driver reads.
+//	sink, err := kv.NewSink(store, kv.WithPrefix("app"))
+//	err = ferry.Dump(ctx, cfg, sink)
 //
-// Staging is what makes a failed dump leave the store untouched. It also buys a
-// better error set: core interleaves encoding and writing for a sink that
-// stages, so one run reports both the values that have no representation and
-// the addresses the store refused, where a flat sink learns the second only
-// after the first is fixed.
+// It stages every write and performs them together at the end, so a save that
+// fails leaves the store untouched. It also means one save reports every field
+// it could not write, rather than stopping at the first.
+//
+// Staging is not a transaction. The writes themselves go through your [Client]
+// one key at a time, so a store that fails part way through the commit is left
+// part way through it.
 type Sink struct {
 	client Client
 	prefix []string
@@ -36,10 +33,9 @@ var _ ferry.Sink = (*Sink)(nil)
 //	sink, err := kv.NewSink(consulClient, kv.WithPrefix("app"))
 //	err = ferry.Dump(ctx, cfg, sink)
 //
-// It refuses [WithBatch], loudly rather than by ignoring it: a sink stages every
-// write and commits them together, so there is no lazy half for that Option to
-// choose between, and an Option silently doing nothing is exactly what ADR-0001
-// rules out.
+// It refuses [WithBatch] rather than ignoring it: a save stages every write and
+// commits them together, so there is no per-key half of that Option to choose
+// against.
 func NewSink(client Client, opts ...Option) (*Sink, error) {
 	cfg, err := newConfig(opts)
 	if err != nil {
@@ -58,9 +54,11 @@ func NewSink(client Client, opts ...Option) (*Sink, error) {
 	return &Sink{client: client, prefix: cfg.prefix}, nil
 }
 
-// Bind precomputes this schema's store keys and checks them, exactly as
-// [Source.Bind] does and for the same reasons. It does no I/O, so a sink binds
-// successfully against a store it may not be allowed to write to.
+// Bind computes this schema's store keys and checks them, exactly as
+// [Source.Bind] does and for the same reasons.
+//
+// It does no I/O, so a sink binds successfully against a store it may not be
+// allowed to write to. See [ACL] for where that is discovered.
 func (s *Sink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 	keys, err := ferry.NewKeys(addrs, driverName, keyFunc(s.prefix))
 	if err != nil {

@@ -47,17 +47,12 @@ func BitEq[T ~float32 | ~float64](a, b T) bool {
 // because a slice of a type whose == is wrong is still a slice: []time.Time
 // needs SliceEq(time.Time.Equal) and there is nothing else it could use.
 //
-// Nil and empty are one value here, and that is ADR-0005's decision rather than
-// a convenience. A composite with no elements is written as Null at its own
-// address, whether it is nil or empty, so the two are one observation on every
-// plane and a relation that separated them would report a failure ferry has
-// deliberately chosen.
-//
-// The golden column is what keeps the conflation honest, and it earned its
-// place on exactly this the first time the table ran: []byte is admitted as a
-// leaf at kind Bytes, so the composite rule does not reach it, and []byte(nil)
-// writes null where []byte{} writes bytes(""). The relation conflates them; the
-// golden reports the difference (ADR-0014).
+// Nil and empty are one value here. A composite with no elements is written the
+// same way whether it is nil or empty, so the two are one observation on every
+// plane, and a relation separating them would report a failure ferry has
+// deliberately chosen. Where the difference does matter - []byte is a leaf and
+// not a composite, so []byte(nil) and []byte{} are written differently - the
+// [Case] golden is what reports it.
 func SliceEq[T any](eq func(a, b T) bool) func(a, b []T) bool {
 	return func(a, b []T) bool {
 		if len(a) != len(b) {
@@ -77,13 +72,12 @@ func SliceEq[T any](eq func(a, b T) bool) func(a, b []T) bool {
 // MapEq lifts a relation on values to a relation on maps, over keys compared
 // with ==.
 //
-// The key is comparable because a Go map key already is, and because a map key
-// addresses a plane: ADR-0005 makes a key codec injective under == over ferry's
-// own key text, so two keys that are == are one address and there is nothing
-// finer for this relation to say.
+// The keys are compared with == and never with a lifted relation, because two
+// keys that are == are one address on the plane and there is nothing finer for
+// this relation to say. [Injective] is what checks that two keys which are not
+// == stay two addresses.
 //
-// Nil and empty are one value here too, and for ADR-0005's reason rather than
-// for convenience, exactly as in [SliceEq].
+// Nil and empty are one value here too, for [SliceEq]'s reason.
 func MapEq[K comparable, V any](eq func(a, b V) bool) func(a, b map[K]V) bool {
 	return func(a, b map[K]V) bool {
 		return len(a) == len(b) && sameEntries(a, b, eq)

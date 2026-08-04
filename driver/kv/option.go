@@ -7,11 +7,8 @@ import (
 	"strings"
 )
 
-// Option is a setting handed to [NewSource] or [NewSink].
-//
-// The set is closed, because the config it writes to is unexported: every
-// Option is one this driver decided on, and a caller who needs a different key
-// space writes a [Client] that has one rather than a fourth Option here.
+// Option is a setting handed to [NewSource] or [NewSink]. The set is closed at
+// two: [WithPrefix] and [WithBatch].
 type Option func(*config) error
 
 // config is the resolved Option set one source or sink runs under.
@@ -49,24 +46,16 @@ func apply(c *config, o Option) error {
 	return o(c)
 }
 
-// WithPrefix places every address this driver reaches under these segments, so
-// that /db/host with WithPrefix("app", "cfg") is the key "app/cfg/db/host".
+// WithPrefix places every key this driver reaches under these segments, so that
+// a db.host field with WithPrefix("app", "cfg") reads the key "app/cfg/db/host".
 //
-// It takes segments and never a key, and that is ADR-0003's rule rather than a
-// signature preference:
+// It takes one argument per level and never a path. WithPrefix("app/cfg") is
+// refused up front, so a prefix cannot smuggle in a level you did not mean, and
+// there is no way to spell a prefix that runs into the first key without a
+// separator between them.
 //
-//	Under a structured address a prefix can only prepend a segment.
-//
-// xload's prefix is text concatenation onto a flat key, so prefix "DB_" with
-// key "HOST" gives DB_HOST, prefix "DB" gives DBHOST, and prefix "DB_" with key
-// "_HOST" gives DB__HOST. All three are legal and two are typos nothing can
-// detect, because the separator is not part of the model. Here it is: a segment
-// spelling the separator is refused at this call, so the concatenated form is
-// not merely discouraged but unexpressible, and a two-level prefix is spelled
-// as two arguments.
-//
-// It may be given once. Two prefixes are a precedence question wearing a
-// convenience costume, and nothing in the call says which is meant.
+// It may be given once. Two prefixes are two key spaces and nothing in the call
+// says which is meant, so a second one is refused rather than quietly winning.
 func WithPrefix(segments ...string) Option {
 	return func(c *config) error {
 		switch {
@@ -109,23 +98,19 @@ func prefixSegments(segments []string) error {
 	return nil
 }
 
-// WithBatch fetches the whole plane in one call when a reader is opened,
-// instead of one call per address as each is asked for.
+// WithBatch fetches the whole prefix in one call when the load starts, instead
+// of one call per field as each is asked for.
 //
-// It is the batch-versus-lazy choice ADR-0004 keeps inside the driver, and it
-// is one bool: Bind was handed the whole address set before any I/O, so an open
-// may fetch everything or fetch nothing, and ferry never learns which. Measured
-// on a three-address schema: three backend calls lazily and one in batch, with
-// identical results.
+//	src, err := kv.NewSource(store, kv.WithPrefix("app"), kv.WithBatch())
 //
-// Which one to want is a property of the plane and not of ferry. Batch is one
-// round trip and a snapshot that cannot change under the walk; lazy reads only
-// the addresses the walk actually reaches, which is the cheaper of the two
-// against a store whose prefix holds far more than this schema names.
+// Pick by what your store costs you. Batch is one round trip and a snapshot that
+// cannot change under the load; per-key reads only the fields your struct
+// actually names, which is cheaper against a store whose prefix holds far more
+// than you want. The struct you get back is identical either way.
 //
-// It is a source's Option. [NewSink] refuses it, because a sink stages every
-// write and commits them together, so there is no lazy half for it to choose
-// between.
+// It is a load-time Option. [NewSink] refuses it rather than ignoring it,
+// because a save stages every write and commits them together, so there is no
+// per-key half of it to choose against.
 func WithBatch() Option {
 	return func(c *config) error {
 		c.batch = true

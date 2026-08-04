@@ -115,4 +115,4 @@ So `ferry.Dump` with this package does not compile, rather than failing at run t
 
 ## More
 
-The package documentation carries the full reasoning behind each of the above, and the design records that decided them are in [`docs/adr/`](../../docs/adr/).
+The [package documentation](https://pkg.go.dev/github.com/onhotpath/ferry/driver/env) is the reference for every option above, and the design records behind them are in [`docs/adr/`](../../docs/adr/).

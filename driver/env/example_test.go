@@ -56,8 +56,8 @@ type Service struct {
 //
 // ferry.TagKey is core's Option and is not this driver's, so it renames the key
 // for every type in the call and for every plane, not only for this one. It
-// names where to look and never what the content means: the grammar inside the
-// tag is the same one ADR-0008 specifies.
+// names where to look and never what the content means: the name, required and
+// default= inside the tag are unchanged.
 func Example_tagKey() {
 	os.Setenv("SERVICE", "checkout")
 	os.Unsetenv("TIMEOUT") // not set at all, so the default applies

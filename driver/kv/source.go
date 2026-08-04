@@ -12,14 +12,15 @@ import (
 
 // Source is the read half of a key-value plane.
 //
-// It is a separate type from [Sink] rather than the other half of one, which is
-// ADR-0004's shape and costs a round trip naming the plane twice: one type
-// cannot have two Bind methods, and the payment buys a plane with no honest
-// Dump the ability to refuse one at compile time.
+//	src, err := kv.NewSource(store, kv.WithPrefix("app"))
+//	cfg, err := ferry.Load[Config](ctx, src)
 //
-// One source may be bound many times and one binding opened many times. Nothing
-// mutable is shared between them: the key table is written once inside Bind and
-// never again, and everything an open mints belongs to that open (ADR-0012).
+// It is a separate type from [Sink], so a round trip names the store twice.
+// The repetition buys the refusal being a compile error: code handed only a
+// Source cannot save through it.
+//
+// One source may be used by many loads at once, from many goroutines. Nothing
+// mutable is shared between them.
 type Source struct {
 	client Client
 	prefix []string
@@ -36,10 +37,8 @@ var _ ferry.Source = (*Source)(nil)
 //	src, err := kv.NewSource(consulClient, kv.WithPrefix("app"), kv.WithBatch())
 //	cfg, err := ferry.Load[Config](ctx, src)
 //
-// It reports every Option that was wrong rather than the first one, and it
-// refuses a nil client here rather than at the first read: a plane that is not
-// there is a mistake in the program that built it, and the constructor is the
-// call that can still say so.
+// It reports every Option that was wrong rather than only the first, and it
+// refuses a nil client here rather than at the first read.
 func NewSource(client Client, opts ...Option) (*Source, error) {
 	cfg, err := newConfig(opts)
 	if err != nil {
@@ -57,18 +56,14 @@ func NewSource(client Client, opts ...Option) (*Source, error) {
 var errNoClient = errors.New("kv: the client is nil, so there is no store to reach: assign one, or check the " +
 	"error of the constructor that was meant to return it")
 
-// Bind precomputes this schema's store keys and checks them, and does no I/O.
+// Bind computes this schema's store keys and checks them, and does no I/O.
 //
-// Both of ADR-0003's obligations run here, over the whole static address set
-// with container addresses included, and they run through [ferry.NewKeys]
-// rather than a table of this driver's own: a hand-rolled map discharges
-// neither check and gets no diagnostic saying so. The error it produces is
-// returned unchanged, because it already carries core's moment, core's class
-// and one element per offending address.
+// Two things are checked before anything is read: that every field has a store
+// key at all, and that no two fields want the same key. A schema failing either
+// is refused here, in one error naming every offending field.
 //
-// It cannot fail for anything about the store, which is the point of it taking
-// no context: a source binds against a backend nothing has reached yet, and the
-// refusal lands in the open instead (ADR-0004).
+// It cannot fail for anything about the store itself. A store that is
+// unreachable, or a token that has expired, is reported when the load starts.
 func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 	keys, err := ferry.NewKeys(addrs, driverName, keyFunc(s.prefix))
 	if err != nil {

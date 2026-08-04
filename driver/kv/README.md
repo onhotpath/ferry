@@ -130,4 +130,4 @@ A token that can write some paths and not others reports every key it was refuse
 
 ## More
 
-The package documentation explains the reasoning behind each of the above, and the design records that decided them are in [`docs/adr/`](../../docs/adr/).
+The [package documentation](https://pkg.go.dev/github.com/onhotpath/ferry/driver/kv) is the reference for everything above, and the design records behind it are in [`docs/adr/`](../../docs/adr/).

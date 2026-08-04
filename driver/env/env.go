@@ -11,17 +11,13 @@ import (
 //
 //	cfg, err := ferry.Load[Config](ctx, env.New())
 //
-// There is no env.Sink beside it, and that is a property of the plane rather
-// than a decision about scope: setting the process's own environment is
-// process-global mutation nobody wants, and the Dump target people actually want
-// is a .env file or an environ slice, both of which are formats and therefore
-// plane knowledge (ADR-0004). So dumping to env is a compile error at the call
-// site, and this package's own tests hold it to that.
+// There is no env.Sink beside it. This package loads only, so [ferry.Dump]
+// through it is a compile error at the call site rather than a failure at run
+// time.
 //
 // A Source is safe for use from many goroutines, and so is a binding it hands
-// back: the plane keys a binding holds are computed once, at Bind, and nothing
-// writes to them afterwards. What each open mints for itself belongs to that
-// open alone (ADR-0012).
+// back: the names a binding holds are computed once, at Bind, and nothing writes
+// to them afterwards.
 //
 // The zero Source has no environment to read and no separator to join with, so
 // it refuses at Bind rather than guessing. Build one with [New].
@@ -35,10 +31,11 @@ var _ ferry.Source = (*Source)(nil)
 
 // New builds a [Source] over the process environment.
 //
-// With no options it joins segments with [DefaultSeparator], returns dynamic
-// segments in [Lower] form, and reads the process environment. Each of those is an
-// option because each is a decision this driver cannot make for every schema:
-// see [Separator], [Canonical] and [Environ].
+//	cfg, err := ferry.Load[Config](ctx, env.New())
+//
+// With no options it joins nested fields with [DefaultSeparator], returns map
+// keys in [Lower] case, and reads the process environment. Change any of the
+// three with [Separator], [Canonical] and [Environ].
 func New(opts ...Option) *Source {
 	c := defaults()
 	for _, o := range opts {
@@ -51,16 +48,14 @@ func New(opts ...Option) *Source {
 // Bind computes this schema's environment variable names and checks them, and it
 // is where a schema this plane cannot hold is refused.
 //
-// Both of ADR-0003's checks land here, before any environment is read: legality,
-// which asks whether the plane can name an address at all, and injectivity,
-// which asks whether the fold collapses two addresses into one. Neither is this
-// driver's own arithmetic - [ferry.NewKeys] runs both over the whole address set
-// and reports every offending address with both of the pair it collided with,
-// sorted, in one error.
+// Two things are checked, before any environment is read: that every field has
+// an environment variable name at all, and that no two fields fold to the same
+// name. A schema failing either is refused here, in one error that names every
+// offending field along with the one it collided with.
 //
 // It does no I/O, so it succeeds whatever the environment holds, and a Source
-// whose options do not describe a usable plane is refused here rather than at
-// the first read.
+// built with an option it cannot use is refused here rather than at the first
+// read.
 func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 	if err := s.cfg.validate(); err != nil {
 		return nil, err
