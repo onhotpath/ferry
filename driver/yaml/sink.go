@@ -37,7 +37,13 @@ const indent = 2
 //
 // An anchor is the exception, and it is deliberate. A value ferry replaces keeps
 // the anchor you wrote on it, so a key no field maps that aliases it reads back
-// as the value just written: its line does not change and its value does.
+// as the value just written: its line does not change and its value does. A key
+// that is itself an alias is written through to the anchor it names, so that
+// line does not change either and the value lands where the two share it.
+//
+// The one refusal that follows is two keys your struct maps that share an
+// anchor, saved with different values: the file can hold only one of them, so
+// the save fails with [ferry.ErrPlane] and your file is left as it was.
 //
 // The write is atomic. A temporary file beside yours is renamed into place once
 // everything has been written, and a save that fails leaves your file byte for
@@ -98,6 +104,8 @@ func open(ctx context.Context, path string, cfg config) (*writer, error) {
 		return nil, err
 	}
 
+	untagMerges(doc)
+
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".ferry-*")
 	if err != nil {
 		// ErrReadOnly is the class whatever the reason the file could not be
@@ -106,7 +114,7 @@ func open(ctx context.Context, path string, cfg config) (*writer, error) {
 		return nil, fmt.Errorf("%w: no replacement could be staged beside it: %w", ferry.ErrReadOnly, err)
 	}
 
-	return &writer{path: path, doc: doc, tmp: tmp, durable: cfg.durable}, nil
+	return &writer{path: path, doc: doc, tmp: tmp, shared: hasAlias(doc), durable: cfg.durable}, nil
 }
 
 // writer is one open dump: the document being built up, and the file that will
@@ -124,13 +132,28 @@ func open(ctx context.Context, path string, cfg config) (*writer, error) {
 // durable is the whole of the Durable option, read once per open and never seen
 // by ferry (#188). It gates the two syncs and nothing else: the staging, the
 // mode inheritance and the rename are what a save is either way.
+//
+// claims is what two addresses meeting at one node are caught by, and shared is
+// what says whether they can meet at all (#198). Only a document holding an
+// alias makes two addresses reach one node, so a document with none records
+// nothing and every ordinary dump pays for one bool.
 type writer struct {
-	path string
-	doc  *yamlv3.Node
-	tmp  *os.File
+	path   string
+	doc    *yamlv3.Node
+	tmp    *os.File
+	claims map[*yamlv3.Node]claim
 
+	shared  bool
 	durable bool
 	swapped bool
+}
+
+// claim is one address's write at one node: where it came from, and what it put
+// there.
+type claim struct {
+	addr ferry.Path
+	tag  string
+	text string
 }
 
 // Set writes one value at one address, creating the containers above it.
@@ -152,6 +175,10 @@ func (w *writer) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
 		return ferry.ErrorAt(addr, err)
 	}
 
+	if err := w.claim(addr, at, spelled); err != nil {
+		return ferry.ErrorAt(addr, err)
+	}
+
 	// The comments around the value are the operator's and survive the value
 	// being replaced. The value, the tag and the style are ferry's.
 	spelled.HeadComment, spelled.LineComment, spelled.FootComment = at.HeadComment, at.LineComment, at.FootComment
@@ -164,6 +191,42 @@ func (w *writer) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
 	spelled.Anchor = at.Anchor
 
 	*at = *spelled
+
+	return nil
+}
+
+// claim records that addr wrote this node, and refuses a second address that
+// arrives at the same node wanting something else (#198).
+//
+// Two addresses meet at one node when the walk to one of them crosses an alias
+// to the other, which is a document saying the two are one value while the
+// destination says they are two. Writing both would leave the file holding
+// whichever went last, so a dump that reported success would load back a value
+// no field of the caller's held. It is refused before anything is written and
+// the plane is left byte for byte as it was.
+//
+// The node written need not be the anchored one: an anchor on a mapping is
+// shared by every leaf under it, and those leaves carry no anchor of their own.
+// So what gates the bookkeeping is the document holding an alias at all, and not
+// the node in hand.
+func (w *writer) claim(addr ferry.Path, at, spelled *yamlv3.Node) error {
+	if !w.shared {
+		return nil
+	}
+
+	held, taken := w.claims[at]
+	if taken && (held.tag != spelled.Tag || held.text != spelled.Value) {
+		return fmt.Errorf("%w: this address and %s are one value in the plane, which shares it through an alias, "+
+			"and the dump gave them different values", ferry.ErrPlane, held.addr)
+	}
+
+	if !taken {
+		if w.claims == nil {
+			w.claims = make(map[*yamlv3.Node]claim, 1)
+		}
+
+		w.claims[at] = claim{addr: addr, tag: spelled.Tag, text: spelled.Value}
+	}
 
 	return nil
 }

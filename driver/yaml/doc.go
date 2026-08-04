@@ -40,11 +40,26 @@
 // host is. Dropping the anchor instead would leave `*h` pointing at nothing and
 // the file would no longer parse for any reader.
 //
-// It does not work the other way round. A key your struct maps that is itself an
-// alias, as `port: *b` is, is saved as its own value and stops sharing the
-// anchor: `base: &b 5432` with `port: *b` becomes `base: &b 5432` and
-// `port: 5433`. The file still parses and still loads; what is lost is the
-// linkage.
+// It works the other way round too. Saving a key that is itself an alias writes
+// through to the anchor it names, so given `base: &b 5432` and `port: *b`,
+// saving port as 5433 writes `base: &b 5433` and leaves the `port: *b` line
+// alone. The value moves and the linkage survives, which is the same reading of
+// an anchor.
+//
+// Two consequences follow, and both are worth knowing before you write one.
+//
+// A save refuses where your struct disagrees with the document about two keys
+// that share an anchor. If `base` and `port` above are both mapped and you save
+// 1 and 2, the file can hold only one of them, so the save fails with
+// [ferry.ErrPlane] naming the second address and your file is left as it was.
+// Saving the same value to both is fine.
+//
+// An alias naming a scalar, at an address your struct says is a mapping or a
+// list, is replaced rather than followed: given `base: &b 5432` and `db: *b`,
+// saving db as a struct writes `db:` with your fields under it and leaves
+// `base` alone. Following it would rewrite `base` itself under every other alias
+// to it, and there is nothing to be gained, because a scalar has no keys of its
+// own to keep.
 //
 // # Types survive the trip
 //

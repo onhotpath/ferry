@@ -439,6 +439,347 @@ func TestAnAliasFollowsTheValueItNames(t *testing.T) {
 	}
 }
 
+// TestAMappedAliasIsWrittenThroughToItsAnchor is the leaf half of #198: the
+// address ferry writes is itself an alias.
+//
+// The write lands on the anchor, so the alias line is byte for byte what the
+// operator wrote and the linkage survives. Replacing the alias node instead
+// would have written `port: 5433` and quietly unshared it from `base`.
+func TestAMappedAliasIsWrittenThroughToItsAnchor(t *testing.T) {
+	type mapped struct {
+		Port int `ferry:"port"`
+	}
+
+	type both struct {
+		Base int `ferry:"base"`
+		Port int `ferry:"port"`
+	}
+
+	path := write(t, "base: &b 5432\nport: *b\n")
+
+	if err := ferry.Dump(t.Context(), mapped{Port: 5433}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, want := read(t, path), "base: &b 5433\nport: *b\n"; got != want {
+		t.Errorf("the plane holds %q, want %q: a mapped alias is written through to the anchor it names", got, want)
+	}
+
+	after, err := ferry.Load[both](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("loading back what the dump wrote: %v", err)
+	}
+
+	if after.Port != 5433 || after.Base != 5433 {
+		t.Errorf("the plane loads back as %+v, want both 5433: an alias shares one value with its anchor", after)
+	}
+}
+
+// TestAnAliasedMappingKeepsTheKeysItShares is the container half of #198, and it
+// is the half that loses data rather than a linkage.
+//
+// `db` is an alias to a mapping and only `db/port` is mapped. Replacing the
+// alias node with a fresh mapping wrote `db: {port: 5433}`, so `db/host` - which
+// read back as localhost before the dump and which no field maps - was gone
+// afterwards.
+func TestAnAliasedMappingKeepsTheKeysItShares(t *testing.T) {
+	type db struct {
+		Port int `ferry:"port"`
+	}
+
+	type mapped struct {
+		DB db `ferry:"db"`
+	}
+
+	type full struct {
+		Host string `ferry:"host"`
+		Port int    `ferry:"port"`
+	}
+
+	type both struct {
+		DB full `ferry:"db"`
+	}
+
+	path := write(t, "base: &b\n  host: localhost\n  port: 5432\ndb: *b\n")
+
+	if err := ferry.Dump(t.Context(), mapped{DB: db{Port: 5433}}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, want := read(t, path), "base: &b\n  host: localhost\n  port: 5433\ndb: *b\n"; got != want {
+		t.Errorf("the plane holds %q, want %q", got, want)
+	}
+
+	after, err := ferry.Load[both](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("loading back what the dump wrote: %v", err)
+	}
+
+	if after.DB.Host != "localhost" {
+		t.Errorf("db/host reads back as %q after a dump at db/port, want %q: a key no field maps and that the "+
+			"address only reached through an alias is not the dump's to drop", after.DB.Host, "localhost")
+	}
+}
+
+// TestAnAliasedSequenceIsWrittenThrough is the same walk through a sequence
+// rather than a mapping, which is the other container kind an address can need.
+func TestAnAliasedSequenceIsWrittenThrough(t *testing.T) {
+	type mapped struct {
+		Other []string `ferry:"other"`
+	}
+
+	path := write(t, "list: &l\n  - a\n  - b\nother: *l\n")
+
+	if err := ferry.Dump(t.Context(), mapped{Other: []string{"a", "z"}}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, want := read(t, path), "list: &l\n  - a\n  - z\nother: *l\n"; got != want {
+		t.Errorf("the plane holds %q, want %q", got, want)
+	}
+}
+
+// TestAnAliasAtASequencePositionIsWrittenThrough puts the alias at a position
+// rather than under a key, which is the segment kind the mapping cases never
+// reach.
+func TestAnAliasAtASequencePositionIsWrittenThrough(t *testing.T) {
+	type mapped struct {
+		Ports []int `ferry:"ports"`
+	}
+
+	path := write(t, "base: &b 5432\nports:\n  - *b\n")
+
+	if err := ferry.Dump(t.Context(), mapped{Ports: []int{5433}}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, want := read(t, path), "base: &b 5433\nports:\n  - *b\n"; got != want {
+		t.Errorf("the plane holds %q, want %q", got, want)
+	}
+}
+
+// TestAnAliasToAScalarIsReplacedWhereTheAddressNeedsAContainer is where writing
+// through stops, and the guard is what keeps it from doing damage.
+//
+// `db` aliases a scalar and the destination type says db is a mapping. Following
+// the alias would rewrite `base` into a mapping under `other`, which no field
+// maps and which reads back as 5432 - and it would keep nothing, because an
+// anchored scalar has no members for the reshape to lose. So the alias node
+// itself is replaced, which is what this driver did before #198.
+func TestAnAliasToAScalarIsReplacedWhereTheAddressNeedsAContainer(t *testing.T) {
+	type db struct {
+		Port int `ferry:"port"`
+	}
+
+	type mapped struct {
+		DB db `ferry:"db"`
+	}
+
+	path := write(t, "base: &b 5432\ndb: *b\nother: *b\n")
+
+	if err := ferry.Dump(t.Context(), mapped{DB: db{Port: 5433}}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, want := read(t, path), "base: &b 5432\ndb:\n  port: 5433\nother: *b\n"; got != want {
+		t.Errorf("the plane holds %q, want %q: an alias naming a scalar at an address that has to be a mapping "+
+			"is replaced rather than followed", got, want)
+	}
+}
+
+// TestTwoAddressesAtOneAnchorAreRefused is the hazard writing through an alias
+// introduces, caught before anything is written (#198).
+//
+// The document says base and port are one value and the destination says they
+// are two. Whichever the walk reached last would have won, so a dump that
+// returned nil would load back a value the caller never held. It is refused, and
+// the plane is left byte for byte as it was.
+func TestTwoAddressesAtOneAnchorAreRefused(t *testing.T) {
+	type config struct {
+		Base int `ferry:"base"`
+		Port int `ferry:"port"`
+	}
+
+	const doc = "base: &b 5432\nport: *b\n"
+
+	path := write(t, doc)
+
+	err := ferry.Dump(t.Context(), config{Base: 1, Port: 2}, yaml.NewSink(path))
+	if err == nil {
+		t.Fatal("two addresses were written to one anchored value with different values, and the file can hold " +
+			"only one of them")
+	}
+
+	if !errors.Is(err, ferry.ErrPlane) {
+		t.Errorf("the refusal was %v, want an error carrying ferry.ErrPlane: what refused is the shape of the "+
+			"document rather than the value", err)
+	}
+
+	e, ok := errors.AsType[*ferry.Error](err)
+	if !ok {
+		t.Fatalf("the refusal was %T, want a *ferry.Error carrying the address", err)
+	}
+
+	if got, want := e.Address(), ferry.At("port"); got != want {
+		t.Errorf("the refusal names %s, want %s: the address that arrived second is the one that could not be "+
+			"written", got, want)
+	}
+
+	if got := read(t, path); got != doc {
+		t.Errorf("the plane holds %q, want %q: a dump that failed leaves the plane byte-identical", got, doc)
+	}
+
+	onlyPlane(t, filepath.Dir(path))
+}
+
+// TestTwoAddressesUnderOneAnchorAreRefused is the same collision one level down,
+// where neither node written carries an anchor of its own.
+//
+// The anchor is on the mapping and the addresses land on a leaf under it, so a
+// guard that asked whether the node in hand was anchored would have let this
+// through - and it wrote 2 where the caller's struct said 1, with the dump
+// returning nil.
+func TestTwoAddressesUnderOneAnchorAreRefused(t *testing.T) {
+	type db struct {
+		Port int `ferry:"port"`
+	}
+
+	type config struct {
+		Base db `ferry:"base"`
+		DB   db `ferry:"db"`
+	}
+
+	const doc = "base: &b\n  port: 5432\ndb: *b\n"
+
+	path := write(t, doc)
+
+	err := ferry.Dump(t.Context(), config{Base: db{Port: 1}, DB: db{Port: 2}}, yaml.NewSink(path))
+	if err == nil {
+		t.Fatal("two addresses under one anchored mapping were given different values, and the file can hold " +
+			"only one of them")
+	}
+
+	if !errors.Is(err, ferry.ErrPlane) {
+		t.Errorf("the refusal was %v, want an error carrying ferry.ErrPlane", err)
+	}
+
+	if got := read(t, path); got != doc {
+		t.Errorf("the plane holds %q, want %q: a dump that failed leaves the plane byte-identical", got, doc)
+	}
+
+	onlyPlane(t, filepath.Dir(path))
+}
+
+// TestTwoAddressesAtOneAnchorAgreeing is the other side of that guard: the
+// document says the two are one value and the destination agrees, so there is
+// nothing to refuse.
+func TestTwoAddressesAtOneAnchorAgreeing(t *testing.T) {
+	type config struct {
+		Base int `ferry:"base"`
+		Port int `ferry:"port"`
+	}
+
+	path := write(t, "base: &b 5432\nport: *b\n")
+
+	if err := ferry.Dump(t.Context(), config{Base: 5433, Port: 5433}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, want := read(t, path), "base: &b 5433\nport: *b\n"; got != want {
+		t.Errorf("the plane holds %q, want %q", got, want)
+	}
+}
+
+// TestAMergeKeySurvivesASave pins the merge key against the tag YAML resolves
+// for it (#198).
+//
+// A save re-emits the whole document, and the emitter printed a tag it could not
+// re-derive from the text, so `<<: *d` came back as `!!merge <<: *d` - a key the
+// operator wrote, rewritten by a dump that was not addressing it.
+func TestAMergeKeySurvivesASave(t *testing.T) {
+	type db struct {
+		Port int `ferry:"port"`
+	}
+
+	type config struct {
+		DB db `ferry:"db"`
+	}
+
+	path := write(t, "defaults: &d\n  host: localhost\n  port: 5432\ndb:\n  <<: *d\n  port: 5432\n")
+
+	if err := ferry.Dump(t.Context(), config{DB: db{Port: 5433}}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	want := "defaults: &d\n  host: localhost\n  port: 5432\ndb:\n  <<: *d\n  port: 5433\n"
+	if got := read(t, path); got != want {
+		t.Errorf("the plane holds %q, want %q: a merge key is the operator's and a save does not retag it", got, want)
+	}
+}
+
+// TestAnAliasNoFieldMapsIsUntouched is the promise the alias work must not have
+// cost: a dump at one address leaves an anchor and an alias somewhere else in
+// the document exactly as they were parsed.
+func TestAnAliasNoFieldMapsIsUntouched(t *testing.T) {
+	type config struct {
+		Name string `ferry:"name"`
+	}
+
+	path := write(t, "name: old\nbase: &b 5432\nport: *b\n")
+
+	if err := ferry.Dump(t.Context(), config{Name: "new"}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, want := read(t, path), "name: new\nbase: &b 5432\nport: *b\n"; got != want {
+		t.Errorf("the plane holds %q, want %q", got, want)
+	}
+}
+
+// TestAnAliasedDocumentSurvivesThreeStages is the acceptance bar a lossy round
+// trip hides from: load, dump, load, with the third stage compared against the
+// first.
+//
+// A read and a write that are wrong in the same direction round-trip cleanly, so
+// the file's own text is asserted alongside the values.
+func TestAnAliasedDocumentSurvivesThreeStages(t *testing.T) {
+	type db struct {
+		Host string `ferry:"host"`
+		Port int    `ferry:"port"`
+	}
+
+	type config struct {
+		DB db `ferry:"db"`
+	}
+
+	const doc = "base: &b\n  host: localhost\n  port: 5432\ndb: *b\n"
+
+	path := write(t, doc)
+
+	first, err := ferry.Load[config](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("the first load: %v", err)
+	}
+
+	if err := ferry.Dump(t.Context(), first, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got := read(t, path); got != doc {
+		t.Errorf("the plane holds %q, want %q: dumping what was just loaded changes no value and so changes no "+
+			"line", got, doc)
+	}
+
+	third, err := ferry.Load[config](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("the third load: %v", err)
+	}
+
+	if third != first {
+		t.Errorf("the third stage is %+v and the first was %+v", third, first)
+	}
+}
+
 // TestTypedBoundary is the five values the typed boundary is for: dumped and
 // loaded back, five of five return exactly.
 //
