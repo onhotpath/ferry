@@ -610,9 +610,11 @@ var _ direction = dumpTo{}
 //
 // A value the leaf's representation does not cover is reported rather than
 // swallowed, which in core's set is a time.Time outside years 0 to 9999 and
-// nothing else.
+// nothing else. So is a codec that produced a kind other than the one it
+// declared, which is the one check core can make about a codec it did not
+// write (ADR-0009).
 func (d dumpTo) atLeaf(ctx context.Context, s spot) error {
-	out, err := s.n.codec.encode(s.v)
+	out, err := s.n.codec.emit(s.v)
 	if err != nil {
 		return newError(momentWalk, ErrValue, s.at, err.Error()).withCause(err)
 	}

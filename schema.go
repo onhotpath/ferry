@@ -258,9 +258,14 @@ func (c *compiler) compileStruct(t reflect.Type, s site, base []int) (n *node, a
 }
 
 // noAddressMsg is ADR-0005's sharpest single line, and it names registration as
-// the fix because that is what registration is for: netip.Addr, netip.AddrPort,
-// big.Int and time.Location all have zero exported fields, and a codec collapses
-// such a type to a leaf, which needs no address set at all.
+// the fix because that is what registration is for: time.Location has zero
+// exported fields, and a codec collapses such a type to a leaf, which needs no
+// address set at all.
+//
+// ADR-0007's chain shortens the list this rule catches by seven types, which is
+// most of what it used to catch: netip.Addr, netip.AddrPort, netip.Prefix and
+// big.Int have zero exported fields too, and every one of them declares a text
+// pair, so the chain claims them before the backstop is reached.
 func noAddressMsg(t reflect.Type) string {
 	return fmt.Sprintf("%s maps no address: every struct ferry visits must contribute at least one, or the "+
 		"type looks supported and is written nowhere - register a codec for it, or map a field of it", t)
@@ -402,6 +407,18 @@ func (c *compiler) compileTagged(t reflect.Type, parent *node, s site, value str
 func (c *compiler) compileValue(t reflect.Type, parent *node, s site, tg tag) int {
 	if cd, ok := leafFor(t); ok {
 		return c.compileLeaf(cd, t, parent, s, tg)
+	}
+
+	// Half a text pair is a refusal rather than a silent fall-through to the
+	// rules below (ADR-0007). It is detected here, from reflect.TypeFor[T]()
+	// alone with no value in hand, so Load and Dump refuse identically and
+	// Compile sees it too. ADR-0011 splits the two locations by tier and this
+	// is below the first, so it sits at the plane address like every other
+	// refusal in this function.
+	if msg, incomplete := incompletePair(t); incomplete {
+		c.errAt(s.addr, msg)
+
+		return 0
 	}
 
 	// A recursive type is asked before its kind is, because the answer for a
