@@ -34,9 +34,15 @@ type sched func(tasks []func() error) error
 // bad leaves, byte-identical in between. So the walk never decides whether to
 // continue, and the error model costs it nothing.
 func serial(tasks []func() error) error {
-	errs := make([]error, 0, len(tasks))
+	// Only a failure is collected, which is the same aggregate join would have
+	// built out of a slice of nils and costs nothing per container where there
+	// is nothing to report.
+	var errs []error
+
 	for _, task := range tasks {
-		errs = append(errs, task())
+		if err := task(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	return join(errs...)

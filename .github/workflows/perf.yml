@@ -1,0 +1,372 @@
+# The performance harness, and the pipeline that publishes what it measured.
+#
+# The harness itself is not on this branch and never will be: it depends on
+# viper, koanf, xload, go-envconfig and kelseyhightower/envconfig, and putting
+# that dependency tree in the repository people clone would put it in Renovate's
+# scope and in the supply chain of a library whose core has zero non-stdlib
+# dependencies. It lives on a perf/ branch, in a module of its own, outside
+# go.work, and this workflow is what brings the two together.
+#
+# What that buys, and it is the point rather than a side effect: the harness is
+# built against whatever `main` is at the moment the job runs, never against a
+# vendored copy of it. A harness sitting on a branch that never merges would
+# otherwise rot silently against core's API, and here a build failure is a real
+# signal that core moved.
+#
+# Two triggers:
+#
+#   workflow_dispatch  measure, render, and open a pull request against main
+#                      that changes the results file, the two chart SVGs and the
+#                      README's marked section, and nothing else.
+#   pull_request       with the `perf` label: measure the pull request's head
+#                      against its merge base and post benchstat's comparison
+#                      as a comment. This is the question a reviewer has.
+#
+# Nothing in either path lets a human type a number. Rendering is a Go program
+# in the harness module with its own tests, the raw benchmark output is embedded
+# in the results file verbatim, and a measurement that was not taken renders as
+# "not measured" rather than as a plausible-looking figure.
+name: Performance
+
+on:
+  workflow_dispatch:
+    inputs:
+      harness_ref:
+        description: The ref carrying bench/ - the harness branch.
+        required: true
+        default: perf/bench-harness
+      count:
+        description: -count. Ten is the floor for benchstat to give an interval.
+        required: true
+        default: '10'
+      benchtime:
+        description: -benchtime, e.g. 1s or 2000x.
+        required: true
+        default: '1s'
+      runs_on:
+        description: >
+          The runner label. GitHub-hosted runners are noisy and their benchmark
+          numbers have wide variance; this input exists so a self-hosted runner
+          can be pointed at without editing this file. This repository has no
+          self-hosted runner today, so the default is the hosted one and the
+          results file says so.
+        required: true
+        default: ubuntu-latest
+      open_pr:
+        description: Open the pull request. Unset to measure and only upload the artefacts.
+        type: boolean
+        required: true
+        default: true
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+env:
+  # The same pin ci.yml carries, for the same reason: ADR-0001's floor is
+  # go 1.27 and only the release candidate exists. These two must not drift, so
+  # if one moves the other moves in the same commit.
+  GO_VERSION: '1.27.0-rc.2'
+
+  # Pinned rather than @latest, so a change in a published figure is always this
+  # repository's doing and never a benchstat release nobody asked for.
+  BENCHSTAT_VERSION: v0.0.0-20260709024250-82a0b07e230d
+
+  # Where the published files live, repository-relative. The results file, the
+  # two chart SVGs and the README's links all derive from this one value.
+  RESULTS_DIR: docs/perf
+  RESULTS_PATH: docs/perf/results.md
+
+  # Where the raw measurements are written. Inside the workspace and outside
+  # both checkouts, so that upload-artifact can take it and so that no step can
+  # accidentally commit it.
+  OUT: ${{ github.workspace }}/perf-out
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The dispatch path: measure main, render, open a pull request.
+  # ---------------------------------------------------------------------------
+  measure:
+    name: Measure and publish
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ${{ inputs.runs_on || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Prepare the output directory
+        run: mkdir -p "$OUT"
+
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          path: ferry
+          fetch-depth: 0
+
+      - name: Check out the harness
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.harness_ref }}
+          path: harness
+          fetch-depth: 0
+
+      - name: Graft the harness onto main
+        id: graft
+        working-directory: ferry
+        run: |
+          set -euo pipefail
+
+          if [ ! -d ../harness/bench ]; then
+            echo "FAIL: ${{ inputs.harness_ref }} carries no bench/ directory."
+            echo "      The harness module is what this workflow measures with,"
+            echo "      and it lives on the perf/ branch rather than on main."
+            exit 1
+          fi
+
+          # bench/ carries a go.work of its own, listing .. and ../driver/*, so
+          # everything under it resolves core sibling-on-disk from THIS
+          # checkout of main. The repository root's go.work is untouched and
+          # still lists exactly the four shipped modules, which is what ci.yml's
+          # "go.work uses every discovered module" step asserts.
+          cp -R ../harness/bench ./bench
+
+          echo "ferry:   $(git rev-parse HEAD)"
+          echo "harness: $(git -C ../harness rev-parse HEAD)"
+          {
+            echo "ferry_rev=$(git rev-parse HEAD)"
+            echo "harness_rev=$(git -C ../harness rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Assert the harness builds against this main
+        working-directory: ferry/bench
+        run: |
+          set -euo pipefail
+          # This is the honesty check. If core's API moved and the harness did
+          # not, it fails here, loudly, and that is a real signal rather than
+          # noise: it means the published numbers would have been measured
+          # against a version of ferry that no longer exists.
+          echo "go: $(go env GOVERSION)   GOWORK: $(go env GOWORK)"
+          go build ./...
+          go vet ./...
+
+      - name: Assert every library still produces the identical struct
+        working-directory: ferry/bench
+        run: |
+          set -euo pipefail
+          # The harness refuses to benchmark at all unless this passes, so this
+          # step is really just the place the log says so out loud.
+          go test ./...
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@${{ env.BENCHSTAT_VERSION }}
+
+      - name: Run the benchmarks
+        working-directory: ferry/bench
+        env:
+          COUNT: ${{ inputs.count }}
+          BENCHTIME: ${{ inputs.benchtime }}
+        run: |
+          set -euo pipefail
+          cmd="go test -run '^\$' -bench . -benchmem -benchtime ${BENCHTIME} -count ${COUNT} ."
+          echo "$cmd" > "$OUT/command.txt"
+          # shellcheck disable=SC2086  # the flags are two vetted inputs
+          go test -run '^$' -bench . -benchmem -benchtime "${BENCHTIME}" -count "${COUNT}" . \
+            | tee "$OUT/bench.txt"
+
+      - name: benchstat
+        run: |
+          set -euo pipefail
+          benchstat "$OUT/bench.txt" | tee "$OUT/stat.txt"
+          benchstat -format csv "$OUT/bench.txt" > "$OUT/stat.csv"
+
+      - name: Render
+        working-directory: ferry/bench
+        run: |
+          set -euo pipefail
+          mkdir -p "../$(dirname "${{ env.RESULTS_PATH }}")"
+          go run ./cmd/perfreport \
+            -csv "$OUT/stat.csv" \
+            -stat "$OUT/stat.txt" \
+            -raw "$OUT/bench.txt" \
+            -results "../${{ env.RESULTS_PATH }}" \
+            -link-dir "${{ env.RESULTS_DIR }}" \
+            -readme ../README.md \
+            -allow-missing-markers \
+            -runner '${{ inputs.runs_on }}' \
+            -ferry-rev '${{ steps.graft.outputs.ferry_rev }}' \
+            -harness-rev '${{ steps.graft.outputs.harness_rev }}' \
+            -count '${{ inputs.count }}' \
+            -benchtime '${{ inputs.benchtime }}' \
+            -command "$(cat "$OUT/command.txt")"
+
+      - name: Upload the raw measurements
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-raw
+          path: perf-out/
+
+      - name: Open the pull request
+        if: inputs.open_pr
+        uses: peter-evans/create-pull-request@v8
+        with:
+          path: ferry
+          branch: perf/results
+          base: main
+          # Only the two published files. bench/ is grafted into the working
+          # tree and must never be committed to main; naming the paths is what
+          # guarantees that rather than a .gitignore entry somebody could drop.
+          add-paths: |
+            ${{ env.RESULTS_PATH }}
+            ${{ env.RESULTS_DIR }}/perf-light.svg
+            ${{ env.RESULTS_DIR }}/perf-dark.svg
+            README.md
+          commit-message: |
+            docs(perf): refresh the measured comparison
+
+            Produced by .github/workflows/perf.yml from a benchmark run on
+            ${{ inputs.runs_on }} with -count ${{ inputs.count }} and
+            -benchtime ${{ inputs.benchtime }}. Every figure is machine-rendered
+            by bench/cmd/perfreport from benchstat output; none was typed.
+          title: 'docs(perf): refresh the measured comparison'
+          body: |
+            Machine-produced. Nothing in this diff was typed by hand.
+
+            | | |
+            | --- | --- |
+            | runner | `${{ inputs.runs_on }}` |
+            | harness ref | `${{ inputs.harness_ref }}` |
+            | harness commit | `${{ steps.graft.outputs.harness_rev }}` |
+            | ferry commit | `${{ steps.graft.outputs.ferry_rev }}` |
+            | -count | `${{ inputs.count }}` |
+            | -benchtime | `${{ inputs.benchtime }}` |
+
+            The harness was built against this `main`, not against a vendored
+            copy, so the run also proves the harness still compiles against
+            core's current API.
+
+            Before it measured anything it asserted that every library produces
+            the identical populated struct from the identical source; it refuses
+            to benchmark otherwise.
+
+            The two chart SVGs are drawn by the same program from the same
+            parsed benchstat output as the tables, so the chart and the tables
+            cannot disagree. Both are regenerated on every run, so a stale
+            chart cannot survive one.
+
+            The raw `go test -bench` output and the benchstat output are attached
+            to the run as the `perf-raw` artefact, and embedded verbatim at the
+            bottom of the results file.
+          delete-branch: true
+
+  # ---------------------------------------------------------------------------
+  # The label path: this pull request against its merge base, as a comment.
+  # ---------------------------------------------------------------------------
+  compare:
+    name: Compare against the merge base
+    if: github.event_name == 'pull_request' && github.event.label.name == 'perf'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Prepare the output directory
+        run: mkdir -p "$OUT"
+
+      - name: Check out the pull request head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+          fetch-depth: 0
+
+      - name: Check out the harness
+        uses: actions/checkout@v7
+        with:
+          ref: perf/bench-harness
+          path: harness
+
+      - name: Check out the merge base
+        id: base
+        run: |
+          set -euo pipefail
+          # github.event.pull_request.base.sha is the commit the pull request
+          # was opened against, which is the merge base. Deriving it again with
+          # git merge-base would need the base branch fetched as well, and
+          # would be a second thing that could disagree with what GitHub shows
+          # the reviewer.
+          base='${{ github.event.pull_request.base.sha }}'
+          echo "merge base: $base"
+          git clone --quiet --no-checkout head base
+          git -C base checkout --quiet "$base"
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+
+      - name: Graft the harness onto both
+        run: |
+          set -euo pipefail
+          # The same harness on both sides, which is what makes the comparison
+          # about the pull request and not about the harness.
+          cp -R harness/bench head/bench
+          cp -R harness/bench base/bench
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@${{ env.BENCHSTAT_VERSION }}
+
+      - name: Assert the head still produces the identical struct
+        working-directory: head/bench
+        run: |
+          set -euo pipefail
+          # A core change that breaks a library's result is a finding in its own
+          # right, and it has to be caught before any number is posted.
+          go test ./...
+
+      # Only ferry's own columns, which is the question a reviewer of a core
+      # change actually has: did this pull request make ferry slower? The
+      # competitive context is the published results file's job, and running
+      # all seven libraries twice would take the best part of an hour for a
+      # comparison in which six of the columns cannot have moved.
+      - name: Measure the merge base
+        working-directory: base/bench
+        run: |
+          go test -run '^$' -bench 'Load/.+/.+/ferry' -benchmem -benchtime 1s -count 10 . \
+            | tee "$OUT/base.txt"
+
+      - name: Measure the head
+        working-directory: head/bench
+        run: |
+          go test -run '^$' -bench 'Load/.+/.+/ferry' -benchmem -benchtime 1s -count 10 . \
+            | tee "$OUT/head.txt"
+
+      - name: Comment the comparison
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # benchstat's own A/B output is what a reviewer wants here, so it is
+          # posted rather than re-rendered. The dispatch path's renderer is for
+          # the published file, where the shape is a table plus provenance;
+          # re-rendering a delta would be a second thing that could be wrong
+          # about the same numbers.
+          {
+            echo '### Performance: this pull request against its merge base'
+            echo
+            echo "merge base \`${{ steps.base.outputs.sha }}\`, head \`${{ github.event.pull_request.head.sha }}\`"
+            echo
+            echo 'ferry'"'"'s own columns only, on a GitHub-hosted runner, `-count 10`, which is noisy.'
+            echo 'Treat a `~` as "no signal" and a single-digit percentage as probably noise.'
+            echo
+            echo '```'
+            benchstat "$OUT/base.txt" "$OUT/head.txt"
+            echo '```'
+          } > /tmp/comment.md
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} --body-file /tmp/comment.md
