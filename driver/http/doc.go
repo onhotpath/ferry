@@ -1,7 +1,14 @@
 // Package ferryhttp loads configuration from an HTTP request into a Go struct:
 // its query parameters, or its header fields.
 //
-//	f, err := ferry.Load[Filter](ferryhttp.WithQuery(r.Context(), r.URL.Query()), src)
+//	b, err := ferry.Bind[Filter](ferryhttp.NewQuerySource()) // once, at start-up
+//	...
+//	f, err := b.Load(ferryhttp.WithQuery(r.Context(), r.URL.Query())) // per request
+//
+// A server binds once and loads through the binding on every request: the type
+// a handler reads does not change between requests, and only the values do.
+// [ferry.Load] takes the same source and is the shape for a one-off, such as a
+// URL parsed in a script.
 //
 // # The request arrives in the context, not in the source
 //

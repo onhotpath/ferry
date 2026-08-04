@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
 
 	"github.com/onhotpath/ferry"
 	ferryhttp "github.com/onhotpath/ferry/driver/http"
@@ -44,6 +46,84 @@ func Example() {
 
 	fmt.Printf("%+v\n", f)
 	// Output: {Q:ferry Tags:[go config] Limit:25}
+}
+
+// filterKey is the middleware's own key for the loaded value, unexported and of
+// its own type so that nothing else can read or overwrite what it put there.
+type filterKey struct{}
+
+// filterFrom reads back what the middleware loaded. A handler reached through it
+// always has one, because a request whose filter did not load never gets there.
+func filterFrom(ctx context.Context) Filter {
+	f, _ := ctx.Value(filterKey{}).(Filter)
+
+	return f
+}
+
+// withFilter is the middleware: it loads a Filter out of every request's query
+// parameters and hands it to next in the context.
+//
+// The binding is built once, by the caller, and this closes over it. Each
+// request supplies its own query parameters instead, so the per-request work is
+// the load and nothing else.
+func withFilter(b *ferry.Binding[Filter], next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, err := b.Load(ferryhttp.WithQuery(r.Context(), r.URL.Query()))
+		if err != nil {
+			refuse(w, err)
+
+			return
+		}
+
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), filterKey{}, f)))
+	})
+}
+
+// refuse answers a request the load would not build a value for, naming the
+// parameter it was about and never quoting what that parameter held.
+func refuse(w http.ResponseWriter, err error) {
+	var located *ferry.Error
+	if errors.As(err, &located) {
+		http.Error(w, "bad request at "+located.Address().String(), http.StatusBadRequest)
+
+		return
+	}
+
+	http.Error(w, "bad request", http.StatusBadRequest)
+}
+
+// Example_middleware wraps a handler so that every request arrives with its query
+// parameters already loaded into a struct.
+//
+// The binding is built once, outside the handler, and holds the compiled schema
+// and the names the source computed for it. Each request loads through it with
+// its own query parameters in the context, so nothing per request recomputes what
+// the type already settled.
+//
+// The second request is the failure path: q is required and is not there, so the
+// wrapped handler is never reached and the refusal carries the address of the
+// parameter it is about rather than a zero value nobody asked for.
+func Example_middleware() {
+	b, err := ferry.Bind[Filter](ferryhttp.NewQuerySource()) // once, at start-up
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	h := withFilter(b, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "%+v", filterFrom(r.Context()))
+	}))
+
+	for _, target := range []string{"/search?q=ferry&tags=go&tags=config", "/search?tags=go"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, nil))
+
+		fmt.Println(w.Code, strings.TrimSpace(w.Body.String()))
+	}
+	// Output:
+	// 200 {Q:ferry Tags:[go config] Limit:25}
+	// 400 bad request at /q
 }
 
 // Tenant is the schema the header example loads. A hyphen is how a header

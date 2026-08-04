@@ -8,10 +8,13 @@ go get github.com/onhotpath/ferry/driver/http
 
 The package is `ferryhttp`, because `http` is a name every caller already has taken.
 
-## Loading
+## In a server: bind once, load per request
 
-Build the source once, at start-up.
-Pass the request in through the context, per request.
+`ferry.Bind` compiles the type and hands the source the names it asks for, once.
+Everything a request supplies of its own arrives in the context instead, so a handler holds the binding and loads through it.
+
+Here that is a middleware, which is the shape most servers already have a place for.
+It is not exported by this package: it is thirty lines a caller writes for the value their own handlers want.
 
 ```go
 type Filter struct {
@@ -20,6 +23,82 @@ type Filter struct {
 	Limit int      `ferry:"limit,default=25"`
 }
 
+// filterKey is the middleware's own key for the loaded value, unexported and of
+// its own type so that nothing else can read or overwrite what it put there.
+type filterKey struct{}
+
+// filterFrom reads back what the middleware loaded. A handler reached through it
+// always has one, because a request whose filter did not load never gets there.
+func filterFrom(ctx context.Context) Filter {
+	f, _ := ctx.Value(filterKey{}).(Filter)
+
+	return f
+}
+
+// withFilter is the middleware: it loads a Filter out of every request's query
+// parameters and hands it to next in the context.
+//
+// The binding is built once, by the caller, and this closes over it. Each
+// request supplies its own query parameters instead, so the per-request work is
+// the load and nothing else.
+func withFilter(b *ferry.Binding[Filter], next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, err := b.Load(ferryhttp.WithQuery(r.Context(), r.URL.Query()))
+		if err != nil {
+			refuse(w, err)
+
+			return
+		}
+
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), filterKey{}, f)))
+	})
+}
+
+// refuse answers a request the load would not build a value for, naming the
+// parameter it was about and never quoting what that parameter held.
+func refuse(w http.ResponseWriter, err error) {
+	var located *ferry.Error
+	if errors.As(err, &located) {
+		http.Error(w, "bad request at "+located.Address().String(), http.StatusBadRequest)
+
+		return
+	}
+
+	http.Error(w, "bad request", http.StatusBadRequest)
+}
+
+func Example_middleware() {
+	b, err := ferry.Bind[Filter](ferryhttp.NewQuerySource()) // once, at start-up
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	h := withFilter(b, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "%+v", filterFrom(r.Context()))
+	}))
+
+	for _, target := range []string{"/search?q=ferry&tags=go&tags=config", "/search?tags=go"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, nil))
+
+		fmt.Println(w.Code, strings.TrimSpace(w.Body.String()))
+	}
+	// Output:
+	// 200 {Q:ferry Tags:[go config] Limit:25}
+	// 400 bad request at /q
+}
+```
+
+That is `Example_middleware` in `example_test.go`, imports aside, so `go test` compiles and runs it.
+The second request is the failure path: `q` is `required` and is not there, so the wrapped handler is never reached and the refusal carries `/q` rather than a zero value nobody asked for.
+
+## One load, with no binding held
+
+`ferry.Load` takes the same source and does the bind again on each call, which is the shape for a one-off: a URL parsed in a script, a test, a single request outside a serving loop.
+
+```go
 func Example() {
 	src := ferryhttp.NewQuerySource() // once, at start-up
 
@@ -42,21 +121,8 @@ func Example() {
 }
 ```
 
-That is the `Example` in `example_test.go`, imports aside, so `go test` compiles and runs it.
-It parses a query string only to be self-contained.
-In a handler the two calls are `r.Context()` and `r.URL.Query()`:
-
-```go
-mux.HandleFunc("GET /search", func(w http.ResponseWriter, r *http.Request) {
-	f, err := ferry.Load[Filter](ferryhttp.WithQuery(r.Context(), r.URL.Query()), src)
-	if err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-
-		return
-	}
-	// ...
-})
-```
+That is the `Example` in the same file.
+It parses a query string only to be self-contained; in a handler the two calls are `r.Context()` and `r.URL.Query()`.
 
 **Parameter names come from the tags.**
 Each part contributes its own text and nested fields are joined with `.`, so a field tagged `host` inside one tagged `db` reads `db.host`.
@@ -69,8 +135,8 @@ Nothing is folded: a query parameter name is any byte sequence, so the name is e
 ## Headers, with the same source shape
 
 ```go
-src := ferryhttp.NewHeaderSource()
-t, err := ferry.Load[Tenant](ferryhttp.WithHeaders(r.Context(), r.Header), src)
+b, err := ferry.Bind[Tenant](ferryhttp.NewHeaderSource()) // once, at start-up
+t, err := b.Load(ferryhttp.WithHeaders(r.Context(), r.Header))
 ```
 
 Field names join with `-` instead of `.`, and are matched case-insensitively, the way `net/http` spells them.
