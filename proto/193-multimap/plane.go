@@ -205,15 +205,31 @@ func (r *reader) Children(_ context.Context, prefix ferry.Path) ([]ferry.Path, e
 	}
 
 	kids := map[ferry.Path]struct{}{}
+	behind := map[ferry.Path]struct{}{}
 
 	if !atRoot {
-		r.positions(prefix, prefixKey, kids)
+		r.positions(prefix, prefixKey, behind)
+		maps.Copy(kids, behind)
 	}
 
 	for key := range r.vals {
-		if kid, ok := r.child(prefix, prefixKey, key, atRoot); ok {
-			kids[kid] = struct{}{}
+		kid, ok := r.child(prefix, prefixKey, key, atRoot)
+		if !ok {
+			continue
 		}
+
+		// Both spellings at one address is a value silently overwritten, and it
+		// is the residue every position-behind-a-name shape has: /tags#0 is
+		// enumerated out of the first value of "tags" and then read out of
+		// "tags.0", which wins because it is the address's own key. Refusing is
+		// cheap, and ADR-0001 is why.
+		if _, clash := behind[kid]; clash {
+			return nil, fmt.Errorf("%w: this name carries a sequence in the plane's own repetition and it "+
+				"carries index-suffixed names as well: the two spellings address the same position and one "+
+				"of the two values would be lost", ferry.ErrPlane)
+		}
+
+		kids[kid] = struct{}{}
 	}
 
 	out := slices.Collect(maps.Keys(kids))
