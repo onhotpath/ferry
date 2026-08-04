@@ -45,14 +45,29 @@ import (
 // It returns nil, or one refusal per address, joined and sorted. Range it with
 // [Elements] and match a member with errors.Is against [ErrSchema].
 func Compile[T any](opts ...Option) error {
-	cfg, err := newConfig(opts)
-	if err != nil {
-		return err
-	}
-
-	_, err = compileSchema(reflect.TypeFor[T](), cfg)
+	_, err := schemaOf(reflect.TypeFor[T](), opts)
 
 	return err
+}
+
+// schemaOf is the one door into the compiler. Compile, Load, LoadOver and Dump
+// all reach a compiled type through this function and no other, so the two
+// entry points cannot disagree about whether a type is legal - which would be
+// the two-engines defect at ferry's own front door (ADR-0010).
+//
+// It resolves the Options first, because an Option list that is wrong is a
+// mistake in the program that wrote it rather than in the type being compiled,
+// and it fails the call it was handed to rather than describing a schema.
+//
+// It is also where the schema cache lands, for the same reason: a cache in one
+// caller and not the other is two engines again, arrived at by omission.
+func schemaOf(t reflect.Type, opts []Option) (*schema, error) {
+	cfg, err := newConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	return compileSchema(t, cfg)
 }
 
 // schema is a compiled type: the node tree a walk iterates, and the address set
