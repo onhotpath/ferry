@@ -88,8 +88,10 @@ type schema struct {
 type nodeKind uint8
 
 const (
-	nodeLeaf   nodeKind = iota // a value that crosses the boundary at one address
-	nodeStruct                 // a position whose members are compiled below it
+	nodeLeaf    nodeKind = iota // a value that crosses the boundary at one address
+	nodeStruct                  // a position whose members are compiled below it
+	nodePointer                 // a composite that can be nil, so its own address carries an answer
+	nodeArray                   // a position whose members are exactly N, from the type
 )
 
 // node is one compiled position, holding resolved behaviour rather than the
@@ -98,8 +100,14 @@ const (
 type node struct {
 	kind nodeKind
 	addr Path
-	// index is the reflect field index path from the root, which is what makes
-	// a promoted field reachable without the walk repeating the field rule.
+	// index is the reflect field index path from the container above this
+	// position, which is what makes a promoted field reachable without the walk
+	// repeating the field rule.
+	//
+	// It is relative rather than rooted because a pointer is a container the
+	// walk descends through: reflect.Value.FieldByIndex dereferences a pointer
+	// step and panics on a nil one, so an index path rooted at the whole value
+	// would panic at exactly the field whose nil-ness is the answer.
 	index  []int
 	fields []*node
 
@@ -122,6 +130,18 @@ type compiler struct {
 	cfg    config
 	errs   []error
 	leaves []leaf
+
+	// containers is every address a composite that can be nil occupies. It is
+	// kept apart from leaves because the two obey different halves of ADR-0003's
+	// collision rule: prefix-freeness is over the leaves alone, and a container
+	// address is exempt from it while still having to be distinct from every
+	// leaf address.
+	containers []leaf
+
+	// stack is the struct types this compile is currently inside, which is what
+	// makes a recursive type detectable from reflect.TypeFor[T]() alone
+	// (ADR-0005).
+	stack []reflect.Type
 }
 
 // leaf pairs a leaf address with the Go field path that named it, so a
@@ -142,6 +162,11 @@ type site struct {
 	addr  Path
 	field Path
 	index []int
+	// nullable says that a pointer above this position owns its address, so the
+	// address is a place a plane can be asked for a Value. It is what separates
+	// Auth Cred, which has no address of its own, from Auth *Cred, which has one
+	// (ADR-0003).
+	nullable bool
 }
 
 // compileSchema is the one compiler. Every entry point reaches a compiled type
@@ -151,6 +176,7 @@ func compileSchema(t reflect.Type, cfg config) (*schema, error) {
 
 	root := c.compileRoot(t)
 	c.checkPrefixFree()
+	c.checkContainersDistinct()
 
 	if err := join(c.errs...); err != nil {
 		return nil, err
@@ -178,23 +204,32 @@ func (c *compiler) compileRoot(t reflect.Type) *node {
 		return nil
 	}
 
-	n, _ := c.compileStruct(t, site{})
+	n, _ := c.compileStruct(t, site{}, nil)
 
 	return n
 }
 
 // compileStruct compiles every field of a struct at the address the struct
 // occupies, reporting how many addresses the subtree contributed.
-func (c *compiler) compileStruct(t reflect.Type, s site) (n *node, addresses int) {
+//
+// base is the index path this struct's fields are reached through from the
+// value the walk holds at it. It is empty for a struct the walk descends into,
+// and it is the embedded field's own index path for a promoted block, whose
+// fields land in the parent's list and are read out of the parent's value.
+func (c *compiler) compileStruct(t reflect.Type, s site, base []int) (n *node, addresses int) {
 	n = &node{kind: nodeStruct, addr: s.addr, index: s.index}
 
 	before := len(c.errs)
 	count := 0
 
+	c.stack = append(c.stack, t)
+
 	for i := range t.NumField() {
 		f := t.Field(i)
-		count += c.compileField(&f, n, s)
+		count += c.compileField(&f, n, site{addr: s.addr, field: s.field, index: base})
 	}
+
+	c.stack = c.stack[:len(c.stack)-1]
 
 	// ADR-0005: a struct that maps no address looks supported and is a silent
 	// total loss - netip.Addr dumped 0 addresses with a nil error and loaded
@@ -202,12 +237,19 @@ func (c *compiler) compileStruct(t reflect.Type, s site) (n *node, addresses int
 	// reported, because a field error is why it contributed nothing, and one
 	// mistake reporting twice is what ADR-0008's tiers exist to stop.
 	if count == 0 && len(c.errs) == before {
-		c.errAt(s.field, fmt.Sprintf(
-			"%s maps no address: every struct ferry visits must contribute at least one, or the type "+
-				"looks supported and is written nowhere", t))
+		c.errAt(s.field, noAddressMsg(t))
 	}
 
 	return n, count
+}
+
+// noAddressMsg is ADR-0005's sharpest single line, and it names registration as
+// the fix because that is what registration is for: netip.Addr, netip.AddrPort,
+// big.Int and time.Location all have zero exported fields, and a codec collapses
+// such a type to a leaf, which needs no address set at all.
+func noAddressMsg(t reflect.Type) string {
+	return fmt.Sprintf("%s maps no address: every struct ferry visits must contribute at least one, or the "+
+		"type looks supported and is written nowhere - register a codec for it, or map a field of it", t)
 }
 
 // compileField is the field rule, which is the other half of the grammar and is
@@ -257,7 +299,7 @@ func (c *compiler) compileEmbedded(f *reflect.StructField, parent *node, s site,
 		return 0
 	}
 
-	n, count := c.compileStruct(f.Type, s)
+	n, count := c.compileStruct(f.Type, s, s.index)
 	parent.fields = append(parent.fields, n.fields...)
 
 	return count
@@ -338,16 +380,113 @@ func (c *compiler) compileValue(t reflect.Type, parent *node, s site, tg tag) in
 		return c.compileLeaf(cd, t, parent, s, tg)
 	}
 
-	if t.Kind() == reflect.Struct {
-		return c.compileNested(t, parent, s, tg)
+	// A recursive type is asked before its kind is, because the answer for a
+	// struct, a pointer and an array would otherwise be to recurse (ADR-0005).
+	// A leaf is asked first and never reaches here, which is what makes a
+	// registered codec collapse a recursive type to something compilable.
+	if cyc, ok := cycleFrom(t, c.stack); ok {
+		c.errAt(s.addr, recursionMsg(t, cyc))
+
+		return 0
 	}
 
 	// ADR-0011 splits the two locations by tier and this is below the first, so
-	// the refusal sits at the plane address rather than at the Go field path,
-	// which is what the neighbouring rules in this function already do.
-	c.errAt(s.addr, refusalMsg(t))
+	// every refusal here sits at the plane address rather than at the Go field
+	// path, which is what the neighbouring rules in this function already do.
+	switch t.Kind() {
+	case reflect.Struct:
+		return c.compileNested(t, parent, s, tg)
+	case reflect.Pointer:
+		return c.compilePointer(t, parent, s, tg)
+	case reflect.Array:
+		return c.compileArray(t, parent, s, tg)
+	default:
+		c.errAt(s.addr, refusalMsg(t))
 
-	return 0
+		return 0
+	}
+}
+
+// compilePointer is *T, which mints no segment of its own (ADR-0005).
+//
+// It is two shapes and the type decides which. A pointer to a leaf is a leaf
+// with a null, because a leaf already has an address and a pointer adds a null
+// to it rather than a second address. A pointer to a composite is a container
+// that can be nil, so it takes an address of its own, which is where the Null a
+// nil writes sits and where a plane is asked whether the section is there at all
+// (ADR-0003).
+func (c *compiler) compilePointer(t reflect.Type, parent *node, s site, tg tag) int {
+	if cd, ok := pointerLeaf(t); ok {
+		return c.compileLeaf(cd, t, parent, s, tg)
+	}
+
+	n := &node{kind: nodePointer, addr: s.addr, index: s.index}
+
+	// The element is compiled at the same address, because the pointer mints no
+	// segment, and with the same tag, because the options were written for what
+	// the pointer points at. nullable is what tells the element that its address
+	// is a place a plane can be asked, which is the whole difference between
+	// Auth Cred and Auth *Cred.
+	count := c.compileValue(t.Elem(), n, site{addr: s.addr, field: s.field, nullable: true}, tg)
+	if count == 0 {
+		return 0
+	}
+
+	parent.fields = append(parent.fields, n)
+	c.containers = append(c.containers, leaf{addr: s.addr, field: s.field})
+
+	return count
+}
+
+// compileArray is [N]T, whose length is part of the type, so it mints exactly N
+// Index segments and every one of them is a static address (ADR-0005).
+//
+// That is the capability difference between an array and a slice, and it is not
+// cosmetic: an array's element addresses are known from reflect.TypeFor[T]()
+// with no value in hand, so an array is loadable from a source that cannot
+// enumerate and a slice is not. An array also has no nil, so it takes no
+// container address of its own.
+func (c *compiler) compileArray(t reflect.Type, parent *node, s site, tg tag) int {
+	c.checkArrayOptions(t, s.addr, tg)
+
+	n := &node{kind: nodeArray, addr: s.addr, index: s.index}
+	count := 0
+
+	// The position is counted in uint rather than converted from one, because
+	// Path.Elem takes the position unsigned: a negative one has no meaning and
+	// a conversion is a place the constraint could be lost.
+	var at uint
+
+	for range t.Len() {
+		before := len(c.errs)
+		// An element inherits no option. The tag names the array, its options
+		// were checked once above, and what each option would mean at an
+		// element is #77's rather than something inheritance decides silently.
+		count += c.compileValue(t.Elem(), n, elemSite(s, at), tag{})
+		at++
+
+		// Every element has one type, so a fault in it is the same fault N times
+		// at N addresses. Reporting it once is what keeps [100]chan int one
+		// refusal rather than a hundred identical ones.
+		if len(c.errs) > before {
+			break
+		}
+	}
+
+	if count == 0 {
+		return 0
+	}
+
+	parent.fields = append(parent.fields, n)
+
+	return count
+}
+
+// elemSite is where one array element sits. Its Go field path carries the index
+// too, because "the third element of Arr" is what a reader needs and "Arr" is
+// what every element would otherwise be called.
+func elemSite(s site, at uint) site {
+	return site{addr: s.addr.Elem(at), field: s.field.Elem(at)}
 }
 
 // compileLeaf records a value that crosses the boundary at one address, with
@@ -406,28 +545,98 @@ func permanentlyRefused(k reflect.Kind) bool {
 // prefixing is under a structured address: the nested struct's tag is the
 // prefix, so there is no concatenation to get wrong and no prefix= to spell.
 func (c *compiler) compileNested(t reflect.Type, parent *node, s site, tg tag) int {
-	c.checkStructOptions(t, s.addr, tg)
+	c.checkStructOptions(t, s, tg)
 
-	n, count := c.compileStruct(t, s)
+	n, count := c.compileStruct(t, s, nil)
 	parent.fields = append(parent.fields, n)
 
 	return count
 }
 
 // checkStructOptions is the second tier at a struct. A non-pointer struct has
-// no address of its own (ADR-0003), so neither required nor a default has
-// anything to sit at; omitzero is admissible at every type, because it asks a
-// question about the Go value rather than about an address.
-func (c *compiler) checkStructOptions(t reflect.Type, addr Path, tg tag) {
-	if tg.required {
-		c.errAt(addr, fmt.Sprintf(
+// no address of its own (ADR-0003), so required has nothing to assert about;
+// under a pointer the same struct does have one, which is the whole difference
+// between Auth Cred and Auth *Cred. omitzero is admissible at every type,
+// because it asks a question about the Go value rather than about an address.
+func (c *compiler) checkStructOptions(t reflect.Type, s site, tg tag) {
+	if tg.required && !s.nullable {
+		c.errAt(s.addr, fmt.Sprintf(
 			"required is not available on %s: a struct has no address of its own for required to assert "+
 				"about, so put it on the field that has to be there", t))
 	}
 
+	c.checkNoDefault(t, s.addr, tg)
+}
+
+// checkArrayOptions is the second tier at an array. Its N element addresses come
+// from the type, which is the tier required is admissible in (ADR-0006), and it
+// is not a leaf, so a default has no single address to sit at.
+func (c *compiler) checkArrayOptions(t reflect.Type, addr Path, tg tag) {
+	c.checkNoDefault(t, addr, tg)
+}
+
+// checkNoDefault refuses a declared default on a composite. A default is text
+// parsed into one value at one address, and a composite's value is spread over
+// the addresses beneath it, so there is nowhere for the text to land.
+func (c *compiler) checkNoDefault(t reflect.Type, addr Path, tg tag) {
 	if tg.hasDef {
 		c.errAt(addr, fmt.Sprintf(
 			"%s is not a leaf, so it has no single address a default could sit at: seed the value instead", t))
+	}
+}
+
+// recursionMsg refuses a type whose static address set is unbounded.
+//
+// It names registration, and that is not a formality: a codec collapses a type
+// to a leaf and a leaf needs no address set, so the thing that makes the set
+// unenumerable stops being asked (ADR-0005).
+func recursionMsg(t, cycle reflect.Type) string {
+	head := fmt.Sprintf("%s is recursive", t)
+	if t != cycle {
+		head += fmt.Sprintf(", through %s", cycle)
+	}
+
+	return head + ": its addresses cannot be enumerated, and an address set that cannot be handed to a " +
+		"driver before any I/O is not one ferry can compile - register a codec for it, which collapses it " +
+		"to a leaf, or break the cycle"
+}
+
+// cycleFrom reports the first type reachable from t that the compile is already
+// inside, and whether there is one.
+//
+// It searches through pointers, arrays, slices and maps, which are the steps
+// that carry a type without naming a new struct, and it never steps through a
+// struct's fields: those are the compile's own descent, and inside is the stack
+// it keeps as it goes. Searching through a slice and a map matters even while
+// neither compiles, because struct{ Kids []Tree } is a recursive type and
+// "unsupported element" is the wrong diagnosis for it.
+func cycleFrom(t reflect.Type, inside []reflect.Type) (reflect.Type, bool) {
+	if slices.Contains(inside, t) {
+		return t, true
+	}
+
+	inside = append(slices.Clone(inside), t)
+
+	for _, e := range carriedBy(t) {
+		if cycle, ok := cycleFrom(e, inside); ok {
+			return cycle, true
+		}
+	}
+
+	return nil, false
+}
+
+// carriedBy is the types a composite reaches without a struct in between. A
+// map's key is included because a map keyed by a type that reaches the map is
+// as unbounded as one valued by it.
+func carriedBy(t reflect.Type) []reflect.Type {
+	switch t.Kind() {
+	case reflect.Pointer, reflect.Slice, reflect.Array:
+		return []reflect.Type{t.Elem()}
+	case reflect.Map:
+		return []reflect.Type{t.Key(), t.Elem()}
+	default:
+		return nil
 	}
 }
 
@@ -502,13 +711,47 @@ func collisionMsg(l, m leaf) string {
 		m.addr, l.field, m.field)
 }
 
-// addressSet is what a driver's Bind is handed. It holds the leaf addresses and
-// no container address, because a non-pointer struct cannot be nil and so has
-// nothing a plane could be asked for at its own address (ADR-0003).
+// checkContainersDistinct is the other half of ADR-0003's collision rule.
+//
+// A container address is exempt from prefix-freeness, because it is a proper
+// prefix of what is under it by construction and that is what makes it a
+// container. It must still be distinct from every leaf address: a container
+// carries Absent or Null and nothing else, so a leaf sharing its address is a
+// value with nowhere to be.
+func (c *compiler) checkContainersDistinct() {
+	at := make(map[Path]Path, len(c.leaves))
+	for _, l := range c.leaves {
+		at[l.addr] = l.field
+	}
+
+	for _, k := range c.containers {
+		field, ok := at[k.addr]
+		if !ok {
+			continue
+		}
+
+		c.errAt(k.addr, fmt.Sprintf(
+			"a container address and a leaf address at once, %s and %s: a container carries only absence "+
+				"or a null, so a value at it has nowhere to be", k.field, field))
+	}
+}
+
+// addressSet is what a driver's Bind is handed: every leaf address the type
+// determines plus every container address, and never a wildcard shape, so every
+// member is one a driver can fetch, write, name and check (ADR-0003).
+//
+// Which of them are containers is one bit per address the compiler holds here
+// and [AddressSet] does not expose, because a driver names, fetches, writes and
+// checks every member uniformly and a bit it cannot see is a bit it cannot
+// branch on wrongly.
 func (c *compiler) addressSet() *AddressSet {
-	addrs := make([]Path, len(c.leaves))
-	for i, l := range c.leaves {
-		addrs[i] = l.addr
+	addrs := make([]Path, 0, len(c.leaves)+len(c.containers))
+	for _, l := range c.leaves {
+		addrs = append(addrs, l.addr)
+	}
+
+	for _, k := range c.containers {
+		addrs = append(addrs, k.addr)
 	}
 
 	return NewAddressSet(addrs...)

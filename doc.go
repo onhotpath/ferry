@@ -39,6 +39,40 @@
 // fmt.Stringer is never consulted, in either direction, because String() string
 // declares no inverse.
 //
+// # The composites whose addresses come from the type
+//
+// A composite is not itself a value. It contributes addresses, and its elements
+// are the leaves. A struct mints one Name segment per exported field; a pointer
+// mints no segment of its own; and [N]T mints exactly N Index segments, because
+// the length is part of the type.
+//
+// Unexported fields are skipped, which is a rule rather than a silence: reflect
+// cannot set one, so the alternative is refusing every struct containing a
+// sync.Mutex, and the loss it could hide is caught by the rule below instead.
+//
+// A composite that can be nil has an address of its own, and the test is
+// exactly that: *struct gets one, a plain struct does not because it cannot be
+// nil, and [N]T does not because an array has no nil. Such an address carries
+// absence or a null and never anything else, so it is never realised at the same
+// time as anything beneath it. *T where T is a leaf is not a composite at all:
+// the leaf already had an address, and the pointer adds a null to it.
+//
+// An array and a slice are not interchangeable, and the difference is a real
+// capability rather than a spelling. An array's element addresses are known from
+// reflect.TypeFor[T]() with no value in hand, so an array is loadable from a
+// source that cannot enumerate and a slice is not. An absent element leaves the
+// element at its zero value, exactly as an absent struct field does, and an
+// index the array cannot hold is loud.
+//
+// Two whole-type refusals fall out of this. A struct that maps no address does
+// not compile, checked at every level rather than only at the root: netip.Addr,
+// netip.AddrPort, big.Int and time.Location all have zero exported fields, so
+// without the rule they look supported and are written nowhere. And a recursive
+// type does not compile, because its address set is unbounded and a set that
+// cannot be enumerated cannot be handed to a driver before any I/O. Both name
+// registration as the fix, because a codec collapses a type to a leaf and a leaf
+// needs no address set.
+//
 // # The type set's sharp edges
 //
 // Three of these are not defects, and every one of them is easier to meet in
