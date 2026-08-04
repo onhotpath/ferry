@@ -222,6 +222,10 @@
 // .AsMapKey(), because a key codec's text has to be injective and nobody else
 // can be asked.
 //
+// A registry is also where a compiled schema is cached, keyed by the type and
+// the struct tag key, so it is a value to keep: one per program, or one per
+// test. [Registry] states what that cache costs, since nothing evicts from it.
+//
 // # What is refused, and what that costs
 //
 // chan, func, unsafe.Pointer and uintptr are refused permanently, because the
