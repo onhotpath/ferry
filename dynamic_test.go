@@ -773,6 +773,29 @@ func TestAPlaneThatContradictsTheContainerIsLoud(t *testing.T) {
 	}
 }
 
+// TestTheGapRefusalNamesARemedy is #120's correction. Every other refusal core
+// writes ends in what to do about it, and this one used to state the rule and
+// stop, which leaves a reader looking at TAGS_0 and TAGS_2 on a flat plane told
+// what ferry requires and nothing about how to satisfy it.
+//
+// The two remedies are the only two there are: make the sequence contiguous, or
+// stop calling it a sequence, because a map is how a plane-chosen set of
+// positions is spelled.
+func TestTheGapRefusalNamesARemedy(t *testing.T) {
+	t.Parallel()
+
+	err := loadInto[tagsOnly](t.Context(), &listing{children: map[Path][]Path{
+		At("tags"): {At("tags").Elem(0), At("tags").Elem(2)},
+	}})
+
+	report := reportOf(err)
+	for _, want := range []string{"fill the gap", "as a map keyed by those positions"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report\n\t%s\ndoes not offer\n\t%s", report, want)
+		}
+	}
+}
+
 // loadInto is one Load[T] as a value, so a table can hold one per destination
 // type without naming the type twice.
 func loadInto[T any](ctx context.Context, src Source) error {

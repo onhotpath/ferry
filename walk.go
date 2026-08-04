@@ -516,7 +516,9 @@ func contiguous(s spot, kids []Path) error {
 		if want := s.at.Elem(at); kid != want {
 			return newError(momentWalk, ErrValue, s.at, fmt.Sprintf(
 				"the plane holds %s under a sequence of %d, and a %s is addressed from %s upwards with no "+
-					"position missing", kid, len(kids), s.v.Type(), s.at.Elem(0)))
+					"position missing: fill the gap, or model a sequence whose positions are chosen "+
+					"by the plane as a map keyed by those positions",
+				kid, len(kids), s.v.Type(), s.at.Elem(0)))
 		}
 
 		at++
