@@ -65,6 +65,49 @@ func leafFor(t reflect.Type) (leafCodec, bool) {
 	return leafByKind(t)
 }
 
+// pointerLeaf resolves *T where T is a leaf, and declines every other pointer
+// to the composite rules.
+//
+// A pointer to a leaf is not a composite and is not given a container address
+// of its own: the leaf already had an address, and what the pointer adds there
+// is a null rather than a second place (ADR-0006). So *int is one address that
+// carries a number or a null, and it is the one shape in the set that tells an
+// explicit zero from an unset field on Dump.
+func pointerLeaf(t reflect.Type) (leafCodec, bool) {
+	elem := t.Elem()
+
+	inner, ok := leafFor(elem)
+	if !ok {
+		return leafCodec{}, false
+	}
+
+	return leafCodec{
+		kind:     inner.kind,
+		nullable: true,
+		encode: func(v reflect.Value) (Value, error) {
+			if v.IsNil() {
+				return Null(), nil
+			}
+
+			return inner.encode(v.Elem())
+		},
+		// The pointee is built fresh and only then published, which is what
+		// keeps a seed the caller still holds out of the walk's reach: writing
+		// through the seed's own pointer would let a partial load mutate a
+		// value LoadOver promises never to touch.
+		parse: func(v reflect.Value, text string) error {
+			fresh := reflect.New(elem)
+			if err := inner.parse(fresh.Elem(), text); err != nil {
+				return err
+			}
+
+			v.Set(fresh)
+
+			return nil
+		},
+	}, true
+}
+
 // byIdentity is the table of types ferry owns the representation of, in both
 // directions.
 //

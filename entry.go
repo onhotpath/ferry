@@ -98,7 +98,7 @@ func runLoad(ctx context.Context, dst reflect.Value, src Source, opts []Option) 
 		return fromDriver(momentOpen, Path{}, err)
 	}
 
-	walked := newWalker(loadRoot(dst), loadFrom{r: r}).walk(ctx, sch.root)
+	walked := newWalker(loadFrom{r: r, wrote: new(int)}).walk(ctx, sch.root, loadRoot(dst))
 
 	return join(walked, released(r))
 }
@@ -125,7 +125,7 @@ func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) err
 		return fromDriver(momentOpen, Path{}, err)
 	}
 
-	walked := newWalker(root, dumpTo{w: w}).walk(ctx, sch.root)
+	walked := newWalker(dumpTo{w: w}).walk(ctx, sch.root, root)
 	if walked == nil {
 		walked = committed(ctx, w)
 	}
