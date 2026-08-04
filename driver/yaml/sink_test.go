@@ -81,7 +81,7 @@ func TestStagingLeavesThePlaneAloneOnFailure(t *testing.T) {
 	onlyPlane(t, dir)
 }
 
-// TestUnflushableDirectoryIsADumpThatDidNotCommit is the second sync's own
+// TestDurableFlushFailureIsADumpThatDidNotCommit is the second sync's own
 // failure, seen from where a caller meets it (#187).
 //
 // A directory with write and execute and no read takes the staged file and takes
@@ -94,7 +94,7 @@ func TestStagingLeavesThePlaneAloneOnFailure(t *testing.T) {
 // The plane holding the new document is asserted rather than tolerated. It is
 // the one case where a save that failed has still replaced the file, and doc.go
 // names it.
-func TestUnflushableDirectoryIsADumpThatDidNotCommit(t *testing.T) {
+func TestDurableFlushFailureIsADumpThatDidNotCommit(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root opens a directory with no read bit, so there is no refusal to observe")
 	}
@@ -103,18 +103,9 @@ func TestUnflushableDirectoryIsADumpThatDidNotCommit(t *testing.T) {
 		Port int `ferry:"port"`
 	}
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, "plane.yaml")
+	dir, path := unreadableDirWithPlane(t)
 
-	if err := os.WriteFile(path, []byte("port: 1\n"), 0o600); err != nil {
-		t.Fatalf("writing the plane: %v", err)
-	}
-
-	if err := os.Chmod(dir, 0o300); err != nil {
-		t.Fatalf("making the directory unreadable: %v", err)
-	}
-
-	err := ferry.Dump(t.Context(), config{Port: 8080}, yaml.NewSink(path))
+	err := ferry.Dump(t.Context(), config{Port: 8080}, yaml.NewSink(path, yaml.Durable()))
 
 	// Restored before anything is asserted, because every assertion below reads
 	// the directory this test just made unreadable.
@@ -123,7 +114,7 @@ func TestUnflushableDirectoryIsADumpThatDidNotCommit(t *testing.T) {
 	}
 
 	if err == nil {
-		t.Fatal("a dump whose replacement could not be flushed reported that it committed")
+		t.Fatal("a durable dump whose replacement could not be flushed reported that it committed")
 	}
 
 	if !errors.Is(err, ferry.ErrPlane) {
@@ -137,6 +128,97 @@ func TestUnflushableDirectoryIsADumpThatDidNotCommit(t *testing.T) {
 	}
 
 	onlyPlane(t, dir)
+}
+
+// TestDefaultDumpDoesNotFlushTheDirectory is the option seen from the other
+// side, and it is the one place the two modes are told apart from outside the
+// driver (#188).
+//
+// The same directory that fails a durable dump takes a default one, because a
+// default save never opens the directory at all. What it does still do is the
+// atomic swap: the plane holds the new document and no temporary is left, which
+// is the half that is not the caller's to decline.
+func TestDefaultDumpDoesNotFlushTheDirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root opens a directory with no read bit, so the durable mode would not fail here either")
+	}
+
+	type config struct {
+		Port int `ferry:"port"`
+	}
+
+	dir, path := unreadableDirWithPlane(t)
+
+	err := ferry.Dump(t.Context(), config{Port: 8080}, yaml.NewSink(path))
+
+	if cerr := os.Chmod(dir, 0o700); cerr != nil {
+		t.Fatalf("restoring the directory: %v", cerr)
+	}
+
+	if err != nil {
+		t.Fatalf("a default dump failed with %v, and the flush it declined is the only thing this directory "+
+			"refuses", err)
+	}
+
+	if got, want := read(t, path), "port: 8080\n"; got != want {
+		t.Errorf("the plane holds %q, want %q: the swap is not the caller's to decline", got, want)
+	}
+
+	onlyPlane(t, dir)
+}
+
+// TestDurableDumpRoundTrips is the durable path on a directory that takes the
+// flush: what a caller who asked for durability gets is the same document, not a
+// different one.
+func TestDurableDumpRoundTrips(t *testing.T) {
+	type config struct {
+		Port  int    `ferry:"port"`
+		Label string `ferry:"label"`
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, planeName)
+	want := config{Port: 8080, Label: "8080"}
+
+	if err := ferry.Dump(t.Context(), want, yaml.NewSink(path, yaml.Durable())); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	got, err := ferry.Load[config](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("loaded %+v, want %+v", got, want)
+	}
+
+	onlyPlane(t, dir)
+}
+
+// unreadableDirWithPlane stages a plane in a directory that takes a write and
+// refuses to be opened: write and execute let os.CreateTemp and os.Rename
+// through, and the missing read bit is what a flush of the directory needs.
+//
+// The caller restores the mode, because it has to happen after the dump and
+// before any assertion that reads the directory.
+func unreadableDirWithPlane(t *testing.T) (dir, path string) {
+	t.Helper()
+
+	dir = t.TempDir()
+	path = filepath.Join(dir, planeName)
+
+	if err := os.WriteFile(path, []byte("port: 1\n"), 0o600); err != nil {
+		t.Fatalf("writing the plane: %v", err)
+	}
+
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	if err := os.Chmod(dir, 0o300); err != nil {
+		t.Fatalf("making the directory unreadable: %v", err)
+	}
+
+	return dir, path
 }
 
 // TestUnwritableDirectoryRefusesInsideTheOpen holds the read-only refusal to
