@@ -311,6 +311,10 @@ So:
 - **Name every address you disliked, not just the first.**
   A refusal over a whole address set may carry one `ErrorAt` per member, joined together, and core reports one failure per address with its own cause and its own class.
   What you return without an address on it stays whole and is reported as one failure with none.
+- **Wrap it in a sentence of your own if you have one.**
+  `fmt.Errorf("flushing the write buffer: %w", ferry.ErrorAt(addr, err))` reports one failure at `addr` whose text and whose whole chain are both intact, however many times you wrapped it.
+  A sentence around a *join* of them is dropped instead, because it describes all of them and the failures are reported one address at a time.
+  The result of `ErrorAt` renders as the error it carries and never as the address, so printing one yourself rather than returning it shows no address: the address is data for core, and what names it is the ferry error a caller gets back.
 
 Do not put a value the plane supplied into an error message.
 ferry's own text never does, which is what stops a plane holding secrets from leaking into a log through ferry.

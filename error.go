@@ -301,12 +301,17 @@ func fromDriver(m moment, loc Path, err error) error {
 // carrier ErrorAt left in the tree, and one for the whole of anything that
 // holds no carrier at all.
 //
-// The carrier is unwrapped away where it is found, because leaving it in the
-// chain prints the address twice, once from ferry's location and once from the
-// carrier's own text. Descending is what makes that hold past the first one:
-// errors.AsType returns the first match in tree order, so reading one address
-// off the tree and taking that carrier's inner error as the cause discards
-// every other failure the driver joined beside it (#211).
+// The cause is the whole of the node the failure was found at, so a driver's
+// own sentence around one ErrorAt survives into the report and into the
+// errors.Is chain (#213). It prints once rather than twice because the carrier
+// renders as the error it carries and never as the address, which is what makes
+// it safe to leave in the chain instead of unwrapping it away.
+//
+// A node standing over more than one failure is context for all of them and
+// belongs to none, so the walk descends past it and each carrier keeps its own
+// cause: errors.AsType returns the first match in tree order, so reading one
+// address off the tree and stopping discards every other failure the driver
+// joined beside it (#211).
 //
 // Anything holding no carrier stays whole, which is ADR-0011's flatness
 // promise: ferry cannot attribute addresses to a third party's children, and a
@@ -318,8 +323,8 @@ func driverErrors(out []error, m moment, loc Path, err error) []error {
 	switch {
 	case !ok:
 		return append(out, driverError(m, loc, err))
-	case identical(at, err):
-		return append(out, driverError(m, coreFirst(loc, at.at), at.err))
+	case identical(at, err), aboveOneFailure(err):
+		return append(out, driverError(m, coreFirst(loc, at.at), err))
 	}
 
 	// There is no guard on the step being empty, and it does not need one:
@@ -331,6 +336,33 @@ func driverErrors(out []error, m moment, loc Path, err error) []error {
 	}
 
 	return out
+}
+
+// aboveOneFailure reports whether err is a driver's own sentence around exactly
+// one failure, which is the case its text can be attributed to that failure
+// (#213). A node wrapping several describes all of them, and ferry has no way
+// to say so once per address without printing every one of them under each.
+func aboveOneFailure(err error) bool {
+	step := unwrapped(err)
+
+	return len(step) == 1 && failures(step[0]) == 1
+}
+
+// failures is how many failures a driver's error reports, counted the way
+// driverErrors reports them: one per carrier it descends to, and one for the
+// whole of anything holding no carrier.
+func failures(err error) int {
+	at, ok := errors.AsType[*atError](err)
+	if !ok || identical(at, err) {
+		return 1
+	}
+
+	n := 0
+	for _, inner := range unwrapped(err) {
+		n += failures(inner)
+	}
+
+	return n
 }
 
 // driverError is one wrapped driver failure. withCause reads the class off this
@@ -474,9 +506,22 @@ func driverMsg(m moment) string {
 // a driver returns without an address on it stays whole and is reported as one
 // failure with no address.
 //
+// A sentence of the driver's own around one of these is kept, so wrapping the
+// result costs nothing:
+//
+//	return fmt.Errorf("flushing the write buffer: %w", ferry.ErrorAt(addr, err))
+//
+// reports one failure at addr whose text and whose whole chain are both intact.
+// A sentence around several of them is dropped instead, because it describes
+// all of them and the failures are reported one address at a time.
+//
 // It attaches and never classifies. On its own the result is not an [Error] and
 // matches no class; core reads the address off it and wraps it. A nil err
 // returns nil.
+//
+// The result also renders as the error it carries, and never as the address:
+// the address is data for core to read, not text, so a driver that prints one
+// of these rather than returning it sees no address in it.
 func ErrorAt(addr Path, err error) error {
 	if err == nil {
 		return nil
@@ -487,12 +532,17 @@ func ErrorAt(addr Path, err error) error {
 
 // atError is ErrorAt's carrier. It is unexported because a caller matches on
 // the sentinels and reads the address off ferry's own error, never off this.
+//
+// It renders as the error it carries and never as the address, which is what
+// lets core leave it in the chain under a driver's own sentence: ferry's
+// location prints the address, and a carrier that printed it too would print it
+// twice for every driver that wrapped one (#213).
 type atError struct {
 	at  Path
 	err error
 }
 
-func (a *atError) Error() string { return a.at.String() + ": " + a.err.Error() }
+func (a *atError) Error() string { return a.err.Error() }
 
 func (a *atError) Unwrap() error { return a.err }
 

@@ -411,6 +411,46 @@ It returns `error` and not `*Error`, which is what closes the typed-nil trap: th
 > So a join with no carrier in it is still one element with its internal shape intact, which is the control this defect was found against, and a join of carriers is one element per carrier.
 > ferry still never nests its own aggregates, and it still never rewrites a tree it cannot read an address out of.
 
+> **Added under [#213](https://github.com/onhotpath/ferry/issues/213): a driver may give its own context as well as an address, and `ErrorAt`'s result carries the address without printing it.**
+>
+> Every measurement in this section was taken on a **bare** `ErrorAt`, and the shipped code read the address off the tree and then reported the carrier's *inner* error as the cause, so a driver that wrapped one in a sentence of its own lost the sentence outright:
+>
+> ```
+> return fmt.Errorf("flushing the write buffer: %w", ferry.ErrorAt(qAddr, err))
+>
+>   as published   ferry: /q: closing the plane: kv: the socket is gone
+>   the same sentence with no ErrorAt under it
+>                  ferry: closing the plane: flushing the write buffer: kv: the socket is gone
+> ```
+>
+> `flushing the write buffer` was gone from `%+v` and from the `errors.Is` chain alike, because the wrapper was no longer in the chain at all, so a driver chose between an address and its own context.
+> That is the same shape of trade the note above reports between an address and every failure, and it is again the aggregation rule broken rather than a decision this ADR left open: the wrapper is not a consequence of the failure it wraps, it is the driver saying where it was.
+>
+> **The cause core reports is now the whole of the node the failure was found at**, so a driver's sentence, its own sentinel and its own concrete type all survive, at any depth of wrapping.
+> **What made that affordable is that the carrier no longer renders its own address**: `ErrorAt(addr, err).Error()` is `err.Error()`, and the address is data for core to read rather than text.
+> This section's own reason for unwrapping the carrier away - that leaving it in the chain prints the address twice, once from ferry's location and once from the carrier's own text - is answered at the second half of the sentence rather than accepted.
+> Measured on the four cases that differ, reporting the wrapper as the cause **with** the carrier still rendering its address against reporting it with the carrier transparent:
+>
+> ```
+>                                        the carrier renders its address   the carrier is transparent
+> a sentence around one address          /q ... flushing: /q: gone         /q ... flushing: gone
+> an address inside an address           /q ... /r: the failure            /q ... the failure
+> core's address, driver names another   /host ... flushing: /somewhere/else: gone
+>                                                                          /host ... flushing: gone
+> a carrier in the driver's own hand     /q: kv: gone                      kv: gone
+> ```
+>
+> The third row is why this is not a matter of taste.
+> This section measures `driver names /somewhere/else inside a Get at /db/host -> /db/host` and states that a driver cannot misattribute a read; a carrier that renders its address puts the address ferry rejected back into the message, beside the one ferry chose, for every driver that wrapped one.
+> Keeping the address out of the carrier's text is the same rule as printing it once, and it is what makes the wrapper safe to keep.
+>
+> **The cost is the fourth row, and it is charged to a driver printing a carrier rather than returning it**, which loses the address entirely: not as text, and not as data either, because the address on the carrier is unexported and has no accessor.
+> That is `ErrorAt` being inert until core wraps it, extended from the class to the rendering, and the check a driver's own test wants goes through `Load` or `Dump` and reads [`Error.Address`](#what-an-error-carries-and-the-one-accessor), which is where this ADR already says an address is read from.
+>
+> **A sentence standing over more than one failure is dropped**, and that is the bound rather than an oversight.
+> A wrapper around a join of carriers describes all of them, and ferry's report is one line per address, so keeping it would mean printing every one of the joined failures under every address.
+> Measured, that renders the whole join's text twice for two addresses and N times for N, so the rule is that a node is context for the failure below it only where there is exactly one.
+
 **What a driver can still do wrong, stated rather than implied.**
 It can wrap `ErrSchema` around an infrastructure failure and produce an error `Validate[T]()` would never have caught.
 Nothing checks it.
@@ -837,6 +877,10 @@ This ADR fixes the semantics, exact-set over `(address, class)` with no message 
 - **A driver may name more than one address in one refusal, and every one of them is reported**, each keeping its own address, its own cause and its own class.
   *(Added under [#211](https://github.com/onhotpath/ferry/issues/211); the shipped code read the first carrier and discarded the rest, which is the aggregation rule broken rather than a decision this ADR left open.
   It qualifies the flatness sentence only as far as that sentence's own reason reaches: a join with no address in it is still one element.)*
+- **A driver may give its own context as well as an address, and keeps both**, at any depth of wrapping, because the cause core reports is the whole of the node the failure was found at.
+  `ErrorAt`'s result renders as the error it carries and never as the address, which is what keeps the address printed once and keeps an address a driver named where core has one of its own out of the message.
+  The cost is that a driver printing the carrier rather than returning it sees no address in it, and a sentence standing over several failures is dropped rather than repeated under each.
+  *(Added under [#213](https://github.com/onhotpath/ferry/issues/213); every measurement on `ErrorAt` had used a bare one, and a wrapper around one lost the driver's sentence from `%+v` and from the `errors.Is` chain alike.)*
 - **ferry's own error text carries no plane value, on every plane, always.**
   Measured at four leaks in five naive messages, on values a Vault or Consul plane makes secret by default.
   The cost is that ferry authors a message for every decode failure mode instead of passing one through, and the carve-out is that a dynamic address segment is plane-supplied and is printed.

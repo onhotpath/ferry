@@ -4,7 +4,6 @@ import (
 	"errors"
 	"slices"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/onhotpath/ferry"
@@ -172,9 +171,9 @@ func TestMemPlaneNeverFolds(t *testing.T) {
 }
 
 // TestMemPlaneRefusesADuplicateWrite is ADR-0003's third obligation. The
-// refusal is loud, it names the address, it answers to the plane class, and the
-// value already there survives it - a plane that kept the last writer would
-// report success for a dump that lost a field.
+// refusal is loud, it answers to the plane class, and the value already there
+// survives it - a plane that kept the last writer would report success for a
+// dump that lost a field. Naming the address is the test below.
 func TestMemPlaneRefusesADuplicateWrite(t *testing.T) {
 	r, w := openPlane(t)
 
@@ -190,12 +189,45 @@ func TestMemPlaneRefusesADuplicateWrite(t *testing.T) {
 		t.Errorf("refusal = %v, want one matching ferry.ErrPlane", err)
 	}
 
-	if !strings.Contains(err.Error(), addr.String()) {
-		t.Errorf("refusal = %q, want it to name %s", err, addr)
-	}
-
 	if got := mustGet(t, r, addr); got != ferry.String("first") {
 		t.Errorf("Get(%s) = %#v, want the first write to have survived", addr, got)
+	}
+}
+
+// TestMemPlaneNamesTheAddressItRefused is the other half of that obligation,
+// asserted where a caller reads it. The address is attached with
+// [ferry.ErrorAt], which makes it data for core rather than text the plane
+// wrote, so what names it is the ferry error a dump reports.
+func TestMemPlaneNamesTheAddressItRefused(t *testing.T) {
+	inst := ferrytest.MemPlane().Open()
+	cfg := errCfg{Host: "h", Port: 1, Rate: 2}
+
+	if err := ferry.Dump(t.Context(), cfg, inst.Sink); err != nil {
+		t.Fatalf("the first dump failed: %v", err)
+	}
+
+	err := ferry.Dump(t.Context(), cfg, inst.Sink)
+
+	els := ferry.Elements(err)
+	if len(els) != 3 {
+		t.Fatalf("a dump into a plane that already holds all three gave %d elements, want 3:\n%+v", len(els), err)
+	}
+
+	for i, want := range []ferry.Path{ferry.At("host"), ferry.At("port"), ferry.At("rate")} {
+		checkRefusalAt(t, els[i], want)
+	}
+}
+
+func checkRefusalAt(t *testing.T, el error, want ferry.Path) {
+	t.Helper()
+
+	e, ok := errors.AsType[*ferry.Error](el)
+	if !ok || e.Address() != want {
+		t.Errorf("element = %v, want a ferry error at %s", el, want)
+	}
+
+	if !errors.Is(el, ferry.ErrPlane) {
+		t.Errorf("the refusal at %s does not answer to ferry.ErrPlane:\n%+v", want, el)
 	}
 }
 
