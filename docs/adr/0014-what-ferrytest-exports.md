@@ -95,6 +95,8 @@ This is the whole file.
 > Nothing then handed a suite the plane's contents, so [`Driver` case 11](#the-case-lists-and-who-owns-each) - the golden artefact, and the only case that sees a representation - was specified and could not run.
 > [ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md) is why that is not cosmetic: a round trip tests a function against its own inverse, so it structurally cannot stand in for the case, and the compatibility promise ferry makes about what a plane holds had nothing behind it.
 > **`Open` now returns `ferrytest.Instance{Source, Sink, Contents}`**, where `Contents func() ([]byte, error)` yields that instance's raw contents, read after the dump has finished and after any `Committer` has committed.
+> *(A fourth member, `InContext`, was added under [#185](https://github.com/onhotpath/ferry/issues/185), on the minor-release optionality this amendment argues for two paragraphs below.
+> The amendment is with [the case it made runnable](#the-case-lists-and-who-owns-each).)*
 >
 > **Why not a field on `Plane` beside `Open`, or one on `Artefact` per row**, which is what the issue proposed.
 > `Open` mints a fresh, empty plane on every call, because this ADR's own rule is that every equivalence subtest gets a fresh destination.
@@ -426,6 +428,23 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 10. A driver reading its plane from the context refuses at open when it is absent, with `ErrPlane` ([ADR-0012](0012-the-caller-held-binding.md)).
 11. A **golden artefact**: a fixed value, dumped, compared against fixed expected plane contents ([ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md)).
 12. A sink accepts `Set` of a `Null` at a **container address** - a nil composite, an empty composite, and a nil optional section - and that address was in the set its `Bind` received ([ADR-0003](0003-how-a-leaf-addresses-a-plane.md), [ADR-0005](0005-the-supported-type-set.md)).
+
+> **Amended under [#185](https://github.com/onhotpath/ferry/issues/185): case 10 had never run, because nothing in this ADR let a `Plane` describe a driver it applies to.**
+> As published, and after [#101](https://github.com/onhotpath/ferry/issues/101) made `Open` return an `Instance`, the description is a plane minted directly by `Plane.Open` and it mentions no `context.Context` anywhere.
+> A driver whose plane is per request carries no contents in its `Source` at all, so there was no field it could fill in, and the case shipped as an unconditional skip against every plane.
+> **The assertion does not move.**
+> The refusal still lands at the open and never at `Bind`, still lands per load, and still carries [ADR-0011](0011-the-error-model.md)'s `ErrPlane`, which is [ADR-0012](0012-the-caller-held-binding.md)'s ruling that a plane that was never supplied is the limiting case of a plane that cannot be reached.
+> **What moves is the description**: `Instance` gains an optional `InContext func(context.Context) context.Context`, which puts that instance's contents into a context.
+> The suite runs every case's own I/O under the context it returns, so a per-request driver can run the whole suite rather than only the case named after it, and case 10 runs where it is set and is skipped, explicitly, where it is not.
+> A plane that leaves it nil runs under `context.Background` exactly as it always has, which is every driver in this repository, verified case by case against the published skip.
+> Both halves are asked, because ADR-0012 puts the same rule on a sink whose plane is per request as on a source.
+>
+> **It is on `Instance` and not on `Plane`, and #185's own sketch put it on `Plane`.**
+> A per-request plane's contents *are* what the context carries, and `Instance` is already the one freshly minted plane, both halves of it over one set of contents.
+> A decorator on `Plane` has to do one of two things and both are wrong: mint fresh contents on every call, so that two opens within one case disagree and `Instance.Contents` cannot see either, or close over contents hoisted out of `Open`, which is the shared destination `Plane.Open` exists to make impossible.
+> It is a member on an existing struct rather than a signature change, which is the optionality [#101](https://github.com/onhotpath/ferry/issues/101) took this shape for: a struct can gain a member in a minor release where a signature cannot, and this is the first time that has been spent.
+> **The surface table does not move**, because `Instance` is already on it and a field adds no exported name; `TestExportedSurface` locks the same twenty-six.
+> That table's own staleness is [#175](https://github.com/onhotpath/ferry/issues/175)'s and is untouched here.
 
 Case 11 is the one that is new, and ADR-0013 gives the reason a round-trip case cannot stand in for it: a round trip tests a function against its own inverse, a spelling is a *choice* of function, and changing both halves together is invisible to any test that only composes them.
 The expected contents live on the `Plane` rather than being a parameter of the suite, because the spelling is the **driver's** statement about itself and ADR-0005 puts it on the driver's side of the line.

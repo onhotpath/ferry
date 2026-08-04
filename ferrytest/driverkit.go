@@ -141,41 +141,49 @@ func kindSet(kinds []ferry.VKind) map[ferry.VKind]bool {
 }
 
 // dumpAndOpen dumps one fixture into a fresh instance and hands back a reader
-// over the same contents.
+// over the same contents, together with the context that reader was opened
+// under and must be read through.
 //
 // It is a function rather than a method because the fixture's type is a
 // parameter, and a method cannot take one. The instance is fresh per call, which
 // is ADR-0014's fresh-destination rule: a plane shared across cases is the
 // defect that hides a broken second walk.
-func dumpAndOpen[T any](d *driverRun, v T, set *ferry.AddressSet, n int) (ferry.Reader, bool) {
+//
+// The context comes back with the reader rather than being rebuilt by the
+// caller, because for a per-request plane it is the instance's contents
+// (ADR-0012) and a second one built from a second instance would be a second
+// plane: the fixture would have been dumped into one and read out of the other.
+func dumpAndOpen[T any](d *driverRun, v T, set *ferry.AddressSet, n int) (context.Context, ferry.Reader, bool) {
 	d.rep.Helper()
 
 	inst := d.plane.Open()
 	if inst.Sink == nil || inst.Source == nil {
-		return nil, false
+		return nil, nil, false
 	}
 
-	if err := ferry.Dump(context.Background(), v, inst.Sink, d.opts...); err != nil {
+	ctx := inst.ctx()
+
+	if err := ferry.Dump(ctx, v, inst.Sink, d.opts...); err != nil {
 		d.fail(n, "dumping the fixture: "+err.Error())
 
-		return nil, false
+		return nil, nil, false
 	}
 
 	open, err := inst.Source.Bind(set)
 	if err != nil {
 		d.fail(n, "Source.Bind: "+err.Error())
 
-		return nil, false
+		return nil, nil, false
 	}
 
-	r, err := open(context.Background())
+	r, err := open(ctx)
 	if err != nil {
 		d.fail(n, "opening a reader: "+err.Error())
 
-		return nil, false
+		return nil, nil, false
 	}
 
-	return r, true
+	return ctx, r, true
 }
 
 // closeIf releases a reader or a writer that holds a resource, which is what

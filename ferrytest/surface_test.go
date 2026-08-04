@@ -38,8 +38,9 @@ func (c *capture) Errorf(format string, args ...any) {
 
 // Logf is not on [ferrytest.T] and is deliberately implemented anyway.
 //
-// A suite skips a case that cannot be run - case 10 for every driver in this
-// repository, case 5 for a reader that does not enumerate - and ADR-0014 wants
+// A suite skips a case that cannot be run - case 10 for a plane that does not
+// take its plane per request, case 5 for a reader that does not enumerate - and
+// ADR-0014 wants
 // that skip explicit rather than silent. T is two methods and neither is a log,
 // so a suite writes the skip where the reporter can carry one, which *testing.T
 // does and which this captures separately from the failures.

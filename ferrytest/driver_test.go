@@ -164,10 +164,13 @@ func TestDriverCase11RefusesAPlaneThatPinsASpellingAndCannotShowIt(t *testing.T)
 // TestDriverSkipsExplicitly is ADR-0014's "the skip is explicit rather than
 // silent", asserted where a skip can be seen.
 //
-// Case 10 is skipped for every driver in this repository, because a Plane
-// describes no driver that takes its plane per request. Case 11 is skipped for a
-// plane with no serialization format, which the memory plane is. A case that
-// quietly did nothing would be indistinguishable from a case that passed.
+// Case 10 is skipped for a plane that puts nothing in a context, which is every
+// driver in this repository and the memory plane: such a plane's halves carry
+// their own contents, so there is no absence of a plane for an open to refuse.
+// It is not skipped where an Instance fills in InContext, and
+// perrequest_test.go asserts that other half. Case 11 is skipped for a plane
+// with no serialization format, which the memory plane is. A case that quietly
+// did nothing would be indistinguishable from a case that passed.
 func TestDriverSkipsExplicitly(t *testing.T) {
 	c := &capture{}
 

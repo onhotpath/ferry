@@ -540,6 +540,24 @@ A struct minted inside `Open` has nowhere to hoist to, so the honest spelling is
 `Instance.Contents` yields the plane's raw contents exactly as it holds them, read after the dump has finished and after any `Committer` has committed.
 A file-backed plane's whole implementation of it is `func() ([]byte, error) { return os.ReadFile(p) }`.
 
+`Instance.InContext` is what a driver whose plane instance is obtained freshly per load fills in, and it is nil for every other plane.
+It puts this instance's contents into a context, which is where such a driver takes its plane from ([ADR-0012](../adr/0012-the-caller-held-binding.md)):
+
+```go
+Open: func() ferrytest.Instance {
+	v := url.Values{}
+
+	return ferrytest.Instance{
+		Source:    ferryhttp.NewQuerySource(),
+		InContext: func(ctx context.Context) context.Context { return ferryhttp.WithQuery(ctx, v) },
+	}
+},
+```
+
+Set it and every case runs its own I/O under the context it returns, so the whole suite reaches your plane the way a request would, and case 10 stops being skipped.
+Close over contents minted inside `Open`, never over contents hoisted out of it, and supply the same contents on every call: one case opens the plane more than once, and each open has to find what the last one wrote.
+A sink whose plane is per request fills it in the same way, from the same function, because an instance is both halves over one set of contents.
+
 **`Golden`** pins your own spelling of a fixed value, and it is empty for a plane with no serialization format.
 It lives on the `Plane` rather than being a parameter of the suite, because the spelling is your statement about yourself: ferry refuses to constrain indentation or key order, so what is pinned has to be your choice.
 
@@ -573,7 +591,7 @@ A case that cannot apply to your plane is skipped and says so:
 ```
 case 5 skipped: the plane's reader does not enumerate, which ADR-0004 makes optional
 case 6 skipped: the plane's writer holds no resource, so it implements no Close
-case 10 skipped: a Plane describes no per-request plane
+case 10 skipped: the plane puts nothing in a context, so it does not take its plane per request
 case 12 skipped: the plane declares no null; case 1 is where its refusal of one is asserted
 ```
 

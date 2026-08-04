@@ -128,7 +128,7 @@ func (d *driverRun) dumpThroughLifecycle(probe lifecycleProbe) (*lifecycleSink, 
 
 	s := &lifecycleSink{inner: inst.Sink, probe: probe}
 
-	return s, ferry.Dump(context.Background(), onlyLeaf{Leaf: "x"}, s, d.opts...)
+	return s, ferry.Dump(inst.ctx(), onlyLeaf{Leaf: "x"}, s, d.opts...)
 }
 
 // lifecycleProbe is what one run of the lifecycle case stages: an error from Set

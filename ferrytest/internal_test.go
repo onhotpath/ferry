@@ -335,7 +335,7 @@ func TestDumpAndOpenReportsAPlaneItCannotUse(t *testing.T) {
 			c := &lines{}
 			d := &driverRun{rep: c, plane: tc.plane, carry: kindSet(nil)}
 
-			if _, ok := dumpAndOpen(d, filledFixture(), leafSet(), caseContainerNo); ok {
+			if _, _, ok := dumpAndOpen(d, filledFixture(), leafSet(), caseContainerNo); ok {
 				t.Fatal("a plane that cannot be used handed back a reader")
 			}
 

@@ -140,6 +140,45 @@ type Instance struct {
 	// variables are the case - and the suite then runs the read-side cases only.
 	Sink ferry.Sink
 
+	// InContext puts this instance's contents into a context, and it is what a
+	// driver whose plane is obtained freshly per load fills in. It is nil for
+	// every plane whose halves already hold their own contents, which is every
+	// plane that does not read one from a [context.Context].
+	//
+	// A driver like that ships a constructor for a source that carries no
+	// plane, and a second one that puts a plane into a context. Both go here,
+	// and the whole of it is the driver's own two calls:
+	//
+	//	Open: func() ferrytest.Instance {
+	//	    v := url.Values{}
+	//	    return ferrytest.Instance{
+	//	        Source:    ferryhttp.NewQuerySource(),
+	//	        InContext: func(ctx context.Context) context.Context {
+	//	            return ferryhttp.WithQuery(ctx, v)
+	//	        },
+	//	    }
+	//	},
+	//
+	// A sink whose plane is per request fills it in exactly the same way, and a
+	// plane with both halves supplies both of them from this one function,
+	// because an instance is both halves over one set of contents.
+	//
+	// Set it and every case runs its own I/O under the context this returns, so
+	// the whole suite reaches the plane the way a request would. Leave it nil
+	// and every case runs under [context.Background], which is what it has
+	// always done.
+	//
+	// Two obligations. It closes over contents minted inside [Plane.Open] and
+	// never over contents hoisted out of it, which is the shared plane Open
+	// exists to make impossible. And it supplies the same contents on every
+	// call, because one case opens the plane more than once and each open has
+	// to find what the last one wrote.
+	//
+	// It is also what makes the per-request refusal checkable: the suite calls
+	// this to supply the plane, and deliberately does not call it to assert that
+	// a load with no plane in the context is refused at the open.
+	InContext func(ctx context.Context) context.Context
+
 	// Contents yields this instance's raw contents, exactly as the plane holds
 	// them, and it is what makes [Plane.Golden] checkable.
 	//
@@ -154,6 +193,29 @@ type Instance struct {
 	// the golden case. Leaving only this one nil, while pinning a spelling, is
 	// reported rather than quietly passing.
 	Contents func() ([]byte, error)
+}
+
+// ctx is the context one instance's I/O runs under, and every case in this
+// package opens, reads, dumps and loads through it.
+//
+// It is [context.Background] for a plane whose halves hold their own contents,
+// which is what every case used before [Instance.InContext] existed and is why
+// a plane that sets nothing is unaffected. For a per-request plane it is
+// ADR-0012's channel: the plane instance travels in the context, using the
+// driver's own key, and core supplies no mechanism for it - so the suite has
+// none either, and asks the description for a context instead.
+//
+// It is called per use rather than once per instance, which is why InContext
+// documents that it supplies the same contents every time. A decorator closed
+// over what Open minted satisfies that for free; one that mints fresh contents
+// per call is the hoisted plane ADR-0014's fresh-destination rule refuses, and
+// it would fail case 1 rather than pass quietly.
+func (i Instance) ctx() context.Context {
+	if i.InContext == nil {
+		return context.Background()
+	}
+
+	return i.InContext(context.Background())
 }
 
 // Artefact is one fixed value and the plane contents that saving it must

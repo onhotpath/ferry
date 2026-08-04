@@ -202,7 +202,7 @@ func (p typeProof[T]) refuseCase(h *harness, i int, c Case[T]) {
 		return
 	}
 
-	err := ferry.Dump(context.Background(), holder[T]{Value: c.Value}, inst.Sink, h.opts...)
+	err := ferry.Dump(inst.ctx(), holder[T]{Value: c.Value}, inst.Sink, h.opts...)
 	if err != nil {
 		return
 	}
@@ -267,10 +267,10 @@ func (d *driverRun) caseContainerGet() {
 
 	set := ferry.NewAddressSet(addrList, addrMap, addrLeaf, addrMissing)
 
-	if r, ok := dumpAndOpen(d, filledFixture(), set, caseContainerNo); ok {
-		d.holdsNothing(r, addrList)
-		d.holdsNothing(r, addrMap)
-		d.holdsNothing(r, addrMissing)
+	if ctx, r, ok := dumpAndOpen(d, filledFixture(), set, caseContainerNo); ok {
+		d.holdsNothing(ctx, r, addrList)
+		d.holdsNothing(ctx, r, addrMap)
+		d.holdsNothing(ctx, r, addrMissing)
 		closeIf(r)
 	}
 
@@ -284,15 +284,15 @@ func (d *driverRun) caseContainerGet() {
 
 	blankSet := ferry.NewAddressSet(addrNilList, addrEmptyMap, addrSection)
 
-	r, ok := dumpAndOpen(d, blanksFixture(), blankSet, caseContainerNo)
+	ctx, r, ok := dumpAndOpen(d, blanksFixture(), blankSet, caseContainerNo)
 	if !ok {
 		return
 	}
 
 	defer closeIf(r)
 
-	d.holdsNull(r, addrNilList)
-	d.holdsNull(r, addrEmptyMap)
+	d.holdsNull(ctx, r, addrNilList)
+	d.holdsNull(ctx, r, addrEmptyMap)
 }
 
 // holdsNothing reads one container address nothing was ever written at, and
@@ -301,10 +301,10 @@ func (d *driverRun) caseContainerGet() {
 //
 // Absent is the only answer here, because a composite is read one element at a
 // time and no Set ever reached the address.
-func (d *driverRun) holdsNothing(r ferry.Reader, addr ferry.Path) {
+func (d *driverRun) holdsNothing(ctx context.Context, r ferry.Reader, addr ferry.Path) {
 	d.rep.Helper()
 
-	v, ok := d.containerGet(r, addr)
+	v, ok := d.containerGet(ctx, r, addr)
 	if !ok || v.Kind() == ferry.KindAbsent {
 		return
 	}
@@ -322,10 +322,10 @@ func (d *driverRun) holdsNothing(r ferry.Reader, addr ferry.Path) {
 // hold the address, so answering it here deletes an observation rather than
 // renaming one: the field a LoadOver should clear keeps its seeded value, and
 // nothing reports why.
-func (d *driverRun) holdsNull(r ferry.Reader, addr ferry.Path) {
+func (d *driverRun) holdsNull(ctx context.Context, r ferry.Reader, addr ferry.Path) {
 	d.rep.Helper()
 
-	v, ok := d.containerGet(r, addr)
+	v, ok := d.containerGet(ctx, r, addr)
 	if !ok || v.Kind() == ferry.KindNull {
 		return
 	}
@@ -337,10 +337,10 @@ func (d *driverRun) holdsNull(r ferry.Reader, addr ferry.Path) {
 
 // containerGet is the read both container assertions share, and the one failure
 // they share with it: a container address holds no value to fail at.
-func (d *driverRun) containerGet(r ferry.Reader, addr ferry.Path) (ferry.Value, bool) {
+func (d *driverRun) containerGet(ctx context.Context, r ferry.Reader, addr ferry.Path) (ferry.Value, bool) {
 	d.rep.Helper()
 
-	v, err := r.Get(context.Background(), addr)
+	v, err := r.Get(ctx, addr)
 	if err != nil {
 		d.fail(caseContainerNo, fmt.Sprintf("Get at the container address %s failed with %v, where a container "+
 			"address holds no value and so has nothing to fail at", addr, err))
@@ -374,7 +374,7 @@ func (d *driverRun) caseGetError() {
 
 	src := erringSource{inner: inst.Source, at: addrLeaf, err: errProbeGet}
 
-	_, err := ferry.Load[onlyLeaf](context.Background(), src, d.opts...)
+	_, err := ferry.Load[onlyLeaf](inst.ctx(), src, d.opts...)
 	if err == nil {
 		d.fail(caseGetErrorNo, "a Get that failed was reported as a load that succeeded, so the field is at its "+
 			"zero value and nothing says why")
@@ -405,7 +405,7 @@ func (d *driverRun) caseChildren() {
 
 	set := ferry.NewAddressSet(addrList, addrMap, addrLeaf)
 
-	r, ok := dumpAndOpen(d, filledFixture(), set, caseChildrenNo)
+	ctx, r, ok := dumpAndOpen(d, filledFixture(), set, caseChildrenNo)
 	if !ok {
 		return
 	}
@@ -419,17 +419,17 @@ func (d *driverRun) caseChildren() {
 		return
 	}
 
-	d.childrenAre(e, addrList, []ferry.Path{addrList.Elem(0), addrList.Elem(1)})
-	d.childrenAre(e, addrMap, []ferry.Path{addrMap.At(fixtureKey)})
+	d.childrenAre(ctx, e, addrList, []ferry.Path{addrList.Elem(0), addrList.Elem(1)})
+	d.childrenAre(ctx, e, addrMap, []ferry.Path{addrMap.At(fixtureKey)})
 }
 
 // childrenAre reads one container's children and compares them against the
 // addresses the fixture put there, sorted segment-wise so that the comparison is
 // about the set rather than about the order a driver happens to answer in.
-func (d *driverRun) childrenAre(e ferry.Enumerator, prefix ferry.Path, want []ferry.Path) {
+func (d *driverRun) childrenAre(ctx context.Context, e ferry.Enumerator, prefix ferry.Path, want []ferry.Path) {
 	d.rep.Helper()
 
-	got, err := e.Children(context.Background(), prefix)
+	got, err := e.Children(ctx, prefix)
 	if err != nil {
 		d.fail(caseChildrenNo, fmt.Sprintf("Children at %s failed with %v", prefix, err))
 
@@ -556,11 +556,11 @@ func (d *driverRun) caseRetention() {
 		return
 	}
 
-	if !d.mints(open, addrMap.At("a-b"), caseRetentionNo) {
+	if !d.mints(inst.ctx(), open, addrMap.At("a-b"), caseRetentionNo) {
 		return
 	}
 
-	if d.mints(open, addrMap.At("a_b"), caseRetentionNo) {
+	if d.mints(inst.ctx(), open, addrMap.At("a_b"), caseRetentionNo) {
 		return
 	}
 
@@ -592,7 +592,7 @@ func (d *driverRun) caseDynamic() {
 		return
 	}
 
-	if d.mints(open, addrMap.At(fixtureKey), caseDynamicNo) {
+	if d.mints(inst.ctx(), open, addrMap.At(fixtureKey), caseDynamicNo) {
 		return
 	}
 
@@ -603,10 +603,10 @@ func (d *driverRun) caseDynamic() {
 // mints opens a writer and writes one address through it, reporting whether the
 // write was taken. The open is closed either way, because a suite that leaked a
 // file handle per case would fail a driver for the suite's own reason.
-func (d *driverRun) mints(open ferry.OpenWriterFunc, addr ferry.Path, n int) bool {
+func (d *driverRun) mints(ctx context.Context, open ferry.OpenWriterFunc, addr ferry.Path, n int) bool {
 	d.rep.Helper()
 
-	w, err := open(context.Background())
+	w, err := open(ctx)
 	if err != nil {
 		d.fail(n, fmt.Sprintf("opening a writer: %v", err))
 
@@ -615,23 +615,158 @@ func (d *driverRun) mints(open ferry.OpenWriterFunc, addr ferry.Path, n int) boo
 
 	defer closeIf(w)
 
-	return w.Set(context.Background(), addr, ferry.String("v")) == nil
+	return w.Set(ctx, addr, ferry.String("v")) == nil
 }
 
 // casePerRequestPlane is case 10: a driver reading its plane from the context
 // refuses at open when it is absent, with [ferry.ErrPlane] (ADR-0012).
 //
-// It ships and is skipped, because a [Plane] does not describe a driver that
-// takes its plane per request and no first-party driver in this repository has
-// one. The skip is explicit rather than silent: a case that quietly did nothing
-// would be indistinguishable from a case that passed, and a driver author would
-// have no way to know that the one obligation their design does carry went
-// unmeasured.
+// It runs for a plane that fills in [Instance.InContext] and is skipped for
+// every plane that does not, because a driver whose halves carry their own
+// contents has no absence to refuse and nothing here would be measuring it. The
+// skip is explicit rather than silent: a case that quietly did nothing would be
+// indistinguishable from a case that passed, and a driver author would have no
+// way to know that the one obligation their design does carry went unmeasured.
+//
+// Both halves are asked, because ADR-0012 puts the same rule on a sink whose
+// plane is per request as on a source: it reads the plane from the context in
+// exactly the same way and refuses at open when it is absent.
+//
+// It reaches the driver through Bind and the open rather than through
+// [ferry.Load], and that is the case rather than a shortcut. What is asserted is
+// *where* the refusal lands, and a load collapses Bind and the open into one
+// error that cannot say which of them produced it.
 func (d *driverRun) casePerRequestPlane() {
 	d.rep.Helper()
 
-	d.skip(casePerRequestNo, "a Plane describes no per-request plane, so there is no open for the absence of one "+
-		"to be refused at")
+	inst := d.plane.Open()
+	if inst.InContext == nil {
+		d.skip(casePerRequestNo, "the plane puts nothing in a context, so it does not take its plane per "+
+			"request and there is no absence of one for an open to refuse")
+
+		return
+	}
+
+	d.perRequestHalf(inst.ctx(), "a reader", d.readProbe(inst.Source))
+	d.perRequestHalf(inst.ctx(), "a writer", d.writeProbe(inst.Sink))
+}
+
+// openProbe opens one half of a plane under one context and reports what the
+// open answered, releasing whatever it handed back.
+//
+// It is one type over both halves because case 10 asks both the same question
+// and neither answer involves reading or writing anything: the refusal is at the
+// open, so a [ferry.Reader] and a [ferry.Writer] are equally beside the point
+// once they exist.
+type openProbe func(ctx context.Context) error
+
+// readProbe binds the read half once, which is where case 10's "not at Bind"
+// half is asserted, and hands the open back as a probe.
+//
+// Bind takes no [context.Context] (ADR-0004), so it cannot see whether a plane
+// was supplied and must not refuse for the absence of one. A nil probe is a
+// plane with no read half, or a Bind that has already been reported.
+func (d *driverRun) readProbe(src ferry.Source) openProbe {
+	d.rep.Helper()
+
+	if src == nil {
+		return nil
+	}
+
+	open, err := src.Bind(ferry.NewAddressSet(addrLeaf))
+	if err != nil {
+		d.fail(casePerRequestNo, fmt.Sprintf("Source.Bind refused a legal address set with %v, and no plane "+
+			"had been supplied: Bind takes no context, so it cannot see that absence, and a plane that is "+
+			"not there is refused inside the open", err))
+
+		return nil
+	}
+
+	return func(ctx context.Context) error {
+		r, err := open(ctx)
+		closeIf(r)
+
+		return err
+	}
+}
+
+// writeProbe is [driverRun.readProbe] on the write half, and it is a second
+// function rather than one over an interface because a [ferry.Source] and a
+// [ferry.Sink] are two interfaces with one method name and no common type.
+func (d *driverRun) writeProbe(sink ferry.Sink) openProbe {
+	d.rep.Helper()
+
+	if sink == nil {
+		return nil
+	}
+
+	open, err := sink.Bind(ferry.NewAddressSet(addrLeaf))
+	if err != nil {
+		d.fail(casePerRequestNo, fmt.Sprintf("Sink.Bind refused a legal address set with %v, and no plane had "+
+			"been supplied: Bind takes no context, so it cannot see that absence, and a plane that is not "+
+			"there is refused inside the open", err))
+
+		return nil
+	}
+
+	return func(ctx context.Context) error {
+		w, err := open(ctx)
+		closeIf(w)
+
+		return err
+	}
+}
+
+// perRequestHalf runs the case over one half of the plane: one binding, one open
+// against a context carrying no plane, and one against the context the
+// description supplies.
+//
+// Both opens are on the one binding, and that is the "per load" half of the
+// rule. A driver that refused the absence once and stayed refused would pass a
+// case that only opened without a plane, and it would never load anything.
+func (d *driverRun) perRequestHalf(ctx context.Context, half string, probe openProbe) {
+	d.rep.Helper()
+
+	if probe == nil {
+		return
+	}
+
+	d.refusesWithoutPlane(half, probe)
+
+	if err := probe(ctx); err != nil {
+		d.fail(casePerRequestNo, fmt.Sprintf("opening %s with the plane in the context failed with %v, on the "+
+			"binding whose open had just refused the absence of one: a refusal that outlives the plane "+
+			"arriving is a driver that never opens at all", half, err))
+	}
+}
+
+// refusesWithoutPlane is the assertion the case exists for: an open against a
+// context carrying no plane is refused, and refused as a plane failure.
+//
+// The class is [ferry.ErrPlane] and not a new one, because a plane that was
+// never supplied is the limiting case of a plane that cannot be reached
+// (ADR-0012), which is a class ADR-0011 already has. A driver wraps its own
+// provenance marker around it, which is the driver's own sentinel and not
+// something this suite can name.
+func (d *driverRun) refusesWithoutPlane(half string, probe openProbe) {
+	d.rep.Helper()
+
+	err := probe(context.Background())
+	if err == nil {
+		d.fail(casePerRequestNo, "opening "+half+" against a context carrying no plane succeeded, so the load "+
+			"that follows reads an empty plane and reports every address as missing: a plane that was "+
+			"never supplied is refused and never quietly answered from")
+
+		return
+	}
+
+	if errors.Is(err, ferry.ErrPlane) {
+		return
+	}
+
+	d.fail(casePerRequestNo, fmt.Sprintf("opening %s against a context carrying no plane failed with %v, which "+
+		"is not a plane refusal: a plane that was never supplied is the limiting case of one that cannot be "+
+		"reached, and it carries the same class", half, err))
 }
 
 // caseGolden is case 11: a golden artefact - a fixed value, dumped, compared
@@ -686,7 +821,7 @@ func (d *driverRun) goldenRow(a Artefact) {
 		return
 	}
 
-	if err := a.dump(context.Background(), inst.Sink, d.opts...); err != nil {
+	if err := a.dump(inst.ctx(), inst.Sink, d.opts...); err != nil {
 		d.fail(caseGoldenNo, fmt.Sprintf("dumping the %s artefact: %v", a.label, err))
 
 		return
@@ -733,7 +868,7 @@ func (d *driverRun) caseNullAtContainer() {
 	}
 
 	spy := &bindSpy{inner: inst.Sink}
-	if err := ferry.Dump(context.Background(), blanksFixture(), spy, d.opts...); err != nil {
+	if err := ferry.Dump(inst.ctx(), blanksFixture(), spy, d.opts...); err != nil {
 		d.fail(caseNullNo, fmt.Sprintf("dumping a nil list, an empty map and a nil section: %v", err))
 
 		return
