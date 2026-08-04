@@ -282,8 +282,8 @@ func TestTwoUnencodableValuesLeaveThePlaneUntouched(t *testing.T) {
 
 	mustBeClass(t, err, ErrValue)
 
-	if want := []Path{At("expires"), At("started")}; !slices.Equal(addressesOf(err), want) {
-		t.Errorf("the report names %v, want %v", addressesOf(err), want)
+	if want := []Path{At("expires"), At("started")}; !slices.Equal(reportedAddresses(err), want) {
+		t.Errorf("the report names %v, want %v", reportedAddresses(err), want)
 	}
 
 	if len(s.attempts) != 0 {
@@ -307,7 +307,7 @@ func TestAStagingSinkLearnsBothFailureKindsAtOnce(t *testing.T) {
 	err := Dump(t.Context(), storeUnrepresentable(), staging)
 
 	want := []Path{At("bucket"), At("expires"), At("region"), At("started")}
-	if got := addressesOf(err); !slices.Equal(got, want) {
+	if got := reportedAddresses(err); !slices.Equal(got, want) {
 		t.Errorf("the staging sink reported %v, want %v\n%+v", got, want, err)
 	}
 
@@ -323,9 +323,9 @@ func TestAStagingSinkLearnsBothFailureKindsAtOnce(t *testing.T) {
 	}
 }
 
-// addressesOf is the report as the addresses it names, in the order the
+// reportedAddresses is the report as the addresses it names, in the order the
 // aggregate holds them, which is sorted at construction.
-func addressesOf(err error) []Path {
+func reportedAddresses(err error) []Path {
 	out := make([]Path, 0, len(Elements(err)))
 
 	for _, e := range Elements(err) {
