@@ -236,13 +236,19 @@ func memberOf(n *node, v reflect.Value, i int, f *node) reflect.Value {
 type loadFrom struct {
 	r Reader
 
-	// wrote counts the writes the walk has made, and it is how "materialised
-	// exactly where something under it was present" is decided at a pointer
-	// (ADR-0006): the count before the subtree ran against the count after.
+	// wrote counts the writes the walk has made, and it is how ADR-0006's
+	// presence bit per subtree is carried: a subtree's bit is the count before
+	// it ran against the count after, so one counter answers "was anything
+	// under here present on the plane" at every pointer without a bool being
+	// threaded through every return.
 	//
-	// It is shared mutable state behind the scheduler seam, which is the hazard
-	// ADR-0010 records rather than one this ticket introduces. A concurrent
-	// scheduler needs it per subtree; the serial one core ships needs nothing.
+	// The difference reads correctly only because the serial scheduler runs a
+	// subtree to completion between the two reads, so the counter is shared
+	// mutable state across the scheduler seam - the hazard ADR-0010 records
+	// rather than one this ticket introduces. It is left standing on purpose. A
+	// lock here, or a walk that started a goroutine, would answer the parked
+	// concurrency question by accident; a concurrent scheduler has to carry the
+	// bit per subtree itself, and the serial one core ships needs nothing.
 	wrote *int
 }
 

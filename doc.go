@@ -116,6 +116,55 @@
 // because there is no stable answer to give: which of the two writes survives is
 // which the walk makes last.
 //
+// # Absence, and what it means to a Go field
+//
+// One rule carries all of it: Absent means ferry does not write to the field.
+// Every other observation, Null and the empty string included, is a value the
+// plane holds, and it is handed to the type set, which either accepts it or
+// refuses it loudly. So a value loaded over an empty plane is unchanged, and an
+// explicit empty beats whatever the field was already carrying, because present
+// beats absent and empty is present.
+//
+// Null is not a second spelling of absence. It means the plane has this address
+// and the value stored there is that plane's own null, so it is presence
+// carrying a value, and the only question is which Go types can hold one. []byte,
+// *T, []T and map[K]V take it and land on their own nil; every other leaf refuses
+// it as a wrong kind, which is the same refusal a Bool gets at a string field.
+// The refusal is the recoverable direction, and that is the whole argument for
+// it: a registered codec for its own type can accept a Null and return whatever
+// it likes, while zeroing in the walk would happen before any codec is consulted
+// and nothing could recover strictness for a plain int. encoding/json/v2 zeroes,
+// which is a change it made from v1, and ferry departs from it knowingly.
+//
+// A struct merges and a composite replaces, and both follow from the one rule. A
+// struct's fields are separate addresses, so the ones the plane does not have are
+// Absent and are left alone. A composite is a single decision: if the plane has
+// any children under that address then it has said what the composite is, so a
+// slice or a map is replaced wholesale rather than merged into.
+//
+// A *T over a composite is materialised exactly where the plane spoke under it,
+// and the walk carries that as a bit per subtree rather than inferring it from
+// the value afterwards. Comparing the result against a fresh zero value cannot
+// tell a subtree the plane really did set to all zeros from one nothing touched.
+// A value already in the field is not presence, so an optional section stays
+// optional, and an explicit Null at its own address is a nil pointer.
+//
+// A *T at a leaf is the one shape that tells an explicit zero from an unset
+// field, and it is worth stating as narrowly as it is true: on Load from any
+// plane, because absence is observable everywhere, and on Dump only from a plane
+// that has a null, because a null is what a nil pointer writes.
+//
+// ferry never hands a sink an Absent. It is a Reader-side kind, so an omitted
+// address gets no Set call at all rather than a Set carrying nothing, and an
+// omission is therefore not a deletion: a replacing sink and a patching sink read
+// one dump differently and both are correct.
+//
+// Presence survives the walk as an observation of one Load, per address and
+// including Absent, and it is nothing a field holds: a key deleted from the plane
+// and a key set to zero are one struct and two observations. Core exports no
+// Option, callback or report for it, because a Reader a caller wraps is already
+// handed every address the walk asks about.
+//
 // # The type set's sharp edges
 //
 // Three of these are not defects, and every one of them is easier to meet in

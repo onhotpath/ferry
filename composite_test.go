@@ -396,13 +396,22 @@ type listing struct {
 	values   map[Path]Value
 	children map[Path][]Path
 	listErr  error
+
+	// got is every address the walk asked about, which is how "a length comes
+	// from enumeration and never from probing" is asserted: what a probe would
+	// have asked for is what this never holds.
+	got []Path
 }
 
 func (l *listing) Bind(*AddressSet) (OpenFunc, error) {
 	return func(context.Context) (Reader, error) { return l, nil }, nil
 }
 
-func (l *listing) Get(_ context.Context, addr Path) (Value, error) { return l.values[addr], nil }
+func (l *listing) Get(_ context.Context, addr Path) (Value, error) {
+	l.got = append(l.got, addr)
+
+	return l.values[addr], nil
+}
 
 func (l *listing) Children(_ context.Context, prefix Path) ([]Path, error) {
 	return l.children[prefix], l.listErr
