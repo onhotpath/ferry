@@ -206,7 +206,13 @@ An array loads either way, because an array's element addresses are known from t
 An address carries its segment kind, so the plane says whether the container is a mapping or a sequence rather than the caller guessing it from base-10 text.
 Sort them segment-wise: sorting the rendering gives `0 1 10 11 2` for twelve indices, and that is a conformance case.
 
-A `Null` at a container's own address is a complete answer and needs no enumeration.
+**At a slice or a map, core asks you for children before it asks the container's own address**, and asks the container's own address only where you returned nothing.
+
+So being asked for children is core telling you that the address is a dynamic container, and it is the only such signal you get: an address arrives at `Get` carrying no kind and no arity, so a container address and a leaf address are the same call.
+A plane whose element values live under the container's own name, an HTTP query string or a header block, needs exactly that signal to answer at all.
+The other side of it is that an answer at a container address which has children under it is never read (ADR-0003).
+
+A source that does **not** implement `Enumerator` is asked the other way round, container address first, and a `Null` there is a complete answer it can still give.
 
 ## What `Get` and `Set` must and must not do
 
@@ -221,6 +227,9 @@ At a **container** address, answer `Absent` or `Null` and nothing else.
 A composite is read one element at a time, so there is no group value for the container itself to hold.
 Which of the two is the plane's own business, and the rule is that **a driver reports what the plane holds**: an address the plane does not hold is `Absent`, and a present address carrying the plane's own null is `Null`.
 At an explicit `tags: []` node in a hand-authored document a tree driver answers `Null`, the same as at `tags: null` (ADR-0014, amended).
+
+If you implement `Enumerator`, the walk reaches a slice or a map's own address only after `Children` came back empty, so it is the answer for a container the plane holds nothing under and nothing else.
+The conformance suite still calls `Get` there itself, outside the walk, and still requires it not to fail.
 
 ### `Set`
 

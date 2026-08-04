@@ -229,6 +229,40 @@ It is not a group arm, which [ADR-0004](0004-source-and-sink.md) refused and sti
 Both of its possible observations mean "there is nothing under here", so it is never realised at the same time as anything beneath it and can never compete with a child for a value.
 That is also why it is exempt from prefix-freeness above.
 
+> **Amended under [#207](https://github.com/onhotpath/ferry/issues/207): the order core asks in is part of the rule, and as published this section said nothing about it.**
+> As published this paragraph said what a container address may hold and stopped there.
+> That silence turned out to be load-bearing for a plane whose key space is `map[string][]string`, such as HTTP query parameters or headers, where the name carrying a sequence's values **is** the name the container sits at.
+> `?tags=a&tags=b` puts a value at exactly the container address, and a driver cannot route around it: an address arrives at `Get` as one `Name` segment with no kind and no arity, so `Get(/tags)` for a `[]string` and `Get(/q)` for a `string` are the same call.
+>
+> **The rule itself does not move.**
+> A container address carries `Absent` or `Null` and never anything else.
+> Only the order changes, and only for sources that enumerate.
+>
+> What is added is the order, and the corollary a driver may rely on:
+>
+> > At a slice or a map, over a source implementing [`Enumerator`](0004-source-and-sink.md), core asks `Children` before it asks the container's own address, and asks the container's own address only where `Children` returned nothing.
+> > So **being asked for children at an address is core saying that address is a dynamic container**, and it is the only such signal a driver gets.
+>
+> That is an obligation on the optional interface as well as a permission: a `Reader` implementing `Enumerator` must be prepared for `Children` at an address its own `Get` would have answered a value at.
+>
+> A pointer is unaffected and is still asked `Get` first, because it has no children to enumerate and a `Null` at it is a complete answer.
+> An array is unaffected, because it has no container address.
+> A source that does not implement `Enumerator` is unaffected in every observable way, down to the wording of the refusal it gets at a dynamic address, and the reason the old order gave for itself was always about that source: a `Null` at the container address is a complete answer and a source that cannot list can still give it.
+>
+> It costs one call each way, and the cost only ever lands on a plane that can report `Null` at a container address.
+> Asserted at the boundary in core's own suite: a populated dynamic container is `Get=2 Children=1` where it was `Get=3 Children=1`, and a container answering `Null` is `Get=1 Children=1` where it was `Get=1 Children=0`.
+> Among the shipped drivers only `yaml` reaches the second row, and its `Children` is an in-memory node walk.
+>
+> **What the order takes away is stated rather than left to be discovered: an answer at a container address that has children under it is never read.**
+> A driver can no longer refuse there, and a `Null` there no longer wins over the children.
+> Measured on `proto/193-multimap`: a query plane reads `?tags=a&tags=b&tags.0=z` as `{Tags:[z]}` under the new order, where under the old one it refused.
+> Neither was a place a driver was entitled to answer from.
+> [ADR-0014](0014-what-ferrytest-exports.md)'s third conformance case already forbids failing at a container `Get`, and calls `Get` there itself outside the walk, so no reordering inside core rescues a driver that refuses there; and a plane reporting `Null` at an address it also lists children under is contradicting itself.
+>
+> [ADR-0006](0006-defaults-and-zero-values.md)'s does-not-write row was checked against the new order rather than assumed unaffected, and it survives unchanged.
+> `Children` empty then `Get` `Absent` is the same two observations in the other sequence, so a container with no children is still indistinguishable from an absent one and a seeded container still keeps what it had.
+> ADR-0006's own statement of the replacement rule, that "the plane either has children under that address or it does not, and if it has any then it has said what the composite is", is the question the new order asks first.
+
 **Which Go types get one is read off the type**, and the test is whether the value at that address can be nil:
 
 | field type | container address | why |
@@ -488,6 +522,8 @@ ADR-0002 shipped it as the place this decision becomes executable, so this ADR s
 - The static address set handed to `Bind` contains container addresses as well as leaf addresses, and prefix-freeness is a rule about the leaves only.
   A driver therefore sees `/Tags` and `/Opt` and never `/Tags/*`, so every address it is handed is one it can fetch, write, name and check.
   The cost is that the prefix-free check has to know which of its members are containers, which is one bit per address the compiler already holds.
+- A driver gets exactly one signal that an address is a dynamic container, and it is being asked for its children.
+  That is what makes a plane whose element addresses share the container's own name expressible at all, and it costs the ability to answer anything at a container address that has children under it.
 - What makes something an address is now stated, and it is not "the compiler knows about it".
   That test admits a wildcard shape, which is derivable from the type and has nothing at it, and the two prototype engines split on exactly that.
 - ferry's address is comparable and its ordering is segment-wise, so both the determinism invariant and the map-key use are satisfied by the same type.
