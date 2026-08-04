@@ -266,6 +266,85 @@ func TestDriverCase3ReportsAValueAtAContainerAddress(t *testing.T) {
 	}
 }
 
+// TestDriverCase3ReportsAnAbsentWhereANullWasStored is the other half of case 3,
+// negative, and it is the row #136 tightened.
+//
+// ADR-0005 writes a Null at an empty composite's own address, so a driver that
+// answers Absent there is reporting that the plane does not hold an address it
+// does hold. That deletes an observation rather than renaming one: a LoadOver
+// stops clearing the field and nothing says why. The misbehaviour is scoped to
+// the two addresses the blanks fixture puts an empty composite at, so every
+// other case runs against the plane the rest of these tests already trust.
+func TestDriverCase3ReportsAnAbsentWhereANullWasStored(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, forgettingPlane())
+
+	if len(c.lines) != 2 {
+		t.Fatalf("report = %q, want one line per empty composite", c.lines)
+	}
+
+	for _, line := range c.lines {
+		if !strings.Contains(line, "case 3") {
+			t.Errorf("report = %q, want case 3 and only case 3", line)
+		}
+	}
+}
+
+// forgettingPlane is the memory plane whose reader answers Absent at the two
+// container addresses the blanks fixture dumps an empty composite to.
+func forgettingPlane() ferrytest.Plane {
+	mem := ferrytest.MemPlane()
+	p := mem
+
+	p.Name = "forgetting"
+	p.Open = func() ferrytest.Instance {
+		inst := mem.Open()
+		inst.Source = forgettingSource{inner: inst.Source}
+
+		return inst
+	}
+
+	return p
+}
+
+type forgettingSource struct{ inner ferry.Source }
+
+func (s forgettingSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
+	open, err := s.inner.Bind(addrs)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context) (ferry.Reader, error) {
+		r, err := open(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		return forgettingReader{inner: r}, nil
+	}, nil
+}
+
+type forgettingReader struct{ inner ferry.Reader }
+
+func (r forgettingReader) Get(ctx context.Context, addr ferry.Path) (ferry.Value, error) {
+	if addr == ferry.At("nillist") || addr == ferry.At("emptymap") {
+		return ferry.Value{}, nil
+	}
+
+	return r.inner.Get(ctx, addr)
+}
+
+func (r forgettingReader) Children(ctx context.Context, prefix ferry.Path) ([]ferry.Path, error) {
+	e, ok := r.inner.(ferry.Enumerator)
+	if !ok {
+		return nil, errors.New("the plane underneath does not enumerate")
+	}
+
+	return e.Children(ctx, prefix)
+}
+
 // allKinds is every kind a plane can declare, which is what a plane that carries
 // the whole boundary says about itself.
 func allKinds() []ferry.VKind {
