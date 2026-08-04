@@ -214,6 +214,13 @@ The other side of it is that an answer at a container address which has children
 
 A source that does **not** implement `Enumerator` is asked the other way round, container address first, and a `Null` there is a complete answer it can still give.
 
+**If your plane can spell one address two ways, `Children` is where you refuse an overlap.**
+A multimap plane such as a query string can reach `/tags#0` by a repeated name and by an index-suffixed one, and a request carrying both reaches it twice.
+Report each child address at most once, and where two plane keys reach one child address, fail rather than pick a winner: `ErrPlane`, at the container's address, with a sentinel of your own beside it (ADR-0015).
+Only an overlap is a clash, so `?tags=a&tags=b&tags.2=z` extends the sequence and loads as three elements.
+`Children` is the only place you can refuse this during the walk, because the addresses are minted here and case 3 forbids failing at a container `Get`.
+The conformance suite does not check it: all five candidate policies scored zero failures (ADR-0015), so this one is on you.
+
 ## What `Get` and `Set` must and must not do
 
 ### `Get`

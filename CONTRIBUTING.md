@@ -36,7 +36,8 @@ A driver module carries no `require` on core until core is tagged.
 ## Where decisions live: `docs/adr/`
 
 An architectural decision record is a numbered file in [`docs/adr/`](docs/adr/) that settles one question and states the evidence it was settled on.
-There are fourteen, all Accepted, and they were written before the code.
+There are fifteen, all Accepted.
+Fourteen were written before the code, and [ADR-0015](docs/adr/0015-two-spellings-of-one-address.md) is the one exception: it records a rule the first multimap driver reached first, and it says so.
 
 **The ADRs are the specification.**
 Where an issue and an ADR disagree, the ADR wins.
