@@ -570,12 +570,29 @@ func (l loadFrom) atMap(ctx context.Context, s spot, into descend) error {
 // indistinguishable from an absent one on every plane surveyed, and ADR-0006
 // puts that row under "does not write".
 func (l loadFrom) members(ctx context.Context, s spot) (kids []Path, more bool, err error) {
+	// THROWAWAY (proto/193-multimap, issue #193). This is the bend, and it is
+	// the whole of it: at a dynamic container over a source that can enumerate,
+	// ask Children first and ask the container address only where there are no
+	// children.
+	//
+	// It is measured here and nowhere else. It never merges.
+	lister, ok := l.r.(Enumerator)
+	if ok {
+		kids, err = lister.Children(ctx, s.at)
+		if err != nil {
+			return nil, false, fromDriver(momentWalk, s.at, err)
+		}
+
+		if len(kids) > 0 {
+			return kids, true, nil
+		}
+	}
+
 	answered, err := l.container(ctx, s)
 	if !answered {
 		return nil, false, err
 	}
 
-	lister, ok := l.r.(Enumerator)
 	if !ok {
 		return nil, false, newError(momentWalk, ErrPlane, s.at, fmt.Sprintf(
 			"the addresses under a %s come from the value, and %T cannot list what a plane holds under an "+
@@ -583,12 +600,7 @@ func (l loadFrom) members(ctx context.Context, s spot) (kids []Path, more bool, 
 				"no dynamic one, which is a property of that plane rather than of this schema", s.v.Type(), l.r))
 	}
 
-	kids, err = lister.Children(ctx, s.at)
-	if err != nil {
-		return nil, false, fromDriver(momentWalk, s.at, err)
-	}
-
-	return kids, len(kids) > 0, nil
+	return nil, false, nil
 }
 
 // buildSlice fills a sequence the length of what the plane enumerated, and
