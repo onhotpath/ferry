@@ -13,24 +13,55 @@
 # otherwise rot silently against core's API, and here a build failure is a real
 # signal that core moved.
 #
-# Two triggers:
+# Two triggers, and the dispatch one has two modes:
 #
-#   workflow_dispatch  measure, render, and open a pull request against main
-#                      that changes the results file, the two chart SVGs and the
-#                      README's marked section, and nothing else.
+#   workflow_dispatch  mode=measure: measure, render, and open a pull request
+#                      against main that changes the results file, the two chart
+#                      SVGs and the README's marked section, and nothing else.
+#
+#                      mode=rerender: publish the committed results file again
+#                      from its own contents, measuring nothing. Some of what
+#                      that file says is prose the harness supplies rather than
+#                      measures - the per-library notes, the scenario
+#                      descriptions, the absence reasons - and when one of those
+#                      is wrong the fix is a harness change plus a re-render in
+#                      which not one number may move.
 #   pull_request       with the `perf` label: measure the pull request's head
 #                      against its merge base and post benchstat's comparison
 #                      as a comment. This is the question a reviewer has.
 #
-# Nothing in either path lets a human type a number. Rendering is a Go program
+# Nothing in any path lets a human type a number. Rendering is a Go program
 # in the harness module with its own tests, the raw benchmark output is embedded
 # in the results file verbatim, and a measurement that was not taken renders as
 # "not measured" rather than as a plausible-looking figure.
+#
+# The re-render path holds to that too, and it is why it is not a few lines of
+# awk here. It extracts the embedded appendices, checks that the raw output
+# still produces the benchstat block beside it, and recovers the runner, both
+# revisions, -count, -benchtime, the command, the toolchain, GOMAXPROCS, the
+# competitor versions and the Generated timestamp from the file's own provenance
+# table, all in bench/internal/report with golden tests over files this workflow
+# really published. A number that reached a file through awk is a number nobody
+# can prove came from a measurement.
 name: Performance
 
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: >
+          measure runs the benchmarks and publishes what they said. rerender
+          publishes the committed results file again from its own contents,
+          measuring nothing, which is what a correction to prose the harness
+          supplies needs. count, benchtime and runs_on are the measure mode's
+          and are ignored by the other; harness_ref applies to both, because
+          the harness is where the corrected prose lives.
+        type: choice
+        required: true
+        default: measure
+        options:
+          - measure
+          - rerender
       harness_ref:
         description: The ref carrying bench/ - the harness branch.
         required: true
@@ -53,7 +84,10 @@ on:
         required: true
         default: ubuntu-latest
       open_pr:
-        description: Open the pull request. Unset to measure and only upload the artefacts.
+        description: >
+          Open the pull request. Unset to run without publishing: measure mode
+          then only uploads the artefacts, and rerender mode only says in the
+          log what a re-render would have moved.
         type: boolean
         required: true
         default: true
@@ -89,7 +123,7 @@ jobs:
   # ---------------------------------------------------------------------------
   measure:
     name: Measure and publish
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'measure'
     runs-on: ${{ inputs.runs_on || 'ubuntu-latest' }}
     permissions:
       contents: write
@@ -262,6 +296,190 @@ jobs:
             The raw `go test -bench` output and the benchstat output are attached
             to the run as the `perf-raw` artefact, and embedded verbatim at the
             bottom of the results file.
+          delete-branch: true
+
+  # ---------------------------------------------------------------------------
+  # The re-render path: publish the committed file again, measuring nothing.
+  # ---------------------------------------------------------------------------
+  rerender:
+    name: Re-render and publish
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'rerender'
+    # Deliberately the hosted runner and not inputs.runs_on. Nothing here is
+    # timed, so the machine cannot affect a published figure, and pointing a
+    # self-hosted runner at a job that measures nothing would only make it look
+    # as though it had.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Prepare the output directory
+        run: mkdir -p "$OUT"
+
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          path: ferry
+          fetch-depth: 0
+
+      - name: Check out the harness
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.harness_ref }}
+          path: harness
+          fetch-depth: 0
+
+      - name: Graft the harness onto main
+        id: graft
+        working-directory: ferry
+        run: |
+          set -euo pipefail
+
+          if [ ! -d ../harness/bench ]; then
+            echo "FAIL: ${{ inputs.harness_ref }} carries no bench/ directory."
+            echo "      The harness module is where the prose being corrected lives,"
+            echo "      and it lives on the perf/ branch rather than on main."
+            exit 1
+          fi
+
+          if [ ! -f "${{ env.RESULTS_PATH }}" ]; then
+            echo "FAIL: main carries no ${{ env.RESULTS_PATH }}."
+            echo "      This mode re-renders a file that was already published."
+            echo "      Run the workflow in measure mode to produce one."
+            exit 1
+          fi
+
+          cp -R ../harness/bench ./bench
+
+          echo "harness: $(git -C ../harness rev-parse HEAD)"
+          echo "harness_rev=$(git -C ../harness rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Assert the harness still builds and still agrees with itself
+        working-directory: ferry/bench
+        run: |
+          set -euo pipefail
+          # The same honesty check the measure path makes. The prose about to be
+          # published comes out of this code, so it has to compile against this
+          # main and its own tests have to pass before any of it reaches a file.
+          go build ./...
+          go vet ./...
+          go test ./...
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@${{ env.BENCHSTAT_VERSION }}
+
+      - name: Extract what the published file already carries
+        working-directory: ferry/bench
+        run: |
+          set -euo pipefail
+          # The raw `go test -bench` output is embedded verbatim in the results
+          # file, which is exactly the property that makes an exact re-render
+          # possible. It comes back out here rather than through awk over line
+          # ranges, because the extraction has golden tests and awk does not.
+          go run ./cmd/perfreport \
+            -rerender "../${{ env.RESULTS_PATH }}" \
+            -extract-to "$OUT"
+
+      - name: benchstat
+        run: |
+          set -euo pipefail
+          # recheck.txt is compared against the benchstat block the published
+          # file carries, which is the guard that the file was internally
+          # consistent before anything was re-rendered. stat.csv is where every
+          # figure in every table comes from, at full precision rather than at
+          # the four digits benchstat prints.
+          benchstat "$OUT/bench.txt" > "$OUT/recheck.txt"
+          benchstat -format csv "$OUT/bench.txt" > "$OUT/stat.csv"
+
+      - name: Re-render
+        working-directory: ferry/bench
+        run: |
+          set -euo pipefail
+          # No -runner, -ferry-rev, -harness-rev, -count, -benchtime, -command
+          # or -generated. Every one of them describes the measurement and is
+          # recovered from the file's own provenance table, so passing one would
+          # restate something that must not move, and perfreport refuses them
+          # here rather than ignoring them.
+          go run ./cmd/perfreport \
+            -rerender "../${{ env.RESULTS_PATH }}" \
+            -csv "$OUT/stat.csv" \
+            -recheck "$OUT/recheck.txt" \
+            -results "../${{ env.RESULTS_PATH }}" \
+            -link-dir "${{ env.RESULTS_DIR }}" \
+            -readme ../README.md \
+            -allow-missing-markers
+
+      - name: Say what moved
+        working-directory: ferry
+        run: |
+          set -euo pipefail
+          # A re-render that changed nothing is the expected outcome when the
+          # harness prose has not been corrected, and it is worth saying so in
+          # the log rather than leaving an empty pull request to explain itself.
+          if git diff --quiet; then
+            echo "Nothing changed: the published file already matches what this harness renders."
+          else
+            git --no-pager diff --stat
+          fi
+
+      - name: Open the pull request
+        if: inputs.open_pr
+        uses: peter-evans/create-pull-request@v8
+        with:
+          path: ferry
+          # A branch of its own, so a re-render and a measurement can never
+          # overwrite each other's pull request.
+          branch: perf/rerender
+          base: main
+          add-paths: |
+            ${{ env.RESULTS_PATH }}
+            ${{ env.RESULTS_DIR }}/perf-light.svg
+            ${{ env.RESULTS_DIR }}/perf-dark.svg
+            README.md
+          commit-message: |
+            docs(perf): re-render the published comparison
+
+            Produced by .github/workflows/perf.yml in rerender mode. No
+            benchmark was run: the figures are the ones already published, and
+            the runner, both revisions, -count, -benchtime, the command, the
+            toolchain and the timestamp were recovered from the file's own
+            provenance table rather than restated. Only prose the harness
+            supplies can have moved.
+          title: 'docs(perf): re-render the published comparison, without re-measuring'
+          body: |
+            **Re-rendered, not re-measured.** No benchmark ran in this job.
+
+            Every figure in this diff is the one that was already published.
+            The raw `go test -bench` output embedded in the results file was
+            extracted, `benchstat` was run over it again, and the result was
+            checked against the benchstat block the same file carries. Nothing
+            reached a table that did not come out of that.
+
+            | | |
+            | --- | --- |
+            | harness ref | `${{ inputs.harness_ref }}` |
+            | harness commit | `${{ steps.graft.outputs.harness_rev }}` |
+            | benchmarks run | none |
+
+            The runner, both revisions, `-count`, `-benchtime`, the command, the
+            Go toolchain, GOMAXPROCS, the competitor versions and the `Generated`
+            timestamp were **recovered from the committed file's own provenance
+            table**, not restated. They describe the measurement, and this job
+            did not take one, so restating any of them is how they drift.
+            `Generated` in particular still dates the numbers rather than this
+            re-render.
+
+            So the only thing that can have moved in this diff is prose the
+            harness supplies: the per-library notes in `bench/impl_*.go`, the
+            scenario descriptions in `bench/scenario.go`, the reasons in
+            `Absences()`, and the static paragraphs in
+            `bench/internal/report/render.go`. If a number moved, that is a bug
+            in this workflow and not a finding.
           delete-branch: true
 
   # ---------------------------------------------------------------------------
