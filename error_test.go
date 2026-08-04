@@ -647,6 +647,7 @@ func TestEveryAddressADriverNamesIsReported(t *testing.T) {
 	t.Run("at bind", locatedPairAtBind)
 	t.Run("each member declares its own class", eachMemberDeclaresItsOwnClass)
 	t.Run("one carrier is unchanged", oneCarrierIsUnchanged)
+	t.Run("a carrier inside the driver's own wrapper", aCarrierInsideAWrapper)
 	t.Run("a join with no carrier is unchanged", aJoinWithNoCarrierIsUnchanged)
 	t.Run("a plain error is unchanged", aPlainDriverErrorIsUnchanged)
 }
@@ -761,6 +762,45 @@ func oneCarrierIsUnchanged(t *testing.T) {
 
 	if n := strings.Count(e.Error(), "/q"); n != 1 {
 		t.Errorf("the address appears %d times in %q", n, e.Error())
+	}
+}
+
+// aCarrierInsideAWrapper is the other step of the walk: a driver that put its
+// own sentence around ErrorAt is still read for the address, which is what a
+// carrier reached through a single Unwrap has always done.
+func aCarrierInsideAWrapper(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	p.closeErr = fmt.Errorf("flushing: %w", ErrorAt(At("q"), &refusal{addr: "/q", why: "the only failure"}))
+
+	_, err := Load[walkDB](t.Context(), planeSource{p: p})
+
+	if n := len(Elements(err)); n != 1 {
+		t.Fatalf("one wrapped carrier gave %d elements, want 1:\n%+v", n, err)
+	}
+
+	mustBeLocatedRefusal(t, Elements(err)[0], "/q")
+}
+
+// TestUnwrappedIsOneStepOfTheTree covers the step driverErrors walks with,
+// including the arm no driver error reaches: the walk asks it only where
+// errors.AsType has already found a carrier below, so a leaf answering nothing
+// is the contract stated rather than a path core takes.
+func TestUnwrappedIsOneStepOfTheTree(t *testing.T) {
+	t.Parallel()
+
+	leaf := errors.New("kv: flush failed")
+	if got := unwrapped(leaf); got != nil {
+		t.Errorf("an error wrapping nothing stepped to %v, want nothing", got)
+	}
+
+	if got := unwrapped(fmt.Errorf("flushing: %w", leaf)); len(got) != 1 || !errors.Is(got[0], leaf) {
+		t.Errorf("a wrapper stepped to %v, want the one error it wraps", got)
+	}
+
+	if got := unwrapped(errors.Join(leaf, errDenied)); len(got) != 2 {
+		t.Errorf("a join stepped to %d errors, want 2", len(got))
 	}
 }
 

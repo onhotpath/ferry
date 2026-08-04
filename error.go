@@ -322,12 +322,11 @@ func driverErrors(out []error, m moment, loc Path, err error) []error {
 		return append(out, driverError(m, coreFirst(loc, at.at), at.err))
 	}
 
-	nested := unwrapped(err)
-	if len(nested) == 0 {
-		return append(out, driverError(m, loc, err))
-	}
-
-	for _, inner := range nested {
+	// There is no guard on the step being empty, and it does not need one:
+	// errors.AsType descends through nothing but the two Unwrap forms, so a
+	// carrier found below err means err wraps something and the walk always has
+	// somewhere to go.
+	for _, inner := range unwrapped(err) {
 		out = driverErrors(out, m, loc, inner)
 	}
 
