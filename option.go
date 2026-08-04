@@ -13,6 +13,41 @@ import (
 // a second authority over what an annotation means: ADR-0008 opens the tag
 // *key* and keeps the *vocabulary* shut, and this is where that line is drawn
 // in the type system rather than in prose.
+//
+// # Compile-affecting and load-affecting
+//
+// A compiled schema is cached and reused, so which Options a caller supplied is
+// part of what identifies it. The rule for that is one sentence, and it is
+// stated here rather than beside the cache because it is a property of an
+// Option rather than of the map:
+//
+//	An Option is compile-affecting if one reflect.Type yields two different
+//	schemas under two values of it. A compile-affecting Option is part of the
+//	cache key, and its value must be comparable. An Option that is not
+//	compile-affecting must not be in the key.
+//
+// [TagKey] is compile-affecting: one struct under two keys is two different
+// address sets, which is what ADR-0008 measured. [WithRegistry] is
+// compile-affecting: two registries that disagree about one member type give
+// that type two representations and the struct two schemas, which is what
+// ADR-0009 measured, and a cache that ignored it would hand one registry the
+// other's codec silently.
+//
+// Both of ferry's Options are on that side today, and that is the order the
+// tickets landed in rather than a property of the design. The other side is a
+// real class: a load-affecting Option changes what one load does and not what
+// the type compiles to, so it must stay out of the key or two callers who
+// differ only in it would be handed two identical schemas under two keys. The
+// worked example is ADR-0006's presence observation - an Option handing the
+// caller which addresses the plane actually answered - which is named here as
+// the other side of the rule and is not proposed: where that is spelled belongs
+// with the caller-facing lifecycle, and is not decided.
+//
+// The rule has a mechanism rather than only a paragraph. The compile-affecting
+// Options are collected into a named key struct, and a static assertion that a
+// plain map can hold it turns an Option whose value is not comparable into a
+// build failure rather than the run-time panic a sync.Map's `any` key would
+// give.
 type Option interface {
 	apply(*config) error
 }
