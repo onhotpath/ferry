@@ -91,6 +91,15 @@ func Dump[T any](ctx context.Context, v T, sink Sink, opts ...Option) error {
 // runLoad is Load and LoadOver, once. dst is the addressable copy of the seed
 // the walk writes into.
 func runLoad(ctx context.Context, dst reflect.Value, src Source, opts []Option) error {
+	// PROTOTYPE (#109), the symmetric half: an interface-kinded seed is unwrapped
+	// to its dynamic type, and publish writes the result back into it.
+	dst, publish, err := seedRoot(dst)
+	if err != nil {
+		return err
+	}
+
+	defer publish()
+
 	sch, err := schemaOf(dst.Type(), opts, retained)
 	if err != nil {
 		return err
@@ -114,6 +123,14 @@ func runLoad(ctx context.Context, dst reflect.Value, src Source, opts []Option) 
 
 // runDump is Dump, once.
 func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) error {
+	// PROTOTYPE (#109): an interface-kinded root is unwrapped to its dynamic
+	// value before the compile, so the schema is that value's type rather than
+	// the interface's. Everything below this line is unchanged.
+	v, err := dynamicRoot(v)
+	if err != nil {
+		return err
+	}
+
 	sch, err := schemaOf(v.Type(), opts, retained)
 	if err != nil {
 		return err
@@ -142,6 +159,31 @@ func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) err
 	return join(walked, released(w))
 }
 
+// seedRoot is the PROTOTYPE's answer to "Load has nothing to unwrap".
+//
+// LoadOver does have something to unwrap: the seed. A seed of static type any
+// holding a Config names Config at runtime, exactly as Dump's value does, so
+// the compile can use it and the result is written back into the interface.
+//
+// Load[any] is the one verb that genuinely cannot be served, because its seed
+// is the zero any and a zero any holds no type.
+func seedRoot(dst reflect.Value) (reflect.Value, func(), error) {
+	if dst.Kind() != reflect.Interface {
+		return dst, func() {}, nil
+	}
+
+	if dst.IsNil() {
+		return reflect.Value{}, nil, newError(momentWalk, ErrValue, Path{},
+			"the seed is a nil interface, so it holds no type whose fields could name an address: "+
+				"Load[any] has nothing to compile, and LoadOver over a typed seed does")
+	}
+
+	fresh := reflect.New(dst.Elem().Type())
+	fresh.Elem().Set(dst.Elem())
+
+	return fresh.Elem(), func() { dst.Set(fresh.Elem()) }, nil
+}
+
 // loadRoot is the struct the walk writes into, given the value the caller's
 // type named.
 //
@@ -168,6 +210,27 @@ func loadRoot(dst reflect.Value) reflect.Value {
 	dst.Set(fresh)
 
 	return fresh.Elem()
+}
+
+// dynamicRoot is the PROTOTYPE for #109: it replaces an interface-kinded root
+// with the value inside it, so the schema is compiled from the dynamic type.
+//
+// A nil interface holds no type at all, so there is nothing to compile and the
+// refusal is the root's own rather than the compiler's.
+//
+// The result is not addressable, which the Dump direction tolerates: the walk
+// reads, and receiver() already copies where it cannot take an address.
+func dynamicRoot(v reflect.Value) (reflect.Value, error) {
+	if v.Kind() != reflect.Interface {
+		return v, nil
+	}
+
+	if v.IsNil() {
+		return reflect.Value{}, newError(momentWalk, ErrValue, Path{},
+			"the root is a nil interface, so it holds no type whose fields could name an address")
+	}
+
+	return v.Elem(), nil
 }
 
 // dumpRoot is the struct the walk reads from, and it refuses a nil one.
