@@ -150,6 +150,130 @@
 // because there is no stable answer to give: which of the two writes survives is
 // which the walk makes last.
 //
+// # Absence, and what it means to a Go field
+//
+// One rule carries all of it: Absent means ferry does not write to the field.
+// Every other observation, Null and the empty string included, is a value the
+// plane holds, and it is handed to the type set, which either accepts it or
+// refuses it loudly. So a value loaded over an empty plane is unchanged, and an
+// explicit empty beats whatever the field was already carrying, because present
+// beats absent and empty is present.
+//
+// Null is not a second spelling of absence. It means the plane has this address
+// and the value stored there is that plane's own null, so it is presence
+// carrying a value, and the only question is which Go types can hold one. []byte,
+// *T, []T and map[K]V take it and land on their own nil; every other leaf refuses
+// it as a wrong kind, which is the same refusal a Bool gets at a string field.
+// The refusal is the recoverable direction, and that is the whole argument for
+// it: a registered codec for its own type can accept a Null and return whatever
+// it likes, while zeroing in the walk would happen before any codec is consulted
+// and nothing could recover strictness for a plain int. encoding/json/v2 zeroes,
+// which is a change it made from v1, and ferry departs from it knowingly.
+//
+// A struct merges and a composite replaces, and both follow from the one rule. A
+// struct's fields are separate addresses, so the ones the plane does not have are
+// Absent and are left alone. A composite is a single decision: if the plane has
+// any children under that address then it has said what the composite is, so a
+// slice or a map is replaced wholesale rather than merged into.
+//
+// A *T over a composite is materialised exactly where the plane spoke under it,
+// and the walk carries that as a bit per subtree rather than inferring it from
+// the value afterwards. Comparing the result against a fresh zero value cannot
+// tell a subtree the plane really did set to all zeros from one nothing touched.
+// A value already in the field is not presence, so an optional section stays
+// optional, and an explicit Null at its own address is a nil pointer.
+//
+// A *T at a leaf is the one shape that tells an explicit zero from an unset
+// field, and it is worth stating as narrowly as it is true: on Load from any
+// plane, because absence is observable everywhere, and on Dump only from a plane
+// that has a null, because a null is what a nil pointer writes.
+//
+// ferry never hands a sink an Absent. It is a Reader-side kind, so an omitted
+// address gets no Set call at all rather than a Set carrying nothing, and an
+// omission is therefore not a deletion: a replacing sink and a patching sink read
+// one dump differently and both are correct.
+//
+// Presence survives the walk as an observation of one Load, per address and
+// including Absent, and it is nothing a field holds: a key deleted from the plane
+// and a key set to zero are one struct and two observations. Core exports no
+// Option, callback or report for it, because a Reader a caller wraps is already
+// handed every address the walk asks about.
+//
+// # Declarations: default, required and omitzero
+//
+// Three tag options, and each has exactly one honest direction, so the grammar
+// spends no syntax on saying which. default= and required are Load-side;
+// omitzero is Dump-side.
+//
+//	Port    int    `ferry:"port,default=8080"`
+//	Host    string `ferry:"host,required"`
+//	Comment string `ferry:"comment,omitzero"`
+//
+// A default is text. Schema compile turns it into a String Value at the field's
+// address, and Load applies it when, and only when, the plane reports Absent
+// there, so it is indistinguishable at the boundary from what a flat plane
+// would have reported. That is the whole design: ferry has one conversion
+// authority rather than two, "0080" means 80 in a tag exactly as it does from a
+// plane, and a registered codec's type takes defaults with no codec-side
+// awareness. The text is decoded fresh on every load rather than cached as a Go
+// value, because a cached one aliases: two independently loaded structs would
+// share one backing array for a []byte default.
+//
+// A default is leaf-only, and one on a composite does not compile: a
+// composite's value lives at many addresses and a tag holds one text, so the
+// remedy is to seed the value through [LoadOver]. Where a seed and a declared
+// default both apply to one field the declared one wins, because ferry cannot
+// tell a seeded value from a zero one.
+//
+// A declaration attaches to the static address shape rather than to an address.
+// A map key's address and a slice element's index come from the value, so
+// /servers/a/port is never in a compiled schema and the declaration lives at
+// /servers/*/port, written once and applied to every realised member. The shape
+// is the walk's own lookup key and is never handed to a driver.
+//
+// A default fills a hole in a section and never conjures the section. A *T over
+// a composite is materialised exactly where the plane spoke under it, and a
+// declared default beneath it is not presence - otherwise no such pointer could
+// ever be nil. A pointer to a leaf is a different shape and is unaffected: its
+// default sits at its own address, so a *int declaring one loads as a non-nil
+// pointer from an empty plane. An array element is a static address and is
+// walked either way, so it takes its declarations with nothing on the plane;
+// a slice element in the same position does not exist at all.
+//
+// required is a presence test and nothing else, satisfied by any observation
+// other than Absent. So an explicit empty satisfies it, and a Null at a *T
+// satisfies it while yielding nil, which is the user getting exactly what their
+// type asked for. It is admissible exactly where an address's children come
+// from the type, so it works on leaves, structs, pointers and arrays, and it is
+// a schema compile error on a slice, a map, or a pointer to either. At a
+// composite it means the plane supplied at least one of the address's static
+// children, with one meaning on every plane class. The reading a user wants for
+// a collection is not writable at all: a missing key and an explicit empty list
+// are one observation at a container address, so the refusal names the remedy,
+// which is to model the distinction as struct{ Set bool; Items []string }.
+//
+// omitzero is a comparison against the Go zero value, evaluated before anything
+// converts it, and it is the one option admissible at every type. It is not a
+// comparison against the default: a field holding its declared default is
+// dumped like any other, because ferry cannot tell "still at its default" from
+// "explicitly set to the same value", and because omitting it would leave the
+// stored artefact under-specified, so what it denotes would be decided by
+// whichever version of the code read it.
+//
+// Five refusals sit at schema compile, checked from the type alone: a default
+// whose text the field's own parser does not accept, a default on a composite,
+// required on a dynamic composite, required together with a default, and
+// omitzero together with a default that is not the field's zero value. A zero
+// default beside omitzero compiles, because omitting it and reapplying it land
+// on the same value. Admissibility is checked before contradictions, so one
+// field's single mistake does not report as three errors.
+//
+// One sharp edge, stated because ADR-0007 requires it to be: `default=aGk=` on
+// a []byte field lands as the four bytes aGk= and not the decoded hi. A
+// declared default is text, String donates to Bytes as a relabel, and base64 is
+// not ferry's business - how a plane spells bytes is the driver's. A user who
+// wants decoded bytes registers a codec, or seeds the value.
+//
 // # The type set's sharp edges
 //
 // Three of these are not defects, and every one of them is easier to meet in
@@ -236,6 +360,26 @@
 // rather than the first one, each naming the address and the type, and the
 // report is sorted.
 //
+// # How an address reaches a plane
+//
+// Core never produces a plane key, because a separator is plane knowledge:
+// flattening is the driver's, always. What a driver is handed instead is the
+// whole address set, before any I/O, and [NewKeys], which computes its plane
+// keys once per schema and checks two different things about them. Legality is
+// the driver's own question - whether its plane can name an address at all -
+// and no transformation rescues it. Injectivity is core's observation about the
+// set: a key function rendering two addresses to one plane key would merge them
+// silently, so it is refused before any backend call, naming both. One rule
+// covers separator collisions, case folding and any normalisation a driver
+// invents, because all three are the same failure.
+//
+// So a driver is expected to transform segment text rather than to reject it,
+// which is what makes an ordinary feature-flags loadable from a plane whose
+// names may not contain a hyphen. An address a value mints - a map key, a
+// sequence index - is checked as it is minted, before the write it belongs to,
+// against the table and against everything the same open has minted. A tree
+// driver walks the segments, builds no key at all, and calls none of this.
+//
 // # Errors
 //
 // ferry reports every failure that is not a consequence of another failure it
@@ -245,6 +389,14 @@
 // [ErrDriver] or [ErrReadOnly]. Read where it happened with
 // errors.AsType[*ferry.Error] and [Error.Address]; there is no concrete type to
 // switch on, and no enum.
+//
+// On Dump the aggregation is preceded by a phase: every value is encoded before
+// any of them is written, so a Dump that fails for a reason ferry could have
+// known without touching the plane writes nothing at all. A sink implementing
+// [Committer] is exempt, because staging already gives it that property, and it
+// gets a better report for it - both kinds of failure in one run, where a sink
+// that cannot stage learns the plane's own refusals only once the values it
+// could not encode are fixed.
 //
 // Message text is not API. Match on the sentinels and on the address rather
 // than on a string, and get precision from the ferrytest assertions. ferry's own
