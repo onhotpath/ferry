@@ -153,6 +153,10 @@ ferry uses `errors.AsType` and the 1.27 standard library, and core takes no non-
 No benchmark results have been published yet.
 <!-- ferry:perf:end -->
 
+## Licence
+
+Apache 2.0. See [`LICENSE`](LICENSE).
+
 ## Contributing
 
 [`CONTRIBUTING.md`](CONTRIBUTING.md) explains how the repository is organised and what the conventions mean: what the ADRs are and how they are amended, what belongs in a doc comment and what does not, why examples live in `example_test.go`, and where benchmarks go.
