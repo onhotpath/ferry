@@ -42,6 +42,21 @@ type Proof interface {
 	// check joins on.
 	Type() reflect.Type
 
+	// columns hands back the two of the three columns a suite otherwise only
+	// reads while running: whether a relation was supplied at all, and the
+	// golden every case pins.
+	//
+	// It exists because [CoreTypes] is a published artefact rather than a
+	// fixture (ADR-0013), so its shape has to be assertable without a plane in
+	// sight: a row added with no relation, or a case added with no golden, is a
+	// change to a compatibility promise and has to fail rather than pass
+	// quietly. The cases are typed by a parameter no caller can name, so there
+	// is no route to them from outside the proof.
+	//
+	// It is unexported for the same reason [Type] is the only constructor: the
+	// columns are the suites' to read, not a caller's to inspect.
+	columns() (hasRelation bool, goldens []ferry.Value)
+
 	// run discharges the proof against one plane, and it is a method here
 	// rather than a loop inside [RoundTrip] because the cases are typed by a
 	// parameter no suite can name. Its implementation is in roundtrip.go, with
@@ -134,5 +149,16 @@ func (p typeProof[T]) Name() string { return p.name }
 // Type recovers the type parameter, which is the thing the prototype's own
 // comment said could not be recovered.
 func (typeProof[T]) Type() reflect.Type { return reflect.TypeFor[T]() }
+
+// columns reads the relation's presence and the golden column, which is the
+// whole of what a proof can say about itself without a plane to run against.
+func (p typeProof[T]) columns() (bool, []ferry.Value) {
+	goldens := make([]ferry.Value, 0, len(p.cases))
+	for _, c := range p.cases {
+		goldens = append(goldens, c.Want)
+	}
+
+	return p.eq != nil, goldens
+}
 
 func (typeProof[T]) proof() {}
