@@ -37,7 +37,7 @@ coverage:
         threshold: 0%
 
       drivers:
-        flags: [driver-env, driver-kv, driver-yaml]
+        flags: [driver-env, driver-http, driver-kv, driver-yaml]
         # Drivers do real I/O against real planes and are held to their own
         # standard rather than to core's. `auto` compares against the base
         # commit, so a driver may not regress even though it carries no fixed
@@ -77,6 +77,8 @@ flags:
   core:
     carryforward: false
   driver-env:
+    carryforward: false
+  driver-http:
     carryforward: false
   driver-kv:
     carryforward: false
