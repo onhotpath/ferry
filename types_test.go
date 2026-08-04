@@ -117,8 +117,12 @@ func TestNoTypeIsMatchedByName(t *testing.T) {
 		t.Errorf("a Duration in another package called time writes %#v, so a type was matched by name", got)
 	}
 
-	if err := Compile[leafHolder[faketime.Time]](); err == nil {
-		t.Error("a Time in another package called time compiled, so a type was matched by name")
+	// The fixture carries a text pair of its own, so ADR-0007's chain claims it
+	// at step 2 and writes the fixture's own constant. What a table matched by
+	// name would have written is time.Time's RFC 3339 of a value this type does
+	// not hold, through a Set of one struct type into another.
+	if got := dumped(t, leafHolder[faketime.Time]{}); got != String("2026-08-02T12:00:00Z") {
+		t.Errorf("a Time in another package called time writes %#v, so a type was matched by name", got)
 	}
 }
 

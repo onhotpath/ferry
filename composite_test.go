@@ -3,11 +3,10 @@ package ferry
 import (
 	"context"
 	"errors"
-	"math/big"
-	"net/netip"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Every assertion in this file goes through Compile[T], Load, LoadOver and Dump.
@@ -242,25 +241,33 @@ func TestPrefixFreenessIsOverTheLeafAddresses(t *testing.T) {
 
 // The maps-no-address cases, at every level: the root, a field, under a pointer,
 // and under an array.
+//
+// The type is time.Location rather than netip.Addr, which is what these cases
+// were written against and what ADR-0005 names first. The codec chain claims
+// netip.Addr, big.Int and netip.AddrPort through their text pairs before the
+// backstop is reached (ADR-0007), so they no longer exercise the rule; that
+// they no longer do is asserted in codec_test.go. time.Location is the fourth
+// of ADR-0005's four and is the one with no text pair, so it still arrives
+// here.
 type (
 	nestedNoAddress struct {
-		V netip.Addr `ferry:"v"`
+		V time.Location `ferry:"v"`
 	}
 	pointedNoAddress struct {
-		V *big.Int `ferry:"v"`
+		V *time.Location `ferry:"v"`
 	}
 	arrayNoAddress struct {
-		V [3]netip.AddrPort `ferry:"v"`
+		V [3]time.Location `ferry:"v"`
 	}
 	oneGoodSibling struct {
-		Name string     `ferry:"name"`
-		Addr netip.Addr `ferry:"addr"`
+		Name string        `ferry:"name"`
+		Addr time.Location `ferry:"addr"`
 	}
 )
 
 // TestAStructThatMapsNoAddressIsRefusedAtEveryLevel is ADR-0005's sharpest
-// single line. Before the rule existed a dump of netip.MustParseAddr("192.0.2.1")
-// produced zero addresses and a nil error, and the value was silently and
+// single line. Before the rule existed a dump of a struct with no exported
+// field produced zero addresses and a nil error, and the value was silently and
 // totally lost - which is worse than an unsupported type, because it looks
 // supported.
 //
@@ -271,28 +278,28 @@ func TestAStructThatMapsNoAddressIsRefusedAtEveryLevel(t *testing.T) {
 
 	run(t, []compileCase{{
 		name:     "at the root",
-		run:      Compile[netip.Addr],
-		want:     []string{"netip.Addr maps no address", "register a codec for it"},
+		run:      Compile[time.Location],
+		want:     []string{"time.Location maps no address", "register a codec for it"},
 		elements: 1,
 	}, {
 		name:     "at a field",
 		run:      Compile[nestedNoAddress],
-		want:     []string{"netip.Addr maps no address"},
+		want:     []string{"time.Location maps no address"},
 		elements: 1,
 	}, {
 		name:     "under a pointer",
 		run:      Compile[pointedNoAddress],
-		want:     []string{"big.Int maps no address"},
+		want:     []string{"time.Location maps no address"},
 		elements: 1,
 	}, {
 		name:     "under an array, once rather than N times",
 		run:      Compile[arrayNoAddress],
-		want:     []string{"netip.AddrPort maps no address"},
+		want:     []string{"time.Location maps no address"},
 		elements: 1,
 	}, {
 		name:     "and one mapped sibling does not hide it",
 		run:      Compile[oneGoodSibling],
-		want:     []string{"netip.Addr maps no address"},
+		want:     []string{"time.Location maps no address"},
 		elements: 1,
 	}})
 }

@@ -10,16 +10,49 @@
 //
 // # The type set
 //
-// A type is resolved by type identity first and by reflect.Kind second, and the
-// ordering is the whole rule: time.Duration's kind is int64 and time.Time's
+// A type is claimed by the first of three steps that will have it, and the
+// claim is a pair: the same claim serves Load and Dump, so a type whose two
+// directions would disagree is refused rather than dumped and never loaded.
+//
+//  1. type identity, reflect.Type compared with ==
+//  2. the text pair, encoding.TextAppender or encoding.TextMarshaler together
+//     with encoding.TextUnmarshaler
+//  3. reflect.Kind admission
+//
+// The ordering is the whole rule. time.Duration's kind is int64 and time.Time's
 // kind is struct, so a kind-first walk would write a nanosecond count for one
-// and three unexported fields for the other.
+// and three unexported fields for the other; time.Time also carries a text
+// pair, and the table beats it, because an entry in the table is not
+// replaceable.
 //
 // Two leaves are owned by identity, and their representations are pinned:
 // time.Duration is a string such as "30s", and time.Time is RFC 3339 with
 // nanoseconds through its text pair. ferry gives time.Duration a representation
 // where encoding/json/v2 refuses and its legacy option gives nanoseconds, and
 // says so rather than claiming to follow v2.
+//
+// Claimed by the text pair: any type declaring both halves of it, which is a
+// declaration ferry did not choose and which the type's author is therefore
+// answerable for. It lands as String, always, because encoding.TextMarshaler
+// produces text and says nothing about kind. This step runs before kind
+// admission because a declaration beats an inference: net.IP lands as
+// "192.0.2.1" rather than as sixteen raw bytes, slog.Level as "WARN" rather
+// than 4, and netip.Addr, netip.AddrPort, netip.Prefix and big.Int stop being
+// refused for mapping no address. A struct claimed here contributes one address
+// rather than one per field, so it needs no tag on any field of it.
+//
+// Half a pair does not compile, in either direction, and the diagnosis names
+// the method that is missing. Using the half anyway is a value that dumps and
+// never loads; falling through to kind admission ignores, with no diagnostic,
+// a method the user wrote for exactly this purpose. An UnmarshalText on a value
+// receiver is a half pair too, because it decodes into a copy. Neither
+// json.Marshaler, encoding.BinaryMarshaler nor gob.GobEncoder is an arm, so a
+// type carrying only one of those is admitted by its kind as usual.
+//
+// A type the chain claims may not key a map. It is not that its text is lossy -
+// every such type in the standard library is injective - it is that nobody was
+// asked: a registration has a call site at which the obligation is declared and
+// a text pair does not.
 //
 // Admitted by kind: bool as Bool; string as String, carrying the bytes
 // unmodified and not required to be UTF-8; the five signed and five unsigned
@@ -65,9 +98,9 @@
 // index the array cannot hold is loud.
 //
 // Two whole-type refusals fall out of this. A struct that maps no address does
-// not compile, checked at every level rather than only at the root: netip.Addr,
-// netip.AddrPort, big.Int and time.Location all have zero exported fields, so
-// without the rule they look supported and are written nowhere. And a recursive
+// not compile, checked at every level rather than only at the root:
+// time.Location has zero exported fields, so without the rule it looks
+// supported and is written nowhere. And a recursive
 // type does not compile, because its address set is unbounded and a set that
 // cannot be enumerated cannot be handed to a driver before any I/O. Both name
 // registration as the fix, because a codec collapses a type to a leaf and a leaf

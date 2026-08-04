@@ -50,15 +50,31 @@ type leafCodec struct {
 	nullable bool
 }
 
-// leafFor resolves a type to its leaf behaviour, by type identity first and by
-// reflect.Kind second.
+// leafFor resolves a type to its leaf behaviour, by type identity first, by the
+// text pair second, and by reflect.Kind third.
 //
-// The ordering is the whole rule (ADR-0005). time.Duration's kind is int64 and
-// time.Time's kind is struct, so a kind-first resolution writes a nanosecond
-// count for one and walks three unexported fields of the other. Consulting
-// identity first is what makes both ferry's.
+// The ordering is the whole rule (ADR-0005, ADR-0007). time.Duration's kind is
+// int64 and time.Time's kind is struct, so a kind-first resolution writes a
+// nanosecond count for one and walks three unexported fields of the other.
+// time.Time also carries a text pair, so it is the case that proves the first
+// step beats the second: an entry in the table is not replaceable, and a user
+// wanting another representation for a type core owns defines a named type and
+// registers that.
+//
+// The chain sits before kind admission because a declaration beats an
+// inference. It shortens ADR-0005's refusal list by seven types and shrinks the
+// category of representations nobody chose: net.IP stops landing as sixteen raw
+// bytes and lands as 192.0.2.1, slog.Level as WARN rather than 4. Both orders
+// drift under an unrelated edit and the ADR says so - before-kind drifts when a
+// dependency adds a text pair, after-kind when somebody exports a field - and
+// the case rests on the first being a visibly serialization-shaped edit and the
+// second not being one.
 func leafFor(t reflect.Type) (leafCodec, bool) {
 	if cd, ok := byIdentity[t]; ok {
+		return cd, true
+	}
+
+	if cd, ok := textPair(t); ok {
 		return cd, true
 	}
 
@@ -507,20 +523,26 @@ func mapKeyFor(t reflect.Type) (mapKey, bool) {
 	}
 }
 
-// mapKeyMsg refuses a key type, and it is three messages rather than one because
-// only the third has a remedy that exists.
+// mapKeyMsg refuses a key type, and it is four messages rather than one because
+// only two of them have a remedy that exists.
 //
 // A message reading "register an injective codec for it" would be naming a
 // remedy that does not exist for the first two: no text form of time.Time can be
 // injective, because == compares a *Location and no text carries a pointer, and
 // two distinct NaN payloads both format as NaN. Naming a remedy that cannot work
 // is the mistake ADR-0005 corrected for time.Time by name.
+//
+// The identity table is consulted before the chain here for the same reason
+// [leafFor] consults it first: time.Time carries a text pair, and one question
+// answered by two lookups is how a chain drifts.
 func mapKeyMsg(t reflect.Type) string {
 	switch {
 	case t == reflect.TypeFor[time.Time]():
 		return "time.Time is in core's own set and is not usable as a map key: its text is not injective over " +
 			"the type, because == compares the *Location and no text carries a pointer, so two distinct keys " +
 			"collapse into one address - key the map by a type that is injective, or convert the key yourself"
+	case armOf(t).complete():
+		return chainKeyMsg(t)
 	case t.Kind() == reflect.Float32 || t.Kind() == reflect.Float64:
 		return fmt.Sprintf("%s is not usable as a map key: two distinct NaN payloads both format as NaN, so its "+
 			"text is not injective over the type and two distinct keys collapse into one address - key the "+
@@ -530,6 +552,31 @@ func mapKeyMsg(t reflect.Type) string {
 			"to parse back out of it, so ferry keys a map by a string or an integer kind - key the map by one, "+
 			"or register a codec for it that declares itself usable as one", t)
 	}
+}
+
+// emit is the encode half plus the one thing core can check about a codec it
+// did not write: the kind the codec declared against the kind it produced.
+//
+// It is one comparison per encode, and it admits Null beside the declared kind
+// rather than only the declared kind. The declared kind is a donation target
+// and not a constraint on what a codec emits (ADR-0009): ADR-0005's registered
+// net.Addr codec returns Null for a nil interface and takes Null back, which is
+// the mechanism that makes an interface expressible at all, and core's own
+// []byte and every pointer leaf do the same.
+//
+// What it cannot catch is a codec that declares the right kind and the wrong
+// text, which is what ADR-0005's golden column exists for.
+func (cd leafCodec) emit(v reflect.Value) (Value, error) {
+	out, err := cd.encode(v)
+	if err != nil {
+		return Value{}, err
+	}
+
+	if out.kind != cd.kind && out.kind != KindNull {
+		return Value{}, &kindLie{typ: v.Type(), declared: cd.kind, got: out.kind}
+	}
+
+	return out, nil
 }
 
 // decode applies one plane observation to one field, and is the whole of
@@ -615,6 +662,20 @@ type lengthFailure struct {
 
 func (e *lengthFailure) Error() string {
 	return fmt.Sprintf("the plane holds %d bytes and %s holds %d", e.got, e.typ, e.want)
+}
+
+// kindLie is a codec producing a kind other than the one it declared.
+//
+// It names the type rather than the codec, because a codec has no name: the
+// registrant supplied a pair of functions and the type is what identifies them.
+type kindLie struct {
+	typ           reflect.Type
+	declared, got VKind
+}
+
+func (e *kindLie) Error() string {
+	return fmt.Sprintf("the codec for %s declared %s and produced %s: the declared kind is what a plane is "+
+		"promised on the way out and what String is donated to on the way back", e.typ, e.declared, e.got)
 }
 
 // encodeFailure is a Go value the leaf's representation does not cover.
