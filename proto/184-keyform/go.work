@@ -1,0 +1,10 @@
+// A workspace of its own, so the prototype never appears in the repository's
+// root go.work and `go build ./...` at the root does not see it.
+go 1.27
+
+toolchain go1.27rc2
+
+use (
+	.
+	../..
+)
