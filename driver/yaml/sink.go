@@ -35,24 +35,36 @@ const indent = 2
 // every key no field of yours maps - is left as it was. That is what makes a
 // hand-maintained config file survive being loaded and written back.
 //
-// The write is atomic and durable. A temporary file beside yours is renamed into
-// place once everything has been written, and both the new contents and the
-// rename itself are flushed to the disk before the save returns. A save that
-// fails leaves your file byte for byte as it was with no temporary left behind,
-// unless it was the flush of the rename that failed, in which case your file
-// holds the new document and the save says so.
+// The write is atomic. A temporary file beside yours is renamed into place once
+// everything has been written, and a save that fails leaves your file byte for
+// byte as it was with no temporary left behind.
+//
+// It is not durable unless you ask. Pass [Durable] to flush the replacement to
+// the disk before the save returns, and read that option before you do: it is
+// the most expensive thing a save can be told to do.
 //
 // It is a separate type from [Source] for the reason recorded there.
 type Sink struct {
 	path string
+	cfg  config
 }
 
 // NewSink returns a sink over the YAML file at path.
 //
+// Pass [Durable] to flush the replacement to the disk before a save returns. The
+// replacement is atomic either way.
+//
 // It touches nothing, and in particular it does not check that the path can be
 // written. A sink over an unwritable directory is legal to build, and the save
 // refuses when it starts.
-func NewSink(path string) Sink { return Sink{path: path} }
+func NewSink(path string, opts ...Option) Sink {
+	var c config
+	for _, o := range opts {
+		o.apply(&c)
+	}
+
+	return Sink{path: path, cfg: c}
+}
 
 // Bind takes the address set and reads nothing out of it, for the reason
 // [Source.Bind] records.
@@ -61,9 +73,11 @@ func NewSink(path string) Sink { return Sink{path: path} }
 // refusal lands when the save starts, which is before anything has been
 // written, rather than part way through.
 func (s Sink) Bind(_ *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
-	path := s.path
+	// Both are read here and not inside the closure, so a Sink reconfigured
+	// after Bind cannot change a binding already handed out (ADR-0012).
+	path, cfg := s.path, s.cfg
 
-	return func(ctx context.Context) (ferry.Writer, error) { return open(ctx, path) }, nil
+	return func(ctx context.Context) (ferry.Writer, error) { return open(ctx, path, cfg) }, nil
 }
 
 // open reads the document that is there and stages the file that will replace
@@ -74,7 +88,7 @@ func (s Sink) Bind(_ *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 // document that does not parse would otherwise be silently overwritten, and a
 // directory that takes no new file would otherwise be discovered half way
 // through a walk.
-func open(ctx context.Context, path string) (*writer, error) {
+func open(ctx context.Context, path string, cfg config) (*writer, error) {
 	doc, err := readDoc(ctx, path)
 	if err != nil {
 		return nil, err
@@ -88,7 +102,7 @@ func open(ctx context.Context, path string) (*writer, error) {
 		return nil, fmt.Errorf("%w: no replacement could be staged beside it: %w", ferry.ErrReadOnly, err)
 	}
 
-	return &writer{path: path, doc: doc, tmp: tmp}, nil
+	return &writer{path: path, doc: doc, tmp: tmp, durable: cfg.durable}, nil
 }
 
 // writer is one open dump: the document being built up, and the file that will
@@ -102,11 +116,16 @@ func open(ctx context.Context, path string) (*writer, error) {
 // It records the rename rather than the commit, because the two came apart when
 // the directory sync landed after the rename (#187): a sync that fails is a
 // dump that did not commit, and the staged file is gone all the same.
+//
+// durable is the whole of the Durable option, read once per open and never seen
+// by ferry (#188). It gates the two syncs and nothing else: the staging, the
+// mode inheritance and the rename are what a save is either way.
 type writer struct {
 	path string
 	doc  *yamlv3.Node
 	tmp  *os.File
 
+	durable bool
 	swapped bool
 }
 
@@ -170,6 +189,10 @@ func (w *writer) Commit(_ context.Context) error {
 // The failure is classed exactly as the rename's own, because a rename that
 // cannot be made durable and a rename that did not happen are the same answer
 // to the caller: the dump did not commit.
+//
+// The rename is unconditional and the sync after it is not (#188). The rename is
+// what keeps a half-written document out of the operator's file and it is cheap;
+// the sync is the expensive half and the caller asks for it.
 func (w *writer) swap() error {
 	if err := os.Rename(w.tmp.Name(), w.path); err != nil {
 		return fmt.Errorf("%w: the staged document could not replace the plane: %w", ferry.ErrPlane, err)
@@ -178,6 +201,10 @@ func (w *writer) swap() error {
 	// Set on the rename and not at the end, because from here there is no
 	// staged file left for Close to remove whatever the sync answers.
 	w.swapped = true
+
+	if !w.durable {
+		return nil
+	}
 
 	if err := syncDir(filepath.Dir(w.path)); err != nil {
 		return fmt.Errorf("%w: the staged document replaced the plane and the replacement could not be made "+
@@ -210,8 +237,26 @@ func (w *writer) emit() error {
 		}
 	}
 
-	if err := w.tmp.Sync(); err != nil {
-		return fmt.Errorf("%w: the staged document could not be flushed: %w", ferry.ErrPlane, err)
+	return w.flushAndClose()
+}
+
+// flushAndClose hands the staged file over: the sync where the caller asked for
+// one, and then the close either way.
+//
+// The sync is the staged file's half of durability and it is the half declined
+// by default (#188). Declining it costs nothing a reader can see, because the
+// close still hands every byte to the kernel and the rename that follows swaps
+// in a whole document either way; what is left in the operating system's cache
+// is only at risk from a crash. The other half is in swap, since a rename is not
+// made durable by syncing the file it moves.
+//
+// The two are one function so that emit stays inside cognitive-complexity, which
+// gating the sync in place put at eight.
+func (w *writer) flushAndClose() error {
+	if w.durable {
+		if err := w.tmp.Sync(); err != nil {
+			return fmt.Errorf("%w: the staged document could not be flushed: %w", ferry.ErrPlane, err)
+		}
 	}
 
 	return w.tmp.Close()
