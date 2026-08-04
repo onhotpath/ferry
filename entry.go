@@ -5,25 +5,20 @@ import (
 	"reflect"
 )
 
-// Load builds a value of T from src.
-//
-// It names its type where [Dump] infers one, which is not an inconsistency:
-// Load has nothing to infer from and Dump has the value in hand.
+// Load builds a value of T from src. The type is named because there is no
+// value to infer it from; [Dump] infers its own.
 //
 //	cfg, err := ferry.Load[Config](ctx, yaml.Source{Path: "app.yaml"})
 //
-// It returns a value and takes no destination, and that is ADR-0006's decision
-// rather than a taste one. Measured on the shape that takes a *T, a second load
-// into the same destination returns the previous load's value for every address
-// the plane has since lost, and a signature taking *T offers exactly that as its
-// only spelling.
+// Every field the plane is silent about keeps T's zero value, and a field
+// declaring default= takes its default there instead.
 //
-// It is [LoadOver] with the zero seed, in the implementation and not only in
-// the prose, so nothing is expressible through one and not the other and the two
-// cannot drift.
+// On failure it returns the zero value of T and never a partly built one. Range
+// the failure with [Elements], and match a member against [ErrSchema],
+// [ErrMissing], [ErrValue], [ErrPlane], [ErrDriver] or [ErrReadOnly].
 //
-// On failure it returns the zero value, which falls out of the rule stated at
-// LoadOver rather than being a second rule. Range the failure with [Elements].
+// It is [LoadOver] with the zero seed, so anything said about one holds for the
+// other.
 func Load[T any](ctx context.Context, src Source, opts ...Option) (T, error) {
 	var zero T
 
@@ -32,23 +27,22 @@ func Load[T any](ctx context.Context, src Source, opts ...Option) (T, error) {
 
 // LoadOver builds a value of T from src, over a seed the caller supplies.
 //
-// It is one operation with two uses, and both are ADR-0006's. A seed is that
-// ADR's answer for a composite default a tag cannot spell, and a reload is the
-// caller writing the carry-over out loud rather than getting it from a
-// destination that happens to be populated:
+// It has two uses. A seed is how a composite default is spelled, since a struct
+// tag holds one text and a composite's value lives at many addresses; and a
+// reload is the caller writing the carry-over out loud rather than getting it
+// from a destination that happens to be populated:
 //
 //	cfg, err := ferry.LoadOver(ctx, Config{Tags: []string{"default"}}, src)
 //	cfg, err = ferry.LoadOver(ctx, cfg, src)
 //
-// An address the plane does not have is Absent, and Absent does not write, so
-// every field the plane is silent about keeps the value the seed gave it.
+// An address the plane does not have is absent, and absence does not write, so
+// every field the plane is silent about keeps the value the seed gave it. Where
+// a seed and a declared default both apply to one field the declared default
+// wins, because ferry cannot tell a seeded value from a zero one.
 //
-// On failure it returns the seed it was handed. ADR-0011's rule is that ferry
-// yields no value it *built*, and returning the zero value here would destroy a
-// live configuration ferry never touched - the same worst outcome reached
-// through the other door. It is honoured as a property rather than as a
-// promise: the walk builds into a copy of the seed, so the partial the walk
-// built is unreachable from the caller whatever happens.
+// On failure it returns the seed it was handed, unchanged. The walk builds into
+// a copy, so a partly built value is never reachable from the caller. Range the
+// failure with [Elements].
 func LoadOver[T any](ctx context.Context, seed T, src Source, opts ...Option) (T, error) {
 	// The copy is the whole mechanism. The walk writes here and never to seed,
 	// so there is no path by which a partial crosses the boundary.
@@ -61,27 +55,28 @@ func LoadOver[T any](ctx context.Context, seed T, src Source, opts ...Option) (T
 	return over, nil
 }
 
-// Dump writes v to sink.
-//
-// It infers its type where [Load] names one, because the value is in hand.
+// Dump writes v to sink. The type is inferred, because the value is in hand.
 //
 //	err := ferry.Dump(ctx, cfg, yaml.Sink{Path: "app.yaml"})
 //
 // The schema is compiled from T rather than from what v happens to hold, so a
-// Dump and a Load of one type are the same address set and one compiler.
+// Dump and a Load of one type cover the same address set.
 //
-// A sink implementing [Committer] is committed only where the walk succeeded,
-// and a sink implementing [Releaser] is closed either way. That is ADR-0004's
-// protocol rather than a lifecycle ferry invents: no driver is ever told that
-// it failed, and closed-without-Commit is the abort signal.
+// A field marked omitzero is skipped where it holds T's zero value. An omitted
+// address gets no write at all rather than a write of nothing, so an omission
+// is not a deletion: a replacing sink and a patching sink read one dump
+// differently and both are correct.
 //
 // Encoding is a phase before any write, so a Dump that fails for a reason ferry
-// could have known without touching the plane leaves the plane untouched: every
-// value is encoded first, and if any of them has no representation, all of those
-// failures are reported and nothing is written. A [Committer] is exempt, because
-// staging already gives it that property and interleaving gives it a better
-// error set - both kinds of failure in one run rather than one kind per round
-// trip. Every refusal the plane makes is aggregated either way.
+// could have known without touching the plane leaves the plane untouched. A
+// sink implementing [Committer] is exempt, since staging already gives it that
+// property, and it gets both kinds of failure in one report for it.
+//
+// A [Committer] is committed only where the walk succeeded, and a [Releaser] is
+// closed either way, so closed-without-Commit is the abort signal and no driver
+// is ever told that it failed.
+//
+// Range the failure with [Elements].
 func Dump[T any](ctx context.Context, v T, sink Sink, opts ...Option) error {
 	// Through a pointer, so the schema and the walk both see T rather than
 	// whatever dynamic type an interface T would hand reflect.ValueOf.

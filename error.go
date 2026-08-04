@@ -66,16 +66,13 @@ func (m moment) String() string {
 // as a sentence.
 
 // ErrSchema is a failure provable from the destination type plus the codec
-// registry, with no plane in sight. It is defined as what schema compile can
-// catch, which reuses ADR-0008's line rather than drawing a new one.
+// registry, with no plane in sight: a malformed tag, an unsupported type, a
+// contradictory declaration. It is what [Compile] reports.
 var ErrSchema = errors.New("schema error")
 
 // ErrMissing is the plane being silent at an address the schema marks required.
-//
-// It is split from ErrValue because "these six keys are unset" and "these two
-// hold garbage" are different messages for different people, and collapsing
-// them makes an operator read the list one line at a time to find out which is
-// which.
+// It is kept apart from [ErrValue] so that "these six keys are unset" and
+// "these two hold garbage" are two lists rather than one.
 var ErrMissing = errors.New("missing")
 
 // ErrValue is the plane speaking and what it said not fitting the target type.
@@ -86,32 +83,21 @@ var ErrValue = errors.New("invalid value")
 var ErrPlane = errors.New("plane error")
 
 // ErrDriver is provenance rather than a class, and it crosses the other four:
-// it says the cause came from below, which is the thing ferry knows for
-// certain.
+// it says the cause came from below the boundary. Core supplies it, so a driver
+// cannot forge it.
 //
-// There is no transient marker, because whether a backend's status code is
-// worth retrying is the driver's knowledge and core contains nothing that
-// requires knowing what a plane is for (ADR-0001). Provenance is the better
-// proxy for the same decision: retrying an ErrValue is always pointless, and
-// retrying a driver's read is sometimes not.
+// It is the closest thing to a retry signal ferry offers. Whether a particular
+// backend failure is worth retrying is the driver's knowledge, and its own
+// sentinel stays reachable underneath; what ferry can say is that retrying an
+// [ErrValue] is always pointless and retrying a driver's read is sometimes not.
 var ErrDriver = errors.New("driver")
 
-// ErrReadOnly is a plane that is writable in principle but not right now, and a
-// sink refuses with it when it opens for writing rather than at the first write
-// (ADR-0004). It is ADR-0011's family rather than an exception beside it.
+// ErrReadOnly is a plane that is writable in principle but not right now: a KV
+// with no write ACL, a file sink over an unwritable directory.
 //
-// It is the only plane condition core names, and the reason is placement rather
-// than taxonomy. Throttled, unauthenticated and timed out are the driver's
-// knowledge and stay the driver's sentinels, reachable under ferry's wrapper. A
-// read-only refusal is different because ADR-0004 makes where it is raised a
-// clause of the contract: inside the open, not at Bind, which does no I/O and
-// cannot know, and not at the first Set, which has already half-written the
-// plane. A rule about placement needs a portable signal to be checked against,
-// or the conformance suite cannot hold a driver to it and the rule is prose.
-//
-// So a driver wraps both: this, so a caller and the suite can ask the question
-// without knowing which plane answered, and its own error underneath, so
-// errors.Is against the driver's sentinel keeps working.
+// A sink raises it when it opens for writing, so a Dump refused this way has
+// written nothing at all rather than half a struct. A driver wraps this and its
+// own error, so errors.Is answers for both.
 var ErrReadOnly = errors.New("plane is read only")
 
 // classRule maps a sentinel a driver or a codec may wrap onto the class it
@@ -149,29 +135,30 @@ func declaredClass(err error) error {
 	return nil
 }
 
-// Error is a ferry failure. It carries four things and no more: the location,
-// the moment, the class and the cause.
+// Error is one ferry failure: where it happened, when in the run, which class
+// it belongs to, and what caused it.
 //
-// The name is exported so errors.AsType finds it through any wrapping; no field
-// is, so the struct can grow and a caller cannot build a switch over ferry's
-// internals. That is the whole answer to "how does a caller match a kind
-// without depending on concrete types": there is no concrete type to depend on,
-// and the accessor set is what ferry commits to (ADR-0011).
+//	if fe, ok := errors.AsType[*ferry.Error](err); ok {
+//	    log.Println(fe.Address(), errors.Is(fe, ferry.ErrValue))
+//	}
 //
-// The location is a Path holding two different spaces, and that is a rule
-// rather than two fields. At schema compile it is the Go field path, because a
-// field with no tag never named an address and the whole error is that it did
-// not. Everywhere else it is the plane address.
+// It has one accessor, [Error.Address], and no exported fields, so there is
+// nothing to switch on: the class is matched with errors.Is against
+// [ErrSchema], [ErrMissing], [ErrValue], [ErrPlane], [ErrDriver] or
+// [ErrReadOnly].
 //
-// The class is matched with errors.Is and there is no accessor for it, nor for
-// the moment. The cause stays in the chain, so errors.Is against a driver's own
-// sentinel or strconv.ErrRange still answers, and ferry never prints it: ferry's
-// own message text never contains a value the plane supplied, and ferry cannot
-// know which addresses hold secrets without knowing what the plane is for. What
-// ferry names instead is structure - the observed kind, the target type,
-// whether a failure was syntax or range, an array's length.
+// The address is the plane address, except at schema compile, where it is the
+// Go field path - a field with no tag never named an address, and that is the
+// whole error. An error with no location, a close failure among them, returns
+// the zero [Path].
 //
-// Message text is not API. Match on the sentinels and on the address.
+// The cause stays in the chain, so errors.Is against a driver's own sentinel or
+// against strconv.ErrRange still answers.
+//
+// Message text is not API. Match on the sentinels and on the address. ferry's
+// own text never repeats a value the plane supplied, because ferry cannot know
+// which addresses hold secrets; what it names instead is structure, such as the
+// observed kind, the target type, or an array's length.
 type Error struct {
 	// loc is the location, and the zero Path is "no location": an address has
 	// at least one segment, so no flag is needed to tell them apart.
@@ -193,22 +180,21 @@ type Error struct {
 // silent false rather than a compile error.
 var _ error = (*Error)(nil)
 
-// Error renders the failure on one line, prefixed with "ferry: ", which is what
-// lands inside somebody else's fmt.Errorf("loading config: %w", err).
+// Error renders the failure on one line, prefixed with "ferry: ". The text is
+// not API; match on the sentinels and on [Error.Address].
 func (e *Error) Error() string { return errPrefix + e.line() }
 
 // Unwrap returns the cause, so a driver's own error and a decode failure's
 // strconv sentinel both stay matchable through ferry's wrapper.
 func (e *Error) Unwrap() error { return e.cause }
 
-// Address is the one accessor. At schema compile it is the Go field path and
-// everywhere else it is the plane address; an error with no location, a close
-// failure among them, returns the zero Path.
+// Address is where the failure happened: the plane address, or the Go field
+// path for a schema compile failure. An error with no location returns the zero
+// [Path].
 func (e *Error) Address() Path { return e.loc }
 
-// Is matches the class sentinel and the provenance marker. Neither is in the
-// unwrap chain, so this is what makes errors.Is the whole of the matching
-// mechanism.
+// Is matches the class sentinel and the provenance marker, which is what makes
+// errors.Is the whole of the matching mechanism.
 func (e *Error) Is(target error) bool {
 	if e.class != nil && target == e.class {
 		return true
@@ -419,11 +405,11 @@ func driverMsg(m moment) string {
 // core cannot supply one: a driver refusing over a whole address set knows
 // which member it disliked, and core does not.
 //
-// It attaches and never classifies, which is what stops it being a second
-// constructor of ferry errors: on its own it is not a *Error and matches no
-// class, and it is inert until core wraps it. It returns error rather than
-// *Error so that "return ferry.ErrorAt(a, f())" cannot smuggle a typed nil out
-// as a non-nil error. A nil err returns nil.
+//	return ferry.ErrorAt(addr, fmt.Errorf("%w: %s", ferry.ErrPlane, why))
+//
+// It attaches and never classifies. On its own the result is not an [Error] and
+// matches no class; core reads the address off it and wraps it. A nil err
+// returns nil.
 func ErrorAt(addr Path, err error) error {
 	if err == nil {
 		return nil
@@ -656,17 +642,20 @@ func sortKeyOf(err error) sortKey {
 	return sortKey{mom: momentUnknown, msg: err.Error()}
 }
 
-// Elements is the reader's half of the error set, which ADR-0001 makes a
-// feature rather than diagnostics: deployment validation is a load followed by
-// reading this.
-//
-// It returns a one-element slice for a single failure, so a caller's loop reads
-// the same whether one field failed or forty, and nil for a nil error. The
-// slice is the caller's to keep.
+// Elements splits a ferry failure into the individual failures it reports.
 //
 //	for _, e := range ferry.Elements(err) {
 //	    if errors.Is(e, ferry.ErrMissing) { ... }
 //	}
+//
+// A failed call reports every failure that is not a consequence of another one
+// it is already reporting, so a struct with six unset required fields is six
+// elements rather than the first. They are sorted, and the order is the same on
+// every run.
+//
+// It returns a one-element slice for a single failure, so the loop above reads
+// the same whether one field failed or forty, and nil for a nil error. The
+// slice is the caller's to keep.
 func Elements(err error) []error {
 	if err == nil {
 		return nil

@@ -1,406 +1,273 @@
 // Package ferry is a bidirectional, struct-first data mapper. One annotated
-// struct and one tag grammar drive both directions: Load fills a value from a
-// pluggable source, and Dump writes the same value back to a pluggable sink.
+// struct and one tag grammar drive both directions: [Load] fills a value from
+// a pluggable source, and [Dump] writes the same value back to a pluggable
+// sink.
 //
-// Core carries only what no driver can supply for itself - the walk, the schema
-// compiler, tag parsing, the codec chain, defaults and zero values - and only
-// what core imposes but cannot compile-check, which ships as the thing that
-// checks it. Nothing in core knows what a plane is for; planes ship as driver
-// modules under driver/ (ADR-0001, ADR-0002).
+//	type Config struct {
+//	    Host    string        `ferry:"host,required"`
+//	    Port    int           `ferry:"port,default=8080"`
+//	    Timeout time.Duration `ferry:"timeout,default=30s"`
+//	}
+//
+//	cfg, err := ferry.Load[Config](ctx, yaml.Source{Path: "app.yaml"})
+//
+// The store a value is read from or written to is called a plane: a YAML file,
+// the process environment, a KV bucket, a query string. Core knows nothing
+// about any of them, and reaches one only through [Source] and [Sink]. Planes
+// ship as separate modules under driver/.
+//
+// # The four verbs
+//
+//   - [Load] builds a fresh value of T from a source.
+//   - [LoadOver] does the same over a seed the caller supplies, which is how a
+//     reload and a composite default are spelled.
+//   - [Dump] writes a value to a sink.
+//   - [Compile] reports whether a type's annotation is legal, from the type
+//     alone, with no value in hand and no plane reachable. It is what a test
+//     calls.
+//
+// Every verb takes the same [Option] values, and there are two of those:
+// [TagKey] names the struct tag key to read, and [WithRegistry] names the codec
+// table to resolve types against.
+//
+// # The tag grammar
+//
+// Four words, and one of them is punctuation:
+//
+//	tag     =  name *( "," option )  /  "-"
+//	option  =  "required"  /  "omitzero"  /  "default" "=" token
+//	token   =  bare  /  "'" quoted "'"
+//
+//	Host     string `ferry:"host,required"`
+//	Port     int    `ferry:"port,default=8080"`
+//	Comment  string `ferry:"comment,omitzero"`
+//	Greeting string `ferry:"greeting,default='Hello, world'"`
+//	Odd      string `ferry:"'a,b'"`
+//	Skipped  string `ferry:"-"`
+//
+// Every exported field names the segment it addresses, or is marked "-". ferry
+// never invents a name out of the Go field name, so exporting a field cannot
+// silently change what a program writes to a plane.
+//
+// A name or a default value containing a comma is single-quoted, and a literal
+// quote inside a quoted token is doubled. Only a leading quote is significant,
+// so default=it's here needs no quoting at all. A word ferry does not have is a
+// refusal rather than a silent no-op, and the diagnostic names what to write in
+// its place.
+//
+// Each option has exactly one honest direction, so the grammar spends no syntax
+// on saying which: default= and required are Load-side, omitzero is Dump-side.
 //
 // # The type set
 //
 // A type is claimed by the first of three steps that will have it, and the
-// claim is a pair: the same claim serves Load and Dump, so a type whose two
-// directions would disagree is refused rather than dumped and never loaded.
+// claim serves both directions, so a type whose two directions would disagree
+// is refused rather than dumped and never loaded.
 //
-//  1. type identity, reflect.Type compared with == - a registration and core's
-//     own two entries, in one table
-//  2. the text pair, encoding.TextAppender or encoding.TextMarshaler together
-//     with encoding.TextUnmarshaler
-//  3. reflect.Kind admission
+//  1. Type identity: a registered codec, or one of core's own two pinned types.
+//  2. The text pair: encoding.TextAppender or encoding.TextMarshaler, together
+//     with encoding.TextUnmarshaler.
+//  3. reflect.Kind admission.
 //
-// The ordering is the whole rule. time.Duration's kind is int64 and time.Time's
-// kind is struct, so a kind-first walk would write a nanosecond count for one
-// and three unexported fields for the other; time.Time also carries a text
-// pair, and the table beats it, because an entry in the table is not
-// replaceable.
-//
-// Two leaves are owned by identity, and their representations are pinned:
+// Core pins two types by identity, and their representations do not change:
 // time.Duration is a string such as "30s", and time.Time is RFC 3339 with
-// nanoseconds through its text pair. ferry gives time.Duration a representation
-// where encoding/json/v2 refuses and its legacy option gives nanoseconds, and
-// says so rather than claiming to follow v2.
+// nanoseconds.
 //
-// Claimed by the text pair: any type declaring both halves of it, which is a
-// declaration ferry did not choose and which the type's author is therefore
-// answerable for. It lands as String, always, because encoding.TextMarshaler
-// produces text and says nothing about kind. This step runs before kind
-// admission because a declaration beats an inference: net.IP lands as
-// "192.0.2.1" rather than as sixteen raw bytes, slog.Level as "WARN" rather
-// than 4, and netip.Addr, netip.AddrPort, netip.Prefix and big.Int stop being
-// refused for mapping no address. A struct claimed here contributes one address
-// rather than one per field, so it needs no tag on any field of it.
+// A type declaring both halves of the text pair is claimed by it and lands as a
+// string, so net.IP is "192.0.2.1" rather than sixteen raw bytes and slog.Level
+// is "WARN" rather than 4. Half a pair does not compile, and the diagnostic
+// names the method that is missing; an UnmarshalText on a value receiver is a
+// half pair too, because it decodes into a copy. Nothing else is consulted -
+// not json.Marshaler, encoding.BinaryMarshaler or gob.GobEncoder, and not
+// fmt.Stringer, which declares no inverse.
 //
-// Half a pair does not compile, in either direction, and the diagnosis names
-// the method that is missing. Using the half anyway is a value that dumps and
-// never loads; falling through to kind admission ignores, with no diagnostic,
-// a method the user wrote for exactly this purpose. An UnmarshalText on a value
-// receiver is a half pair too, because it decodes into a copy. Neither
-// json.Marshaler, encoding.BinaryMarshaler nor gob.GobEncoder is an arm, so a
-// type carrying only one of those is admitted by its kind as usual.
+// Admitted by kind: bool, string, the five signed and five unsigned integer
+// widths, float32 and float64, and []byte and [N]byte as bytes. A named type
+// over an admitted kind is admitted with it, so `type Port int` round-trips
+// with nothing registered.
 //
-// A type the chain claims may not key a map. It is not that its text is lossy -
-// every such type in the standard library is injective - it is that nobody was
-// asked: a registration has a call site at which the obligation is declared and
-// a text pair does not.
+// Composites contribute addresses rather than values. A struct mints one name
+// segment per exported field, and unexported fields are skipped; a pointer
+// mints no segment of its own; [N]T mints exactly N indices, because the length
+// is part of the type; []T mints one index per element and map[K]V one name per
+// key, both from the value rather than from the type.
 //
-// Admitted by kind: bool as Bool; string as String, carrying the bytes
-// unmodified and not required to be UTF-8; the five signed and five unsigned
-// integer widths as Number in base 10; float32 and float64 as Number, formatted
-// at their own bit size; and []byte and [N]byte as Bytes. A named type over an
-// admitted kind is admitted with it, so `type Port int` round-trips with
-// nothing registered.
+// A map is keyed by a string or an integer kind, by time.Duration, or by a
+// registered type whose registration declared [Reg.AsMapKey]. Nothing else keys
+// a map, because the key becomes address text and has to parse back out of it.
 //
-// On Load every leaf accepts its own kind, and additionally accepts String,
-// whose text is parsed by exactly the parser that leaf's own kind uses. Nothing
-// else coerces: String is what a plane says when it has nothing to say, while
-// Number, Bool and Bytes are assertions a plane made and ferry respects. So a
-// Number is refused at a Go string, because accepting it would destroy the
-// quoting distinction the boundary preserves. Null is accepted by exactly the
-// types that have a null, which among the leaves is []byte alone.
+// chan, func, complex64, complex128, unsafe.Pointer and uintptr are refused. So
+// is a struct that maps no address, and so is a recursive type, whose address
+// set is unbounded; registering a codec collapses either to a leaf and is the
+// remedy for both. Every violation in a type is reported rather than the first,
+// each naming the address and the type, sorted.
 //
-// fmt.Stringer is never consulted, in either direction, because String() string
-// declares no inverse.
+// On Load a leaf accepts its own kind, and additionally accepts a string, whose
+// text is parsed by exactly the parser that leaf's own kind uses. Nothing else
+// coerces. So "0080" is 80 at an int field and never 0, "yes" is not a bool,
+// and a plane's number is refused at a Go string field, which is what keeps a
+// quoted 8080 and an unquoted one distinguishable across a round trip.
 //
-// # The composites whose addresses come from the type
+// # Sharp edges
 //
-// A composite is not itself a value. It contributes addresses, and its elements
-// are the leaves. A struct mints one Name segment per exported field; a pointer
-// mints no segment of its own; and [N]T mints exactly N Index segments, because
-// the length is part of the type.
+// None of these is a defect, and every one is easier to meet in production than
+// to guess at from the rules above.
 //
-// Unexported fields are skipped, which is a rule rather than a silence: reflect
-// cannot set one, so the alternative is refusing every struct containing a
-// sync.Mutex, and the loss it could hide is caught by the rule below instead.
+// A time crossing a plane should be UTC. RFC 3339 carries the offset and not
+// the zone identity, so a time.Time that is not UTC loses its zone's DST rules:
+// a stored timestamp is unaffected, but a stored "when to run next" is wrong by
+// an hour for half the year. The Location a load produces is machine-dependent
+// as well, so two machines can load values that are .Equal and not ==.
+// encoding/json/v2 does exactly the same thing and has no zone-preserving
+// option, so this is inherited from RFC 3339 rather than chosen.
 //
-// A composite that can be nil has an address of its own, and the test is
-// exactly that: *struct gets one, a plain struct does not because it cannot be
-// nil, and [N]T does not because an array has no nil. Such an address carries
-// absence or a null and never anything else, so it is never realised at the same
-// time as anything beneath it. *T where T is a leaf is not a composite at all:
-// the leaf already had an address, and the pointer adds a null to it.
+// An array and a slice are not interchangeable. An array's element addresses
+// are known from the type, so an array loads from a source that cannot
+// enumerate and a slice does not. See [Enumerator].
 //
-// An array and a slice are not interchangeable, and the difference is a real
-// capability rather than a spelling. An array's element addresses are known from
-// reflect.TypeFor[T]() with no value in hand, so an array is loadable from a
-// source that cannot enumerate and a slice is not. An absent element leaves the
-// element at its zero value, exactly as an absent struct field does, and an
-// index the array cannot hold is loud.
+// A type admitted by kind gets a representation nobody chose. A [16]byte UUID
+// lands in a YAML file as sixteen raw bytes: it round-trips exactly, it is
+// simply illegible. Register a codec for a type whose stored spelling matters.
 //
-// Two whole-type refusals fall out of this. A struct that maps no address does
-// not compile, checked at every level rather than only at the root:
-// time.Location has zero exported fields, so without the rule it looks
-// supported and is written nowhere. And a recursive
-// type does not compile, because its address set is unbounded and a set that
-// cannot be enumerated cannot be handed to a driver before any I/O. Both name
-// registration as the fix, because a codec collapses a type to a leaf and a leaf
-// needs no address set.
+// []byte is []uint8 and []rune is []int32, one reflect.Type each, so ferry
+// cannot tell a byte blob from a slice of small unsigned integers and picks
+// bytes, and []rune is an indexed sequence of numbers rather than text.
 //
-// # The composites whose addresses come from the value
+// A named type over time.Duration dumps nanoseconds, because it is a distinct
+// reflect.Type and falls through to its kind. [DurationLike] is the one-line
+// remedy.
 //
-// []T mints one Index segment per element and map[K]V one Name segment per key,
-// and nothing about the type differs between two values that mint different
-// address sets. So a schema can compile, pass every driver check, and be refused
-// later because of what a map contained: both collision rules run at two points
-// and neither is after a write - the static tier at schema compile with no value
-// and no plane, and the dynamic tier as each address is minted, before the write
-// it belongs to.
+// A type claimed by the text pair may not key a map. Its text may well be
+// injective, but nobody was asked, and a registration is the only place that
+// declaration can live.
 //
-// A composite with no elements writes Null at its own address, whether it is nil
-// or empty, and loads back to nil. Three Go states meet two observations at a
-// container address and the collision is forced rather than chosen: measured
-// through a real YAML plane, a missing key, an empty list and an empty mapping
-// are one observation. The distinction between nil and empty is therefore not
-// expressible by any type in the set - not by *[]T either, whose nil pointer and
-// pointer to an empty slice are one address carrying one value - and a user who
-// needs it models it as struct{ Set bool; Items []string }.
+// default=aGk= on a []byte field lands as the four bytes aGk= and not the
+// decoded hi. A declared default is text, and how a plane spells bytes is the
+// driver's business rather than ferry's. Register a codec, or seed the value
+// through [LoadOver].
 //
-// Load reaches a dynamic address only through [Enumerator], which a [Reader] may
-// implement and need not. It cannot be required, because a Vault token with read
-// and no list is ordinary, and it cannot be omitted, because a map could then be
-// loaded from no plane at all. So the two directions cover different address
-// sets: Dump reaches every address always, since the value is in hand, and
-// loading a slice or a map from a source that cannot list is an error naming the
-// field and the source rather than a silently empty one. A Null at the
-// container's own address is a complete answer and needs no enumeration.
+// Message text is not API. Match on the sentinels and on the address.
 //
-// A type keys a map only if it is declared usable as one, per entry, and nothing
-// else confers it - membership of the identity table included. The obligation is
-// injectivity under Go's ==, because == is what a Go map's key identity is and
-// therefore what decides how many entries the map holds. string and the integer
-// kinds are admitted, and so is time.Duration; time.Time is refused, and the
-// refusal is forced rather than chosen, because == compares its *Location and no
-// text carries a pointer. Float keys are excluded because two distinct NaN
-// payloads both format as NaN.
+// # Absence, defaults and zero values
 //
-// A map's members are written in the order of their key text, which is ADR-0001's
-// determinism invariant at the one place a Go map reaches a plane. Two members
-// rendering to one address are refused as the address is minted, naming it,
-// because there is no stable answer to give: which of the two writes survives is
-// which the walk makes last.
+// One rule carries all of it: absent means ferry does not write to the field.
+// Every other observation, a null and the empty string included, is a value the
+// plane holds and is handed to the type set, which accepts it or refuses it
+// loudly. So a [LoadOver] against an empty plane leaves the seed untouched, and
+// an explicit empty beats whatever the field was already carrying.
 //
-// # Absence, and what it means to a Go field
+// A null is presence carrying a value, not a second spelling of absence.
+// []byte, *T, []T and map[K]V take it and land on their own nil; every other
+// leaf refuses it as a wrong kind. Nothing is zeroed silently.
 //
-// One rule carries all of it: Absent means ferry does not write to the field.
-// Every other observation, Null and the empty string included, is a value the
-// plane holds, and it is handed to the type set, which either accepts it or
-// refuses it loudly. So a value loaded over an empty plane is unchanged, and an
-// explicit empty beats whatever the field was already carrying, because present
-// beats absent and empty is present.
+// A struct merges and a composite replaces: a struct's fields are separate
+// addresses, so the ones the plane does not have are left alone, while a slice
+// or a map the plane has any children under is replaced wholesale. A *T at a
+// leaf is the one shape that tells an explicit zero from an unset field.
 //
-// Null is not a second spelling of absence. It means the plane has this address
-// and the value stored there is that plane's own null, so it is presence
-// carrying a value, and the only question is which Go types can hold one. []byte,
-// *T, []T and map[K]V take it and land on their own nil; every other leaf refuses
-// it as a wrong kind, which is the same refusal a Bool gets at a string field.
-// The refusal is the recoverable direction, and that is the whole argument for
-// it: a registered codec for its own type can accept a Null and return whatever
-// it likes, while zeroing in the walk would happen before any codec is consulted
-// and nothing could recover strictness for a plain int. encoding/json/v2 zeroes,
-// which is a change it made from v1, and ferry departs from it knowingly.
+// A declared default is text, applied when and only when the plane reports
+// absence, and decoded by the field's own parser, so "0080" means 80 in a tag
+// exactly as it does from a plane. It is leaf-only; a composite default is
+// spelled by seeding [LoadOver].
 //
-// A struct merges and a composite replaces, and both follow from the one rule. A
-// struct's fields are separate addresses, so the ones the plane does not have are
-// Absent and are left alone. A composite is a single decision: if the plane has
-// any children under that address then it has said what the composite is, so a
-// slice or a map is replaced wholesale rather than merged into.
+// required is a presence test and nothing else, so an explicit empty satisfies
+// it. It is not admissible on a slice or a map, where a missing key and an
+// explicit empty list are one observation at a container address.
 //
-// A *T over a composite is materialised exactly where the plane spoke under it,
-// and the walk carries that as a bit per subtree rather than inferring it from
-// the value afterwards. Comparing the result against a fresh zero value cannot
-// tell a subtree the plane really did set to all zeros from one nothing touched.
-// A value already in the field is not presence, so an optional section stays
-// optional, and an explicit Null at its own address is a nil pointer.
+// omitzero compares against the Go zero value, before anything converts it, and
+// is admissible at every type. A field holding its declared default is dumped
+// like any other.
 //
-// A *T at a leaf is the one shape that tells an explicit zero from an unset
-// field, and it is worth stating as narrowly as it is true: on Load from any
-// plane, because absence is observable everywhere, and on Dump only from a plane
-// that has a null, because a null is what a nil pointer writes.
-//
-// ferry never hands a sink an Absent. It is a Reader-side kind, so an omitted
-// address gets no Set call at all rather than a Set carrying nothing, and an
-// omission is therefore not a deletion: a replacing sink and a patching sink read
-// one dump differently and both are correct.
-//
-// Presence survives the walk as an observation of one Load, per address and
-// including Absent, and it is nothing a field holds: a key deleted from the plane
-// and a key set to zero are one struct and two observations. Core exports no
-// Option, callback or report for it, because a Reader a caller wraps is already
-// handed every address the walk asks about.
-//
-// # Declarations: default, required and omitzero
-//
-// Three tag options, and each has exactly one honest direction, so the grammar
-// spends no syntax on saying which. default= and required are Load-side;
-// omitzero is Dump-side.
-//
-//	Port    int    `ferry:"port,default=8080"`
-//	Host    string `ferry:"host,required"`
-//	Comment string `ferry:"comment,omitzero"`
-//
-// A default is text. Schema compile turns it into a String Value at the field's
-// address, and Load applies it when, and only when, the plane reports Absent
-// there, so it is indistinguishable at the boundary from what a flat plane
-// would have reported. That is the whole design: ferry has one conversion
-// authority rather than two, "0080" means 80 in a tag exactly as it does from a
-// plane, and a registered codec's type takes defaults with no codec-side
-// awareness. The text is decoded fresh on every load rather than cached as a Go
-// value, because a cached one aliases: two independently loaded structs would
-// share one backing array for a []byte default.
-//
-// A default is leaf-only, and one on a composite does not compile: a
-// composite's value lives at many addresses and a tag holds one text, so the
-// remedy is to seed the value through [LoadOver]. Where a seed and a declared
-// default both apply to one field the declared one wins, because ferry cannot
-// tell a seeded value from a zero one.
-//
-// A declaration attaches to the static address shape rather than to an address.
-// A map key's address and a slice element's index come from the value, so
-// /servers/a/port is never in a compiled schema and the declaration lives at
-// /servers/*/port, written once and applied to every realised member. The shape
-// is the walk's own lookup key and is never handed to a driver.
-//
-// A default fills a hole in a section and never conjures the section. A *T over
-// a composite is materialised exactly where the plane spoke under it, and a
-// declared default beneath it is not presence - otherwise no such pointer could
-// ever be nil. A pointer to a leaf is a different shape and is unaffected: its
-// default sits at its own address, so a *int declaring one loads as a non-nil
-// pointer from an empty plane. An array element is a static address and is
-// walked either way, so it takes its declarations with nothing on the plane;
-// a slice element in the same position does not exist at all.
-//
-// required is a presence test and nothing else, satisfied by any observation
-// other than Absent. So an explicit empty satisfies it, and a Null at a *T
-// satisfies it while yielding nil, which is the user getting exactly what their
-// type asked for. It is admissible exactly where an address's children come
-// from the type, so it works on leaves, structs, pointers and arrays, and it is
-// a schema compile error on a slice, a map, or a pointer to either. At a
-// composite it means the plane supplied at least one of the address's static
-// children, with one meaning on every plane class. The reading a user wants for
-// a collection is not writable at all: a missing key and an explicit empty list
-// are one observation at a container address, so the refusal names the remedy,
-// which is to model the distinction as struct{ Set bool; Items []string }.
-//
-// omitzero is a comparison against the Go zero value, evaluated before anything
-// converts it, and it is the one option admissible at every type. It is not a
-// comparison against the default: a field holding its declared default is
-// dumped like any other, because ferry cannot tell "still at its default" from
-// "explicitly set to the same value", and because omitting it would leave the
-// stored artefact under-specified, so what it denotes would be decided by
-// whichever version of the code read it.
-//
-// Five refusals sit at schema compile, checked from the type alone: a default
-// whose text the field's own parser does not accept, a default on a composite,
-// required on a dynamic composite, required together with a default, and
-// omitzero together with a default that is not the field's zero value. A zero
-// default beside omitzero compiles, because omitting it and reapplying it land
-// on the same value. Admissibility is checked before contradictions, so one
-// field's single mistake does not report as three errors.
-//
-// One sharp edge, stated because ADR-0007 requires it to be: `default=aGk=` on
-// a []byte field lands as the four bytes aGk= and not the decoded hi. A
-// declared default is text, String donates to Bytes as a relabel, and base64 is
-// not ferry's business - how a plane spells bytes is the driver's. A user who
-// wants decoded bytes registers a codec, or seeds the value.
-//
-// # The type set's sharp edges
-//
-// Three of these are not defects, and every one of them is easier to meet in
-// production than to guess at from the rules above.
-//
-// A type admitted by kind gets a representation nobody chose. []byte and
-// [N]byte are Bytes, so a [16]byte UUID lands in a YAML file as sixteen raw
-// bytes. Value fidelity is not violated - it round-trips exactly - but
-// legibility is, and no rule in core catches it.
-//
-// Two type identities are forced by Go rather than chosen: []byte is []uint8
-// as one reflect.Type, so ferry cannot offer both a byte blob and a slice of
-// small unsigned integers and picks Bytes; and []rune is []int32, so it is an
-// indexed composite of numbers rather than text.
-//
-// A named type over time.Duration dumps nanoseconds. Such a type is a distinct
-// reflect.Type, so it misses the identity table and falls to its kind. Matching
-// on the underlying type instead would capture every ordinary `type Port int`,
-// so the remedy is [DurationLike] rather than a wider rule.
+// A composite with no elements writes a null at its own address, whether it is
+// nil or empty, and loads back to nil. The nil-versus-empty distinction is not
+// expressible by any type in the set; a user who needs it models it as
+// struct{ Set bool; Items []string }.
 //
 // # Registration
 //
-// The type set is closed and its extension is explicit: a registered codec
-// claims a type ferry does not own, and the guarantee about that type transfers
-// to whoever registered it. Registering without proving is permitted and
-// forfeits the guarantee.
+// The type set is closed, and its extension is explicit. A registered codec
+// claims a type ferry does not own, in both directions at once, and the
+// guarantee about that type transfers to whoever registered it:
 //
 //	func init() {
 //	    if err := ferry.Register(
-//	        ferry.TextCodec[netip.AddrPort](ferry.KindString),
+//	        ferry.TextCodec[big.Int](ferry.KindNumber),
 //	        ferry.DurationLike[PollInterval](),
-//	        ferry.ValueCodec(ferry.KindNumber, encodeBigInt, decodeBigInt),
 //	    ); err != nil {
 //	        panic(err)
 //	    }
 //	}
 //
-// There are three constructors and they differ by what the registrant hands
-// over and by nothing else. [TextCodec] takes a kind and no functions, because
-// both halves come from the type; its purpose is changing the kind rather than
-// rescuing the type, since the chain already claims any type with a text pair.
+// There are four constructors. [TextCodec] takes a kind and no functions, for a
+// type that already carries a text pair and wants a different boundary kind.
 // [StringCodec] takes two functions over string. [ValueCodec] takes a kind and
-// two functions over [Value], and it is the only one whose decode half sees the
-// whole Value - which is the only way to accept a Null into a Go type whose
-// kind has no null, and the escape hatch strictness rests on. [DurationLike]
-// closes the named-duration hole at one line per type.
+// two functions over [Value], and its decode half is the only one that sees the
+// whole [Value], which is what lets it accept a null. [DurationLike] closes the
+// named-duration hole at one line per type.
 //
-// Each takes both halves at once, so a half pair, two halves swapped and two
-// halves over different types are build errors rather than run-time refusals.
-// Inference works at every call site with a value argument, so no explicit type
-// argument is written except for [TextCodec] and [DurationLike], which have
-// nothing to infer from.
+// [Register] writes to the registry core ships. [NewRegistry] builds another,
+// and [WithRegistry] names it for one call.
 //
-// [Register] runs the codec against the zero value of its type before accepting
-// it. That catches one class of wrong codec out of four, and it is the class
-// that matters: the one-line registration a user is most likely to write is not
-// an inverse at the zero value for netip.Addr, netip.AddrPort and netip.Prefix,
-// and since a registration beats the text pair those types already carry,
-// registering it makes the type worse than leaving it alone. What it does not
-// catch - a lossy codec, a constant codec, and a codec that declares the wrong
-// kind - is what a proof in ferrytest is for.
+// A registry freezes at the first [Load], [LoadOver] or [Dump] run against it,
+// so register from an init. [Compile] retains nothing and does not freeze. A
+// registration claims its type unconditionally: there is no decline, and
+// "fall through to the next step" is spelled by not registering the type.
 //
-// A registration goes into a [Registry], which is a value. It freezes at its
-// first retained schema compile, so nothing can be registered after the first
-// [Load] or [Dump]; [Compile] retains no resolution and does not freeze. Core
-// ships a default registry and [Register] writes to it, and [WithRegistry]
-// names another. A registration claims its type unconditionally: there is no
-// decline, and "fall through to the next step" is spelled by not registering
-// the type. A registered type keys a map only if the registration says
-// .AsMapKey(), because a key codec's text has to be injective and nobody else
-// can be asked.
+// A registry also holds the compiled-schema cache, and nothing evicts from it,
+// so a registry is a value to keep. Build one per program, or one per test.
 //
-// A registry is also where a compiled schema is cached, keyed by the type and
-// the struct tag key, so it is a value to keep: one per program, or one per
-// test. [Registry] states what that cache costs, since nothing evicts from it.
+// # Addresses
 //
-// # What is refused, and what that costs
+// Every place a plane can be asked for a value has an address: a [Path], an
+// ordered sequence of segments each carrying a kind and a text. /db/host is two
+// name segments, /tags#0 is a name segment followed by an index.
 //
-// chan, func, unsafe.Pointer and uintptr are refused permanently, because the
-// value does not exist outside the process and no text could carry it.
-// complex64 and complex128 are refused by policy rather than by constraint: no
-// plane in ferry's range has a complex type. Everything else outside the set is
-// a question of who supplies the codec. Every violation in a type is reported
-// rather than the first one, each naming the address and the type, and the
-// report is sorted.
-//
-// # How an address reaches a plane
-//
-// Core never produces a plane key, because a separator is plane knowledge:
-// flattening is the driver's, always. What a driver is handed instead is the
-// whole address set, before any I/O, and [NewKeys], which computes its plane
-// keys once per schema and checks two different things about them. Legality is
-// the driver's own question - whether its plane can name an address at all -
-// and no transformation rescues it. Injectivity is core's observation about the
-// set: a key function rendering two addresses to one plane key would merge them
-// silently, so it is refused before any backend call, naming both. One rule
-// covers separator collisions, case folding and any normalisation a driver
-// invents, because all three are the same failure.
-//
-// So a driver is expected to transform segment text rather than to reject it,
-// which is what makes an ordinary feature-flags loadable from a plane whose
-// names may not contain a hyphen. An address a value mints - a map key, a
-// sequence index - is checked as it is minted, before the write it belongs to,
-// against the table and against everything the same open has minted. A tree
-// driver walks the segments, builds no key at all, and calls none of this.
+// Core never joins segments into a plane key, because a separator is plane
+// knowledge. A driver is handed the whole [AddressSet] before any I/O and does
+// the flattening itself. [NewKeys] is the helper for that, and it checks two
+// things about the result: that the plane can name every address, and that no
+// two addresses collapse onto one plane key. Both refusals land before any
+// backend call.
 //
 // # Errors
 //
-// ferry reports every failure that is not a consequence of another failure it
-// is already reporting, so a failed call carries a set rather than the first
-// thing that went wrong. Range it with [Elements], and match a member with
-// errors.Is against [ErrSchema], [ErrMissing], [ErrValue], [ErrPlane],
-// [ErrDriver] or [ErrReadOnly]. Read where it happened with
-// errors.AsType[*ferry.Error] and [Error.Address]; there is no concrete type to
-// switch on, and no enum.
+// A failed call carries a set rather than the first thing that went wrong.
+// Range it with [Elements], and match a member with errors.Is against
+// [ErrSchema], [ErrMissing], [ErrValue], [ErrPlane], [ErrDriver] or
+// [ErrReadOnly]. Read where it happened with errors.AsType[*ferry.Error] and
+// [Error.Address]:
 //
-// On Dump the aggregation is preceded by a phase: every value is encoded before
-// any of them is written, so a Dump that fails for a reason ferry could have
-// known without touching the plane writes nothing at all. A sink implementing
-// [Committer] is exempt, because staging already gives it that property, and it
-// gets a better report for it - both kinds of failure in one run, where a sink
-// that cannot stage learns the plane's own refusals only once the values it
-// could not encode are fixed.
+//	for _, e := range ferry.Elements(err) {
+//	    if fe, ok := errors.AsType[*ferry.Error](e); ok {
+//	        log.Println(fe.Address(), errors.Is(fe, ferry.ErrMissing))
+//	    }
+//	}
 //
-// Message text is not API. Match on the sentinels and on the address rather
-// than on a string, and get precision from the ferrytest assertions. ferry's own
-// text never repeats a value the plane supplied - the cause stays in the chain
-// and is never printed - so a plane that holds secrets does not leak them into
-// a log through ferry (ADR-0011).
+// Message text is not API. Match on the sentinels and on the address, and get
+// exactness from the assertions ferrytest ships. ferry's own text never repeats
+// a value the plane supplied, so a plane holding secrets does not leak them
+// into a log through ferry.
+//
+// On failure [Load] returns the zero value and [LoadOver] returns the seed it
+// was handed; neither ever yields a partly built value. On Dump every value is
+// encoded before any of them is written, so a dump that fails for a reason
+// ferry could have known without touching the plane leaves the plane untouched.
+//
+// # Compatibility
+//
+// Two promises, and they are not the same one. The API is ordinary semver, at
+// v0 today. What a plane holds is a second promise with three tiers: the
+// representation of a type in core's own set is promised at core's major
+// version; a registered codec's representation is its registrant's, at their
+// major version; and a type admitted by kind or claimed by the text pair has a
+// representation nobody chose and nobody promises. That third tier is large,
+// and the text pair's half of it cannot even be enumerated, since any type in
+// any module may declare one.
+//
+// A change to a pinned representation is a major version of the module that
+// owns it, and the new ferry cannot read what the old one wrote. The migration
+// is a few lines of ordinary ferry code, and it terminates, because the new
+// codec refuses the old file afterwards.
+//
+// The design records behind these decisions are in docs/adr/.
 package ferry

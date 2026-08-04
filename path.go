@@ -9,15 +9,12 @@ import (
 )
 
 // SegmentKind says what a segment of an address names, and the set is closed at
-// two: adding a third kind is an amendment to ADR-0003 rather than an
-// implementation choice.
+// two: [Name] and [Index].
 //
-// The kind is load-bearing and not decoration. Given only text, an emitter has
-// one signal for "is this container a list", which is whether the segment looks
-// like a base-10 integer, and that signal turns a map holding the key "0" into a
-// sequence and destroys the key text. That is the limitation jsontext.Pointer's
-// own godoc states about itself, and it is why ferry carries the kind instead of
-// recovering it from the text.
+// It is carried rather than inferred from the text, because the only way to
+// recover it from text is to ask whether the segment looks like a base-10
+// integer - which turns a map holding the key "0" into a sequence and loses the
+// key.
 type SegmentKind uint8
 
 const (
@@ -59,25 +56,27 @@ func (s Segment) Kind() SegmentKind { return s.kind }
 // on the way back out.
 func (s Segment) Text() string { return s.text }
 
-// Path is the address of a place a plane can be asked for a Value, or handed
-// one: an ordered sequence of segments, each carrying a kind and a text
-// (ADR-0003).
+// Path is the address of a place a plane can be asked for a [Value], or handed
+// one: an ordered sequence of segments, each carrying a [SegmentKind] and a
+// text.
 //
+//	ferry.At("db", "host")        // /db/host
+//	ferry.At("tags").Elem(0)      // /tags#0
+//
+// Build one with [At], [Path.At] and [Path.Elem]; read it with [Path.Segments].
 // A Path is comparable, so it is a map key and a set element with no encoding
-// step at the call site, and identity is ==. That holds because the canonical
-// text rendering has a unique representation: two addresses render alike exactly
-// when they are equal. String returns that rendering.
+// step, and identity is ==.
 //
-// The rendering is for identity, not for ordering. Sorted as text, twelve
-// indices give 0 1 10 11 2 3 ...; Compare orders segment-wise and gives
-// 0 1 2 ... 11, which is the order a human diffing a dumped file expects.
-// Wherever ferry enumerates addresses it sorts with Compare.
+// [Path.String] is a canonical rendering that identifies the address, and it is
+// not a plane key: no driver may write it into a plane. Core never joins
+// segments into a key, because a separator is plane knowledge. An environment
+// driver joins with _, a YAML driver walks the segments as a tree, and neither
+// spelling is core's business.
 //
-// The rendering is not a plane key, and no driver may write it into a plane as
-// one. Core never joins segments, because a separator is plane knowledge:
-// flattening is the driver's, always. An environment driver joins with _, a
-// YAML driver walks the segments as a tree, and neither spelling is core's
-// business.
+// Sort with [Path.Compare] and not by the rendering. As text, twelve indices
+// give 0 1 10 11 2 3; segment-wise they give 0 1 2 through 11, which is the
+// order a human diffing a dumped file expects, and the order ferry enumerates
+// addresses in.
 //
 // The zero Path has no segments. An address has at least one.
 type Path struct {
@@ -131,11 +130,10 @@ func (p Path) At(names ...string) Path {
 	return Path{rendered: string(b)}
 }
 
-// Elem extends the address with an Index segment, a position in a sequence.
-//
-// The position is unsigned because a negative one has no meaning and ferry
-// itself never panics (ADR-0011): the constraint is carried by the type rather
-// than by a check the caller can trip over.
+// Elem extends the address with an [Index] segment, a position in a sequence,
+// leaving the receiver untouched. The position is unsigned because a negative
+// one has no meaning, so the constraint is in the type rather than in a check
+// the caller can trip over.
 func (p Path) Elem(i uint) Path {
 	b := append([]byte(p.rendered), indexSep)
 	b = strconv.AppendUint(b, uint64(i), base10)
@@ -173,18 +171,20 @@ func (p Path) concat(q Path) Path { return Path{rendered: p.rendered + q.rendere
 // for free: a member's compiled address extends its container's by construction.
 func (p Path) below(prefix Path) Path { return Path{rendered: p.rendered[len(prefix.rendered):]} }
 
-// String is the canonical rendering: /db/host for two Name segments, /tags#0 for
-// a Name segment followed by an Index segment.
+// String is the canonical rendering: /db/host for two [Name] segments, /tags#0
+// for a Name segment followed by an [Index]. Two addresses render alike exactly
+// when they are equal, so it identifies the address.
 //
-// It identifies the address and nothing more. It is not a plane key, no driver
-// may write it into a plane as one, and sorting it is not this type's ordering.
+// It is not a plane key, no driver may write it into a plane as one, and
+// sorting it is not this type's ordering: see [Path.Compare].
 func (p Path) String() string { return p.rendered }
 
-// Segments enumerates the address left to right.
+// Segments enumerates the address left to right. It is what a driver's key
+// function walks to build a plane key.
 //
-// It is an iterator rather than a slice because a driver's key function runs
-// over every address of a schema at Bind, and the address holds its rendering
-// rather than a segment slice.
+//	for seg := range addr.Segments() {
+//	    if seg.Kind() == ferry.Index { ... }
+//	}
 func (p Path) Segments() iter.Seq[Segment] {
 	return func(yield func(Segment) bool) {
 		for rest := p.rendered; rest != ""; {
@@ -198,14 +198,14 @@ func (p Path) Segments() iter.Seq[Segment] {
 	}
 }
 
-// Compare orders two addresses segment-wise, comparing Name segments by exact
-// bytes and Index segments numerically, and orders a prefix before what extends
-// it. It reports -1, 0 or +1 and is a total order, so slices.SortFunc takes it
-// directly as Path.Compare.
+// Compare orders two addresses segment-wise, comparing [Name] segments by exact
+// bytes and [Index] segments numerically, and orders a prefix before what
+// extends it. It reports -1, 0 or +1 and is a total order, so slices.SortFunc
+// takes it directly as Path.Compare.
 //
-// This is not the order of the renderings, and the difference is the point:
-// sorted as text, twelve indices give 0 1 10 11 2 3 ..., and /a-x sorts before
-// /a/b because a separator byte sorts against ordinary text (ADR-0003).
+// It is not the order of the renderings, and the difference is the point:
+// sorted as text, twelve indices give 0 1 10 11 2 3, and /a-x sorts before /a/b
+// because a separator byte sorts against ordinary text.
 func (p Path) Compare(q Path) int {
 	a, b := p.rendered, q.rendered
 
@@ -409,33 +409,26 @@ func canonicalSegment(s Segment) bool {
 }
 
 // AddressSet is the set of addresses a compiled schema determines, and it is
-// what a driver's Bind is handed (ADR-0004). Holding it before any I/O is what
-// lets a driver precompute its plane keys once per schema, check that they are
-// legal on its plane, and check that its key function is injective over the set.
-//
-// It is sorted segment-wise, which is what lets a driver that wants locality
-// sort for itself.
+// what [Source.Bind] and [Sink.Bind] are handed. Holding it before any I/O is
+// what lets a driver precompute its plane keys once per schema and check them:
+// see [NewKeys].
 //
 // It contains every leaf address the type determines plus every container
-// address, and it never contains a wildcard shape: a wildcard is a
-// schema-internal lookup key with nothing at it, and every member of this set is
-// one a driver can fetch, write, name and check. Which of its members are
-// containers is one bit per address the compiler holds and this type does not
-// expose (ADR-0003).
+// address, so every member is one a driver can fetch, write, name and check. It
+// is sorted segment-wise, and [AddressSet.All] enumerates it in that order.
 //
-// Addresses minted from a value, a map key or a sequence index, do not exist
-// until there is a value and are not in it.
+// It does not contain the addresses a value mints - a map key, a sequence index
+// - because those do not exist until there is a value. A driver that treats its
+// precomputed table as a closed set will refuse a legal write, which is why
+// [Keys.Open] hands back a function rather than a map.
 type AddressSet struct {
 	// addrs is sorted by Path.Compare and holds no duplicates.
 	addrs []Path
 }
 
-// NewAddressSet builds the set from the addresses a compiled schema determined,
-// sorting them segment-wise. It copies what it is given, so the caller may keep
-// and reuse the slice.
-//
-// Equal addresses collapse, because this is a set: identity is ==, so two equal
-// addresses are one place and nothing is lost by holding it once.
+// NewAddressSet builds a set from the addresses given, sorting them
+// segment-wise. It copies what it is handed, so the caller may keep and reuse
+// the slice, and equal addresses collapse, because this is a set.
 func NewAddressSet(addrs ...Path) *AddressSet {
 	sorted := slices.Clone(addrs)
 	slices.SortFunc(sorted, Path.Compare)
@@ -446,8 +439,8 @@ func NewAddressSet(addrs ...Path) *AddressSet {
 // Len is how many addresses the set holds.
 func (a *AddressSet) Len() int { return len(a.addrs) }
 
-// All enumerates the set segment-wise. The order is the set's own and is stable
-// across builds of the same schema, so a driver may key a table by position.
+// All enumerates the set segment-wise. The order is stable across builds of the
+// same schema, so a driver may key a table by position.
 func (a *AddressSet) All() iter.Seq[Path] { return slices.Values(a.addrs) }
 
 // Has reports whether the set holds this address.
