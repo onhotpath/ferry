@@ -44,8 +44,7 @@ func Load[T any](ctx context.Context, src Source, opts ...Option) (T, error) {
 // a copy, so a partly built value is never reachable from the caller. Range the
 // failure with [Elements].
 //
-// It is [Bind] plus [Binding.LoadOver] with the handle dropped, which is a
-// property of the implementation and not only of this sentence: a caller who
+// It is [Bind] plus [Binding.LoadOver] with the handle dropped. A caller who
 // keeps the handle gets the same load and skips the compile and the bind.
 func LoadOver[T any](ctx context.Context, seed T, src Source, opts ...Option) (T, error) {
 	b, err := Bind[T](src, opts...)
@@ -79,10 +78,9 @@ func LoadOver[T any](ctx context.Context, seed T, src Source, opts ...Option) (T
 //
 // Range the failure with [Elements].
 //
-// It is [BindSink] plus [SinkBinding.Dump] with the handle dropped, in the
-// implementation and not only in this sentence. So a call naming no sink at all
-// is refused as a nil plane before the value is looked at, which is a sink
-// question rather than a value one.
+// It is [BindSink] plus [SinkBinding.Dump] with the handle dropped. So a call
+// naming no sink at all is refused as a nil plane before the value is looked
+// at: where the sink is nil and v is a nil pointer, the report names the sink.
 func Dump[T any](ctx context.Context, v T, sink Sink, opts ...Option) error {
 	b, err := BindSink[T](sink, opts...)
 	if err != nil {
