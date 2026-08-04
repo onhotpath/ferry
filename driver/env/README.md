@@ -45,6 +45,47 @@ It sets its own variables only to be self-contained; ordinarily they are already
 
 Composites load from the names the environment already holds: `TAGS_0` and `TAGS_1` fill a `[]string`, and `LIMITS_RPS` fills a `map[string]string` with the key `rps`.
 
+## Reading `env` tags instead of `ferry` tags
+
+`ferry` is the struct tag key by default, and `ferry.TagKey` changes it.
+A struct already annotated for an environment loader, or one you would rather read as `env:"..."` because that is what the field means here, needs no rewriting.
+
+```go
+type Service struct {
+	Name    string `env:"service,required"`
+	Timeout int    `env:"timeout,default=30"`
+}
+
+func Example_tagKey() {
+	os.Setenv("SERVICE", "checkout")
+	os.Unsetenv("TIMEOUT") // not set at all, so the default applies
+
+	svc, err := ferry.Load[Service](context.Background(), env.New(), ferry.TagKey("env"))
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Printf("%+v\n", svc)
+	// Output: {Name:checkout Timeout:30}
+}
+```
+
+Two things it is worth knowing before reaching for it.
+
+`ferry.TagKey` is core's option and not this driver's, so it renames the key for every type in that call and for every plane, not only for this one.
+It names where to look and never what the content means: `required`, `default=` and the rest of the grammar are unchanged, because ADR-0008 specifies the content and this only specifies the key.
+
+A type read under two different keys is two different schemas, so ferry caches them apart and a call that omits the option gets the `ferry` key back.
+The fields above carry no `ferry` tag at all, so loading them without the option is a schema refusal naming each field rather than a silent empty struct:
+
+```
+ferry: 2 errors:
+  /Name: field Name carries no ferry tag: every exported field must name the segment it addresses, or be marked ferry:"-"
+  /Timeout: field Timeout carries no ferry tag: every exported field must name the segment it addresses, or be marked ferry:"-"
+```
+
 ## There is no Dump
 
 Setting the process's own environment is process-global mutation nobody wants, and the target people actually want is a `.env` file, which is a format and belongs to a driver of its own.

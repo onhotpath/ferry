@@ -44,3 +44,31 @@ func Example() {
 	fmt.Printf("%+v\n", cfg)
 	// Output: {Name:checkout DB:{Host:db.internal Port:5432}}
 }
+
+// Service is the same idea as [Config] under a different tag key: the fields
+// carry `env` rather than `ferry`, which is what ferry.TagKey names.
+type Service struct {
+	Name    string `env:"service,required"`
+	Timeout int    `env:"timeout,default=30"`
+}
+
+// Example_tagKey reads the struct tag key `env` instead of the default `ferry`.
+//
+// ferry.TagKey is core's Option and is not this driver's, so it renames the key
+// for every type in the call and for every plane, not only for this one. It
+// names where to look and never what the content means: the grammar inside the
+// tag is the same one ADR-0008 specifies.
+func Example_tagKey() {
+	os.Setenv("SERVICE", "checkout")
+	os.Unsetenv("TIMEOUT") // not set at all, so the default applies
+
+	svc, err := ferry.Load[Service](context.Background(), env.New(), ferry.TagKey("env"))
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Printf("%+v\n", svc)
+	// Output: {Name:checkout Timeout:30}
+}
