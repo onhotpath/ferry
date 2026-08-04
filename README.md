@@ -161,11 +161,11 @@ multiple over it, ferry's computed the same way as the rest.
 
 | scenario | ferry (warm) | fastest other library | | baseline: no mapping layer |
 | --- | --- | --- | --- | --- |
-| `env_small` | 2.75µs | 570ns (go-envconfig) | ferry 4.82x slower | 166ns (stdlib) |
-| `env_large` | 33.5µs | 10.2µs (go-envconfig) | ferry 3.27x slower | 2.15µs (stdlib) |
-| `yaml_small` | 17.4µs | 26.6µs (viper) | ferry 1.53x faster | 16.6µs (stdlib) |
-| `yaml_large` | 102µs | 202µs (viper) | ferry 1.98x faster | 98.2µs (stdlib) |
-| `dump_large` | 2.35ms | 353µs (koanf) | ferry 6.68x slower | 212µs (stdlib) |
+| `env_small` | 2.29µs | 508ns (go-envconfig) | ferry 4.50x slower | 156ns (stdlib) |
+| `env_large` | 26.8µs | 9.14µs (go-envconfig) | ferry 2.93x slower | 1.86µs (stdlib) |
+| `yaml_small` | 13.1µs | 20.8µs (viper) | ferry 1.59x faster | 12.9µs (stdlib) |
+| `yaml_large` | 86.7µs | 180µs (viper) | ferry 2.08x faster | 85.7µs (stdlib) |
+| `dump_large` | 398µs | 444µs (koanf) | ferry 1.12x faster | 286µs (stdlib) |
 
 Left out of the comparison above because its warm figure measures a different job:
 `xload` in `yaml_small`.
@@ -180,7 +180,7 @@ rows are comparable.
 Full results, the machine, the toolchain, the competitor versions, what each library
 actually did and what was not measured: [docs/perf/results.md](docs/perf/results.md).
 
-Run on a developer workstation, not a CI runner, `-count 10`, `-benchtime 1s`, Go go1.27rc2.
+Run on ubuntu-latest, `-count 10`, `-benchtime 1s`, Go go1.27rc2.
 <!-- ferry:perf:end -->
 
 ## Licence
