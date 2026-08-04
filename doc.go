@@ -165,6 +165,81 @@
 // Option, callback or report for it, because a Reader a caller wraps is already
 // handed every address the walk asks about.
 //
+// # Declarations: default, required and omitzero
+//
+// Three tag options, and each has exactly one honest direction, so the grammar
+// spends no syntax on saying which. default= and required are Load-side;
+// omitzero is Dump-side.
+//
+//	Port    int    `ferry:"port,default=8080"`
+//	Host    string `ferry:"host,required"`
+//	Comment string `ferry:"comment,omitzero"`
+//
+// A default is text. Schema compile turns it into a String Value at the field's
+// address, and Load applies it when, and only when, the plane reports Absent
+// there, so it is indistinguishable at the boundary from what a flat plane
+// would have reported. That is the whole design: ferry has one conversion
+// authority rather than two, "0080" means 80 in a tag exactly as it does from a
+// plane, and a registered codec's type takes defaults with no codec-side
+// awareness. The text is decoded fresh on every load rather than cached as a Go
+// value, because a cached one aliases: two independently loaded structs would
+// share one backing array for a []byte default.
+//
+// A default is leaf-only, and one on a composite does not compile: a
+// composite's value lives at many addresses and a tag holds one text, so the
+// remedy is to seed the value through [LoadOver]. Where a seed and a declared
+// default both apply to one field the declared one wins, because ferry cannot
+// tell a seeded value from a zero one.
+//
+// A declaration attaches to the static address shape rather than to an address.
+// A map key's address and a slice element's index come from the value, so
+// /servers/a/port is never in a compiled schema and the declaration lives at
+// /servers/*/port, written once and applied to every realised member. The shape
+// is the walk's own lookup key and is never handed to a driver.
+//
+// A default fills a hole in a section and never conjures the section. A *T over
+// a composite is materialised exactly where the plane spoke under it, and a
+// declared default beneath it is not presence - otherwise no such pointer could
+// ever be nil. A pointer to a leaf is a different shape and is unaffected: its
+// default sits at its own address, so a *int declaring one loads as a non-nil
+// pointer from an empty plane. An array element is a static address and is
+// walked either way, so it takes its declarations with nothing on the plane;
+// a slice element in the same position does not exist at all.
+//
+// required is a presence test and nothing else, satisfied by any observation
+// other than Absent. So an explicit empty satisfies it, and a Null at a *T
+// satisfies it while yielding nil, which is the user getting exactly what their
+// type asked for. It is admissible exactly where an address's children come
+// from the type, so it works on leaves, structs, pointers and arrays, and it is
+// a schema compile error on a slice, a map, or a pointer to either. At a
+// composite it means the plane supplied at least one of the address's static
+// children, with one meaning on every plane class. The reading a user wants for
+// a collection is not writable at all: a missing key and an explicit empty list
+// are one observation at a container address, so the refusal names the remedy,
+// which is to model the distinction as struct{ Set bool; Items []string }.
+//
+// omitzero is a comparison against the Go zero value, evaluated before anything
+// converts it, and it is the one option admissible at every type. It is not a
+// comparison against the default: a field holding its declared default is
+// dumped like any other, because ferry cannot tell "still at its default" from
+// "explicitly set to the same value", and because omitting it would leave the
+// stored artefact under-specified, so what it denotes would be decided by
+// whichever version of the code read it.
+//
+// Five refusals sit at schema compile, checked from the type alone: a default
+// whose text the field's own parser does not accept, a default on a composite,
+// required on a dynamic composite, required together with a default, and
+// omitzero together with a default that is not the field's zero value. A zero
+// default beside omitzero compiles, because omitting it and reapplying it land
+// on the same value. Admissibility is checked before contradictions, so one
+// field's single mistake does not report as three errors.
+//
+// One sharp edge, stated because ADR-0007 requires it to be: `default=aGk=` on
+// a []byte field lands as the four bytes aGk= and not the decoded hi. A
+// declared default is text, String donates to Bytes as a relabel, and base64 is
+// not ferry's business - how a plane spells bytes is the driver's. A user who
+// wants decoded bytes registers a codec, or seeds the value.
+//
 // # The type set's sharp edges
 //
 // Three of these are not defects, and every one of them is easier to meet in

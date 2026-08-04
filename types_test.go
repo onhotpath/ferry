@@ -823,9 +823,11 @@ func TestOmitzeroAndTheZeroDefaultAgreeAtEveryLeaf(t *testing.T) {
 		{"int away from it", Compile[nonZeroInt], false},
 		{"bool at its zero", Compile[zeroBool], true},
 		{"time.Duration at its zero", Compile[zeroDuration], true},
-		// A default that does not decode at all is a different mistake, and
-		// naming this one for it would name the wrong one.
-		{"int given a default that does not decode", Compile[unparseableInt], true},
+		// A default that does not decode at all is a different mistake, and it
+		// is reported as that one rather than as this one: it has no value to
+		// compare against zero, so naming the contradiction for it would name
+		// the wrong mistake. TestDeclaredDefaultsMustParse holds the text.
+		{"int given a default that does not decode", Compile[unparseableInt], false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

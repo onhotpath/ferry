@@ -424,13 +424,18 @@ func TestCompileRoot(t *testing.T) {
 	}})
 }
 
-// tiers is ADR-0008's measured fixture: one field of each fault, plus a clean
-// one, reporting 1 + 2 + 1 elements.
+// tiers is ADR-0008's measured fixture, byte for byte: one field of each fault,
+// plus a clean one, reporting 1 + 2 + 1 elements.
+//
+// The tier-two field is a []string rather than a struct, which is the ADR's own
+// spelling of it. A struct carries required admissibly now (ADR-0006, and #118
+// against the draft that refused it), so it contributes one fault rather than
+// two and cannot stand in for the two-fault row.
 type tiers struct {
-	H  string `ferry:"h,requird"`
-	S  sub    `ferry:"s,required,default=v"`
-	C  string `ferry:"c,required,default=x"`
-	OK string `ferry:"ok"`
+	H  string   `ferry:"h,requird"`
+	S  []string `ferry:"s,required,default=v"`
+	C  string   `ferry:"c,required,default=x"`
+	OK string   `ferry:"ok"`
 }
 
 func TestCompileTiers(t *testing.T) {
@@ -441,8 +446,8 @@ func TestCompileTiers(t *testing.T) {
 		run:  Compile[tiers],
 		want: []string{
 			`/H: unknown option "requird"`,
-			"/s: required is not available on ferry.sub",
-			"/s: ferry.sub is not a leaf",
+			"/s: required is not available on []string",
+			"/s: []string is not a leaf",
 			"/c: required and default contradict",
 		},
 		elements: 4,
