@@ -469,15 +469,39 @@ func (d *driverRun) namesBothAddresses(err error) {
 			"a key function that folds two addresses together is the plane's own class", err))
 	}
 
-	text := err.Error()
-	for _, pair := range collidingPairs {
-		if strings.Contains(text, pair[0].String()) && strings.Contains(text, pair[1].String()) {
-			return
+	if namesAPair(err) {
+		return
+	}
+
+	d.fail(caseInjectiveNo, fmt.Sprintf("Bind refused with %+v, which does not name both addresses of any pair it "+
+		"could have collided: one of the two is the one the author has to move", err))
+}
+
+// namesAPair reports whether some element of a refusal names both addresses of
+// some pair this set could collide.
+//
+// Per element rather than over the whole rendering, and that is the first real
+// flattening driver's finding rather than tidiness. An uppercase fold collapses
+// three of the pairs above and not one, so a driver routing its refusal through
+// [ferry.NewKeys] hands back an aggregate - and an aggregate's Error() is the
+// one-line summary, which names one address per element and elides past three.
+// Read that way, a refusal that named both addresses of all three pairs looked
+// like a refusal that named neither.
+//
+// [ferry.Elements] returns a one-element slice for a single failure, so a driver
+// refusing exactly one pair, and a driver refusing with an error of its own that
+// core never wrote, both read the same here as they did before.
+func namesAPair(err error) bool {
+	for _, e := range ferry.Elements(err) {
+		text := e.Error()
+		for _, pair := range collidingPairs {
+			if strings.Contains(text, pair[0].String()) && strings.Contains(text, pair[1].String()) {
+				return true
+			}
 		}
 	}
 
-	d.fail(caseInjectiveNo, fmt.Sprintf("Bind refused with %v, which does not name both addresses of any pair it "+
-		"could have collided: one of the two is the one the author has to move", err))
+	return false
 }
 
 // caseRetention is case 8: a key function retains nothing across opens, asserted

@@ -72,6 +72,76 @@ func assertCase7(t *testing.T, c *capture, want string) {
 	}
 }
 
+// TestDriverCase7TakesAnAggregateRefusal is the shape a real flattening driver
+// refuses in, and it is the one shape the case above cannot produce.
+//
+// An uppercase fold that maps every byte an environment variable name cannot
+// hold to _ collapses three of case 7's pairs, not one: the separator pair, the
+// hyphen pair and the case pair. A driver routing that refusal through
+// [ferry.NewKeys] therefore hands back an aggregate, whose Error() is the
+// one-line summary - one address per element, elided past three - so every
+// element named both of its pair and the rendering the case read named neither.
+//
+// The count is asserted before the suite is run, because a fold that refused
+// nothing would make the rest of this test pass by having nothing to report.
+func TestDriverCase7TakesAnAggregateRefusal(t *testing.T) {
+	err := foldedRefusal()
+
+	if n := len(ferry.Elements(err)); n < 2 {
+		t.Fatalf("the fold refused %d of case 7's pairs, want more than one, or this test asserts nothing", n)
+	}
+
+	c := &capture{}
+
+	ferrytest.Driver(c, collidingPlane(err))
+
+	if len(c.lines) != 0 {
+		t.Errorf("an aggregate whose every element names both addresses reported %q, want nothing", c.lines)
+	}
+}
+
+// foldedRefusal is what case 7's own address set does to a real environment key
+// function, produced through core's helper rather than written out.
+func foldedRefusal() error {
+	_, err := ferry.NewKeys(ferry.NewAddressSet(
+		ferry.At("db_host"), ferry.At("db", "host"),
+		ferry.At("feature-flags"), ferry.At("feature_flags"),
+		ferry.At("Host"), ferry.At("host"),
+	), "probe", foldedKey)
+
+	return err
+}
+
+// foldedKey uppercases each segment, maps every other byte to _, and joins with
+// _, which is driver/env's key function in the smallest form that reproduces it.
+func foldedKey(addr ferry.Path) (string, error) {
+	var b strings.Builder
+
+	for seg := range addr.Segments() {
+		if b.Len() > 0 {
+			b.WriteByte('_')
+		}
+
+		b.WriteString(strings.Map(foldedRune, seg.Text()))
+	}
+
+	return b.String(), nil
+}
+
+// foldedRune is the character transform: upper case where it is a letter, kept
+// where it is a digit, and _ everywhere else.
+func foldedRune(r rune) rune {
+	if r >= 'a' && r <= 'z' {
+		return r - ('a' - 'A')
+	}
+
+	if r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+		return r
+	}
+
+	return '_'
+}
+
 // TestDriverCase5ReportsChildrenThatAreNotTheElements is case 5, negative.
 //
 // Children returns addresses rather than names because an address carries its
