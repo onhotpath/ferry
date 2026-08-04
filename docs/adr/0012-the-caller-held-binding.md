@@ -110,9 +110,16 @@ Two more this ticket inherited:
 > That is a constraint #20 inherits and this change does not resolve.
 > Nothing here says anything about whether one load may run its own walk concurrently, which is the sentence #20 owns.
 >
-> **No figure from this ADR, or from any probe since, goes into a doc comment, a README or a guide.**
+> **No figure from this ADR, or from any probe since, goes into a doc comment or the README, and none is added to a guide.**
+> `docs/guide/drivers.md` already quotes this ADR's 20,000-address retention figure with the citation a guide is required to carry, and that line is untouched by this change.
 > The numbers below are the prototype's, on the prototype's fixture, and the later probe on the perf harness used the memoisation design [ADR-0004](0004-source-and-sink.md) refused, so it is an upper bound rather than a measurement of what shipped.
 > The pipeline measures the shipped binding.
+>
+> **Two ADRs moved underneath this amendment while it was open, and neither disturbs it.**
+> [ADR-0003](0003-how-a-leaf-addresses-a-plane.md) was amended under [#207](https://github.com/onhotpath/ferry/issues/207) so that core asks a dynamic container for its children before its own address, which is the address-model work the per-request query plane named above needed before it could express a sequence at all.
+> That is the trigger above being met in the tree rather than only in intent, and it touches nothing in the bind half or the walk half.
+> [ADR-0011](0011-the-error-model.md) was amended under [#211](https://github.com/onhotpath/ferry/issues/211) so that a driver naming several addresses in one refusal is reported as one failure per address.
+> A `Bind` refusal is a driver refusal, so `Bind[T]` inherits that reading unchanged, and the published instruction to range a bind failure with `Elements` is now literally true of more than one member rather than of one.
 
 The reason is the surface count, and it is worth stating as a number rather than leaving in prose.
 [ADR-0010](0010-the-entry-point-and-the-schema-cache.md) closed with "four functions and two Options".
