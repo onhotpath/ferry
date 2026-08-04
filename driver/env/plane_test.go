@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/ferrytest"
@@ -51,11 +52,18 @@ func (e *fakeEnviron) environ() []string {
 // plane describes the env plane for the conformance suite, with both halves over
 // one environment.
 //
-// Kinds is a declaration and not a wish: this plane carries Absent, String and
-// Bytes, and has no Null. FOO= is a zero-length string rather than a null
-// (ADR-0004), so a value ferry can only express as a Null - a nil composite, an
-// empty one - has no representation here at all, and the suite holds the plane
-// to refusing those loudly rather than mangling them.
+// Kinds is a declaration and not a wish, and the one kind missing from it is
+// the whole of what this plane cannot do. An environment variable is text, so
+// Bool and Number are carried as their spellings - PORT=8080 is the most
+// ordinary environment variable there is, and a plane that refused it would be
+// describing something other than env. ADR-0005 measured a flattening plane
+// with no null at 11 of 11 core types, and every value it refused was a nil or
+// empty composite, which the walk writes as Null at a container address.
+//
+// So there is no Null. FOO= is a zero-length string rather than a null
+// (ADR-0004), and a value ferry can only express as a Null has no
+// representation here at all: the suite holds the plane to refusing those
+// loudly rather than mangling them.
 //
 // There is no Golden and no Contents. A golden artefact pins a driver's own
 // spelling of a value, and this driver has none: it never writes, so the only
@@ -63,8 +71,10 @@ func (e *fakeEnviron) environ() []string {
 // compatibility promise (ADR-0013).
 func plane(opts ...Option) ferrytest.Plane {
 	return ferrytest.Plane{
-		Name:  driverName,
-		Kinds: []ferry.VKind{ferry.KindAbsent, ferry.KindString, ferry.KindBytes},
+		Name: driverName,
+		Kinds: []ferry.VKind{
+			ferry.KindAbsent, ferry.KindBool, ferry.KindNumber, ferry.KindString, ferry.KindBytes,
+		},
 		Open: func() ferrytest.Instance {
 			e := newEnviron()
 			src := New(append([]Option{Environ(e.environ)}, opts...)...)
@@ -132,8 +142,21 @@ func (w standInWriter) Set(_ context.Context, addr ferry.Path, v ferry.Value) er
 
 // carried is the plane's kind declaration as a function: the text an
 // environment variable would hold, or a refusal naming the kind.
+//
+// Bool and Number are text here, which is what makes PORT=8080 an ordinary
+// environment variable rather than a value this plane refuses. ADR-0005
+// measured a flattening plane with no null at 11 of 11 core types, with the
+// only refusals being the nil and empty composites the walk writes as Null at
+// a container address - so the kinds this plane cannot carry number exactly
+// one, and it is Null.
 func carried(v ferry.Value) (string, error) {
 	switch v.Kind() {
+	case ferry.KindBool:
+		b, err := v.AsBool()
+
+		return strconv.FormatBool(b), err
+	case ferry.KindNumber:
+		return v.AsNumber()
 	case ferry.KindString:
 		return v.AsString()
 	case ferry.KindBytes:
