@@ -24,16 +24,21 @@ var (
 
 // capture is what the second and third reasons for T buy: a caller who wants to
 // assert that a driver fails a case, and this package's own tests holding its
-// suites to the rules it publishes. Nothing takes a T yet - the suites are a
-// later ticket - so this asserts only that a caller who is not a test can be
-// one.
-type capture struct{ lines []string }
+// suites to the rules it publishes. [ferrytest.RoundTrip] reports through it
+// throughout roundtrip_test.go, which is the whole of why T is an interface.
+type capture struct {
+	lines   []string
+	helpers int
+}
 
 func (c *capture) Errorf(format string, args ...any) {
 	c.lines = append(c.lines, fmt.Sprintf(format, args...))
 }
 
-func (*capture) Helper() {}
+// Helper is counted rather than ignored, because a suite that never calls it
+// attributes every failure to a line inside ferrytest and a driver author
+// learns nothing from their own CI output.
+func (c *capture) Helper() { c.helpers++ }
 
 var _ ferrytest.T = (*capture)(nil)
 
@@ -58,9 +63,9 @@ func TestCaptureIsAT(t *testing.T) {
 // The surface is fixed by decision rather than left to emerge - which is why
 // revive's max-public-structs is switched off in this repository - so a name
 // arriving here without an ADR behind it is a change to a published contract
-// that a driver's CI depends on. The seven missing from ADR-0014's twenty are
-// the suites and the tables that call the entry point, which does not exist
-// yet: RoundTrip, Driver, Codec, Complete, Injective, Record and CoreTypes.
+// that a driver's CI depends on. The five still missing from ADR-0014's twenty
+// are the suites and the table that need a codec registry and a wider type set:
+// Driver, Codec, Complete, Injective and CoreTypes.
 //
 // Twenty rather than nineteen since #101, which added Instance: the shape as
 // published could not support its own golden artefact case, because nothing
@@ -68,7 +73,7 @@ func TestCaptureIsAT(t *testing.T) {
 func TestExportedSurface(t *testing.T) {
 	want := []string{
 		"Artefact", "At", "BitEq", "Case", "Eq", "Instance", "MapEq", "MemPlane",
-		"Plane", "Proof", "PtrEq", "SliceEq", "Static", "T", "Type",
+		"Plane", "Proof", "PtrEq", "Record", "RoundTrip", "SliceEq", "Static", "T", "Type",
 	}
 
 	got := exportedNames(t)

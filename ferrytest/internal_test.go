@@ -1,20 +1,23 @@
 package ferrytest
 
 import (
+	"context"
 	"slices"
 	"testing"
 
 	"github.com/onhotpath/ferry"
 )
 
-// Two claims in this package have no behaviour to observe them through yet, so
-// they are asserted from inside.
+// Two claims in this package have no behaviour to observe them through, so they
+// are asserted from inside.
 //
-// This is the same exception the pure-value units in core get. The memory
-// plane's key function and the proof's three columns have no engine behind
-// them: Load, Dump and the suites that would exercise them do not exist, so
-// there is no seam to assert through and the alternative is not asserting at
-// all. Both move to the entry point when it lands.
+// This is the same exception the pure-value units in core get. The proof's
+// three columns are no longer among them: [RoundTrip] reads the relation and
+// the cases through [ferry.Dump] and [ferry.Load], and roundtrip_test.go
+// asserts on what it reports, which is the seam this file promised to move them
+// to. What is left is a key function whose only observable behaviour is also
+// produced by keying on the address type, and an interface set whose two
+// spellings core's own entry point cannot tell apart.
 
 // TestStoreKeysAreRenderings is ADR-0003's first obligation, read off the key
 // function itself.
@@ -58,36 +61,83 @@ func TestStoreKeysAreRenderings(t *testing.T) {
 	}
 }
 
-// TestTypeCarriesThreeColumns asserts that [Type] keeps all three of what it is
-// given, because a proof that quietly dropped its relation or its cases would
-// pass every test that only reads Name and Type - and the suites that read the
-// other two are a later ticket.
-func TestTypeCarriesThreeColumns(t *testing.T) {
-	cases := []Case[int]{At(0, ferry.Number("0")), At(-5, ferry.Number("-5"))}
-
-	p, ok := Type("int", Eq[int], cases...).(typeProof[int])
+// TestProofIsSealed asserts the seal that stops anything outside this package
+// from being a [Proof].
+//
+// It is here because a method nothing ever calls is a method nothing ever
+// checks is there: the seal has no behaviour, so no suite can observe it, and
+// what it buys is the freedom for the suites to grow the methods they need
+// without every proof outside this repository breaking.
+func TestProofIsSealed(t *testing.T) {
+	p, ok := Type("int", Eq[int], At(0, ferry.Number("0"))).(typeProof[int])
 	if !ok {
 		t.Fatal("Type did not build a typeProof")
 	}
 
-	if p.name != "int" {
-		t.Errorf("name = %q, want %q", p.name, "int")
-	}
-
-	if p.eq == nil {
-		t.Fatal("the relation was dropped")
-	}
-
-	if !p.eq(1, 1) || p.eq(1, 2) {
-		t.Error("the relation is not the one Type was given")
-	}
-
-	if !slices.Equal(p.cases, cases) {
-		t.Errorf("cases = %v, want %v", p.cases, cases)
-	}
-
-	// The seal itself, which is what stops anything outside this package from
-	// being a Proof. It is called here because a method nothing ever calls is a
-	// method nothing ever checks is there.
 	p.proof()
 }
+
+// TestWrapWriterKeepsTheOptionalInterfaces is the recording sink's whole
+// obligation, and it cannot be asserted through the entry point.
+//
+// A shell that implemented Commit and Close unconditionally and forwarded them
+// to nothing would behave identically under [ferry.Dump] - a no-op Commit and a
+// no-op Close return nil, which is what a writer without them produces anyway.
+// What it would break is everything that asks a sink what it is: ADR-0014's
+// driver conformance case 6 asserts that Commit runs only on success and that a
+// Close failure appears in the reported error set, and against a wrapper that
+// always answers yes it would be asserting about the wrapper.
+func TestWrapWriterKeepsTheOptionalInterfaces(t *testing.T) {
+	cases := []optionalCase{
+		{name: "neither", inner: plainWriter{}},
+		{name: "commits", inner: committingWriter{}, commits: true},
+		{name: "releases", inner: releasingWriter{}, releases: true},
+		{name: "both", inner: bothWriter{}, commits: true, releases: true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, c.assert)
+	}
+}
+
+// optionalCase is one inner writer and the interface set its wrapper must have.
+type optionalCase struct {
+	name     string
+	inner    ferry.Writer
+	commits  bool
+	releases bool
+}
+
+// assert reads the two optional interfaces off the wrapper.
+func (c optionalCase) assert(t *testing.T) {
+	t.Helper()
+
+	w := wrapWriter(c.inner, map[ferry.Path]ferry.Value{})
+
+	if _, ok := w.(ferry.Committer); ok != c.commits {
+		t.Errorf("wrapped writer is a Committer = %v, want %v", ok, c.commits)
+	}
+
+	if _, ok := w.(ferry.Releaser); ok != c.releases {
+		t.Errorf("wrapped writer is a Releaser = %v, want %v", ok, c.releases)
+	}
+}
+
+// The four writers the table above wraps, which exist only to have the four
+// combinations of the two optional interfaces.
+type (
+	plainWriter      struct{}
+	committingWriter struct{ plainWriter }
+	releasingWriter  struct{ plainWriter }
+	bothWriter       struct{ plainWriter }
+)
+
+func (plainWriter) Set(context.Context, ferry.Path, ferry.Value) error { return nil }
+
+func (committingWriter) Commit(context.Context) error { return nil }
+
+func (releasingWriter) Close() error { return nil }
+
+func (bothWriter) Commit(context.Context) error { return nil }
+
+func (bothWriter) Close() error { return nil }

@@ -34,3 +34,12 @@ type T interface {
 	Errorf(format string, args ...any)
 	Helper()
 }
+
+// reporter is [T] under a name a generic can still see.
+//
+// [Type], [Case] and typeProof all take a type parameter spelled T, which
+// shadows the interface inside every one of their methods - and the run a proof
+// performs is a method on typeProof, because that is the only place its cases
+// are typed. An alias resolves here, at package scope, where T is still the
+// interface.
+type reporter = T
