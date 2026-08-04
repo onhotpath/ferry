@@ -646,6 +646,37 @@ This is a constraint on how the static check is written, not a change to the rul
 *(Followed up under [#56](https://github.com/onhotpath/ferry/issues/56), which found the constraint had never reached ADR-0003's own wording, and two engines minting two different static sets as a result.
 [ADR-0003](0003-how-a-leaf-addresses-a-plane.md) now states prefix-freeness over leaf addresses and admits the container address to the static set by name.)*
 
+### What a plane may hand back for a dynamic composite
+
+> **Added under [#120](https://github.com/onhotpath/ferry/issues/120).**
+> This ADR argued the injectivity obligation in the Dump direction and said nothing about Load.
+> Two refusals were needed to load a slice and a map at all, they were implemented in the dynamic-composite work with no ADR behind them, and they are recorded here rather than being left to live only in code.
+
+**A slice loads from a contiguous enumeration, and from nothing else.**
+The positions a plane enumerates under a sequence must be `0` upwards with none missing, and a gap or an out-of-band position is refused naming the address, the count and the type.
+
+The alternative is to take the length as the largest index plus one and leave the gaps at their zero values.
+That was rejected for two reasons, and the second is the one that decides it.
+It lets the **plane** choose the allocation, so a plane holding `/tags#1000000` makes ferry allocate a million elements from three bytes of input.
+And it merges two different situations, "the sequence is shorter than you thought" and "an element is missing", into one silent outcome, which is what ADR-0001 rules out.
+
+The cost is real and it lands on flat planes only, because a tree plane hands back a list and cannot produce a gap.
+On an environment plane, `TAGS_0` and `TAGS_2` after an operator removed `TAGS_1` is a hard failure rather than a two-element slice.
+That is the intended outcome: the two remedies are to fill the gap, or to stop calling it a sequence, since a map keyed by the positions is how a plane-chosen set of them is spelled.
+The refusal names both.
+
+The precedent is the array rule, where an index the array cannot hold is already a loud error naming the index and the length.
+This is the same instinct where the length comes from the plane rather than from the type.
+
+**Two plane keys that read back as one Go key are refused**, naming the address and the key type.
+
+This is the Load-side mirror of the injectivity obligation above.
+Dumping, two Go keys rendering to one address is refused because an entry is lost on the way out; loading, two plane keys parsing to one Go key loses an entry on the way in.
+`/m/1` and `/m/01` are two addresses on the plane and one key in a `map[int]V`, so one of the two entries cannot survive.
+Dropping either silently is the thing the injectivity rule exists to prevent, so the refusal is the only answer consistent with the rule this ADR already carries.
+
+The check compares the entry count against the child count, so it costs one comparison per mapping and needs no second pass.
+
 ### On Load, `String` is the universal donor, and nothing else coerces
 
 The tables above say which `Value` kind a Go type **produces** on Dump.
