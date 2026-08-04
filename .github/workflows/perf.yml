@@ -84,7 +84,10 @@ on:
         required: true
         default: ubuntu-latest
       open_pr:
-        description: Open the pull request. Unset to measure and only upload the artefacts.
+        description: >
+          Open the pull request. Unset to run without publishing: measure mode
+          then only uploads the artefacts, and rerender mode only says in the
+          log what a re-render would have moved.
         type: boolean
         required: true
         default: true
