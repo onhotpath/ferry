@@ -8,7 +8,7 @@ import (
 
 // KeyFunc maps a ferry address to a key in one plane's own key space: the join
 // an environment driver spells with _, the dotted path a flat KV uses, the
-// bracket form a query string wants.
+// hyphen join that spells an HTTP header name.
 //
 // A driver supplies one to [NewKeys] and gets one back from [Keys.Open], so the
 // shape is the same at both ends: an address in, a checked plane key out.
