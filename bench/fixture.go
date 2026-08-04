@@ -127,10 +127,19 @@ func EnvSmall() map[string]string {
 //	KV_LIMITS                    delimited pairs - xload, go-envconfig,
 //	                             kelseyhightower
 //
-// The delimited spelling is not called TAGS, and that is not cosmetic. ferry
-// addresses the elements at TAGS_0.., so /tags is a container address that
-// holds nothing itself, and a plain string sitting there is a load ferry
-// refuses outright. CSV_TAGS keeps the two spellings out of each other's way.
+// The delimited spelling is not called TAGS, and that is not cosmetic, but the
+// reason moved. It used to be ferry's: a plain string at the container address
+// /tags was a load ferry refused outright. Core now asks a source that can list
+// for a dynamic container's children before it asks the container's own
+// address, so driver/env's TAGS_0.. win and the string at TAGS is never read.
+// TestFerryReadsTheChildrenAndNotTheContainer pins that.
+//
+// What survives is the flat plane. TAGS and TAGS_0.. are one field spelled
+// twice in one key space, and a library that scans the whole environ has to
+// resolve the collision itself: koanf's transform already drops one of the two
+// spellings, and the same clash at LIMITS would put a string and a mapping on
+// the same koanf key. A name of its own keeps every library reading a variable
+// it defines.
 //
 // Forcing one spelling on everybody would measure which library happened to
 // agree with the harness author. Each library reads the spelling it defines,
