@@ -60,7 +60,9 @@ The cost is stated rather than hidden: a driver serving both directions ships **
 | the `OpenFunc` | the precomputed key table | the schema or the driver config changes |
 | the `Reader` | the plane's contents | every load |
 
-`OpenFunc` may be called many times against one `Bind`.
+`OpenFunc` may be called many times against one `Bind`, and it may be called from many goroutines at once, because a caller may hold what `Bind` returned and load through it concurrently.
+Precompute at `Bind` and only read it afterwards and you already satisfy that; write to what you closed over and you do not.
+The same holds for `OpenWriterFunc`.
 
 Whether an open fetches everything in one round trip or fetches nothing at all is **your** business and not core's: `Bind` already handed you the whole address set.
 That is why there is no `Snapshotter` interface.

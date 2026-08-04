@@ -100,6 +100,70 @@ func ExampleDump() {
 	// Output: db.internal 5432 1m0s checkout
 }
 
+// ExampleBind binds a source once and loads through it many times, which is
+// what a handler does: the compile and the driver's own bind happen at startup,
+// and each load is the open, the walk and the release.
+//
+// The plane here is a source of constants so that the example is
+// self-contained. A plane that is the request carries its contents in the
+// context instead, and the shape of the code does not change.
+func ExampleBind() {
+	src := ferrytest.Static(map[ferry.Path]ferry.Value{
+		ferry.At("host"):       ferry.String("db.internal"),
+		ferry.At("db", "user"): ferry.String("checkout"),
+	})
+
+	b, err := ferry.Bind[Config](src)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	for range 2 {
+		cfg, err := b.Load(context.Background())
+		if err != nil {
+			fmt.Println(err)
+
+			return
+		}
+
+		fmt.Println(cfg.Host, cfg.Port, cfg.DB.User)
+	}
+	// Output:
+	// db.internal 8080 checkout
+	// db.internal 8080 checkout
+}
+
+// ExampleBindSink is the same split on the write side: bind the sink once, dump
+// through it as often as there is something to write.
+func ExampleBindSink() {
+	plane := ferrytest.MemPlane().Open()
+
+	b, err := ferry.BindSink[DB](plane.Sink)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	if err = b.Dump(context.Background(), DB{User: "checkout"}); err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	back, err := ferry.Load[DB](context.Background(), plane.Source)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Println(back.User)
+	// Output: checkout
+}
+
 // Untagged is a type that does not compile: an exported field must name the
 // segment it addresses, or be marked "-".
 type Untagged struct {

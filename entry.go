@@ -18,7 +18,7 @@ import (
 // [ErrMissing], [ErrValue], [ErrPlane], [ErrDriver] or [ErrReadOnly].
 //
 // It is [LoadOver] with the zero seed, so anything said about one holds for the
-// other.
+// other, and it is [Bind] plus [Binding.Load] with the handle dropped.
 func Load[T any](ctx context.Context, src Source, opts ...Option) (T, error) {
 	var zero T
 
@@ -43,16 +43,16 @@ func Load[T any](ctx context.Context, src Source, opts ...Option) (T, error) {
 // On failure it returns the seed it was handed, unchanged. The walk builds into
 // a copy, so a partly built value is never reachable from the caller. Range the
 // failure with [Elements].
+//
+// It is [Bind] plus [Binding.LoadOver] with the handle dropped. A caller who
+// keeps the handle gets the same load and skips the compile and the bind.
 func LoadOver[T any](ctx context.Context, seed T, src Source, opts ...Option) (T, error) {
-	// The copy is the whole mechanism. The walk writes here and never to seed,
-	// so there is no path by which a partial crosses the boundary.
-	over := seed
-
-	if err := runLoad(ctx, reflect.ValueOf(&over).Elem(), src, opts); err != nil {
+	b, err := Bind[T](src, opts...)
+	if err != nil {
 		return seed, err
 	}
 
-	return over, nil
+	return b.LoadOver(ctx, seed)
 }
 
 // Dump writes v to sink. The type is inferred, because the value is in hand.
@@ -77,72 +77,140 @@ func LoadOver[T any](ctx context.Context, seed T, src Source, opts ...Option) (T
 // is ever told that it failed.
 //
 // Range the failure with [Elements].
+//
+// It is [BindSink] plus [SinkBinding.Dump] with the handle dropped. So a call
+// naming no sink at all is refused as a nil plane before the value is looked
+// at: where the sink is nil and v is a nil pointer, the report names the sink.
 func Dump[T any](ctx context.Context, v T, sink Sink, opts ...Option) error {
-	// Through a pointer, so the schema and the walk both see T rather than
-	// whatever dynamic type an interface T would hand reflect.ValueOf.
-	return runDump(ctx, reflect.ValueOf(&v).Elem(), sink, opts)
-}
-
-// runLoad is Load and LoadOver, once. dst is the addressable copy of the seed
-// the walk writes into.
-func runLoad(ctx context.Context, dst reflect.Value, src Source, opts []Option) error {
-	sch, err := schemaOf(dst.Type(), opts, retained)
+	b, err := BindSink[T](sink, opts...)
 	if err != nil {
 		return err
 	}
 
+	return b.Dump(ctx, v)
+}
+
+// bound is ADR-0004's phase split on the read side, with no type parameter: a
+// compiled schema and the [OpenFunc] a driver handed back for it.
+//
+// [Binding] is this plus T, and runLoad is this plus a reflect.Type, so the
+// bind half and the load half each exist exactly once whichever door the caller
+// came in through (ADR-0012).
+type bound struct {
+	sch  *schema
+	open OpenFunc
+}
+
+// newBound is [Bind] with the type as a value. The order is load-bearing: the
+// compile runs first, so an Option list that does not resolve fails before any
+// driver is reached, and the retention is retained rather than discarded,
+// because whatever holds the result holds the schema (ADR-0009, ADR-0010).
+func newBound(t reflect.Type, src Source, opts []Option) (*bound, error) {
+	sch, err := schemaOf(t, opts, retained)
+	if err != nil {
+		return nil, err
+	}
+
 	if src == nil {
-		return nilPlane(nilSourceMsg)
+		return nil, nilPlane(nilSourceMsg)
 	}
 
 	open, err := src.Bind(sch.addrs)
 	if err != nil {
-		return fromBind(err)
+		return nil, fromBind(err)
 	}
 
-	r, err := open(ctx)
+	return &bound{sch: sch, open: open}, nil
+}
+
+// load is the per-load half: open, walk, release. dst is the addressable copy
+// of the seed the walk writes into.
+//
+// Everything it touches is either the binding's own immutable state or minted
+// here, which is what lets [Binding] promise goroutine safety with no lock
+// anywhere (ADR-0012).
+func (b *bound) load(ctx context.Context, dst reflect.Value) error {
+	r, err := b.open(ctx)
 	if err != nil {
 		return fromDriver(momentOpen, Path{}, err)
 	}
 
 	dir := loadFrom{r: r, wrote: new(int)}
-	walked := newWalker(dir).walk(ctx, spot{n: sch.root, v: loadRoot(dst)})
+	walked := newWalker(dir).walk(ctx, spot{n: b.sch.root, v: loadRoot(dst)})
 
 	return join(walked, released(r))
 }
 
-// runDump is Dump, once.
-func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) error {
-	sch, err := schemaOf(v.Type(), opts, retained)
+// boundSink is bound on the write side, and [SinkBinding] is this plus T.
+type boundSink struct {
+	sch  *schema
+	open OpenWriterFunc
+}
+
+// newBoundSink is [BindSink] with the type as a value.
+//
+// It has no value to look at, which is where ADR-0012's split puts the nil-sink
+// refusal ahead of the nil-root one: a call that named no plane at all failed
+// before the value was ever relevant.
+func newBoundSink(t reflect.Type, sink Sink, opts []Option) (*boundSink, error) {
+	sch, err := schemaOf(t, opts, retained)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	if sink == nil {
+		return nil, nilPlane(nilSinkMsg)
+	}
+
+	open, err := sink.Bind(sch.addrs)
+	if err != nil {
+		return nil, fromBind(err)
+	}
+
+	return &boundSink{sch: sch, open: open}, nil
+}
+
+// dump is the per-dump half: refuse a nil root, open, encode and write, commit,
+// release.
+func (b *boundSink) dump(ctx context.Context, v reflect.Value) error {
 	root, err := dumpRoot(v)
 	if err != nil {
 		return err
 	}
 
-	if sink == nil {
-		return nilPlane(nilSinkMsg)
-	}
-
-	open, err := sink.Bind(sch.addrs)
-	if err != nil {
-		return fromBind(err)
-	}
-
-	w, err := open(ctx)
+	w, err := b.open(ctx)
 	if err != nil {
 		return fromDriver(momentOpen, Path{}, err)
 	}
 
-	walked := written(ctx, w, sch, root)
+	walked := written(ctx, w, b.sch, root)
 	if walked == nil {
 		walked = committed(ctx, w)
 	}
 
 	return join(walked, released(w))
+}
+
+// runLoad is [LoadOver] for a caller holding a reflect.Value rather than a T,
+// which is the internal seam and nothing else. It is newBound plus load, the
+// same two halves the generic door runs.
+func runLoad(ctx context.Context, dst reflect.Value, src Source, opts []Option) error {
+	b, err := newBound(dst.Type(), src, opts)
+	if err != nil {
+		return err
+	}
+
+	return b.load(ctx, dst)
+}
+
+// runDump is [Dump] for the same caller, and it is newBoundSink plus dump.
+func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) error {
+	b, err := newBoundSink(v.Type(), sink, opts)
+	if err != nil {
+		return err
+	}
+
+	return b.dump(ctx, v)
 }
 
 // loadRoot is the struct the walk writes into, given the value the caller's
