@@ -140,6 +140,20 @@ time and warm does not.
 A library that reflects on every call has nothing to put in the constructor and its two
 columns come out the same; that flat line is the finding, not a missing measurement.
 
+**One column in every scenario is the baseline, and it is a floor rather than a competitor.**
+It is the same job written out by hand with no mapping layer over it: ` + "`os.Getenv`" + ` plus
+` + "`strconv`" + ` for the environment scenarios, a direct ` + "`yaml.Unmarshal`" + ` for the YAML ones.
+It is measured, and its raw figure is published in every table below, unrounded.
+What it is not is a library. No mapping library can beat the code a mapping library would
+otherwise have to generate, so every row here loses to it by construction, and being told
+which row lost by the least is not information.
+So the baseline is left out of "the fastest other library" and used instead as the
+denominator of one multiple, rendered against every library in the comparison and computed
+the same way for each, ferry included.
+That multiple is what the abstraction costs over the same floor, and it is the figure to
+read: it is the one number in this file that compares a library to something no library
+gets to move.
+
 **Where the libraries differ semantically, the difference is in the notes** under each
 table rather than smoothed over.
 Some of those differences are large: ferry's YAML dump edits an existing document and
@@ -166,8 +180,8 @@ target for this job.
 
 func writeScenario(b *strings.Builder, in *Input, sc ScenarioDoc) {
 	fmt.Fprintf(b, "## `%s`\n\n%s\n\n", sc.Name, sc.What)
-	fmt.Fprint(b, "| library | cold | warm | warm B/op | warm allocs/op |\n")
-	fmt.Fprint(b, "| --- | --- | --- | --- | --- |\n")
+	fmt.Fprint(b, "| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |\n")
+	fmt.Fprint(b, "| --- | --- | --- | --- | --- | --- |\n")
 
 	for _, impl := range sc.Impls {
 		writeScenarioRow(b, in, sc, impl)
@@ -178,7 +192,7 @@ func writeScenario(b *strings.Builder, in *Input, sc ScenarioDoc) {
 	writeCaveats(b, sc)
 
 	for _, impl := range sc.Impls {
-		fmt.Fprintf(b, "- **%s**%s %s\n", impl.Name, moduleSuffix(impl), impl.Notes)
+		fmt.Fprintf(b, "- **%s**%s %s\n", implLabel(impl), moduleSuffix(impl), impl.Notes)
 	}
 
 	fmt.Fprint(b, "\n")
@@ -188,13 +202,71 @@ func writeScenarioRow(b *strings.Builder, in *Input, sc ScenarioDoc, impl ImplDo
 	cold, coldOK := in.Stats.Lookup(Key{Scenario: sc.Name, Mode: "cold", Impl: impl.Name})
 	warm, warmOK := in.Stats.Lookup(Key{Scenario: sc.Name, Mode: "warm", Impl: impl.Name})
 
-	fmt.Fprintf(b, "| %s | %s | %s%s | %s | %s |\n",
-		impl.Name,
+	fmt.Fprintf(b, "| %s | %s | %s%s | %s%s | %s | %s |\n",
+		implLabel(impl),
 		measured(cold, coldOK, unitSec),
 		measured(warm, warmOK, unitSec), caveatMark(impl),
+		baselineCell(in, sc, impl), caveatMark(impl),
 		measured(warm, warmOK, unitBytes),
 		measured(warm, warmOK, unitAllocs),
 	)
+}
+
+// implLabel is how a library is named in a table cell. The baseline says what
+// it is everywhere it appears, because a row that cannot be beaten reads as a
+// row that won unless it is labelled.
+func implLabel(impl ImplDoc) string {
+	if impl.Baseline {
+		return impl.Name + " " + BaselineTag
+	}
+
+	return impl.Name
+}
+
+// BaselineTag is spelled once, in every table and on the chart.
+const BaselineTag = "(baseline)"
+
+// baselineOf is the scenario's baseline measurement: the same job with no
+// mapping layer, and the denominator of every multiple this file renders.
+//
+// A scenario that declares no baseline, or whose baseline was not measured,
+// gets no multiple at all rather than one over whichever row happened to be
+// quickest.
+func baselineOf(in *Input, sc ScenarioDoc) (secs float64, name string, ok bool) {
+	for _, impl := range sc.Impls {
+		if !impl.Baseline {
+			continue
+		}
+
+		if got, found := warmSeconds(in, sc.Name, impl.Name); found {
+			return got, impl.Name, true
+		}
+	}
+
+	return 0, "", false
+}
+
+// baselineCell renders one library's warm time as a multiple of the baseline's.
+//
+// It is computed the same way for every row in the table, ferry's included.
+// The baseline's own row says what it is rather than reading 1.00x, which would
+// look like a measurement rather than a definition.
+func baselineCell(in *Input, sc ScenarioDoc, impl ImplDoc) string {
+	base, _, ok := baselineOf(in, sc)
+	if !ok {
+		return notMeasured
+	}
+
+	if impl.Baseline {
+		return "1.00x, by definition"
+	}
+
+	got, found := warmSeconds(in, sc.Name, impl.Name)
+	if !found {
+		return notMeasured
+	}
+
+	return ratio(got, base)
 }
 
 // caveatMark is the dagger that goes on the number itself.
@@ -311,6 +383,9 @@ func writeGeomean(b *strings.Builder, in *Input) {
 func writeLosses(b *strings.Builder, in *Input) {
 	fmt.Fprint(b, "## Where ferry loses\n\n")
 	fmt.Fprint(b, "Derived from the warm `sec/op` column above, not written by hand.\n\n")
+	fmt.Fprint(b, "The baseline is in this table, marked, and it stays in it.\n")
+	fmt.Fprint(b, "It is a real measurement ferry is really that many times slower than, and the fact that\n")
+	fmt.Fprint(b, "nothing in the comparison beats it is a reason to label the row, not to drop it.\n\n")
 	fmt.Fprint(b, "| scenario | library | warm | ferry warm | ferry is |\n")
 	fmt.Fprint(b, "| --- | --- | --- | --- | --- |\n")
 
@@ -346,7 +421,7 @@ func writeLossRows(b *strings.Builder, in *Input, sc ScenarioDoc) int {
 		}
 
 		fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s slower |\n",
-			sc.Name, impl.Name, formatDuration(other), formatDuration(ferry), ratio(ferry, other))
+			sc.Name, implLabel(impl), formatDuration(other), formatDuration(ferry), ratio(ferry, other))
 
 		rows++
 	}

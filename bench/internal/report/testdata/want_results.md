@@ -59,6 +59,20 @@ time and warm does not.
 A library that reflects on every call has nothing to put in the constructor and its two
 columns come out the same; that flat line is the finding, not a missing measurement.
 
+**One column in every scenario is the baseline, and it is a floor rather than a competitor.**
+It is the same job written out by hand with no mapping layer over it: `os.Getenv` plus
+`strconv` for the environment scenarios, a direct `yaml.Unmarshal` for the YAML ones.
+It is measured, and its raw figure is published in every table below, unrounded.
+What it is not is a library. No mapping library can beat the code a mapping library would
+otherwise have to generate, so every row here loses to it by construction, and being told
+which row lost by the least is not information.
+So the baseline is left out of "the fastest other library" and used instead as the
+denominator of one multiple, rendered against every library in the comparison and computed
+the same way for each, ferry included.
+That multiple is what the abstraction costs over the same floor, and it is the figure to
+read: it is the one number in this file that compares a library to something no library
+gets to move.
+
 **Where the libraries differ semantically, the difference is in the notes** under each
 table rather than smoothed over.
 Some of those differences are large: ferry's YAML dump edits an existing document and
@@ -85,15 +99,15 @@ target for this job.
 
 five flat fields out of the process environment.
 
-| library | cold | warm | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- |
-| ferry | 7.68µs ±4% | 2.75µs ±4% | 2.89 KiB | 41 |
-| koanf | 12.4µs ±7% | 12.5µs ±3% | 8.41 KiB | 171 |
-| viper | 8.12µs ±3% | 6.76µs ±2% | 3.61 KiB | 67 |
-| xload | 1.55µs ±2% | 1.55µs ±5% | 936 B | 17 |
-| go-envconfig | 597ns ±4% | 570ns ±4% | 0 B | 0 |
-| kelseyhightower | 2.72µs ±3% | 2.73µs ±7% | 1.21 KiB | 56 |
-| stdlib | 166ns ±1% | 166ns ±15% | 0 B | 0 |
+| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- |
+| ferry | 7.68µs ±4% | 2.75µs ±4% | 16.60x | 2.89 KiB | 41 |
+| koanf | 12.4µs ±7% | 12.5µs ±3% | 75.24x | 8.41 KiB | 171 |
+| viper | 8.12µs ±3% | 6.76µs ±2% | 40.80x | 3.61 KiB | 67 |
+| xload | 1.55µs ±2% | 1.55µs ±5% | 9.34x | 936 B | 17 |
+| go-envconfig | 597ns ±4% | 570ns ±4% | 3.44x | 0 B | 0 |
+| kelseyhightower | 2.72µs ±3% | 2.73µs ±7% | 16.46x | 1.21 KiB | 56 |
+| stdlib (baseline) | 166ns ±1% | 166ns ±15% | 1.00x, by definition | 0 B | 0 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Compiles once, caches the schema.
 - **koanf** (`github.com/knadh/koanf/v2`) Reads the whole environ per load.
@@ -101,19 +115,19 @@ five flat fields out of the process environment.
 - **xload** (`github.com/gojekfarm/xtools/xload`) Reflects per call.
 - **go-envconfig** (`github.com/sethvargo/go-envconfig`) Reflects per call.
 - **kelseyhightower** (`github.com/kelseyhightower/envconfig`) Reflects per call.
-- **stdlib** Hand-rolled os.Getenv.
+- **stdlib (baseline)** Hand-rolled os.Getenv.
 
 ## `yaml_small`
 
 five flat fields out of a small YAML document.
 
-| library | cold | warm | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- |
-| ferry | 22.1µs ±5% | 17.4µs ±3% | 11.0 KiB | 107 |
-| koanf | 30.0µs ±4% | 30.1µs ±3% | 17.4 KiB | 249 |
-| viper | 26.4µs ±3% | 26.6µs ±14% | 15.5 KiB | 171 |
-| xload | 19.5µs ±3% | 1.74µs ±2% † | 1000 B | 23 |
-| stdlib | 16.6µs ±4% | 16.6µs ±11% | 9.82 KiB | 98 |
+| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- |
+| ferry | 22.1µs ±5% | 17.4µs ±3% | 1.05x | 11.0 KiB | 107 |
+| koanf | 30.0µs ±4% | 30.1µs ±3% | 1.82x | 17.4 KiB | 249 |
+| viper | 26.4µs ±3% | 26.6µs ±14% | 1.61x | 15.5 KiB | 171 |
+| xload | 19.5µs ±3% | 1.74µs ±2% † | 0.10x † | 1000 B | 23 |
+| stdlib (baseline) | 16.6µs ±4% | 16.6µs ±11% | 1.00x, by definition | 9.82 KiB | 98 |
 
 † **xload's warm figure is not comparable with the rest of this table.** xload's YAML provider reads and parses the file once, when the loader is constructed, so this warm figure excludes the read and the parse every other row pays.
 
@@ -121,15 +135,15 @@ five flat fields out of a small YAML document.
 - **koanf** (`github.com/knadh/koanf/v2`) Reads and parses on every load.
 - **viper** (`github.com/spf13/viper`) Reads and parses on every load.
 - **xload** (`github.com/gojekfarm/xtools/xload`) Its YAML provider parses in the constructor.
-- **stdlib** Direct yaml.Unmarshal.
+- **stdlib (baseline)** Direct yaml.Unmarshal.
 
 ## `no_such_scenario`
 
 a scenario nothing was measured for.
 
-| library | cold | warm | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- |
-| ferry | not measured | not measured | not measured | not measured |
+| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- |
+| ferry | not measured | not measured | not measured | not measured | not measured |
 
 - **ferry** (`github.com/onhotpath/ferry`) n/a
 
@@ -159,14 +173,18 @@ any row is zero - is absent rather than zero.
 
 Derived from the warm `sec/op` column above, not written by hand.
 
+The baseline is in this table, marked, and it stays in it.
+It is a real measurement ferry is really that many times slower than, and the fact that
+nothing in the comparison beats it is a reason to label the row, not to drop it.
+
 | scenario | library | warm | ferry warm | ferry is |
 | --- | --- | --- | --- | --- |
 | `env_small` | xload | 1.55µs | 2.75µs | 1.78x slower |
 | `env_small` | go-envconfig | 570ns | 2.75µs | 4.82x slower |
 | `env_small` | kelseyhightower | 2.73µs | 2.75µs | 1.01x slower |
-| `env_small` | stdlib | 166ns | 2.75µs | 16.60x slower |
+| `env_small` | stdlib (baseline) | 166ns | 2.75µs | 16.60x slower |
 | `yaml_small` | xload | 1.74µs | 17.4µs | 10.00x slower |
-| `yaml_small` | stdlib | 16.6µs | 17.4µs | 1.05x slower |
+| `yaml_small` | stdlib (baseline) | 16.6µs | 17.4µs | 1.05x slower |
 
 ## What was not measured
 

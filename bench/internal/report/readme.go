@@ -50,14 +50,25 @@ func ReplaceSection(readme, section string) (string, error) {
 // The table is ferry's warm number against the fastest other library measured
 // in the same scenario, because that is the comparison a reader wants and the
 // one it would be dishonest to leave out.
+//
+// The baseline - the same job with no mapping layer over it - is not that
+// library and never can be, so it gets a column of its own instead, carrying
+// its raw figure. One ratio per row, against the peer; the baseline is the
+// reference the row is read against rather than a second contest inside it.
+//
+// The multiple over the baseline is not computed here. It is computed for every
+// library, ferry included, in the results file, which is where the whole field
+// is. Both operands of ferry's are in this row, so nothing about it is out of
+// reach from the README either.
 func Summary(in *Input) string {
 	var b strings.Builder
 
 	fmt.Fprint(&b, "\nMeasured, not claimed.\n")
 	fmt.Fprint(&b, "The table is machine-generated from a benchmark run; the harness refuses to run at\n")
 	fmt.Fprint(&b, "all unless every library produces the identical struct from the identical source.\n\n")
-	fmt.Fprint(&b, "| scenario | ferry (warm) | fastest other | |\n")
-	fmt.Fprint(&b, "| --- | --- | --- | --- |\n")
+	fmt.Fprint(&b, summaryBaselineNote)
+	fmt.Fprint(&b, "| scenario | ferry (warm) | fastest other library | | baseline: no mapping layer |\n")
+	fmt.Fprint(&b, "| --- | --- | --- | --- | --- |\n")
 
 	excluded := make(map[string][]string, len(in.Scenarios))
 
@@ -89,23 +100,60 @@ func writeSummaryChart(b *strings.Builder, in *Input) {
 		in.Meta.ChartDarkLink, chartAlt, in.Meta.ChartLightLink)
 }
 
+// summaryBaselineNote says what the baseline column is before the table uses it,
+// because a column of figures nothing can beat reads as a column that won
+// unless the reader is told what it is.
+const summaryBaselineNote = "The baseline is the same job written out by hand with no mapping layer over it, " +
+	"and it is\nthe floor rather than a competitor: no library beats it, so it is published as the " +
+	"reference\nthe row is read against rather than ranked against one. The results file gives every " +
+	"library's\nmultiple over it, ferry's computed the same way as the rest.\n\n"
+
 func writeSummaryRow(b *strings.Builder, in *Input, sc ScenarioDoc) (excluded []string) {
 	ferry, ferryOK := warmSeconds(in, sc.Name, ferryImpl)
 
 	best, bestName, excluded := fastestOther(in, sc)
+	base, baseName, _ := baselineOf(in, sc)
 
-	switch {
-	case !ferryOK || bestName == "":
-		fmt.Fprintf(b, "| `%s` | %s | %s | |\n", sc.Name, notMeasured, notMeasured)
-	case best < ferry:
-		fmt.Fprintf(b, "| `%s` | %s | %s (%s) | ferry %s slower |\n",
-			sc.Name, formatDuration(ferry), formatDuration(best), bestName, ratio(ferry, best))
-	default:
-		fmt.Fprintf(b, "| `%s` | %s | %s (%s) | ferry %s faster |\n",
-			sc.Name, formatDuration(ferry), formatDuration(best), bestName, ratio(best, ferry))
-	}
+	fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s |\n",
+		sc.Name,
+		duration(ferry, ferryOK),
+		otherCell(best, bestName),
+		verdict(ferry, ferryOK, best, bestName),
+		otherCell(base, baseName),
+	)
 
 	return excluded
+}
+
+// duration renders a measured figure or the marker, so that an absent
+// measurement can never reach a cell as a zero.
+func duration(v float64, ok bool) string {
+	if !ok {
+		return notMeasured
+	}
+
+	return formatDuration(v)
+}
+
+// otherCell renders a figure with the name of what was measured.
+func otherCell(v float64, name string) string {
+	if name == "" {
+		return notMeasured
+	}
+
+	return formatDuration(v) + " (" + name + ")"
+}
+
+// verdict is the ranking sentence, and it names only libraries.
+func verdict(ferry float64, ferryOK bool, best float64, bestName string) string {
+	switch {
+	case !ferryOK || bestName == "":
+		return ""
+	case best < ferry:
+		return "ferry " + ratio(ferry, best) + " slower"
+	default:
+		return "ferry " + ratio(best, ferry) + " faster"
+	}
 }
 
 // writeSummaryExclusions names every library left out of the comparison above,
@@ -135,7 +183,16 @@ func writeSummaryExclusions(b *strings.Builder, byScenario map[string][]string, 
 }
 
 // fastestOther is the quickest warm measurement in a scenario that is not
-// ferry's, with its name. An empty name means nothing else was measured.
+// ferry's and not the baseline's, with its name. An empty name means no other
+// library was measured.
+//
+// The baseline is skipped because it is not a library and cannot lose. It is
+// the same job written out by hand with no mapping layer, so no mapping library
+// beats it, every row in the column loses to it by construction, and "fastest
+// other" resolving to it says only that the comparison had a floor in it. The
+// baseline is not thereby hidden: the summary gives it a column of its own,
+// with its raw figure and with the multiple over it that every library in the
+// table carries, ferry's computed by the same code as the rest.
 //
 // A row carrying a WarmCaveat is skipped, and skipping it is the whole point.
 // The caveat says that warm figure measures a different job from the rest of
@@ -148,7 +205,7 @@ func writeSummaryExclusions(b *strings.Builder, byScenario map[string][]string, 
 // comparison rather than dropping them silently.
 func fastestOther(in *Input, sc ScenarioDoc) (best float64, name string, excluded []string) {
 	for _, impl := range sc.Impls {
-		if impl.Name == ferryImpl {
+		if impl.Name == ferryImpl || impl.Baseline {
 			continue
 		}
 

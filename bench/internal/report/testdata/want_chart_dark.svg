@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="681" viewBox="0 0 1180 681" role="img" aria-label="ferry against 7 config libraries: time and allocations per load, cold and warm, over 3 scenarios">
-<rect x="0" y="0" width="1180" height="681" fill="#0d1117"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="695" viewBox="0 0 1180 695" role="img" aria-label="ferry against 7 config libraries: time and allocations per load, cold and warm, over 3 scenarios">
+<rect x="0" y="0" width="1180" height="695" fill="#0d1117"/>
 <text x="16.0" y="26.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="15.0" font-weight="600" fill="#e6edf3" text-anchor="start">ferry against the libraries people choose between</text>
 <text x="16.0" y="45.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#9198a1" text-anchor="start">One populated struct, one source, asserted identical across every library before anything was timed.</text>
 <text x="16.0" y="60.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#9198a1" text-anchor="start">a workstation, not a runner, Go go1.27rc2, -count 10, -benchtime 1s. Whiskers are benchstat's 95% confidence interval.</text>
@@ -10,6 +10,8 @@
 <text x="244.0" y="88.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#9198a1" text-anchor="start">warm: constructed once, then run</text>
 <circle cx="444.0" cy="84.0" r="2.4" fill="none" stroke="#6e7681" stroke-width="1.2"/>
 <text x="454.0" y="88.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#9198a1" text-anchor="start">marks ferry's row, which is privileged nowhere else</text>
+<line x1="736.0" y1="78.0" x2="736.0" y2="90.0" stroke="#d29922" stroke-width="1.2" stroke-dasharray="3 3"/>
+<text x="746.0" y="88.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#d29922" text-anchor="start">baseline: the same work, no mapping library; nothing beats it</text>
 <text x="184.0" y="102.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#e6edf3" text-anchor="start">time per operation (log scale)</text>
 <line x1="184.0" y1="112.0" x2="184.0" y2="613.0" stroke="#2a313c" stroke-width="1.0"/>
 <text x="184.0" y="627.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#6e7681" text-anchor="middle">100ns</text>
@@ -31,18 +33,20 @@
 <line x1="1164.0" y1="112.0" x2="1164.0" y2="613.0" stroke="#2a313c" stroke-width="1.0"/>
 <text x="1164.0" y="627.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#6e7681" text-anchor="middle">250</text>
 <text x="16.0" y="138.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12.0" font-weight="600" fill="#e6edf3" text-anchor="start">env_small</text>
-<text x="29.0" y="166.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#e6edf3" text-anchor="start">stdlib</text>
+<line x1="218.3" y1="154.0" x2="218.3" y2="273.0" stroke="#d29922" stroke-width="1.2" stroke-dasharray="3 3"/>
+<line x1="696.0" y1="154.0" x2="696.0" y2="273.0" stroke="#d29922" stroke-width="1.2" stroke-dasharray="3 3"/>
+<text x="29.0" y="166.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#d29922" text-anchor="start">stdlib (baseline)</text>
 <line x1="218.3" y1="162.5" x2="218.4" y2="162.5" stroke="#6e7681" stroke-width="1.0"/>
-<line x1="217.7" y1="162.5" x2="219.0" y2="162.5" stroke="#c297ff" stroke-width="1.2"/>
-<line x1="217.7" y1="159.5" x2="217.7" y2="165.5" stroke="#c297ff" stroke-width="1.2"/>
-<line x1="219.0" y1="159.5" x2="219.0" y2="165.5" stroke="#c297ff" stroke-width="1.2"/>
-<line x1="207.2" y1="162.5" x2="227.7" y2="162.5" stroke="#6cb6ff" stroke-width="1.2"/>
-<line x1="207.2" y1="159.5" x2="207.2" y2="165.5" stroke="#6cb6ff" stroke-width="1.2"/>
-<line x1="227.7" y1="159.5" x2="227.7" y2="165.5" stroke="#6cb6ff" stroke-width="1.2"/>
-<circle cx="218.4" cy="162.5" r="3.6" fill="#0d1117" stroke="#c297ff" stroke-width="1.6"/>
-<circle cx="218.3" cy="162.5" r="3.6" fill="#6cb6ff"/>
-<rect x="696.0" y="157.0" width="0.6" height="5.0" fill="#5a3a92"/>
-<rect x="696.0" y="163.0" width="0.6" height="5.0" fill="#1a5a9e"/>
+<line x1="217.7" y1="162.5" x2="219.0" y2="162.5" stroke="#d29922" stroke-width="1.2"/>
+<line x1="217.7" y1="159.5" x2="217.7" y2="165.5" stroke="#d29922" stroke-width="1.2"/>
+<line x1="219.0" y1="159.5" x2="219.0" y2="165.5" stroke="#d29922" stroke-width="1.2"/>
+<line x1="207.2" y1="162.5" x2="227.7" y2="162.5" stroke="#d29922" stroke-width="1.2"/>
+<line x1="207.2" y1="159.5" x2="207.2" y2="165.5" stroke="#d29922" stroke-width="1.2"/>
+<line x1="227.7" y1="159.5" x2="227.7" y2="165.5" stroke="#d29922" stroke-width="1.2"/>
+<circle cx="218.4" cy="162.5" r="3.6" fill="#0d1117" stroke="#d29922" stroke-width="1.6"/>
+<circle cx="218.3" cy="162.5" r="3.6" fill="#d29922"/>
+<rect x="696.0" y="157.0" width="0.6" height="5.0" fill="#6b4f12"/>
+<rect x="696.0" y="163.0" width="0.6" height="5.0" fill="#6b4f12"/>
 <text x="29.0" y="183.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#e6edf3" text-anchor="start">go-envconfig</text>
 <line x1="302.0" y1="179.5" x2="305.0" y2="179.5" stroke="#6e7681" stroke-width="1.0"/>
 <line x1="302.2" y1="179.5" x2="307.7" y2="179.5" stroke="#c297ff" stroke-width="1.2"/>
@@ -117,6 +121,8 @@
 <rect x="696.0" y="259.0" width="322.0" height="5.0" fill="#5a3a92"/>
 <rect x="696.0" y="265.0" width="320.1" height="5.0" fill="#1a5a9e"/>
 <text x="16.0" y="295.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12.0" font-weight="600" fill="#e6edf3" text-anchor="start">yaml_small</text>
+<line x1="530.2" y1="311.0" x2="530.2" y2="430.0" stroke="#d29922" stroke-width="1.2" stroke-dasharray="3 3"/>
+<line x1="879.5" y1="311.0" x2="879.5" y2="430.0" stroke="#d29922" stroke-width="1.2" stroke-dasharray="3 3"/>
 <text x="29.0" y="323.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#e6edf3" text-anchor="start">xload †</text>
 <line x1="377.3" y1="319.5" x2="541.3" y2="319.5" stroke="#6e7681" stroke-width="1.0"/>
 <line x1="539.2" y1="319.5" x2="543.3" y2="319.5" stroke="#c297ff" stroke-width="1.2"/>
@@ -129,18 +135,18 @@
 <circle cx="377.3" cy="319.5" r="3.6" fill="#6cb6ff"/>
 <rect x="696.0" y="314.0" width="258.3" height="5.0" fill="#5a3a92"/>
 <rect x="696.0" y="320.0" width="43.1" height="5.0" fill="#1a5a9e"/>
-<text x="29.0" y="340.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#e6edf3" text-anchor="start">stdlib</text>
+<text x="29.0" y="340.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#d29922" text-anchor="start">stdlib (baseline)</text>
 <line x1="530.2" y1="336.5" x2="530.4" y2="336.5" stroke="#6e7681" stroke-width="1.0"/>
-<line x1="527.6" y1="336.5" x2="533.1" y2="336.5" stroke="#c297ff" stroke-width="1.2"/>
-<line x1="527.6" y1="333.5" x2="527.6" y2="339.5" stroke="#c297ff" stroke-width="1.2"/>
-<line x1="533.1" y1="333.5" x2="533.1" y2="339.5" stroke="#c297ff" stroke-width="1.2"/>
-<line x1="522.3" y1="336.5" x2="537.2" y2="336.5" stroke="#6cb6ff" stroke-width="1.2"/>
-<line x1="522.3" y1="333.5" x2="522.3" y2="339.5" stroke="#6cb6ff" stroke-width="1.2"/>
-<line x1="537.2" y1="333.5" x2="537.2" y2="339.5" stroke="#6cb6ff" stroke-width="1.2"/>
-<circle cx="530.4" cy="336.5" r="3.6" fill="#0d1117" stroke="#c297ff" stroke-width="1.6"/>
-<circle cx="530.2" cy="336.5" r="3.6" fill="#6cb6ff"/>
-<rect x="696.0" y="331.0" width="185.3" height="5.0" fill="#5a3a92"/>
-<rect x="696.0" y="337.0" width="183.5" height="5.0" fill="#1a5a9e"/>
+<line x1="527.6" y1="336.5" x2="533.1" y2="336.5" stroke="#d29922" stroke-width="1.2"/>
+<line x1="527.6" y1="333.5" x2="527.6" y2="339.5" stroke="#d29922" stroke-width="1.2"/>
+<line x1="533.1" y1="333.5" x2="533.1" y2="339.5" stroke="#d29922" stroke-width="1.2"/>
+<line x1="522.3" y1="336.5" x2="537.2" y2="336.5" stroke="#d29922" stroke-width="1.2"/>
+<line x1="522.3" y1="333.5" x2="522.3" y2="339.5" stroke="#d29922" stroke-width="1.2"/>
+<line x1="537.2" y1="333.5" x2="537.2" y2="339.5" stroke="#d29922" stroke-width="1.2"/>
+<circle cx="530.4" cy="336.5" r="3.6" fill="#0d1117" stroke="#d29922" stroke-width="1.6"/>
+<circle cx="530.2" cy="336.5" r="3.6" fill="#d29922"/>
+<rect x="696.0" y="331.0" width="185.3" height="5.0" fill="#6b4f12"/>
+<rect x="696.0" y="337.0" width="183.5" height="5.0" fill="#6b4f12"/>
 <circle cx="20.0" cy="353.5" r="2.4" fill="none" stroke="#6e7681" stroke-width="1.2"/>
 <text x="29.0" y="357.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#e6edf3" text-anchor="start">ferry</text>
 <line x1="533.3" y1="353.5" x2="549.6" y2="353.5" stroke="#6e7681" stroke-width="1.0"/>
@@ -207,7 +213,8 @@
 <text x="29.0" y="582.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#e6edf3" text-anchor="start">xload</text>
 <text x="184.0" y="582.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6e7681" text-anchor="start">not measured</text>
 <text x="696.0" y="582.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6e7681" text-anchor="start">not measured</text>
-<text x="16.0" y="655.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#9198a1" text-anchor="start">The time panel is a log scale, so a mark twice as far right is ten times the number, not twice it. Marks carry no bar because a bar on a log axis reads as a proportion it does not have.</text>
-<text x="16.0" y="669.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#9198a1" text-anchor="start">The allocation panel is linear and starts at zero. † marks a warm mark that is not comparable with the others in its scenario, because that library reads and parses the file once at construction; its cold mark is the comparable one.</text>
-<text x="16.0" y="683.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#9198a1" text-anchor="start">Generated by bench/cmd/perfreport from benchstat output; no figure on this chart was typed.</text>
+<text x="16.0" y="669.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#9198a1" text-anchor="start">The time panel is a log scale, so a mark twice as far right is ten times the number, not twice it. Marks carry no bar because a bar on a log axis reads as a proportion it does not have.</text>
+<text x="16.0" y="683.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#9198a1" text-anchor="start">The allocation panel is linear and starts at zero. † marks a warm mark that is not comparable with the others in its scenario, because that library reads and parses the file once at construction; its cold mark is the comparable one.</text>
+<text x="16.0" y="697.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#9198a1" text-anchor="start">The dashed rule in each scenario stands at the baseline's warm value, so the distance from it to a mark is what that library's abstraction costs over the floor, ferry's read the same way.</text>
+<text x="16.0" y="711.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#9198a1" text-anchor="start">Generated by bench/cmd/perfreport from benchstat output; no figure on this chart was typed.</text>
 </svg>

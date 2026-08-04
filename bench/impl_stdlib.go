@@ -33,7 +33,7 @@ const (
 
 func stdlibEnvSmall() Impl {
 	return Impl{
-		Name: "stdlib", Notes: stdlibNotesEnv,
+		Name: "stdlib", Notes: stdlibNotesEnv, Baseline: true,
 		New: func(*Fixture) (Loader, error) {
 			return func(dst any) error {
 				p, err := dstOf[Small](dst)
@@ -55,7 +55,7 @@ func stdlibEnvSmall() Impl {
 
 func stdlibEnvLarge() Impl {
 	return Impl{
-		Name: "stdlib", Notes: stdlibNotesEnv,
+		Name: "stdlib", Notes: stdlibNotesEnv, Baseline: true,
 		New: func(*Fixture) (Loader, error) {
 			return func(dst any) error {
 				p, err := dstOf[Large](dst)
@@ -349,7 +349,7 @@ func envMap(key string) (map[string]string, error) {
 
 func stdlibYAML[T any](path func(*Fixture) string) Impl {
 	return Impl{
-		Name: "stdlib", Module: "go.yaml.in/yaml/v3", Notes: stdlibNotesYAML,
+		Name: "stdlib", Module: "go.yaml.in/yaml/v3", Notes: stdlibNotesYAML, Baseline: true,
 		New: func(f *Fixture) (Loader, error) {
 			p := path(f)
 
@@ -377,7 +377,7 @@ func stdlibYAMLLarge() Impl { return stdlibYAML[Large](func(f *Fixture) string {
 
 func stdlibDumpLarge() Impl {
 	return Impl{
-		Name: "stdlib", Module: "go.yaml.in/yaml/v3", Notes: stdlibNotesDump,
+		Name: "stdlib", Module: "go.yaml.in/yaml/v3", Notes: stdlibNotesDump, Baseline: true,
 		New: func(f *Fixture) (Loader, error) {
 			path, err := f.Seed("stdlib", YAMLLarge)
 			if err != nil {

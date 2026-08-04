@@ -51,6 +51,13 @@ type Theme struct {
 	Absent  string
 	BarCold string
 	BarWarm string
+
+	// Base and BarBase are the baseline's, and they are a different hue from
+	// every library's on purpose: the baseline is a floor rather than a
+	// competitor, and a reader who takes it for one has been misled by the
+	// drawing.
+	Base    string
+	BarBase string
 }
 
 // LightTheme is the rendering for GitHub's light mode.
@@ -60,6 +67,7 @@ func LightTheme() Theme {
 		Grid: "#d1d9e0", Axis: "#8c959f",
 		Cold: "#8250df", Warm: "#0969da", Absent: "#8c959f",
 		BarCold: "#c9a7f5", BarWarm: "#54aeff",
+		Base: "#9a6700", BarBase: "#e0b872",
 	}
 }
 
@@ -70,6 +78,7 @@ func DarkTheme() Theme {
 		Grid: "#2a313c", Axis: "#6e7681",
 		Cold: "#c297ff", Warm: "#6cb6ff", Absent: "#6e7681",
 		BarCold: "#5a3a92", BarWarm: "#1a5a9e",
+		Base: "#d29922", BarBase: "#6b4f12",
 	}
 }
 
@@ -84,7 +93,7 @@ const (
 	groupHead    = 26.0
 	groupGap     = 12.0
 	headerHeight = 118.0
-	footerHeight = 62.0
+	footerHeight = 76.0
 	axisHeight   = 30.0
 	markRadius   = 3.6
 	capHalf      = 3.0
@@ -94,6 +103,13 @@ const (
 type chartRow struct {
 	Impl    string
 	IsFerry bool
+
+	// IsBaseline marks the row that is not a library: the same job with no
+	// mapping layer over it. It keeps its marks and its measurement, and it is
+	// drawn in its own colour with a rule down the panel at its warm value, so
+	// that what the chart shows is every library's distance from the floor
+	// rather than a race the floor won.
+	IsBaseline bool
 
 	// Caveat is set when this row's warm mark is not comparable with the
 	// others', which the label says with a dagger.
@@ -201,15 +217,18 @@ func chartGroups(in *Input) []chartGroup {
 	out := make([]chartGroup, 0, len(in.Scenarios))
 
 	for _, sc := range in.Scenarios {
-		caveats := map[string]bool{}
+		caveats, baselines := map[string]bool{}, map[string]bool{}
+
 		for _, impl := range sc.Impls {
 			caveats[impl.Name] = impl.WarmCaveat != ""
+			baselines[impl.Name] = impl.Baseline
 		}
 
 		rows := make([]chartRow, 0, len(all))
 		for _, name := range all {
 			r := buildRow(in, sc.Name, name)
 			r.Caveat = caveats[name]
+			r.IsBaseline = baselines[name]
 			rows = append(rows, r)
 		}
 

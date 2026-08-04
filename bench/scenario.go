@@ -62,6 +62,22 @@ type Impl struct {
 	// than no comparison.
 	Notes string
 
+	// Baseline marks the column that is not a library.
+	//
+	// The baseline is the same job written out by hand with no mapping layer
+	// over it: os.Getenv plus strconv for the env scenarios, a direct
+	// yaml.Unmarshal for the YAML ones. It is the floor, and it is the floor by
+	// construction rather than by measurement - no library can beat the code a
+	// library would have to generate, so every row in the comparison loses to
+	// it, always, and a reader learns nothing from being told which one lost
+	// least.
+	//
+	// So it is measured, published, and excluded from "fastest other library".
+	// What it is for instead is the multiple every library is rendered against,
+	// ferry included: applied uniformly that says what each abstraction costs
+	// over the same floor, which is the comparison worth having.
+	Baseline bool
+
 	// WarmCaveat, when set, says that this implementation's warm figure is not
 	// comparable with the other rows' and why.
 	//

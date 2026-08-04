@@ -31,6 +31,16 @@ type ImplDoc struct {
 	// Notes is the semantic difference stated out loud.
 	Notes string
 
+	// Baseline marks the column that is not a library: the same job written by
+	// hand with no mapping layer over it.
+	//
+	// It is the floor by construction, so it is never the answer to "fastest
+	// other library" - every row loses to it and saying which lost least is
+	// not information. It is published in every table it would otherwise be
+	// in, and it is the denominator of the multiple rendered against every
+	// library including ferry.
+	Baseline bool
+
 	// WarmCaveat, when set, says the warm figure is not comparable with the
 	// other rows' and why. It marks the cell rather than only the prose.
 	WarmCaveat string

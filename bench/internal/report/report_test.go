@@ -2,6 +2,7 @@ package report_test
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,7 +134,7 @@ func fixtureYAMLImpls() []report.ImplDoc {
 			WarmCaveat: "xload's YAML provider reads and parses the file once, when the loader is " +
 				"constructed, so this warm figure excludes the read and the parse every other row pays.",
 		},
-		{Name: "stdlib", Module: "", Notes: "Direct yaml.Unmarshal."},
+		{Name: "stdlib", Module: "", Notes: "Direct yaml.Unmarshal.", Baseline: true},
 	}
 }
 
@@ -145,7 +146,7 @@ func fixtureImpls() []report.ImplDoc {
 		{Name: "xload", Module: "github.com/gojekfarm/xtools/xload", Notes: "Reflects per call."},
 		{Name: "go-envconfig", Module: "github.com/sethvargo/go-envconfig", Notes: "Reflects per call."},
 		{Name: "kelseyhightower", Module: "github.com/kelseyhightower/envconfig", Notes: "Reflects per call."},
-		{Name: "stdlib", Module: "", Notes: "Hand-rolled os.Getenv."},
+		{Name: "stdlib", Module: "", Notes: "Hand-rolled os.Getenv.", Baseline: true},
 	}
 }
 
@@ -343,7 +344,7 @@ func TestChartShowsUnmeasuredAsWords(t *testing.T) {
 func TestChartOrdersByTheMeasurement(t *testing.T) {
 	svg := report.Chart(input(t), report.LightTheme())
 
-	first := strings.Index(svg, ">stdlib<")
+	first := strings.Index(svg, ">stdlib "+report.BaselineTag+"<")
 	ferry := strings.Index(svg, ">ferry<")
 
 	if first < 0 || ferry < 0 {
@@ -427,4 +428,166 @@ func TestReplaceSectionFailsWithoutMarkers(t *testing.T) {
 			}
 		})
 	}
+}
+
+// summaryRow returns the cells of the summary's row for one scenario, split on
+// the pipe, so that an assertion can name a column rather than search the whole
+// line and match a figure that is legitimately in a different cell.
+func summaryRow(t *testing.T, summary, scenario string) []string {
+	t.Helper()
+
+	for line := range strings.SplitSeq(summary, "\n") {
+		if strings.HasPrefix(line, "| `"+scenario+"`") {
+			return strings.Split(line, "|")
+		}
+	}
+
+	t.Fatalf("the summary has no row for %s", scenario)
+
+	return nil
+}
+
+// fastestOtherCell is the column the summary names a library in. Index 3 is the
+// third cell of a row that opens with an empty field before the first pipe.
+const fastestOtherCell = 3
+
+// TestSummaryNeverRanksTheBaselineAsALibrary is the rule that stops the
+// baseline being reported as the thing ferry lost to.
+//
+// The baseline is the same job with no mapping layer over it. No mapping
+// library beats it, so every row loses to it by construction and "the fastest
+// other library" resolving to it says only that the comparison had a floor in
+// it. It is not thereby hidden: the row below asserts that the same table still
+// publishes its raw figure and ferry's multiple over it.
+func TestSummaryNeverRanksTheBaselineAsALibrary(t *testing.T) {
+	in := input(t)
+	got := report.Summary(in)
+
+	found := 0
+
+	for _, sc := range in.Scenarios {
+		for _, impl := range sc.Impls {
+			if !impl.Baseline {
+				continue
+			}
+
+			found++
+
+			cell := summaryRow(t, got, sc.Name)[fastestOtherCell]
+			if strings.Contains(cell, "("+impl.Name+")") {
+				t.Errorf("the summary names %s as the fastest other library in %s: %q\n"+
+					"It is the baseline: nothing in the comparison can beat it, so ranking "+
+					"against it is not a comparison.", impl.Name, sc.Name, cell)
+			}
+		}
+	}
+
+	if found == 0 {
+		t.Fatal("no baseline in the fixture, so this test asserts nothing")
+	}
+}
+
+// TestSummaryKeepsTheBaselineVisible is the other half of the same rule, and it
+// exists so that the change above cannot become a way to drop a bad number.
+func TestSummaryKeepsTheBaselineVisible(t *testing.T) {
+	in := input(t)
+	got := report.Summary(in)
+
+	for _, sc := range in.Scenarios {
+		for _, impl := range sc.Impls {
+			if !impl.Baseline {
+				continue
+			}
+
+			if _, ok := in.Stats.Lookup(report.Key{Scenario: sc.Name, Mode: "warm", Impl: impl.Name}); !ok {
+				continue
+			}
+
+			row := strings.Join(summaryRow(t, got, sc.Name), "|")
+			if !strings.Contains(row, "("+impl.Name+")") {
+				t.Errorf("the summary's %s row does not carry the baseline's own figure: %q", sc.Name, row)
+			}
+		}
+	}
+}
+
+// TestBaselineMultipleIsPublishedUnrounded checks that the multiple ferry is
+// rendered at is the one the measurements give, at the same precision every
+// other library's is rendered at.
+//
+// The README stopped computing it when the column was dropped, so the two halves
+// of the rule are checked in the two places they now live: the results file
+// carries the figure itself, and the README row carries both of its operands, so
+// nothing about it is out of reach from either document.
+func TestBaselineMultipleIsPublishedUnrounded(t *testing.T) {
+	in := input(t)
+
+	ferry, ok := in.Stats.Lookup(report.Key{Scenario: "env_small", Mode: "warm", Impl: "ferry"})
+	if !ok {
+		t.Fatal("the fixture has no warm ferry measurement in env_small")
+	}
+
+	base, ok := in.Stats.Lookup(report.Key{Scenario: "env_small", Mode: "warm", Impl: "stdlib"})
+	if !ok {
+		t.Fatal("the fixture has no warm baseline measurement in env_small")
+	}
+
+	want := fmt.Sprintf("%.2fx", ferry["sec/op"].Value/base["sec/op"].Value)
+	if got := report.Results(in); !strings.Contains(got, want) {
+		t.Errorf("the results file does not carry ferry's %s over the baseline; it is the figure "+
+			"the reframing exists to publish, and it is not roundable", want)
+	}
+
+	row := strings.Join(summaryRow(t, report.Summary(in), "env_small"), "|")
+	for _, operand := range []string{"2.75", "166ns"} {
+		if !strings.Contains(row, operand) {
+			t.Errorf("the README row lost %q, so ferry's multiple over the baseline is no longer "+
+				"derivable from it: %q", operand, row)
+		}
+	}
+}
+
+// TestResultsGivesEveryLibraryABaselineMultiple checks the treatment is uniform:
+// every row of every scenario table carries the column, so no row can be the one
+// that is spared it.
+func TestResultsGivesEveryLibraryABaselineMultiple(t *testing.T) {
+	in := input(t)
+	got := report.Results(in)
+
+	for _, sc := range in.Scenarios {
+		for _, impl := range sc.Impls {
+			if _, ok := in.Stats.Lookup(report.Key{Scenario: sc.Name, Mode: "warm", Impl: impl.Name}); !ok {
+				continue
+			}
+
+			cells := scenarioRow(t, got, sc.Name, impl)
+			if strings.TrimSpace(cells[baselineColumn]) == "" {
+				t.Errorf("%s has no baseline multiple in %s: %q", impl.Name, sc.Name, cells)
+			}
+		}
+	}
+}
+
+// baselineColumn is the "warm x baseline" cell of a scenario table's row.
+const baselineColumn = 4
+
+func scenarioRow(t *testing.T, results, scenario string, impl report.ImplDoc) []string {
+	t.Helper()
+
+	section := results[strings.Index(results, "## `"+scenario+"`"):]
+
+	name := impl.Name
+	if impl.Baseline {
+		name += " " + report.BaselineTag
+	}
+
+	for line := range strings.SplitSeq(section, "\n") {
+		if strings.HasPrefix(line, "| "+name+" |") {
+			return strings.Split(line, "|")
+		}
+	}
+
+	t.Fatalf("%s has no row in %s's table", name, scenario)
+
+	return nil
 }
