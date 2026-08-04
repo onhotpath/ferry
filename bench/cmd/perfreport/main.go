@@ -8,6 +8,11 @@
 // is no default, no placeholder and no fallback: a measurement that is not in
 // the input renders as "not measured".
 //
+// It has a second mode, -rerender, for the case where the prose is wrong and
+// the numbers are not: it rebuilds the same three files from the committed
+// results file's own contents, so a corrected note can be published without a
+// benchmark run and without a person retyping the flags the last run used.
+//
 // It imports the benchmark package, and that is deliberate twice over. It is
 // where the scenario descriptions and the per-library notes live, so they
 // cannot drift from the code that was measured; and linking it puts every
@@ -65,6 +70,12 @@ type opts struct {
 	generated string
 	linkDir   string
 	allowNoMk bool
+
+	// rerender, extractTo and recheck are the re-render mode, which publishes
+	// a corrected file without measuring anything. See rerender.go.
+	rerender  string
+	extractTo string
+	recheck   string
 }
 
 // chartLight and chartDark are the two files the chart is written to, beside
@@ -98,10 +109,26 @@ func parseFlags() *opts {
 	flag.BoolVar(&o.allowNoMk, "allow-missing-markers", false,
 		"write the results file and warn, rather than failing, when the README has no markers")
 
+	flag.StringVar(&o.rerender, "rerender", "",
+		"re-render this already-published results `file` from its own contents rather than from a "+
+			"benchmark run. The measurement, and everything that describes it, is recovered from the "+
+			"file; only the prose the harness supplies is re-derived.")
+	flag.StringVar(&o.extractTo, "extract-to", "",
+		"with -rerender, write the two embedded appendices into this `directory` and stop, so that "+
+			"benchstat can be run over them again")
+	flag.StringVar(&o.recheck, "recheck", "",
+		"with -rerender, benchstat text `file` freshly produced from the extracted raw output. It is "+
+			"checked against the block the published file carries, which is the guard that the file "+
+			"was internally consistent before anything was re-rendered.")
+
 	return o
 }
 
 func run(o *opts) error {
+	if o.rerender != "" {
+		return o.republish()
+	}
+
 	if err := o.require(); err != nil {
 		return err
 	}
@@ -111,17 +138,23 @@ func run(o *opts) error {
 		return err
 	}
 
-	if err := os.WriteFile(o.results, []byte(report.Results(&in)), published); err != nil {
+	return o.write(&in)
+}
+
+// write emits everything one rendered input produces: the results file, both
+// charts, and the README's marked section.
+func (o *opts) write(in *report.Input) error {
+	if err := os.WriteFile(o.results, []byte(report.Results(in)), published); err != nil {
 		return fmt.Errorf("writing %s: %w", o.results, err)
 	}
 
 	fmt.Println("perfreport: wrote", o.results)
 
-	if err := o.writeCharts(&in); err != nil {
+	if err := o.writeCharts(in); err != nil {
 		return err
 	}
 
-	return o.patchREADME(&in)
+	return o.patchREADME(in)
 }
 
 func (o *opts) require() error {
