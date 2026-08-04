@@ -1,6 +1,9 @@
 package ferrytest
 
 import (
+	"context"
+	"reflect"
+
 	"github.com/onhotpath/ferry"
 )
 
@@ -129,18 +132,38 @@ type Instance struct {
 }
 
 // Artefact is one fixed value and the plane contents that dumping it must
-// produce, byte for byte.
+// produce, byte for byte. [Golden] is the only way to build one.
 //
 // It is the driver's half of ferry's second compatibility promise. A change to
 // one of these rows is a change to what every stored artefact of that plane
 // means, which is a major version of the module that owns it and not a test
 // fixture edit (ADR-0013).
+//
+// # Why it holds a closure rather than the two fields ADR-0014 published
+//
+// As published this was a struct of `Value any` and `Want string`, filled in as
+// a composite literal. That cannot be dumped, and the reason is a decision core
+// took on purpose: [ferry.Dump] compiles the schema from its type parameter
+// rather than from the dynamic type of what it was handed, so that the schema
+// and the walk see one type, and `any` is therefore the schema of `interface{}`
+// - which names no address and is refused. A slice of these rows is
+// heterogeneous by design, which is the whole point of a golden table, so the
+// remedy #71 used for [Record] - make the function generic and let inference
+// resolve the call site - is not available to a struct field.
+//
+// So the type parameter is captured where it still exists, at the row's own
+// construction, and what the row carries is the dump rather than the value.
+// [Plane.Golden] stays a heterogeneous slice and this type stays opaque.
+//
+// This is provisional: it is one of the three shapes offered in #109, taken so
+// that the golden artefact case could be built at all, and the owner has not
+// ruled between them.
 type Artefact struct {
-	// Value is dumped. It is an ordinary annotated struct, and it is `any`
-	// because a Plane describes one plane over many types rather than one type.
-	Value any
+	// dump is [ferry.Dump] instantiated at the row's own type, closed over the
+	// value the row pins.
+	dump func(ctx context.Context, sink ferry.Sink, opts ...ferry.Option) error
 
-	// Want is the exact contents the plane must hold afterwards, compared
+	// want is the exact contents the plane must hold afterwards, compared
 	// against what [Instance.Contents] yields.
 	//
 	// One string, which fits a plane holding one document and puts an
@@ -151,7 +174,37 @@ type Artefact struct {
 	// which is why it is stated rather than solved here: a rendering two
 	// different stores share is a golden row that cannot see the difference,
 	// exactly as a plane key two addresses share is data loss.
-	Want string
+	want string
+
+	// label names the row's type in a report, because a row that carries a
+	// closure has nothing else a failure could name.
+	label string
+}
+
+// Golden pins one value's spelling on a plane: dumping v must leave the plane
+// holding exactly want.
+//
+//	Golden: []ferrytest.Artefact{
+//	    ferrytest.Golden(struct {
+//	        B []byte `ferry:"b"`
+//	    }{[]byte("hi")}, "b: !!binary aGk=\n"),
+//	},
+//
+// It is a function where ADR-0014 published a composite literal, and [Artefact]
+// records why: a row's type has to be captured while the compiler still has it,
+// because [ferry.Dump] takes its schema from its type parameter and `any` is the
+// schema of nothing.
+//
+// v is an ordinary annotated struct, exactly as it is at a [ferry.Dump] call
+// site, and a bare leaf is refused there for naming no address.
+func Golden[T any](v T, want string) Artefact {
+	return Artefact{
+		dump: func(ctx context.Context, sink ferry.Sink, opts ...ferry.Option) error {
+			return ferry.Dump(ctx, v, sink, opts...)
+		},
+		want:  want,
+		label: reflect.TypeFor[T]().String(),
+	}
 }
 
 // MemPlane is the plane with nothing of its own: a map from address to Value,

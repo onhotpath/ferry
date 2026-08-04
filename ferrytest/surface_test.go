@@ -28,11 +28,23 @@ var (
 // throughout roundtrip_test.go, which is the whole of why T is an interface.
 type capture struct {
 	lines   []string
+	logs    []string
 	helpers int
 }
 
 func (c *capture) Errorf(format string, args ...any) {
 	c.lines = append(c.lines, fmt.Sprintf(format, args...))
+}
+
+// Logf is not on [ferrytest.T] and is deliberately implemented anyway.
+//
+// A suite skips a case that cannot be run - case 10 for every driver in this
+// repository, case 5 for a reader that does not enumerate - and ADR-0014 wants
+// that skip explicit rather than silent. T is two methods and neither is a log,
+// so a suite writes the skip where the reporter can carry one, which *testing.T
+// does and which this captures separately from the failures.
+func (c *capture) Logf(format string, args ...any) {
+	c.logs = append(c.logs, fmt.Sprintf(format, args...))
 }
 
 // Helper is counted rather than ignored, because a suite that never calls it
@@ -63,9 +75,7 @@ func TestCaptureIsAT(t *testing.T) {
 // The surface is fixed by decision rather than left to emerge - which is why
 // revive's max-public-structs is switched off in this repository - so a name
 // arriving here without an ADR behind it is a change to a published contract
-// that a driver's CI depends on. The four still missing from ADR-0014's twenty
-// are the suites that need a codec registry: Driver, Codec, Complete and
-// Injective.
+// that a driver's CI depends on.
 //
 // CoreTypes arrived ahead of the engine that can satisfy it, which is #72's own
 // decision rather than an accident of ordering: the table is ADR-0013's
@@ -73,18 +83,27 @@ func TestCaptureIsAT(t *testing.T) {
 // that writes it and the types the engine cannot yet carry are named in a skip
 // list in core's own test rather than being absent from the artefact.
 //
-// Twenty rather than nineteen since #101, which added Instance: the shape as
-// published could not support its own golden artefact case, because nothing
-// handed a suite the contents of the plane instance it had just dumped to.
+// # Twenty-three, where ADR-0014 published nineteen
 //
-// Nineteen of the twenty since #79, which added Complete: the check joins over
-// the union of three tables and the third of them is a registry, so it could
-// not be written before one existed. The three still missing are Driver, Codec
-// and Injective.
+// Three of the four are the ADR's own, arriving with the tickets that could
+// build them: Instance under #101, because the shape as published could not
+// support its own golden artefact case; Complete under #79, because the check
+// joins over three tables and the third is a registry; and Driver, Codec and
+// Injective here, which is the last of the list.
+//
+// The twenty-third is Golden, and it is provisional. ADR-0014 publishes
+// Artefact as a struct of `Value any` and `Want string`, filled in as a
+// composite literal, and that cannot be dumped: ferry.Dump compiles its schema
+// from its type parameter, so `any` is the schema of interface{}, which names no
+// address and is refused. A slice of Artefact is heterogeneous by design, so the
+// type parameter has to be captured at the row's own construction, which is a
+// constructor. #109 is where the owner chooses between that and two other
+// shapes; this is option 1, taken so that case 11 could be built at all.
 func TestExportedSurface(t *testing.T) {
 	want := []string{
-		"Artefact", "At", "BitEq", "Case", "Complete", "CoreTypes", "Eq", "Instance", "MapEq", "MemPlane",
-		"Plane", "Proof", "PtrEq", "Record", "RoundTrip", "SliceEq", "Static", "T", "Type",
+		"Artefact", "At", "BitEq", "Case", "Codec", "Complete", "CoreTypes", "Driver", "Eq", "Golden",
+		"Injective", "Instance", "MapEq", "MemPlane", "Plane", "Proof", "PtrEq", "Record", "RoundTrip",
+		"SliceEq", "Static", "T", "Type",
 	}
 
 	got := exportedNames(t)
