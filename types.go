@@ -448,6 +448,90 @@ func timeCodec() leafCodec {
 	}
 }
 
+// mapKey is what a key type does at the address it becomes, in both directions.
+//
+// It is not a [leafCodec] and carries no kind, because a key never crosses the
+// boundary as a Value: it becomes the segment text of an address on the way out
+// and is parsed back out of that text on the way in. That is also why a key type
+// is a decode rather than a conversion - a prototype that converted the segment
+// text straight to the key type panicked on map[int]string with "value of type
+// string cannot be converted to type int", which is how the restriction below
+// was found rather than assumed.
+//
+// Rendering cannot fail, because core admits only key types whose text is total
+// over the type. Parsing can, because the text is the plane's.
+type mapKey struct {
+	text  func(reflect.Value) string
+	parse func(reflect.Value, string) error
+}
+
+// mapKeyFor resolves a type's key behaviour, and declines every type that is not
+// declared usable as a map key.
+//
+// Admissibility is declared per entry and nothing else confers it, membership of
+// the identity table included. The obligation is injectivity under Go's ==,
+// because == is what a Go map's key identity is and therefore what decides how
+// many entries the map holds: two keys rendering to one text are one address,
+// and one entry is lost with no error anywhere. string and the integer kinds are
+// admitted because they are trivially injective - the text is the value, or base
+// 10 is a bijection on the width - and time.Duration because a randomised hunt
+// over 2^20 values plus the extremes found no collision. time.Time is in the
+// same identity table and is refused, which is the whole of what "per entry"
+// means (ADR-0005).
+func mapKeyFor(t reflect.Type) (mapKey, bool) {
+	// Identity before kind, for the reason [leafFor] gives: time.Duration's kind
+	// is int64, so a kind-first resolution would key a map by a nanosecond count
+	// and write /timeouts/30000000000 where ferry writes /timeouts/30s.
+	if t == reflect.TypeFor[time.Duration]() {
+		return mapKey{
+			text:  func(v reflect.Value) string { return time.Duration(v.Int()).String() },
+			parse: durationCodec().parse,
+		}, true
+	}
+
+	switch t.Kind() {
+	case reflect.String:
+		return mapKey{text: reflect.Value.String, parse: stringCodec().parse}, true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return mapKey{
+			text:  func(v reflect.Value) string { return strconv.FormatInt(v.Int(), numBase) },
+			parse: signedCodec(t.Bits()).parse,
+		}, true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return mapKey{
+			text:  func(v reflect.Value) string { return strconv.FormatUint(v.Uint(), numBase) },
+			parse: unsignedCodec(t.Bits()).parse,
+		}, true
+	default:
+		return mapKey{}, false
+	}
+}
+
+// mapKeyMsg refuses a key type, and it is three messages rather than one because
+// only the third has a remedy that exists.
+//
+// A message reading "register an injective codec for it" would be naming a
+// remedy that does not exist for the first two: no text form of time.Time can be
+// injective, because == compares a *Location and no text carries a pointer, and
+// two distinct NaN payloads both format as NaN. Naming a remedy that cannot work
+// is the mistake ADR-0005 corrected for time.Time by name.
+func mapKeyMsg(t reflect.Type) string {
+	switch {
+	case t == reflect.TypeFor[time.Time]():
+		return "time.Time is in core's own set and is not usable as a map key: its text is not injective over " +
+			"the type, because == compares the *Location and no text carries a pointer, so two distinct keys " +
+			"collapse into one address - key the map by a type that is injective, or convert the key yourself"
+	case t.Kind() == reflect.Float32 || t.Kind() == reflect.Float64:
+		return fmt.Sprintf("%s is not usable as a map key: two distinct NaN payloads both format as NaN, so its "+
+			"text is not injective over the type and two distinct keys collapse into one address - key the "+
+			"map by a type that is injective, or convert the key yourself", t)
+	default:
+		return fmt.Sprintf("%s is not usable as a map key: a key becomes the segment text of an address and has "+
+			"to parse back out of it, so ferry keys a map by a string or an integer kind - key the map by one, "+
+			"or register a codec for it that declares itself usable as one", t)
+	}
+}
+
 // decode applies one plane observation to one field, and is the whole of
 // ADR-0005's donor rule and ADR-0006's null rule in one place.
 //

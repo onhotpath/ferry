@@ -98,7 +98,8 @@ func runLoad(ctx context.Context, dst reflect.Value, src Source, opts []Option) 
 		return fromDriver(momentOpen, Path{}, err)
 	}
 
-	walked := newWalker(loadFrom{r: r, wrote: new(int)}).walk(ctx, sch.root, loadRoot(dst))
+	dir := loadFrom{r: r, wrote: new(int)}
+	walked := newWalker(dir).walk(ctx, spot{n: sch.root, v: loadRoot(dst)})
 
 	return join(walked, released(r))
 }
@@ -125,7 +126,11 @@ func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) err
 		return fromDriver(momentOpen, Path{}, err)
 	}
 
-	walked := newWalker(dumpTo{w: w}).walk(ctx, sch.root, root)
+	// The minted set is the walk's own and starts empty on every dump, because
+	// the addresses in it came from this value and the next dump has another.
+	dir := dumpTo{w: w, addrs: sch.addrs, minted: map[Path]struct{}{}}
+
+	walked := newWalker(dir).walk(ctx, spot{n: sch.root, v: root})
 	if walked == nil {
 		walked = committed(ctx, w)
 	}

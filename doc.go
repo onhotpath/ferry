@@ -73,6 +73,49 @@
 // registration as the fix, because a codec collapses a type to a leaf and a leaf
 // needs no address set.
 //
+// # The composites whose addresses come from the value
+//
+// []T mints one Index segment per element and map[K]V one Name segment per key,
+// and nothing about the type differs between two values that mint different
+// address sets. So a schema can compile, pass every driver check, and be refused
+// later because of what a map contained: both collision rules run at two points
+// and neither is after a write - the static tier at schema compile with no value
+// and no plane, and the dynamic tier as each address is minted, before the write
+// it belongs to.
+//
+// A composite with no elements writes Null at its own address, whether it is nil
+// or empty, and loads back to nil. Three Go states meet two observations at a
+// container address and the collision is forced rather than chosen: measured
+// through a real YAML plane, a missing key, an empty list and an empty mapping
+// are one observation. The distinction between nil and empty is therefore not
+// expressible by any type in the set - not by *[]T either, whose nil pointer and
+// pointer to an empty slice are one address carrying one value - and a user who
+// needs it models it as struct{ Set bool; Items []string }.
+//
+// Load reaches a dynamic address only through [Enumerator], which a [Reader] may
+// implement and need not. It cannot be required, because a Vault token with read
+// and no list is ordinary, and it cannot be omitted, because a map could then be
+// loaded from no plane at all. So the two directions cover different address
+// sets: Dump reaches every address always, since the value is in hand, and
+// loading a slice or a map from a source that cannot list is an error naming the
+// field and the source rather than a silently empty one. A Null at the
+// container's own address is a complete answer and needs no enumeration.
+//
+// A type keys a map only if it is declared usable as one, per entry, and nothing
+// else confers it - membership of the identity table included. The obligation is
+// injectivity under Go's ==, because == is what a Go map's key identity is and
+// therefore what decides how many entries the map holds. string and the integer
+// kinds are admitted, and so is time.Duration; time.Time is refused, and the
+// refusal is forced rather than chosen, because == compares its *Location and no
+// text carries a pointer. Float keys are excluded because two distinct NaN
+// payloads both format as NaN.
+//
+// A map's members are written in the order of their key text, which is ADR-0001's
+// determinism invariant at the one place a Go map reaches a plane. Two members
+// rendering to one address are refused as the address is minted, naming it,
+// because there is no stable answer to give: which of the two writes survives is
+// which the walk makes last.
+//
 // # The type set's sharp edges
 //
 // Three of these are not defects, and every one of them is easier to meet in

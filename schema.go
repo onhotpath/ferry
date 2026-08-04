@@ -92,6 +92,8 @@ const (
 	nodeStruct                  // a position whose members are compiled below it
 	nodePointer                 // a composite that can be nil, so its own address carries an answer
 	nodeArray                   // a position whose members are exactly N, from the type
+	nodeSlice                   // a position whose members are one Index segment each, from the value
+	nodeMap                     // a position whose members are one Name segment each, from the value
 )
 
 // node is one compiled position, holding resolved behaviour rather than the
@@ -123,6 +125,11 @@ type node struct {
 	hasDef   bool
 	required bool
 	omitzero bool
+
+	// key is a map's key behaviour, resolved here for the same reason codec is:
+	// which type keys this map is the type's business and is settled once per
+	// position per schema, not per entry of every dump.
+	key mapKey
 }
 
 // compiler is the state one compile accumulates.
@@ -167,6 +174,13 @@ type site struct {
 	// Auth Cred, which has no address of its own, from Auth *Cred, which has one
 	// (ADR-0003).
 	nullable bool
+
+	// dynamic says that a slice or a map above this position mints the segment
+	// that reaches it, so what is compiled here is an address shape and not an
+	// address. Nothing under it joins the static set: a driver is handed only
+	// addresses it can fetch, write, name and check, and there is nothing at a
+	// shape to fetch (ADR-0003).
+	dynamic bool
 }
 
 // compileSchema is the one compiler. Every entry point reaches a compiled type
@@ -226,7 +240,7 @@ func (c *compiler) compileStruct(t reflect.Type, s site, base []int) (n *node, a
 
 	for i := range t.NumField() {
 		f := t.Field(i)
-		count += c.compileField(&f, n, site{addr: s.addr, field: s.field, index: base})
+		count += c.compileField(&f, n, site{addr: s.addr, field: s.field, index: base, dynamic: s.dynamic})
 	}
 
 	c.stack = c.stack[:len(c.stack)-1]
@@ -255,7 +269,12 @@ func noAddressMsg(t reflect.Type) string {
 // compileField is the field rule, which is the other half of the grammar and is
 // where most of the argument is (ADR-0008).
 func (c *compiler) compileField(f *reflect.StructField, parent *node, s site) int {
-	at := site{addr: s.addr, field: s.field.At(f.Name), index: slices.Concat(s.index, f.Index)}
+	at := site{
+		addr:    s.addr,
+		field:   s.field.At(f.Name),
+		index:   slices.Concat(s.index, f.Index),
+		dynamic: s.dynamic,
+	}
 
 	r, err := scanTag(string(f.Tag), c.cfg.tagKey)
 	if err != nil {
@@ -364,7 +383,12 @@ func (c *compiler) compileTagged(t reflect.Type, parent *node, s site, value str
 		return 0
 	}
 
-	return c.compileValue(t, parent, site{addr: s.addr.At(tg.name), field: s.field, index: s.index}, tg)
+	return c.compileValue(t, parent, site{
+		addr:    s.addr.At(tg.name),
+		field:   s.field,
+		index:   s.index,
+		dynamic: s.dynamic,
+	}, tg)
 }
 
 // compileValue is the second and third tiers: is each option legal at this
@@ -400,6 +424,10 @@ func (c *compiler) compileValue(t reflect.Type, parent *node, s site, tg tag) in
 		return c.compilePointer(t, parent, s, tg)
 	case reflect.Array:
 		return c.compileArray(t, parent, s, tg)
+	case reflect.Slice:
+		return c.compileSlice(t, parent, s, tg)
+	case reflect.Map:
+		return c.compileMap(t, parent, s, tg)
 	default:
 		c.errAt(s.addr, refusalMsg(t))
 
@@ -427,15 +455,133 @@ func (c *compiler) compilePointer(t reflect.Type, parent *node, s site, tg tag) 
 	// the pointer points at. nullable is what tells the element that its address
 	// is a place a plane can be asked, which is the whole difference between
 	// Auth Cred and Auth *Cred.
-	count := c.compileValue(t.Elem(), n, site{addr: s.addr, field: s.field, nullable: true}, tg)
+	count := c.compileValue(t.Elem(), n, site{
+		addr:     s.addr,
+		field:    s.field,
+		nullable: true,
+		dynamic:  s.dynamic,
+	}, tg)
 	if count == 0 {
 		return 0
 	}
 
 	parent.fields = append(parent.fields, n)
-	c.containers = append(c.containers, leaf{addr: s.addr, field: s.field})
+	c.recordContainer(s)
 
 	return count
+}
+
+// compileSlice is []T, whose length is a property of the value rather than of
+// the type, so it mints one Index segment per element and the compiler records
+// a shape rather than addresses (ADR-0005).
+//
+// That is the capability difference an array does not have and it is not
+// cosmetic: a slice's element addresses do not exist until there is a value, so
+// Dump reaches every one of them always and Load reaches them only from a
+// source that can list. The element is compiled once, at the address shape its
+// members share, and the walk carries the realised address it stands at.
+func (c *compiler) compileSlice(t reflect.Type, parent *node, s site, tg tag) int {
+	c.checkDynamicOptions(t, s.addr, tg)
+
+	n := &node{kind: nodeSlice, addr: s.addr, index: s.index}
+
+	// An element inherits no option, for the reason [compileArray] gives: the
+	// tag names the composite, and what each option would mean at an element is
+	// not something inheritance decides silently.
+	count := c.compileValue(t.Elem(), n, shapeSite(s), tag{})
+	if count == 0 {
+		return 0
+	}
+
+	parent.fields = append(parent.fields, n)
+	c.recordContainer(s)
+
+	return count
+}
+
+// compileMap is map[K]V, which mints one Name segment per key.
+//
+// The key type is resolved before the element is compiled, because a map whose
+// key ferry cannot address is refused whatever its values are, and reporting the
+// element's own faults underneath that would be two diagnoses for one mistake.
+func (c *compiler) compileMap(t reflect.Type, parent *node, s site, tg tag) int {
+	c.checkDynamicOptions(t, s.addr, tg)
+
+	key, ok := mapKeyFor(t.Key())
+	if !ok {
+		c.errAt(s.addr, mapKeyMsg(t.Key()))
+
+		return 0
+	}
+
+	n := &node{kind: nodeMap, addr: s.addr, index: s.index, key: key}
+
+	count := c.compileValue(t.Elem(), n, shapeSite(s), tag{})
+	if count == 0 {
+		return 0
+	}
+
+	parent.fields = append(parent.fields, n)
+	c.recordContainer(s)
+
+	return count
+}
+
+// shapeSite is where a dynamic composite's element is compiled: one address
+// shape every member shares, and out of the static address set.
+//
+// It carries no reflect index path, because a member of a slice or a map is
+// reached by position or by key rather than by field. The count it returns still
+// reaches the enclosing struct, which is what makes the maps-no-address backstop
+// count minted address shapes rather than static leaf addresses - without it,
+// struct{ Limits map[string]int } contributes nothing and does not compile.
+func shapeSite(s site) site {
+	return site{addr: s.addr.shape(), field: s.field.shape(), dynamic: true}
+}
+
+// checkDynamicOptions is the second tier at a slice or a map.
+//
+// required names an address, so it is admissible exactly where that address's
+// children come from the type, and here they come from the value (ADR-0006).
+// The refusal carries the remedy because the user reaching for it has a
+// legitimate intent that is simply not writable: five YAML documents give three
+// distinct observations at a container address, and a missing key and an empty
+// list are one of them.
+func (c *compiler) checkDynamicOptions(t reflect.Type, addr Path, tg tag) {
+	if tg.required {
+		c.errAt(addr, fmt.Sprintf(
+			"required is not available on %s: a plane cannot report present and empty at a container address, "+
+				"so required could only mean at least one element, which is a constraint on the value rather "+
+				"than an assertion about the plane - model the distinction as a struct with a set flag, or "+
+				"check len() after Load", t))
+	}
+
+	c.checkNoDefault(t, addr, tg)
+}
+
+// recordLeaf adds a leaf address to the static set, and adds nothing under a
+// dynamic composite: what is compiled there is a shape, a driver is never handed
+// one, and there is nothing at it to fetch or write (ADR-0003).
+func (c *compiler) recordLeaf(s site) {
+	if s.dynamic {
+		return
+	}
+
+	c.leaves = append(c.leaves, leaf{addr: s.addr, field: s.field})
+}
+
+// recordContainer adds a composite's own address, which is where the Null an
+// empty one writes sits.
+//
+// It adds nothing where a pointer above already owns the address, because a
+// pointer adds no second bit: *[]string at nil and a pointer to an empty slice
+// are one address carrying one value (ADR-0005).
+func (c *compiler) recordContainer(s site) {
+	if s.dynamic || s.nullable {
+		return
+	}
+
+	c.containers = append(c.containers, leaf{addr: s.addr, field: s.field})
 }
 
 // compileArray is [N]T, whose length is part of the type, so it mints exactly N
@@ -486,7 +632,7 @@ func (c *compiler) compileArray(t reflect.Type, parent *node, s site, tg tag) in
 // too, because "the third element of Arr" is what a reader needs and "Arr" is
 // what every element would otherwise be called.
 func elemSite(s site, at uint) site {
-	return site{addr: s.addr.Elem(at), field: s.field.Elem(at)}
+	return site{addr: s.addr.Elem(at), field: s.field.Elem(at), dynamic: s.dynamic}
 }
 
 // compileLeaf records a value that crosses the boundary at one address, with
@@ -497,7 +643,7 @@ func (c *compiler) compileLeaf(cd leafCodec, t reflect.Type, parent *node, s sit
 		kind: nodeLeaf, addr: s.addr, index: s.index, codec: cd,
 		def: String(tg.def), hasDef: tg.hasDef, required: tg.required, omitzero: tg.omitzero,
 	})
-	c.leaves = append(c.leaves, leaf{addr: s.addr, field: s.field})
+	c.recordLeaf(s)
 
 	return 1
 }
@@ -607,9 +753,9 @@ func recursionMsg(t, cycle reflect.Type) string {
 // It searches through pointers, arrays, slices and maps, which are the steps
 // that carry a type without naming a new struct, and it never steps through a
 // struct's fields: those are the compile's own descent, and inside is the stack
-// it keeps as it goes. Searching through a slice and a map matters even while
-// neither compiles, because struct{ Kids []Tree } is a recursive type and
-// "unsupported element" is the wrong diagnosis for it.
+// it keeps as it goes. Searching through a slice and a map is what makes
+// struct{ Kids []Tree } a recursive type rather than a slice whose element
+// happens not to compile, which is the wrong diagnosis for it.
 func cycleFrom(t reflect.Type, inside []reflect.Type) (reflect.Type, bool) {
 	if slices.Contains(inside, t) {
 		return t, true

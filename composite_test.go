@@ -712,9 +712,13 @@ func mustRoundTripAPointedLeaf(t *testing.T, v *int, want Value) {
 	}
 }
 
-// rootArray and rootLeaf are the two root shapes an entry point's signature
-// cannot refuse for itself.
-type rootArray [2]string
+// rootArray, rootSlice and rootMap are the root shapes an entry point's
+// signature cannot refuse for itself.
+type (
+	rootArray [2]string
+	rootSlice []string
+	rootMap   map[string]string
+)
 
 // TestTheRootMustBeAStructFerryWalks is the one rule Load[T] and Dump cannot
 // express in their signatures.
@@ -730,6 +734,16 @@ func TestTheRootMustBeAStructFerryWalks(t *testing.T) {
 		name:     "a root array",
 		run:      Compile[rootArray],
 		want:     []string{"ferry.rootArray is not a struct ferry walks"},
+		elements: 1,
+	}, {
+		name:     "a root slice",
+		run:      Compile[rootSlice],
+		want:     []string{"ferry.rootSlice is not a struct ferry walks"},
+		elements: 1,
+	}, {
+		name:     "a root map, which is the shape a first run most often reaches for",
+		run:      Compile[rootMap],
+		want:     []string{"ferry.rootMap is not a struct ferry walks"},
 		elements: 1,
 	}, {
 		name:     "and a root pointer to a leaf",
@@ -801,6 +815,11 @@ func (s *treeSink) Set(_ context.Context, addr Path, v Value) error {
 // A root leaf mints the empty path, which renders as nothing and is therefore
 // not distinguishable from no address at all, and a sink handed one writes
 // nothing and reports success.
+//
+// A root map or a root slice is the same hole reached by the other door, and it
+// is the value a first run most often has: a nil or empty one writes a Null at
+// its own address, that address is the empty path, and the whole dump is one
+// write nobody can see.
 func TestTheRootCheckStandsBecauseTheEmptyPathIsSilent(t *testing.T) {
 	t.Parallel()
 
@@ -818,8 +837,18 @@ func TestTheRootCheckStandsBecauseTheEmptyPathIsSilent(t *testing.T) {
 		t.Fatalf("the sink wrote %v, and it is meant to work for an ordinary schema", sink.wrote)
 	}
 
+	for _, v := range []Value{String("the whole configuration"), Null()} {
+		mustWriteNothingAtTheEmptyPath(t, sink, v)
+	}
+}
+
+// mustWriteNothingAtTheEmptyPath is the failure mode itself: a sink asked to put
+// a value nowhere has done exactly what it was asked, and reports success.
+func mustWriteNothingAtTheEmptyPath(t *testing.T, sink *treeSink, v Value) {
+	t.Helper()
+
 	before := len(sink.wrote)
-	if err := sink.Set(t.Context(), At(), String("the whole configuration")); err != nil {
+	if err := sink.Set(t.Context(), At(), v); err != nil {
 		t.Fatalf("the sink refused the empty path with %v, which is not the failure mode", err)
 	}
 

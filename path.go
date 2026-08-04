@@ -143,6 +143,36 @@ func (p Path) Elem(i uint) Path {
 	return Path{rendered: string(b)}
 }
 
+// shape extends the address with the segment every member of a dynamic
+// composite shares, which is what a slice element and a map value are compiled
+// under (ADR-0006's /servers/*/port).
+//
+// A shape is not an address. Nothing is at it, no driver is ever handed one,
+// and the walk realises it per member from the value; it exists so that a
+// composite whose members come from the value is compiled once rather than per
+// element. "*" is ordinary segment text under this package's escaping model
+// rather than a marker, which is exactly why a shape may not leave the schema
+// (ADR-0003).
+func (p Path) shape() Path { return p.At(wildcard) }
+
+// wildcard is the shape segment's text. It is spelled as ADR-0006 spells it, so
+// a schema-internal lookup key reads the way the ADR that owns it writes.
+const wildcard = "*"
+
+// concat appends q's segments to p.
+//
+// It is a byte concatenation, which is exact rather than convenient: a
+// rendering carries its own delimiters and escaping leaves no bare one inside a
+// segment, so joining two renderings joins two segment sequences and can do
+// nothing else.
+func (p Path) concat(q Path) Path { return Path{rendered: p.rendered + q.rendered} }
+
+// below is the part of p that extends prefix.
+//
+// The caller has established that prefix is a prefix of p, which the walk gets
+// for free: a member's compiled address extends its container's by construction.
+func (p Path) below(prefix Path) Path { return Path{rendered: p.rendered[len(prefix.rendered):]} }
+
 // String is the canonical rendering: /db/host for two Name segments, /tags#0 for
 // a Name segment followed by an Index segment.
 //

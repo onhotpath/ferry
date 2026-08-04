@@ -18,6 +18,31 @@ import (
 // gets, whose Source and Sink stay unexported inside an Instance and which
 // implements neither Committer nor Releaser.
 
+// TestCoreTypesOverTheMemoryPlane runs every row of the published type table
+// against the engine.
+//
+// The memory plane is where core's value fidelity is stated, because it is the
+// only plane that adds nothing of its own: it stores the boundary Value itself,
+// so a failure here is core's and never a driver's.
+//
+// This test used to run behind a skip list. #72 wrote ferrytest.CoreTypes
+// complete - nineteen rows and 57 cases - ahead of the compiler that admits
+// their types, and named every row the engine could not yet carry against the
+// ticket that would land it. The list was a ratchet rather than a to-do: a row
+// that started round-tripping failed the suite as stale, so a widening ticket
+// could not land green without deleting its entry, and the ticket that emptied
+// the list deleted the list. This one did, and the whole table runs.
+func TestCoreTypesOverTheMemoryPlane(t *testing.T) {
+	t.Parallel()
+
+	rows := ferrytest.CoreTypes()
+	if len(rows) == 0 {
+		t.Fatal("the type table is empty, so this test asserts nothing")
+	}
+
+	ferrytest.RoundTrip(t, ferrytest.MemPlane(), rows)
+}
+
 type memCommon struct {
 	Name string `ferry:"name"`
 	Env  string `ferry:"env"`
