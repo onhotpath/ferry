@@ -123,32 +123,6 @@ func TestCoreTypesIsFreshPerCall(t *testing.T) {
 	}
 }
 
-// admittedMembers is core's supported set as ADR-0005 enumerates it: the two
-// leaves ferry owns by type identity, and one representative type per kind it
-// admits as a leaf.
-//
-// A kind is not a type, so the join needs a canonical member and core picks it
-// rather than leaving every proof author to guess; [3]byte is core's
-// representative for the fixed-size byte array.
-//
-// It is written out here rather than read off the engine on purpose. The engine
-// admits string leaves alone today, so a census taken from it would be a census
-// of one, and the whole point of the check is that the table is complete from
-// this ticket rather than complete relative to whatever the compiler currently
-// tolerates.
-func admittedMembers() []reflect.Type {
-	return []reflect.Type{
-		reflect.TypeFor[time.Duration](), reflect.TypeFor[time.Time](),
-		reflect.TypeFor[bool](), reflect.TypeFor[string](),
-		reflect.TypeFor[int](), reflect.TypeFor[int8](), reflect.TypeFor[int16](),
-		reflect.TypeFor[int32](), reflect.TypeFor[int64](),
-		reflect.TypeFor[uint](), reflect.TypeFor[uint8](), reflect.TypeFor[uint16](),
-		reflect.TypeFor[uint32](), reflect.TypeFor[uint64](),
-		reflect.TypeFor[float32](), reflect.TypeFor[float64](),
-		reflect.TypeFor[[]byte](), reflect.TypeFor[[3]byte](),
-	}
-}
-
 // TestCoreTypesCoversEveryAdmittedMember is the completeness check, and it is
 // the reason the row count is not counted by hand.
 //
@@ -158,18 +132,16 @@ func admittedMembers() []reflect.Type {
 // would think to doubt. ADR-0013 states why that is not housekeeping: the
 // compatibility promise is exactly as wide as this table, so an admitted member
 // with no row is outside the promise by accident rather than by decision.
+//
+// It is [Complete] since #79, and the member list it used to carry is that
+// function's two tables. The check core makes about its own set and the one a
+// registrant makes about theirs are one function over the union of three tables
+// (ADR-0014), so this test is now the same call an ordinary consumer writes.
 func TestCoreTypesCoversEveryAdmittedMember(t *testing.T) {
 	t.Parallel()
 
-	have := map[reflect.Type]bool{}
-	for _, p := range CoreTypes() {
-		have[p.Type()] = true
-	}
-
-	for _, m := range admittedMembers() {
-		if !have[m] {
-			t.Errorf("%s is in core's admitted set and has no proof row", m)
-		}
+	for _, s := range Complete(nil, CoreTypes()...) {
+		t.Errorf("core type set: %s", s)
 	}
 }
 

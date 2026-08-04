@@ -34,6 +34,14 @@ type config struct {
 	// makes a second TagKey a refusal rather than a silent last-wins.
 	tagKey    string
 	tagKeySet bool
+
+	// registry is the codec table this compile resolves against, which defaults
+	// to the one core ships. It belongs here rather than beside here because it
+	// is compile-affecting in exactly ADR-0010's sense: one reflect.Type yields
+	// two different schemas, and two different address sets, under two registries
+	// that disagree about one member type (ADR-0009).
+	registry    *Registry
+	registrySet bool
 }
 
 // defaultTagKey is the key ferry reads when nobody says otherwise.
@@ -42,7 +50,7 @@ const defaultTagKey = "ferry"
 // newConfig resolves an Option list, reporting every Option that was wrong
 // rather than the first one.
 func newConfig(opts []Option) (config, error) {
-	c := config{tagKey: defaultTagKey}
+	c := config{tagKey: defaultTagKey, registry: defaultRegistry}
 
 	errs := make([]error, 0, len(opts))
 	for _, o := range opts {
@@ -85,6 +93,46 @@ func TagKey(key string) Option {
 				c.tagKey, key))
 		default:
 			c.tagKey, c.tagKeySet = key, true
+
+			return nil
+		}
+	})
+}
+
+// WithRegistry names the codec registry this call resolves types against,
+// instead of the one core ships.
+//
+//	reg := ferry.NewRegistry()
+//	if err := reg.Register(ferry.TextCodec[netip.Addr](ferry.KindString)); err != nil { ... }
+//
+//	cfg, err := ferry.Load[Config](ctx, src, ferry.WithRegistry(reg))
+//
+// It is the escape hatch that makes a default registry affordable at all. A
+// global table would leave two tests unable to want different codecs for one
+// type in one process, and that is not a hypothetical: choosing between two
+// representations for a type is exactly what a registrant does before shipping
+// one (ADR-0009).
+//
+// The registry it names freezes at this call if the call retains its schema,
+// which [Load], [LoadOver] and [Dump] do and [Compile] does not.
+//
+// ferry resolves against exactly one registry, and supplying this twice is a
+// refusal on the same argument [TagKey] is: two tables that disagree about one
+// type give two representations, and nothing in the call says which is meant. A
+// nil registry is refused rather than read as the default, because "no
+// registrations" is spelled [NewRegistry] and a nil that quietly meant
+// something would make the two indistinguishable at the call site.
+func WithRegistry(reg *Registry) Option {
+	return optionFunc(func(c *config) error {
+		switch {
+		case reg == nil:
+			return optionError("WithRegistry was given a nil registry: ferry.NewRegistry() builds an empty one, " +
+				"and omitting the Option resolves against the registry core ships")
+		case c.registrySet:
+			return optionError("the registry is given twice: ferry resolves against exactly one, because two " +
+				"tables that disagree about one type are two representations and nothing here chooses between them")
+		default:
+			c.registry, c.registrySet = reg, true
 
 			return nil
 		}
