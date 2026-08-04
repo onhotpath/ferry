@@ -156,8 +156,9 @@ gets to move.
 
 **Where the libraries differ semantically, the difference is in the notes** under each
 table rather than smoothed over.
-Some of those differences are large: ferry's YAML dump edits an existing document and
-fsyncs it, while the columns beside it serialise a fresh one and do not.
+Some of those differences are large: ferry's YAML dump edits an existing document where the
+columns beside it serialise a fresh one, and two of those four columns fsync what they wrote
+while the other two do not.
 
 **The destination is allocated once, outside the timed loop, and reused across iterations.**
 Funnelling a fifty-one field struct back through an ` + "`any`" + ` on every iteration would box it,

@@ -22,7 +22,10 @@ const (
 		"bridge to dump one. That is fatih/structs here, which is the same bridge koanf's " +
 		"own structs provider uses internally, so the two dump columns are the same shape: " +
 		"struct to map, map to YAML, whole file replaced. Neither preserves a comment, a key " +
-		"order or a quoting decision, and neither write is atomic or fsynced."
+		"order or a quoting decision. The writes differ where it costs: viper opens the " +
+		"target with O_TRUNC and ends writeConfig with f.Sync(), so its write is fsynced " +
+		"but not atomic, and a crash mid-write leaves the operator a truncated file that " +
+		"has been durably committed. koanf's os.WriteFile is neither."
 )
 
 // viperTag tells viper's mapstructure decoder to read the pooled yaml: tag

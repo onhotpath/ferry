@@ -23,10 +23,14 @@ const (
 	ferryNotesDump = "Edits the existing document in place: it reads and parses the file, writes only " +
 		"the keys the struct maps, and leaves comments, key order, quoting and unmapped " +
 		"keys intact. The replacement is atomic and durable - temp file, fsync, rename - " +
-		"and the fsync is where the bulk of this row's time goes. The other two columns " +
-		"serialise a fresh document and os.WriteFile it with no fsync at all, so this row " +
-		"compares a durable in-place edit against a non-durable whole-file replacement. " +
-		"That is the honest comparison because it is the only one either library offers."
+		"and the fsync is where the bulk of this row's time goes. ferry is not the only " +
+		"column that fsyncs: viper's WriteConfigAs ends in f.Sync() too, which is why the " +
+		"two of them land together, and why koanf and the baseline, which os.WriteFile a " +
+		"fresh document and never sync, land far below both. What ferry alone has is both " +
+		"guarantees at once - its write is atomic and fsynced, viper's is fsynced and not " +
+		"atomic, and koanf's and the baseline's are neither. So this row splits on " +
+		"durability rather than on the mapping layer, and what ferry gives up to koanf " +
+		"here is the price of a journal commit rather than of the walk."
 )
 
 // ferryTag is the pooled struct tag key, which ferry is told to read instead
