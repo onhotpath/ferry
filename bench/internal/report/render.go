@@ -56,23 +56,43 @@ func writeHeading(b *strings.Builder, in *Input) {
 	fmt.Fprint(b, "Nothing here is estimated, extrapolated or carried over from another run.\n")
 	fmt.Fprint(b, "A cell reading `"+notMeasured+"` is a measurement that was not taken, and the reason is\n")
 	fmt.Fprint(b, "in [what was not measured](#what-was-not-measured).\n\n")
-	fmt.Fprintf(b, "Generated %s.\n\n", value(in.Meta.Generated))
+	fmt.Fprintf(b, "%s%s.\n\n", generatedPrefix, value(in.Meta.Generated))
 }
+
+// The provenance block's own vocabulary, spelled once because republish.go
+// reads every one of these back out of a published file. A heading or a row
+// label that moved without the reader moving would be a silent failure to
+// recover the field under it.
+const (
+	environmentHeading = "## The machine, the toolchain and the versions"
+	commandIntro       = "The command:"
+	generatedPrefix    = "Generated "
+	gomaxprocsPrefix   = "(GOMAXPROCS "
+
+	labelRunner     = "runner"
+	labelPlatform   = "GOOS / GOARCH"
+	labelCPUs       = "CPUs"
+	labelToolchain  = "Go toolchain"
+	labelFerryRev   = "ferry revision"
+	labelHarnessRev = "harness revision"
+	labelCount      = "-count"
+	labelBenchtime  = "-benchtime"
+)
 
 func writeEnvironment(b *strings.Builder, in *Input) {
 	m := &in.Meta
 
-	fmt.Fprint(b, "## The machine, the toolchain and the versions\n\n")
+	fmt.Fprint(b, environmentHeading+"\n\n")
 	fmt.Fprint(b, "| | |\n| --- | --- |\n")
-	fmt.Fprintf(b, "| runner | %s |\n", value(m.Runner))
-	fmt.Fprintf(b, "| GOOS / GOARCH | %s / %s |\n", value(m.GOOS), value(m.GOARCH))
-	fmt.Fprintf(b, "| CPUs | %s |\n", value(cpuLine(in)))
-	fmt.Fprintf(b, "| Go toolchain | %s |\n", value(m.GoVersion))
-	fmt.Fprintf(b, "| ferry revision | %s |\n", value(m.FerryRevision))
-	fmt.Fprintf(b, "| harness revision | %s |\n", value(m.HarnessRevision))
-	fmt.Fprintf(b, "| -count | %s |\n", value(m.Count))
-	fmt.Fprintf(b, "| -benchtime | %s |\n", value(m.Benchtime))
-	fmt.Fprint(b, "\nThe command:\n\n```\n"+value(m.Command)+"\n```\n\n")
+	fmt.Fprintf(b, "| %s | %s |\n", labelRunner, value(m.Runner))
+	fmt.Fprintf(b, "| %s | %s / %s |\n", labelPlatform, value(m.GOOS), value(m.GOARCH))
+	fmt.Fprintf(b, "| %s | %s |\n", labelCPUs, value(cpuLine(in)))
+	fmt.Fprintf(b, "| %s | %s |\n", labelToolchain, value(m.GoVersion))
+	fmt.Fprintf(b, "| %s | %s |\n", labelFerryRev, value(m.FerryRevision))
+	fmt.Fprintf(b, "| %s | %s |\n", labelHarnessRev, value(m.HarnessRevision))
+	fmt.Fprintf(b, "| %s | %s |\n", labelCount, value(m.Count))
+	fmt.Fprintf(b, "| %s | %s |\n", labelBenchtime, value(m.Benchtime))
+	fmt.Fprint(b, "\n"+commandIntro+"\n\n```\n"+value(m.Command)+"\n```\n\n")
 	writeModules(b, &in.Meta)
 }
 
@@ -103,7 +123,7 @@ func cpuLine(in *Input) string {
 	for _, h := range in.Stats.Header {
 		if strings.HasPrefix(h, "cpu:") {
 			return strings.TrimSpace(strings.TrimPrefix(h, "cpu:")) +
-				fmt.Sprintf(" (GOMAXPROCS %d)", in.Meta.NumCPU)
+				fmt.Sprintf(" %s%d)", gomaxprocsPrefix, in.Meta.NumCPU)
 		}
 	}
 
@@ -477,11 +497,18 @@ func writeTagConfound(b *strings.Builder, in *Input) {
 	fmt.Fprint(b, "\n")
 }
 
+// The two appendix headings, spelled once: republish.go finds the embedded
+// blocks by them, and they are what makes an exact re-render possible at all.
+const (
+	benchstatHeading = "## Raw benchstat output"
+	rawHeading       = "## Raw `go test -bench` output"
+)
+
 func writeAppendices(b *strings.Builder, in *Input) {
-	fmt.Fprint(b, "## Raw benchstat output\n\n```\n")
+	fmt.Fprint(b, benchstatHeading+"\n\n```\n")
 	fmt.Fprint(b, strings.TrimRight(in.BenchstatText, "\n"))
 	fmt.Fprint(b, "\n```\n\n")
-	fmt.Fprint(b, "## Raw `go test -bench` output\n\n")
+	fmt.Fprint(b, rawHeading+"\n\n")
 	fmt.Fprint(b, "Every figure above is derived from this, and from nothing else.\n\n<details>\n")
 	fmt.Fprint(b, "<summary>expand</summary>\n\n```\n")
 	fmt.Fprint(b, strings.TrimRight(in.RawBench, "\n"))
@@ -492,8 +519,12 @@ func writeAppendices(b *strings.Builder, in *Input) {
 // leaving a blank cell that reads as a measurement.
 func value(s string) string {
 	if strings.TrimSpace(s) == "" {
-		return "not recorded"
+		return notRecorded
 	}
 
 	return s
 }
+
+// notRecorded is what an empty Meta field renders as, and what republish.go
+// reads back as empty again.
+const notRecorded = "not recorded"

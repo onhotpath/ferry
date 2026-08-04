@@ -1,0 +1,26 @@
+{
+  "GoVersion": "go1.27rc2",
+  "GOOS": "linux",
+  "GOARCH": "amd64",
+  "NumCPU": 6,
+  "Runner": "a developer workstation, not a CI runner",
+  "FerryRevision": "8cff2aa",
+  "HarnessRevision": "working tree on perf/bench-harness",
+  "Count": "10",
+  "Benchtime": "1s",
+  "Command": "go test -timeout 0 -run '^$' -bench . -benchmem -benchtime 1s -count 10 .",
+  "Generated": "2026-08-04T13:07:28Z",
+  "Modules": {
+    "github.com/gojekfarm/xtools/xload": "v0.10.0",
+    "github.com/gojekfarm/xtools/xload/providers/yaml": "v0.10.0",
+    "github.com/kelseyhightower/envconfig": "v1.4.0",
+    "github.com/knadh/koanf/v2": "v2.3.6",
+    "github.com/onhotpath/ferry": "(devel)",
+    "github.com/sethvargo/go-envconfig": "v1.4.3",
+    "github.com/spf13/viper": "v1.21.0",
+    "go.yaml.in/yaml/v3": "v3.0.5"
+  },
+  "ResultsLink": "",
+  "ChartLightLink": "",
+  "ChartDarkLink": ""
+}

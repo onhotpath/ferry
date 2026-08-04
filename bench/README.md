@@ -98,6 +98,59 @@ struct.
 A benchmark whose columns are doing different work is worse than no benchmark, so the
 refusal is not a test somebody can skip past with `-run`.
 
+## Re-rendering without re-measuring
+
+Some of what the results file says is prose the harness supplies rather than a measurement:
+the per-library notes in `impl_*.go`, the scenario descriptions in `scenario.go`, the reasons
+in `Absences()`, and the static paragraphs in `internal/report/render.go`.
+When one of those is wrong, the fix is a harness change plus a re-render, and not one number
+may move.
+
+`-rerender` does that from the committed file itself:
+
+```
+go run ./cmd/perfreport -rerender ../docs/perf/results.md -extract-to /tmp/out
+benchstat /tmp/out/bench.txt > /tmp/out/recheck.txt
+benchstat -format csv /tmp/out/bench.txt > /tmp/out/stat.csv
+go run ./cmd/perfreport -rerender ../docs/perf/results.md \
+    -csv /tmp/out/stat.csv -recheck /tmp/out/recheck.txt \
+    -results ../docs/perf/results.md -link-dir docs/perf -readme ../README.md
+```
+
+Three steps rather than one because this program does not run `benchstat`.
+The workflow does, at the version it pins, which is the same `benchstat` the published
+numbers were produced with.
+
+`.github/workflows/perf.yml` runs exactly that in its `rerender` job, so a corrected note is
+one dispatch rather than a hand-operated step on somebody's workstation.
+
+Three things about it are the point:
+
+- **The provenance is recovered, not restated.**
+  The runner, both revisions, `-count`, `-benchtime`, the command, the toolchain, the machine
+  and `Generated` all come off the file's own table, because every one of them describes a
+  measurement and a re-render measures nothing.
+  `Generated` in particular is carried forward unchanged: it dates the numbers, and stamping
+  it with the moment a note was corrected would make the one field that dates the measurement
+  date the prose instead.
+  Passing `-runner`, `-ferry-rev`, `-harness-rev`, `-count`, `-benchtime`, `-command`,
+  `-generated`, `-stat` or `-raw` alongside `-rerender` is refused rather than ignored.
+- **`-recheck` is the guard.**
+  Running `benchstat` again over the raw output the file embeds has to reproduce the
+  benchstat block beside it, or the file was not internally consistent before anybody
+  corrected anything, and re-rendering it would publish that under a fresh commit.
+- **The benchstat block is carried through byte for byte and never regenerated.**
+  `benchstat` writes the path it was handed into its own column header and pads the whole
+  table to it, so a fresh block produced under a different filename changes the published
+  file with no measurement having moved.
+  That is the trap, and `report.Reproduces` sees through the path so that the check does not
+  turn on the name of a temporary file.
+
+Re-rendering a file nobody has corrected gives that file back, byte for byte, along with both
+SVGs and the README's marked section.
+`TestRerenderRepublishesTheSameBytes` is that assertion, over a results file the workflow
+really published.
+
 ## The layout
 
 | file | what |
@@ -111,7 +164,9 @@ refusal is not a test somebody can skip past with `-run`.
 | `internal/report/` | the renderer: benchstat CSV in, markdown and SVG out, with golden tests over real captured output |
 | `internal/report/chart.go` | the chart's data model: rows, ordering, scales |
 | `internal/report/chartdraw.go` | the chart's drawing: five element kinds, no script, no style, no external reference |
+| `internal/report/republish.go` | the inverse of the renderer: a published file taken apart again, and the check that its raw output still produces its own benchstat block |
 | `cmd/perfreport/` | the command the workflow runs |
+| `cmd/perfreport/rerender.go` | the re-render mode, which publishes a corrected note without measuring anything |
 
 ## Adding a library
 
