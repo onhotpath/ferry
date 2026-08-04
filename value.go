@@ -6,76 +6,51 @@ import (
 	"strconv"
 )
 
-// VKind is what a plane observed at an address, and it is the only thing that
-// decides which accessor on a Value can answer.
+// VKind is what a plane observed at an address, and it decides which accessor
+// on a [Value] can answer.
 //
-// The set is closed at six, and closure is a decision rather than an oversight.
-// ADR-0004 refused a group arm because ADR-0003's structured addresses read a
-// composite one element at a time, so there is no address a group could be at;
-// and it refused an escape arm holding a driver-native value because such a
-// value is uninterpretable by every other driver, which is exactly what
-// plane-to-plane transfer needs. The escape arm is recorded there as the
-// weakest call in that ADR.
-//
-// What a seventh kind would cost: every driver that switches on Kind, every
-// codec that declares a kind, and every conformance table that lists the six
-// gains a case it did not have, and after v1 that is a breaking change. The
-// only mitigation ADR-0004 claims is that ferry is at v0, which is the one
-// place semver allows taking a closed enum back. Treat the table below as the
-// enum's boundary: adding a name to it is the whole of the change, and the
-// assertion under it is what makes forgetting one a compile error.
+// The set is closed at six: [KindAbsent], [KindNull], [KindBool], [KindNumber],
+// [KindString] and [KindBytes]. There is no kind for a whole composite, because
+// a composite is read one element at a time, and none for a driver-native value,
+// because no other driver could interpret one.
 type VKind uint8
 
 const (
-	// KindAbsent means the plane does not have this address, and nothing was
-	// found at it.
+	// KindAbsent means the plane does not have this address at all.
 	//
-	// It is kind zero on purpose. The zero Value is therefore KindAbsent, a
-	// map[Path]Value lookup miss *is* absence, and a recording sink needs no
-	// parallel presence map to tell "not recorded" from "recorded as absent"
-	// (ADR-0004).
+	// It is kind zero, so the zero [Value] is absence and a map[Path]Value
+	// lookup miss reports it without being asked. Absence is what a driver
+	// returns for an address its plane is silent about, and it is never handed
+	// to a [Writer].
 	KindAbsent VKind = iota
 
-	// KindNull means the plane has this address and the value stored there is
-	// that plane's own null.
+	// KindNull means the plane has this address and holds its own null there.
 	//
-	// It is a different observation from Absent, and the difference belongs to
-	// the plane: only a plane whose type system contains a null can produce it.
-	// YAML and JSON can; TOML, environment variables and query parameters
-	// cannot, and on those a driver reports Absent or a String and never a Null
-	// (ADR-0004).
+	// It is a different observation from absence, and only a plane whose type
+	// system contains a null can produce it. YAML and JSON can; TOML,
+	// environment variables and query parameters cannot, and a driver over those
+	// reports absence or a string and never a null.
 	KindNull
 
 	// KindBool is a plane-side boolean. Its text is always "true" or "false",
-	// because the Bool constructor is the only door into the kind, which is why
-	// AsBool has no parse failure to report.
+	// because [Bool] is the only way to build one, which is why [Value.AsBool]
+	// has no parse failure to report.
 	KindBool
 
-	// KindNumber is a plane-side number, carried as the source text the plane
-	// spelled it with and never as a machine number.
-	//
-	// Every lossless design ADR-0004 examined converged on text, and a native
-	// numeric leaf recreates structpb's documented float64 defect. The
-	// consequence is that AsInt, AsUint and AsFloat parse, and report a failure
-	// rather than guess.
+	// KindNumber is a plane-side number, carried as the text the plane spelled
+	// it with rather than as a machine number, so no width is chosen before a
+	// target type is in hand. [Value.AsInt], [Value.AsUint] and [Value.AsFloat]
+	// parse it and report a failure rather than guess.
 	KindNumber
 
-	// KindString is a plane-side string, and it stays distinct from Number even
-	// when the text is identical.
-	//
-	// That distinction is how quoting survives the boundary, which is the one
-	// thing a stringly-typed boundary destroys: `port: 8080` arrives as
-	// Number("8080"), `port: "8080"` as String("8080"), and each round-trips
-	// back to its own spelling (ADR-0004).
+	// KindString is a plane-side string, and it stays distinct from a number
+	// over the same text. That is how quoting survives the boundary: `port:
+	// 8080` arrives as Number("8080"), `port: "8080"` as String("8080"), and
+	// each round-trips back to its own spelling.
 	KindString
 
-	// KindBytes is an opaque byte sequence, carried in the same text field as
-	// every other kind, because a Go string is an immutable byte sequence and
-	// nothing requires it to be UTF-8.
-	//
-	// That is what removes the `any` field the survey's sketch had, and it buys
-	// three things at once: Value is 24 bytes, it boxes nothing, and it is
-	// comparable (ADR-0004).
+	// KindBytes is an opaque byte sequence, valid UTF-8 or not. How a plane
+	// spells bytes - base64, hex, raw - is the driver's business.
 	KindBytes
 )
 
@@ -88,9 +63,9 @@ var vkindName = [...]string{"absent", "null", "bool", "number", "string", "bytes
 // while vkindName has exactly one entry per kind.
 var _ [len(vkindName)]struct{} = [int(KindBytes) + 1]struct{}{}
 
-// String names the kind in the lower-case spelling every ADR measurement and
-// every ferrytest diff uses. An out-of-range kind renders as VKind(n) rather
-// than panicking or reporting a neighbouring name.
+// String names the kind in lower case: absent, null, bool, number, string,
+// bytes. An out-of-range kind renders as VKind(n) rather than panicking or
+// reporting a neighbouring name.
 func (k VKind) String() string {
 	if int(k) < len(vkindName) {
 		return vkindName[k]
@@ -100,19 +75,14 @@ func (k VKind) String() string {
 }
 
 // Value is what crosses the boundary between ferry and a plane, in both
-// directions: a kind, the source text that kind was spelled with, and nothing
-// else.
+// directions: a [VKind], the text that kind was spelled with, and nothing else.
 //
-// The zero Value is KindAbsent, so a driver with nothing to report returns
-// ferry.Value{} and a map miss returns absence without being asked to.
+// Build one with [Null], [Bool], [Number], [String] or [Bytes], read it with
+// [Value.Kind] and the As accessors. The zero Value is [KindAbsent], so a driver
+// with nothing to report returns ferry.Value{}.
 //
-// Comparability is load-bearing rather than incidental. It is what lets the
-// round-trip harness and the conformance suite assert with ==, and what makes
-// map[Path]Value a usable recording sink. It also forecloses ever adding a
-// slice or a map field to Value, which is a constraint on the type rather than
-// a property of today's fields. slog.Value and protoreflect.Value both give
-// comparability up (`_ [0]func()`, pragma.DoNotCompare) in exchange for unsafe
-// packing that ADR-0004 measured ferry as not needing.
+// A Value is comparable, so it is usable as a map key and assertable with ==,
+// and it boxes nothing.
 type Value struct {
 	kind VKind
 	text string
@@ -136,32 +106,31 @@ var _ map[Value]struct{}
 // function that builds one would suggest absence is a thing to construct rather
 // than the thing that is already there.
 
-// Null returns a Null value: the plane has this address and holds its own null
-// there. A driver on a plane whose grammar has no null never calls it.
+// Null returns a null value: the plane has this address and holds its own null
+// there. A driver over a plane whose grammar has no null never calls it.
 func Null() Value { return Value{kind: KindNull} }
 
-// Bool returns a Bool value. The text is the canonical "true" or "false", which
-// is what lets AsBool answer without a parse that could fail.
+// Bool returns a boolean value. Its text is the canonical "true" or "false",
+// which is what lets [Value.AsBool] answer without a parse that could fail.
 func Bool(b bool) Value { return Value{kind: KindBool, text: strconv.FormatBool(b)} }
 
-// Number returns a Number value carrying the plane's own spelling of it.
+// Number returns a numeric value carrying the plane's own spelling of it.
 //
-// The text is not validated here, on purpose: a plane is entitled to spell a
-// number in a way no Go type wants, and the place that finds out is the
-// accessor that has a target type in hand. What that buys is that "007",
-// "1e400" and "18446744073709551615" all survive the boundary intact and fail,
-// if they fail at all, where the failure can be described.
+// The text is not validated here. A plane is entitled to spell a number in a
+// way no Go type wants, and the accessor that has a target type in hand is what
+// finds out, so "007", "1e400" and "18446744073709551615" all survive the
+// boundary intact and fail, if they fail at all, where the failure can be
+// described.
 func Number(text string) Value { return Value{kind: KindNumber, text: text} }
 
-// String returns a String value. It stays distinct from a Number over the same
-// text, which is the whole of how quoting survives.
+// String returns a string value. It stays distinct from a [Number] over the
+// same text, which is how quoting survives a round trip.
 func String(s string) Value { return Value{kind: KindString, text: s} }
 
-// Bytes returns a Bytes value holding b exactly, valid UTF-8 or not.
+// Bytes returns a byte-sequence value holding b exactly, valid UTF-8 or not.
 //
-// The bytes are copied into the immutable text field, so a caller may reuse
-// its buffer afterwards and no later mutation can reach a Value already handed
-// out.
+// The bytes are copied, so the caller may reuse its buffer afterwards and no
+// later mutation can reach a Value already handed out.
 func Bytes(b []byte) Value { return Value{kind: KindBytes, text: string(b)} }
 
 // Kind reports what the plane observed. It is the one accessor that cannot
@@ -169,28 +138,15 @@ func Bytes(b []byte) Value { return Value{kind: KindBytes, text: string(b)} }
 func (v Value) Kind() VKind { return v.kind }
 
 // ErrWrongKind reports an accessor asked to answer for a kind that has no
-// answer: an Absent holds no string, and a Number is not a Bool.
+// answer: an absent value holds no string, and a number is not a bool. Every
+// accessor on [Value] returns it rather than panicking, and it is matched with
+// errors.Is.
 //
-// Accessors return it rather than panicking, which is where ferry parts company
-// with cty, protoreflect and slog. All three panic on kind mismatch and all
-// three document it as intentional, because their callers type-check first.
-// ferry's callers are third-party driver authors, so ferry does not get to make
-// that assumption (ADR-0004). Match it with errors.Is.
-//
-// Its message names both kinds, which ADR-0011 permits because a kind is
-// structure rather than a value the plane supplied. It carries no accessor for
-// them, because a caller holds both already: Kind reports the one in hand, and
-// the wanted kind is whichever accessor was called, since AsInt wants
-// KindNumber by definition. A typed error would return the call site its own
-// arguments.
-//
-// It is not a seventh class. It is subordinate to ErrValue in the same way
-// ErrReadOnly is subordinate to ErrPlane: an accessor's refusal that reaches a
-// caller through core answers to errors.Is(err, ErrValue) as well as to itself,
-// so a caller reading the error set by class never has to know it exists
-// (ADR-0011). What it is for is the finer question a codec asks - "I asked the
-// wrong accessor" rather than "the plane's value did not fit" - which the class
-// alone cannot answer.
+// It is subordinate to [ErrValue] rather than a class of its own, so a refusal
+// reaching a caller through core answers errors.Is(err, ferry.ErrValue) too and
+// a caller reading the error set by class never has to know it exists. What it
+// is for is the finer question a codec asks: "I called the wrong accessor",
+// rather than "the plane's value did not fit".
 var ErrWrongKind = errors.New("value: wrong kind")
 
 // require is the single gate every accessor passes through, so that "wrong kind
@@ -236,14 +192,13 @@ func (e *numError) Error() string {
 
 func (e *numError) Unwrap() error { return e.err }
 
-// AsString returns the text of a String value.
+// AsString returns the text of a string value, and [ErrWrongKind] for every
+// other kind.
 //
-// It refuses a Number, which is the refusal worth stating: accepting one here
-// would be ferry overriding the plane's own type information, and it would
-// destroy the quoting distinction the boundary exists to preserve (ADR-0005).
-// It refuses Null too, which is what makes a codec built on it unable to
-// express ADR-0006's null escape hatch, and is why ADR-0009 keeps a general
-// constructor whose decode half sees the whole Value.
+// The refusal worth knowing about is a number: accepting one would override the
+// plane's own type information and destroy the quoting distinction the boundary
+// preserves. It refuses a null too, so a codec that has to accept one is a
+// [ValueCodec] rather than a [StringCodec].
 func (v Value) AsString() (string, error) {
 	if err := v.require(KindString); err != nil {
 		return "", err
@@ -252,11 +207,12 @@ func (v Value) AsString() (string, error) {
 	return v.text, nil
 }
 
-// AsNumber returns the plane's own spelling of a Number, unparsed.
+// AsNumber returns the plane's own spelling of a numeric value, unparsed, and
+// [ErrWrongKind] for every other kind.
 //
-// It is what a codec for a type wider than any Go machine number uses -
-// ADR-0009's big.Int registration is the worked example - and it is the only
-// accessor that hands back a number without deciding how wide it is.
+// It is the accessor a codec for a type wider than any Go machine number uses -
+// big.Int is the worked example - because it hands back the digits without
+// deciding how wide they are.
 func (v Value) AsNumber() (string, error) {
 	if err := v.require(KindNumber); err != nil {
 		return "", err
@@ -265,11 +221,9 @@ func (v Value) AsNumber() (string, error) {
 	return v.text, nil
 }
 
-// AsBool returns the boolean a Bool carries.
-//
-// It has no parse arm because it needs none: Bool is the only constructor for
-// the kind and it writes the canonical spelling, so the text of a Bool is
-// "true" or "false" and never anything else.
+// AsBool returns the boolean a [KindBool] value carries, and [ErrWrongKind] for
+// every other kind. It has no parse failure, because [Bool] is the only way to
+// build one and it writes the canonical spelling.
 func (v Value) AsBool() (bool, error) {
 	if err := v.require(KindBool); err != nil {
 		return false, err
@@ -278,11 +232,11 @@ func (v Value) AsBool() (bool, error) {
 	return v.text == "true", nil
 }
 
-// AsBytes returns the bytes a Bytes value carries, exactly, valid UTF-8 or not.
+// AsBytes returns the bytes a [KindBytes] value carries, exactly, valid UTF-8
+// or not, and [ErrWrongKind] for every other kind.
 //
-// The returned slice is a copy, so writing to it cannot reach the Value and
-// cannot reach any other holder of an equal Value. That copy is the price of
-// keeping Value comparable and allocation-free everywhere else.
+// The returned slice is a copy, so writing to it cannot reach the [Value] or
+// any other holder of an equal one.
 func (v Value) AsBytes() ([]byte, error) {
 	if err := v.require(KindBytes); err != nil {
 		return nil, err
@@ -291,13 +245,13 @@ func (v Value) AsBytes() ([]byte, error) {
 	return []byte(v.text), nil
 }
 
-// AsInt parses the source text of a Number as a signed 64-bit integer.
+// AsInt parses the text of a numeric value as a signed 64-bit integer.
 //
-// Out of range is an error and never a saturation. koanf's Int64() turning
-// 18446744073709551615 into MaxInt64 with a nil error is one of the silent
-// wrong answers ferry exists in order not to have (ADR-0001). On any error the
-// int64 returned is zero rather than strconv's saturated bound, so a caller who
-// ignores the error gets an obviously wrong value instead of a plausible one.
+// Out of range is an error and never a saturation, and on any error the int64
+// returned is zero rather than strconv's saturated bound, so a caller who
+// ignores the error gets an obviously wrong value rather than a plausible one.
+// The error wraps strconv.ErrRange or strconv.ErrSyntax, and a non-numeric kind
+// gives [ErrWrongKind].
 func (v Value) AsInt() (int64, error) {
 	if err := v.require(KindNumber); err != nil {
 		return 0, err
@@ -311,10 +265,9 @@ func (v Value) AsInt() (int64, error) {
 	return n, nil
 }
 
-// AsUint parses the source text of a Number as an unsigned 64-bit integer.
-//
-// It is the accessor that makes 18446744073709551615 representable at all, and
-// it saturates no more than AsInt does.
+// AsUint parses the text of a numeric value as an unsigned 64-bit integer. It
+// is the accessor that makes 18446744073709551615 representable at all, and it
+// saturates no more than [Value.AsInt] does.
 func (v Value) AsUint() (uint64, error) {
 	if err := v.require(KindNumber); err != nil {
 		return 0, err
@@ -328,11 +281,11 @@ func (v Value) AsUint() (uint64, error) {
 	return n, nil
 }
 
-// AsFloat parses the source text of a Number as a 64-bit float.
+// AsFloat parses the text of a numeric value as a 64-bit float.
 //
-// A float is where precision is lost if it is lost anywhere, which is the whole
-// reason the text is what crossed the boundary: a caller that cannot afford the
-// conversion calls AsNumber instead and keeps the plane's own spelling.
+// A float is where precision is lost if it is lost anywhere, and that is why
+// the plane's own text is what crossed the boundary: a caller who cannot afford
+// the conversion calls [Value.AsNumber] and keeps the spelling.
 func (v Value) AsFloat() (float64, error) {
 	if err := v.require(KindNumber); err != nil {
 		return 0, err
@@ -346,13 +299,12 @@ func (v Value) AsFloat() (float64, error) {
 	return f, nil
 }
 
-// GoString renders a Value the way every ADR measurement and every ferrytest
-// diff spells one: absent, null, bool("true"), number("8080"), string(""),
-// bytes("\xff").
+// GoString renders a Value for a diff or a test failure: absent, null,
+// bool("true"), number("8080"), string(""), bytes("\xff").
 //
-// It is a debugging rendering and it prints the plane's own text, so it must
-// never be interpolated into an error message. ADR-0011 makes that rule total,
-// because ferry cannot know which addresses hold secrets.
+// It prints the plane's own text, so it must never be interpolated into an
+// error message: ferry cannot know which addresses hold secrets, and neither
+// can a caller writing a log line.
 func (v Value) GoString() string {
 	if v.kind == KindAbsent || v.kind == KindNull {
 		return v.kind.String()

@@ -7,9 +7,8 @@ import (
 	"slices"
 )
 
-// Compile reports whether T's annotation compiles, from the type alone.
-//
-// It is callable from a test with no value in hand and no plane reachable:
+// Compile reports whether T's annotation is legal, from the type alone, with no
+// value in hand and no plane reachable.
 //
 //	func TestSchema(t *testing.T) {
 //	    if err := ferry.Compile[Config](); err != nil {
@@ -17,19 +16,15 @@ import (
 //	    }
 //	}
 //
-// It is not a second compiler with the same rules. It is the same function the
-// load and dump verbs run, because two entry points that could disagree about
-// whether a type is legal would be the two-engines defect at ferry's own front
-// door (ADR-0010). It takes the same Options for the same reason: a compile
-// that could not see [TagKey] would answer about a schema no load will ever
-// build.
+// It runs exactly the compiler [Load] and [Dump] run, and takes the same
+// [Option] values, so a type it accepts is a type they accept. It compiles the
+// schema and discards it, so it retains no resolution, does not freeze a
+// [Registry], and is safe anywhere, including during init.
 //
-// It is Compile and not Validate because ADR-0001 rules validation out by
-// architecture - the type is the validation - and a package that decides that
-// cannot export Validate honestly. It compiles the schema and discards it, so
-// it retains no resolution and it is safe anywhere, including during init.
-//
-// What a struct has to carry, in full (ADR-0008):
+// What it checks is the whole annotation: every exported field names the
+// segment it addresses or is marked "-", every named type is in the supported
+// set or has a registered codec, and every declaration is admissible at the
+// type it sits on.
 //
 //	Host     string `ferry:"host,required"`
 //	Greeting string `ferry:"greeting,default='Hello, world'"`
@@ -37,14 +32,8 @@ import (
 //	Odd      string `ferry:"'a,b'"`
 //	Skipped  string `ferry:"-"`
 //
-// Every exported field names the segment it addresses or is marked "-", and
-// ferry never invents a name: measured over 10,012 third-party Go files and the
-// standard library, a Go field name is byte-exactly the name the author wanted
-// about one time in twenty. Under an explicit name, exporting a field cannot
-// silently change what a program writes to a plane.
-//
-// It returns nil, or one refusal per address, joined and sorted. Range it with
-// [Elements] and match a member with errors.Is against [ErrSchema].
+// It returns nil, or one refusal per address, sorted. Range it with [Elements],
+// and match a member with errors.Is against [ErrSchema].
 func Compile[T any](opts ...Option) error {
 	_, err := schemaOf(reflect.TypeFor[T](), opts, discarded)
 

@@ -24,19 +24,16 @@ import (
 // a property of the type alone and the address set stays computable with no
 // value in hand.
 
-// Reg is one registration: a type, the boundary kind its codec declares, and
+// Reg is one registration: a type, the boundary [VKind] its codec declares, and
 // both halves of that codec.
 //
 // It is opaque, and the only way to build one is [TextCodec], [StringCodec],
-// [ValueCodec] or [DurationLike]. Every one of them takes both halves at once,
-// which is ADR-0007's "a codec is a pair" made unrepresentable-otherwise rather
-// than documented: a half pair, two halves swapped and two halves over
-// different types are each a build error, so nothing on the registration path
-// has to check for one at run time.
+// [ValueCodec] or [DurationLike]. Each takes both halves at once, so a half
+// pair, two halves swapped and two halves over different types are all build
+// errors rather than run-time refusals. [Reg.AsMapKey] is the one thing that
+// can be added to one afterwards.
 //
-// Nothing is readable off a Reg. A proof exercises a codec through the ordinary
-// walk, so a harness needs no accessor on a registration, and an accessor would
-// be exported surface forever (ADR-0009).
+// Hand it to [Register] or [Registry.Register].
 type Reg struct {
 	typ   reflect.Type
 	codec leafCodec
@@ -52,24 +49,18 @@ type Reg struct {
 }
 
 // AsMapKey declares this codec's text injective over its type under Go's ==,
-// which is what a map key needs and what no rule ferry can write discharges for
-// a codec somebody else supplied.
+// which is what a map key needs.
 //
-// It is opt-in because the failure it prevents is silent. Two keys rendering to
-// one text are one address, so one entry is lost with no error anywhere and
-// which one survives is map iteration order. A map[T]V whose key type is
-// registered without this is a schema compile error naming this method, and
-// that diagnostic is the only moment a registrant is guaranteed to read
-// (ADR-0009).
+//	ferry.TextCodec[netip.Addr](ferry.KindString).AsMapKey()
 //
-// The cost is stated rather than hidden: a registrant whose codec is injective
-// and who has not said so gets a refusal for a codec that is fine. It is
-// affordable because the fix is one method call named after the obligation and
-// because it arrives at schema compile, where the implied rule's failure is a
-// dropped map entry on a plane already written.
+// It is a claim ferry cannot check, and it is opt-in because the failure it
+// prevents is silent: two keys rendering to one text are one address, so one
+// entry is lost with no error anywhere and which one survives is map iteration
+// order. Using a registered type as a map key without it is a schema compile
+// error naming this method.
 //
-// It is a claim rather than a check. Discharging it over the values a
-// registrant cares about is what ferrytest.Injective is for.
+// ferrytest.Injective discharges the claim over the values a registrant cares
+// about.
 func (g Reg) AsMapKey() Reg {
 	g.key = true
 
@@ -91,24 +82,20 @@ type textPtr[T any] interface {
 }
 
 // TextCodec registers a type that already declares its own text form and its
-// own inverse, at a boundary kind of the registrant's choosing.
-//
-// Its purpose is changing the kind rather than rescuing the type, and that is
-// narrower than it looks: ADR-0007's chain already claims any type carrying a
-// text pair, correctly, at kind String. What this adds is the kind, which is
-// the difference between a value that loads from a flat plane and one that
-// loads from a structured plane too:
+// own inverse, at a boundary [VKind] of the registrant's choosing.
 //
 //	ferry.TextCodec[big.Int](ferry.KindNumber)
 //
-// big.Int's text is a run of digits, so unregistered it lands as
-// string("1099511627776") and does not load from a YAML plane that reports
-// Number. Declaring Number loads from both, because String is donated to the
-// declared kind on the way in.
+// Its purpose is changing the kind rather than rescuing the type: any type
+// carrying a text pair is already claimed, at [KindString]. What the kind buys
+// is loading from a structured plane. big.Int's text is a run of digits, so
+// unregistered it lands as string("1099511627776") and does not load from a
+// YAML plane that reports a number; declaring [KindNumber] loads from both,
+// because a plane's string is donated to the declared kind on the way in.
 //
-// PT is inferred from T by constraint type inference, so one type argument is
-// written at a call site and never two. It is the one constructor with no value
-// argument to infer T from, so T is named.
+// It is one of the two constructors that name their type argument, because
+// there is no value argument to infer it from. PT is inferred from T, so a call
+// site writes one type argument and never two.
 func TextCodec[T any, PT textPtr[T]](kind VKind) Reg {
 	t := reflect.TypeFor[T]()
 
@@ -157,22 +144,18 @@ func encodeTextAs(kind VKind) func(reflect.Value) (Value, error) {
 //	        return *u, nil
 //	    })
 //
-// T is inferred from either function, so no call site writes a type argument,
-// and a method expression makes the whole registration one line where the
-// standard library put the receivers the right way round.
+// T is inferred from either function, so no call site writes a type argument.
 //
-// The declared kind is String, which is what two functions over string can
-// promise. A type whose text is a run of digits wants [ValueCodec] or
-// [TextCodec], and a codec that must accept a kind it never emits - a Null, for
-// a Go type whose kind has no null - can only be a [ValueCodec], because this
-// decode half never sees anything but a string.
+// The declared kind is [KindString], which is what two functions over string
+// can promise. A type whose text is a run of digits wants [TextCodec] or
+// [ValueCodec], and a codec that must accept a null needs [ValueCodec], because
+// this decode half never sees anything but a string.
 //
-// The zero value is worth a thought before writing one, and
-// [Registry.Register] runs it rather than trusting the thought: netip.Addr,
-// netip.AddrPort and netip.Prefix all render their zero as "invalid IP" and
-// cannot parse it back, so the one-liner over String and Parse is refused for
-// all three. Those are also the types where registering the obvious thing makes
-// the type worse than leaving it alone, because the text pair they already
+// Check the codec against the zero value of T before writing one, because
+// [Registry.Register] does: netip.Addr, netip.AddrPort and netip.Prefix all
+// render their zero as "invalid IP" and cannot parse it back, so the obvious
+// one-liner over String and Parse is refused for all three. Those are also the
+// types that are better left unregistered, since the text pair they already
 // carry is correct.
 func StringCodec[T any](format func(T) string, parse func(string) (T, error)) Reg {
 	return Reg{
@@ -187,26 +170,24 @@ func StringCodec[T any](format func(T) string, parse func(string) (T, error)) Re
 	}
 }
 
-// ValueCodec registers a type as a kind and two functions over [Value], which
-// is the general form and the only one of the three that can accept a kind it
-// never emits.
+// ValueCodec registers a type as a kind and two functions over [Value]. It is
+// the general form, and the only constructor whose decode half sees the whole
+// [Value] rather than its text.
 //
 //	ferry.ValueCodec(ferry.KindNumber,
 //	    func(x big.Int) (ferry.Value, error) { return ferry.Number(x.String()), nil },
 //	    func(v ferry.Value) (big.Int, error) { ... })
 //
-// It stays even though it is the longest of the three, because ADR-0006's
-// strictness rests on it. Core refuses a Null at every leaf whose Go kind has
-// no null, and its argument for refusing rather than zeroing is that a
-// registered codec for the type accepts the Null and returns whatever it likes.
-// A decode half that sees the whole Value is the only shape that can, and it is
-// also how an interface is expressible at all: a nil interface emits Null and
-// takes Null back.
+// It is the escape hatch from ferry's strictness about nulls. Core refuses a
+// null at every leaf whose Go kind has no null, and a decode half that sees the
+// whole [Value] is the only shape that can accept one anyway and return
+// whatever it likes. It is also how an interface field is expressible at all: a
+// nil interface emits a null and takes one back.
 //
-// The declared kind is a donation target and nothing else. It does not
-// constrain the kinds this codec accepts, and beyond a Null it is the one thing
-// core checks about a codec it did not write: a codec declaring Number and
-// producing String is reported at Dump.
+// The declared kind is a donation target and does not constrain what this codec
+// accepts. Beyond a null it is the one thing core checks about a codec it did
+// not write: a codec declaring [KindNumber] and producing a string is reported
+// at Dump.
 func ValueCodec[T any](kind VKind, enc func(T) (Value, error), dec func(Value) (T, error)) Reg {
 	accept := func(v reflect.Value, got Value) error {
 		out, err := dec(donate(got, kind))
@@ -247,23 +228,19 @@ func encodeValue[T any](enc func(T) (Value, error)) func(reflect.Value) (Value, 
 }
 
 // DurationLike registers a named type over int64 with time.Duration's own
-// representation, which closes ADR-0005's named-duration hole at one line per
-// type.
+// representation, so it dumps "30s" rather than a nanosecond count.
 //
 //	type PollInterval time.Duration
 //
 //	ferry.Register(ferry.DurationLike[PollInterval]())
 //
-// ADR-0005 leaves the hole open on purpose: such a type is a distinct
-// reflect.Type, misses the identity table and falls to kind int64, so it dumps
-// a nanosecond count, and matching on the underlying type instead would capture
-// every ordinary `type Port int` as well. Core ships the one-liner rather than a
-// predicate arm, because a predicate over the underlying type has exactly that
-// defect handed to the user, and two predicates matching one type would make
-// precedence a property of the import graph.
+// It is the remedy for a sharp edge: a named type over time.Duration is a
+// distinct reflect.Type, so it misses the type ferry pins and falls through to
+// kind int64. ferry cannot close that by matching on the underlying type
+// instead, because that would capture every ordinary `type Port int` too.
 //
-// It is the other place inference does not work, for the same reason
-// [TextCodec] names its type: there is no value argument to infer from.
+// It is the other constructor with no value argument to infer T from, so T is
+// named.
 func DurationLike[T ~int64]() Reg {
 	return StringCodec(
 		func(d T) string { return time.Duration(d).String() },
@@ -331,55 +308,28 @@ func donate(got Value, kind VKind) Value {
 }
 
 // Registry is the set of codecs one program registers for types ferry does not
-// own.
+// own. Core ships a default one, which [Register] writes to; [NewRegistry]
+// builds another and [WithRegistry] names it for one call.
 //
-// It is a value rather than a global table, and it freezes at its first
-// retained schema compile - the first [Load], [LoadOver] or [Dump] run against
-// it. A registration after that is a loud error naming the freeze point.
+// It freezes at the first [Load], [LoadOver] or [Dump] run against it, and a
+// registration after that is a loud error naming the freeze point. So register
+// from an init, where Go's own initialisation order guarantees the ordering.
+// [Compile] retains nothing and does not freeze, so it is safe during init too.
 //
-// Both halves of that are soundness rather than taste. A schema holds the codec
-// it resolved, so a table that can change after a schema is built means a value
-// is dumped through a codec the registrant replaced, with no error anywhere;
-// and the address set a driver was handed and precomputed keys for is the one
-// the resolution produced, so a late registration that collapses a struct to a
-// leaf makes a legitimate write a driver error. A frozen registry is written
-// before its first reader exists and never again, which is also what keeps the
-// read path a plain map lookup with no lock (ADR-0009).
+// The freeze is what stops a schema being resolved against one set of codecs
+// and walked against another: a compiled schema holds the codec it resolved,
+// and the address set a driver precomputed keys for is the one that resolution
+// produced.
 //
-// Whole-registry freezing is chosen over per-type freezing on import-graph
-// determinism: freezing each type as it is resolved would make whether a
-// registration succeeds depend on which schemas were compiled first, which is
-// the same ground on which this design refuses a predicate arm.
+// A registry is a value to keep, because the compiled-schema cache hangs off
+// it. Nothing is ever evicted from that cache, so a registry that stays alive
+// keeps every schema ever compiled against it alive too, and a fresh registry
+// per call means a full schema compile per call. Build one per program, or one
+// per test, and hand it to every call with [WithRegistry].
 //
-// Core ships a default registry, and the package-level [Register] is a method
-// call on it rather than a second path with its own rules. A test that wants a
-// different codec for one type builds its own with [NewRegistry] and hands it
-// over with [WithRegistry].
-//
-// # A registry is long-lived, because the schema cache hangs off it
-//
-// Every schema a [Load], [LoadOver] or [Dump] compiles is cached on the
-// registry it resolved against, and that cache is unbounded: nothing is ever
-// evicted, because a compiled schema is reachable again from the type that
-// produced it and no eviction policy could know that it will not be. Every
-// library surveyed documents this rather than solving it, and so does ferry.
-//
-// The usual door onto that is a program that mints types at run time, where 200
-// reflect.StructOf types produce 200 entries. ferry has a second, and it opens
-// on ordinary, statically declared types: a registry that is kept alive keeps
-// every schema ever compiled against it alive too. Measured on ADR-0009's
-// prototype, whose cache was one package-level table keyed by the type and the
-// registry together, 10,000 per-call registries produced 10,000 entries, none
-// evictable. Hanging the cache off the registry moves where that lands rather
-// than removing it: the entries are collected with the registry, and what a
-// per-call registry buys instead is a full schema compile on every call with
-// nothing reused, which is the cost the cache exists to remove. Either way the
-// conclusion is ADR-0009's: build one registry per program, or per test, and
-// hand it to every call with [WithRegistry].
-//
-// The zero Registry is empty, unfrozen and usable, and a nil *Registry reads as
-// an empty one so that [Registry.Types] can be asked about a program that
-// registered nothing.
+// The zero Registry is empty, unfrozen and usable. A nil *Registry reads as an
+// empty one, so [Registry.Types] can be asked about a program that registered
+// nothing.
 type Registry struct {
 	// mu guards the write path alone. The read path takes no lock at all,
 	// because after the freeze there is nothing to guard against.
@@ -409,9 +359,9 @@ type registration struct {
 	key   bool
 }
 
-// NewRegistry builds an empty registry, which is what a test that needs a
-// different codec for one type reaches for, and what a program that would
-// rather not have a package-level anything uses instead of the default one.
+// NewRegistry builds an empty [Registry]: what a test that wants a different
+// codec for one type reaches for, and what a program that would rather not have
+// a package-level anything uses instead of the default one.
 func NewRegistry() *Registry { return &Registry{} }
 
 // defaultRegistry is the registry [Register] writes to and the one every verb
@@ -445,19 +395,20 @@ var defaultRegistry = NewRegistry()
 func Register(regs ...Reg) error { return defaultRegistry.Register(regs...) }
 
 // Register adds codecs to this registry, reporting every failure rather than
-// the first.
+// the first. Each registration is applied on its own, so one refusal does not
+// withdraw the registrations beside it. Range the failure with [Elements].
 //
-// Each registration is applied on its own, so one refusal in a variadic call
-// does not withdraw the registrations beside it, and the failures are joined
-// and sorted: ADR-0001's determinism invariant applies to a startup error
-// exactly as it applies to a load (ADR-0011).
+// It refuses four things: a type core owns, whose representation is pinned and
+// not replaceable - define a named type over it and register that; a second
+// codec for a type already registered, since a registration claims its type
+// unconditionally and there is no decline; a pointer type, because pointer
+// indirection is structural and a codec for one would lose the null a nil
+// pointer writes; and a codec that is not total over the zero value of its
+// type, which is checked by running it.
 //
-// What it refuses, and why each has no other place to be caught: a type core
-// owns, because an entry in the identity table is not replaceable; a duplicate,
-// because there is no decline and so no second entry to fall through to; a
-// pointer type, because pointer indirection is structural and a registration
-// for one would make a nil pointer a leaf; and a codec that is not total over
-// the zero value of its type.
+// That last check catches one class of wrong codec out of four. A lossy codec,
+// a constant codec and a codec that declares the wrong kind all pass it, and
+// the way to discharge those is a proof through ferrytest.
 func (r *Registry) Register(regs ...Reg) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -470,19 +421,12 @@ func (r *Registry) Register(regs ...Reg) error {
 	return join(errs...)
 }
 
-// Types is every type this registry holds a codec for.
+// Types is every type this registry holds a codec for, sorted.
 //
-// It is the one thing exported from this package for ferrytest's sake, and it
-// is a property of the registry rather than of any registration: the
-// completeness check joins a proof list against the union of core's own tables
-// and this one, so a registrant who adds a codec and no proof finds out from
-// their own CI (ADR-0014).
-//
-// The result is sorted, freshly allocated and the caller's to keep. A nil
-// registry holds nothing, which is the one place in this file a nil receiver is
-// answered: every internal caller reaches a registry through the resolved
-// Option set, where it is core's default or one WithRegistry refused to take
-// nil for, and this is the only entry point a caller can hand a nil to.
+// It exists so that a completeness check can join a list of proofs against the
+// types that were registered, and tell a registrant who added a codec and no
+// proof. The result is freshly allocated and the caller's to keep, and a nil
+// registry holds nothing.
 func (r *Registry) Types() []reflect.Type {
 	if r == nil {
 		return nil

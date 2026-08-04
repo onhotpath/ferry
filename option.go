@@ -5,49 +5,16 @@ import (
 	"strings"
 )
 
-// Option is a setting a caller hands to [Compile], and to every verb that
-// compiles a schema on its way to a plane.
+// Option is a setting a caller hands to [Load], [LoadOver], [Dump] or
+// [Compile]. There are two: [TagKey] and [WithRegistry].
 //
-// The set is closed, because the interface's one method is unexported. Every
-// Option is one ferry decided on, so a library built on ferry cannot introduce
-// a second authority over what an annotation means: ADR-0008 opens the tag
-// *key* and keeps the *vocabulary* shut, and this is where that line is drawn
-// in the type system rather than in prose.
+// The set is closed, because the interface's one method is unexported. A
+// library built on ferry can therefore change where ferry reads its annotation
+// from, and cannot change what the annotation means.
 //
-// # Compile-affecting and load-affecting
-//
-// A compiled schema is cached and reused, so which Options a caller supplied is
-// part of what identifies it. The rule for that is one sentence, and it is
-// stated here rather than beside the cache because it is a property of an
-// Option rather than of the map:
-//
-//	An Option is compile-affecting if one reflect.Type yields two different
-//	schemas under two values of it. A compile-affecting Option is part of the
-//	cache key, and its value must be comparable. An Option that is not
-//	compile-affecting must not be in the key.
-//
-// [TagKey] is compile-affecting: one struct under two keys is two different
-// address sets, which is what ADR-0008 measured. [WithRegistry] is
-// compile-affecting: two registries that disagree about one member type give
-// that type two representations and the struct two schemas, which is what
-// ADR-0009 measured, and a cache that ignored it would hand one registry the
-// other's codec silently.
-//
-// Both of ferry's Options are on that side today, and that is the order the
-// tickets landed in rather than a property of the design. The other side is a
-// real class: a load-affecting Option changes what one load does and not what
-// the type compiles to, so it must stay out of the key or two callers who
-// differ only in it would be handed two identical schemas under two keys. The
-// worked example is ADR-0006's presence observation - an Option handing the
-// caller which addresses the plane actually answered - which is named here as
-// the other side of the rule and is not proposed: where that is spelled belongs
-// with the caller-facing lifecycle, and is not decided.
-//
-// The rule has a mechanism rather than only a paragraph. The compile-affecting
-// Options are collected into a named key struct, and a static assertion that a
-// plain map can hold it turns an Option whose value is not comparable into a
-// build failure rather than the run-time panic a sync.Map's `any` key would
-// give.
+// Both of today's Options change what a type compiles to, so both are part of
+// the key a compiled schema is cached under, and both are refused when supplied
+// twice in one call.
 type Option interface {
 	apply(*config) error
 }
@@ -97,21 +64,24 @@ func newConfig(opts []Option) (config, error) {
 
 // TagKey names the struct tag key ferry reads, which defaults to "ferry".
 //
-// It names where to look and never what the content means. Whatever key ferry
-// is told to read, it reads ferry's grammar under it and holds it to ferry's
-// strictness, so TagKey("mylib") changes nothing about what mylib:"host,retry=3"
-// is: a schema compile error, and correctly so. The case it exists for is a
-// library built on ferry, whose users should be writing that library's tag
-// rather than ferry's (ADR-0008).
+//	cfg, err := ferry.Load[Config](ctx, src, ferry.TagKey("mylib"))
 //
-// ferry reads exactly one key, and supplying this twice is a refusal. A list is
-// a precedence question wearing a convenience costume: two keys on one field
-// give two address sets, and nothing in the tag says which is meant.
+// It exists for a library built on ferry, whose users should be writing that
+// library's tag rather than ferry's.
 //
-// The key is checked here, where the Option is supplied, rather than at schema
-// compile. A key that could never appear in a conventional struct tag is a
-// mistake in the program that wrote it and not in the struct being compiled,
-// and the error arrives at whichever call the Option was handed to.
+// It names where to look and never what the content means. Under whatever key
+// it is told to read, ferry reads ferry's own grammar and holds it to ferry's
+// own strictness, so mylib:"host,retry=3" is still a schema compile error. That
+// is the sharp edge: pointing ferry at a key another mapper already uses does
+// not make that mapper's options legal, and json:"name,omitempty" refuses.
+//
+// It applies to every struct reached by the call it is handed to, not only to
+// the top-level one, and it is refused when supplied twice: two keys on one
+// field would be two address sets with nothing to choose between them.
+//
+// A key that could never be written into a struct tag at all - one holding a
+// space, a quote or a colon - is refused here, at the call the Option was given
+// to, rather than at schema compile.
 func TagKey(key string) Option {
 	// Checked eagerly, so that the refusal is about this call and not about
 	// the type some later Compile happens to name.
@@ -142,21 +112,16 @@ func TagKey(key string) Option {
 //
 //	cfg, err := ferry.Load[Config](ctx, src, ferry.WithRegistry(reg))
 //
-// It is the escape hatch that makes a default registry affordable at all. A
-// global table would leave two tests unable to want different codecs for one
-// type in one process, and that is not a hypothetical: choosing between two
-// representations for a type is exactly what a registrant does before shipping
-// one (ADR-0009).
+// It is what lets two tests in one process want different codecs for one type,
+// and what a library uses to keep its own codecs out of its consumer's default
+// registry.
 //
 // The registry it names freezes at this call if the call retains its schema,
 // which [Load], [LoadOver] and [Dump] do and [Compile] does not.
 //
-// ferry resolves against exactly one registry, and supplying this twice is a
-// refusal on the same argument [TagKey] is: two tables that disagree about one
-// type give two representations, and nothing in the call says which is meant. A
-// nil registry is refused rather than read as the default, because "no
-// registrations" is spelled [NewRegistry] and a nil that quietly meant
-// something would make the two indistinguishable at the call site.
+// It is refused when supplied twice, and a nil registry is refused rather than
+// read as the default: an empty registry is spelled [NewRegistry], and omitting
+// the Option is how the default one is asked for.
 func WithRegistry(reg *Registry) Option {
 	return optionFunc(func(c *config) error {
 		switch {

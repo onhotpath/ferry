@@ -6,66 +6,42 @@ import (
 	"strconv"
 )
 
-// KeyFunc is a mapping from a ferry address to a key in one plane's own key
-// space: the join an environment driver spells with _, the dotted path a flat
-// KV uses, the bracket form a query string wants.
+// KeyFunc maps a ferry address to a key in one plane's own key space: the join
+// an environment driver spells with _, the dotted path a flat KV uses, the
+// bracket form a query string wants.
 //
-// Core never produces a plane key, because a separator is plane knowledge and
-// producing one would require core to know what the plane is. Flattening is the
-// driver's, always (ADR-0003), and this is the type it is spelled in.
+// A driver supplies one to [NewKeys] and gets one back from [Keys.Open], so the
+// shape is the same at both ends: an address in, a checked plane key out.
 //
-// # A key function answers legality and never injectivity
+// A KeyFunc answers legality and never injectivity. Legality is what it returns
+// an error for: whether the plane can name this address at all. An empty
+// segment has no environment variable name, and no transformation rescues it.
+// Whether the transformation collapses two addresses onto one key is not a
+// question one call can answer, because one call cannot see a set; [NewKeys]
+// answers that.
 //
-// Legality is what a key function reports an error for: whether the plane can
-// name this address at all. An empty segment has no environment variable name
-// and a segment holding a backslash has no Registry name, and no transformation
-// rescues either. Injectivity - whether the transformation collapses two
-// addresses into one - is not a question one call can answer, because one call
-// cannot see a set. That is what [NewKeys] is for, and the two are different
-// questions rather than two spellings of one.
-//
-// # A key function is expected to transform segment text, not to reject it
-//
-// An environment variable name may not contain a hyphen, so a key function that
+// A KeyFunc is expected to transform segment text rather than to reject it. An
+// environment variable name may not contain a hyphen, so a key function that
 // only validates refuses feature-flags, which is an ordinary thing to write in
-// a config struct. One that maps the hyphen to _ accepts it and is not thereby
-// less safe: a transformation is many-to-one, and a many-to-one map out of the
-// address set is precisely what the injectivity check exists to catch. A driver
-// that refuses to transform is not safer than one that does, only less useful.
-//
-// It is also the type core hands back from [Keys.Open], because what a driver
-// wants at a lookup is the same shape it supplied at Bind: an address in, a
-// checked plane key out.
+// a config struct; one that maps the hyphen to _ accepts it and is no less
+// safe, because the injectivity check is what catches a transformation that
+// merges two addresses.
 type KeyFunc func(addr Path) (string, error)
 
 // Keys is a driver's plane keys for one compiled schema, computed once and
 // checked once, before any I/O.
 //
-// A driver builds one inside [Source.Bind] or [Sink.Bind], where it holds the
-// whole address set and has not yet touched its plane, and calls [Keys.Open]
-// once per load or per dump. Both checks ADR-0003 puts on a driver run at
-// construction, over the whole static set with container addresses included:
-// two containers rendering to one plane key return one merged subtree from
-// Children, which is the same silent merge the rule exists to catch.
+// A driver builds one with [NewKeys] inside [Source.Bind] or [Sink.Bind], where
+// it holds the whole address set and has not yet touched its plane, and calls
+// [Keys.Open] once per load or per dump.
 //
-// # The static table is immutable, and reading it takes no lock
+// The table is written before the value is returned and never again, so reading
+// it takes no lock and one binding is safe to use from many goroutines. The
+// addresses a value mints live in the open instead.
 //
-// Every key the address set determines is computed before this value is
-// returned, and nothing writes to the table afterwards. That is what keeps the
-// static tier at the cost ADR-0003 priced it at, a precomputed lookup against a
-// bare map lookup, rather than the 109 ns of deriving a key per call, and it is
-// what lets one binding be read from many goroutines with no synchronisation.
-// The addresses a value mints live in the open instead, so nothing mutable is
-// shared here.
-//
-// # A hand-rolled table opts out of both checks, silently
-//
-// A key function is ordinary Go and nothing obliges a driver to route its
-// lookups through this type. A driver that builds its own map[Path]string
-// discharges neither check, and gets no diagnostic saying so, because core is
-// not in the call. That is a conformance-suite concern rather than something
-// core can prevent: the suite hands a driver an address set its own transform
-// folds together and asserts that Bind refuses before any I/O.
+// Nothing obliges a driver to route its lookups through this type, and a driver
+// that builds its own map[Path]string gets neither check and no diagnostic
+// saying so, because core is not in the call.
 type Keys struct {
 	// name is what the driver calls itself, and it appears in a refusal so
 	// that a schema which is fine on one plane and impossible on another is
@@ -81,15 +57,23 @@ type Keys struct {
 	owner  map[string]Path
 }
 
-// NewKeys computes a driver's plane keys for one schema and checks them, and it
-// is the whole of what ADR-0003 asks of a flattening driver.
+// NewKeys computes a driver's plane keys for one schema and checks them. It is
+// the whole of what a flattening driver has to do with the address set it was
+// bound to.
 //
-// It takes the address set the driver's Bind was handed, the driver's own short
-// name for its diagnostics, and its key function. It returns a value serving
-// the static tier from a precomputed table, and an error naming every address
-// the plane cannot name and every pair the key function collapses into one key.
-// A driver returns that error from Bind unchanged; core supplies the moment and
-// leaves the rest alone.
+//	func (s Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
+//	    keys, err := ferry.NewKeys(addrs, "env", s.key)
+//	    if err != nil {
+//	        return nil, err
+//	    }
+//	    ...
+//	}
+//
+// It takes the address set, the driver's own short name for its diagnostics,
+// and its [KeyFunc]. It returns a binding that serves those keys from a
+// precomputed table, or an error naming every address the plane cannot name and
+// every pair the key function collapses onto one key. Return that error from
+// Bind unchanged; core supplies the rest.
 //
 // Both refusals land before any I/O, which is what lets a plane-to-plane
 // transfer be refused after zero backend calls rather than after reading the
@@ -100,9 +84,8 @@ type Keys struct {
 //	  /DB_HOST: env renders this address and /DB/HOST to one plane key, "DB_HOST", ...
 //	  /feature_flags: env renders this address and /feature-flags to one plane key, ...
 //
-// A tree driver calls none of this. It walks the segments and builds no plane
-// key at all, so it carries no injectivity obligation and pays nothing for the
-// address set (ADR-0004).
+// A tree driver calls none of this. It walks the segments, builds no plane key
+// at all, and so carries no injectivity obligation.
 func NewKeys(a *AddressSet, name string, f KeyFunc) (*Keys, error) {
 	if f == nil {
 		return nil, newError(momentBind, ErrPlane, Path{}, "the driver supplied no key function")
@@ -155,31 +138,23 @@ func (k *Keys) record(addr Path) error {
 	return nil
 }
 
-// Open starts one load or one dump over this table and hands back the key
-// function for it.
+// Open starts one load or one dump over this table and hands back the [KeyFunc]
+// for it. Call it from the [OpenFunc] or [OpenWriterFunc], once per load or per
+// dump.
 //
-// The static tier is served from the precomputed table. An address the type did
-// not determine - a map key, a sequence index - is minted on demand and checked
-// as it is minted, against the static table and against everything this open has
-// already minted, before the write it belongs to. A legitimate map key is
-// therefore answered rather than refused: core hands back a key function and not
-// a map exactly because a map invites a driver to treat a miss as an error, and
-// a static set of {/name} then refuses /labels/env for a map nobody got wrong
-// (ADR-0004).
+// An address the type determined is served from the precomputed table. An
+// address a value mints - a map key, a sequence index - is minted on demand and
+// checked as it is minted, against the table and against everything this open
+// has already minted, before the write it belongs to. So a legitimate map key
+// is answered rather than refused, which is why core hands back a function and
+// not a map: a map invites a driver to treat a miss as an error.
 //
-// # The minted set belongs to the open, and never to the binding
+// Each call gets a fresh minted set, and nothing an open mints outlives it. Two
+// dumps through one binding are not required to be mutually injective, only
+// each within itself.
 //
-// Injectivity is a property of one write. Two writes to one plane at different
-// times are not required to be mutually injective, and requiring it produces a
-// refusal with no defect behind it: a caller holding one binding and dumping a
-// map twice, each dump holding one of two keys the transform folds together, is
-// refused on the second and told about an address no plane still holds. The
-// retention is unbounded too, measured at 20,000 addresses held across 20,000
-// loads through one binding (ADR-0012).
-//
-// So each call gets a fresh minted set, and nothing an open mints outlives it.
-// The returned function is the open's and is not safe for concurrent use; the
-// binding it came from is, because the table behind it never changes.
+// The returned function belongs to the open and is not safe for concurrent use.
+// The [Keys] it came from is, because the table behind it never changes.
 func (k *Keys) Open() KeyFunc {
 	minted := map[Path]string{}
 	owner := map[string]Path{}
