@@ -223,19 +223,21 @@ func (d *driverRun) caseBind() {
 	}
 }
 
-// caseContainerGet is case 3: Get at a container address returns Absent with a
-// nil error, for a populated list, an empty list, an empty map and a missing
-// key (ADR-0004).
+// caseContainerGet is case 3: Get at a container address answers with a nil
+// error and reports what the plane holds there (ADR-0004, ADR-0014 amended
+// under #136).
 //
 // A composite is read one element at a time under ADR-0003's structured
 // addresses, so there is no group value for the container itself to hold, and a
 // driver answering one is a driver core cannot interpret.
 //
-// The empty cases admit Null as well as Absent, and that is ADR-0005 meeting
-// ADR-0014's sentence rather than a loosening: a composite with no elements
-// writes Null at its own address, so a plane that was handed one and reports it
-// back is answering correctly. The populated list and the missing address admit
-// Absent alone, because nothing was ever written there.
+// Which of the two empty answers a row demands follows from what was written
+// there. A populated list and a missing address hold Absent, because nothing
+// was ever written at either. An empty composite holds Null, because ADR-0005
+// writes a Null at a composite's own address when it has no elements, and a
+// driver reports what the plane holds: answering Absent for a stored Null
+// deletes an observation rather than renaming one, and takes a LoadOver's
+// clearing of the field with it.
 func (d *driverRun) caseContainerGet() {
 	d.rep.Helper()
 
@@ -248,9 +250,10 @@ func (d *driverRun) caseContainerGet() {
 		closeIf(r)
 	}
 
-	// The empty composites write a Null, so a plane with no null is asked only
-	// the half of this case it can be asked. Case 1 is where its refusal of the
-	// other half is asserted.
+	// The empty composites write a Null, so on a plane with no null they are
+	// never written at all and there is no stored answer to read back. Such a
+	// plane is asked only the half of this case it can be asked, and case 1 is
+	// where its refusal of the other half is asserted.
 	if !d.carry[ferry.KindNull] {
 		return
 	}
@@ -264,17 +267,53 @@ func (d *driverRun) caseContainerGet() {
 
 	defer closeIf(r)
 
-	d.holdsNothing(r, addrNilList, ferry.KindNull)
-	d.holdsNothing(r, addrEmptyMap, ferry.KindNull)
+	d.holdsNull(r, addrNilList)
+	d.holdsNull(r, addrEmptyMap)
 }
 
-// holdsNothing reads one container address and reports a driver that answered
-// with a value, or with an error where there is nothing to fail at.
+// holdsNothing reads one container address nothing was ever written at, and
+// reports a driver that answered with a value, or with an error where there is
+// nothing to fail at.
 //
-// Absent is always an answer here. The kinds a caller names beside it are the
-// ones the fixture put there: an empty composite writes a Null at its own
-// address, so a plane handed one and reporting it back is answering correctly.
-func (d *driverRun) holdsNothing(r ferry.Reader, addr ferry.Path, also ...ferry.VKind) {
+// Absent is the only answer here, because a composite is read one element at a
+// time and no Set ever reached the address.
+func (d *driverRun) holdsNothing(r ferry.Reader, addr ferry.Path) {
+	d.rep.Helper()
+
+	v, ok := d.containerGet(r, addr)
+	if !ok || v.Kind() == ferry.KindAbsent {
+		return
+	}
+
+	d.fail(caseContainerNo, fmt.Sprintf("Get at the container address %s answered %#v, where nothing was ever "+
+		"written: a composite is read one element at a time, so there is no group value for the container "+
+		"itself to hold", addr, v))
+}
+
+// holdsNull reads one container address an empty composite was dumped to, and
+// reports a driver that answered anything but the Null it was handed.
+//
+// ADR-0005 writes a Null at a composite's own address when it has no elements,
+// and a driver reports what the plane holds. Absent means the plane does not
+// hold the address, so answering it here deletes an observation rather than
+// renaming one: the field a LoadOver should clear keeps its seeded value, and
+// nothing reports why.
+func (d *driverRun) holdsNull(r ferry.Reader, addr ferry.Path) {
+	d.rep.Helper()
+
+	v, ok := d.containerGet(r, addr)
+	if !ok || v.Kind() == ferry.KindNull {
+		return
+	}
+
+	d.fail(caseContainerNo, fmt.Sprintf("Get at the container address %s answered %#v, where an empty composite "+
+		"was dumped and a Null landed: a driver reports what the plane holds, and Absent says the plane does "+
+		"not hold the address at all", addr, v))
+}
+
+// containerGet is the read both container assertions share, and the one failure
+// they share with it: a container address holds no value to fail at.
+func (d *driverRun) containerGet(r ferry.Reader, addr ferry.Path) (ferry.Value, bool) {
 	d.rep.Helper()
 
 	v, err := r.Get(context.Background(), addr)
@@ -282,15 +321,10 @@ func (d *driverRun) holdsNothing(r ferry.Reader, addr ferry.Path, also ...ferry.
 		d.fail(caseContainerNo, fmt.Sprintf("Get at the container address %s failed with %v, where a container "+
 			"address holds no value and so has nothing to fail at", addr, err))
 
-		return
+		return ferry.Value{}, false
 	}
 
-	if v.Kind() == ferry.KindAbsent || slices.Contains(also, v.Kind()) {
-		return
-	}
-
-	d.fail(caseContainerNo, fmt.Sprintf("Get at the container address %s answered %#v: a composite is read one "+
-		"element at a time, so there is no group value for the container itself to hold", addr, v))
+	return v, true
 }
 
 // caseGetError is case 4: a Get returning a non-nil error reaches the caller as
