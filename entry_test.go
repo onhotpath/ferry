@@ -531,6 +531,26 @@ func TestANilPlaneIsRefusedRatherThanDereferenced(t *testing.T) {
 	}
 }
 
+// TestANilSinkIsRefusedBeforeTheValueIsLookedAt pins the order of the two
+// refusals a Dump can make when both apply.
+//
+// Dump is BindSink plus the method, and BindSink has no value in hand, so the
+// nil sink is refused first and the nil root pointer is never reached. That is
+// the defensible order rather than an accident of the split: the nil sink is a
+// fault in the call and the nil root is a fault in the value, and a call that
+// named no plane at all failed before the value was ever relevant.
+func TestANilSinkIsRefusedBeforeTheValueIsLookedAt(t *testing.T) {
+	t.Parallel()
+
+	err := withoutPanicking(t, func() error { return Dump(t.Context(), (*walkDB)(nil), nil) })
+
+	mustRefuseANilPlane(t, err, "the sink is nil")
+
+	if strings.Contains(reportOf(err), "the root is a nil pointer") {
+		t.Errorf("%+v reports the value, and the call named no plane to write it to", err)
+	}
+}
+
 // withoutPanicking runs one call and turns a panic into a failure of this test.
 //
 // It is the assertion and not scaffolding: the defect under test is a nil

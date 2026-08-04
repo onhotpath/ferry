@@ -762,7 +762,7 @@ func TestARegistryFreezesAtItsFirstRetainedCompile(t *testing.T) {
 	}
 
 	mustRefuse(t, reg.Register(DurationLike[lateInterval]()),
-		"the registry is frozen", "before the first Load or Dump")
+		"the registry is frozen", "before the first Load, Dump or Bind")
 }
 
 // TestCompileDoesNotFreeze is the other half of "retained", and it is what

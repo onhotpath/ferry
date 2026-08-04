@@ -11,10 +11,11 @@ import (
 // on nothing else.
 //
 // Both methods are the generic entry points minus their generics: [Dump] and
-// [LoadOver] already reduce to runDump and runLoad over a reflect.Value, so
-// this adds no engine, no second compiler and no second walk. What it adds is a
-// door, and the door is internal because who may walk a runtime type is a
-// capability decision (#134) rather than a test harness's to take.
+// [LoadOver] reduce to a bind and a walk over a reflect.Value, and runDump and
+// runLoad are that pair with the type as a value, so this adds no engine, no
+// second compiler and no second walk. What it adds is a door, and the door is
+// internal because who may walk a runtime type is a capability decision (#134)
+// rather than a test harness's to take.
 //
 // It is a type with methods rather than two function variables so that the
 // caller can recover both halves with one assertion, over an interface it
@@ -29,8 +30,8 @@ func init() { valuewalk.Seam = valueWalk{} }
 
 // DumpValue is [Dump] with the root handed over as a reflect.Value.
 //
-// v is the root value itself and not a pointer to it, matching what runDump
-// receives from [Dump]: the pointer there exists to stop reflect.ValueOf
+// v is the root value itself and not a pointer to it, matching what the dump
+// half receives from [Dump]: the pointer there exists to stop reflect.ValueOf
 // unwrapping an interface T, and a caller holding a reflect.Value has already
 // chosen its static type.
 func (valueWalk) DumpValue(ctx context.Context, v reflect.Value, sink Sink, opts []Option) error {

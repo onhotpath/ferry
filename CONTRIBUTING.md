@@ -115,7 +115,7 @@ That is the pattern to copy for any new user-facing document that shows code.
 ## Tests
 
 **One seam.**
-Tests assert external behaviour through `Load`, `LoadOver`, `Dump` and `Compile`, or through `ferrytest`, which calls those.
+Tests assert external behaviour through `Load`, `LoadOver`, `Dump`, `Compile`, `Bind` and `BindSink`, or through `ferrytest`, which calls those.
 The compiled schema, the node tree, the walker, the schema cache, the scheduler, the tag scanner and the codec chain are unexported and are not reached directly by a test.
 A compiler rule is asserted through `Compile[T]()`; an address-set rule through what a recording driver's `Bind` was handed; a walk rule through what a plane was asked and what came back.
 `Path`, `AddressSet`, `Value` and `Error` are the exception, because they are pure values with no engine behind them and they are themselves the seam.

@@ -47,6 +47,11 @@ type Sink interface {
 // OpenFunc opens a [Reader] over the addresses a [Source] was bound to. It is
 // called once per load, and may be called many times against one Bind.
 //
+// It may be called from many goroutines at once, because a caller may hold what
+// [Source.Bind] returned and load through it concurrently. A driver that
+// precomputes at Bind and only reads that afterwards already satisfies this;
+// one that writes to what it closed over does not.
+//
 // Whether the driver fetches the whole plane here in one round trip or fetches
 // nothing until the first Get is the driver's own choice, and core has no
 // opinion: Bind already handed over the whole address set, so both are
@@ -54,7 +59,11 @@ type Sink interface {
 type OpenFunc func(ctx context.Context) (Reader, error)
 
 // OpenWriterFunc opens a [Writer] over the addresses a [Sink] was bound to. It
-// is called once per dump.
+// is called once per dump, and may be called many times against one Bind.
+//
+// It may be called from many goroutines at once, on the same terms as
+// [OpenFunc] and for the same reason: a caller may hold what [Sink.Bind]
+// returned and dump through it concurrently.
 //
 // It is where a read-only refusal lands, wrapping [ErrReadOnly]: a KV with no
 // write ACL, or a file sink over an unwritable directory, fails here after zero
