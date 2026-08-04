@@ -2,7 +2,6 @@ package ferry
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 )
 
@@ -48,11 +47,11 @@ func serial(tasks []func() error) error {
 // with two answers; and members cannot be shared at all, because Dump reads a
 // map's keys off the value while Load enumerates the plane.
 //
-// Only the leaf has anything to do while the compiler admits string leaves and
-// structs of them. The container question needs a composite that can be nil,
-// and members needs one whose children come from the value, so those two
-// operations join this interface with the types that give them something to
-// decide rather than being stubbed out ahead of them.
+// Only the leaf has anything to do while the compiler admits leaves and structs
+// of them. The container question needs a composite that can be nil, and
+// members needs one whose children come from the value, so those two operations
+// join this interface with the types that give them something to decide rather
+// than being stubbed out ahead of them.
 //
 // Everything else is written once and lives on [walker]: which nodes exist and
 // in what order, where the context is checked, and where the scheduler sits.
@@ -148,21 +147,14 @@ func (l loadFrom) atLeaf(ctx context.Context, n *node, v reflect.Value) error {
 		return nil
 	}
 
-	s, err := got.AsString()
-	if err != nil {
-		return newError(momentWalk, ErrValue, n.addr, wrongKindMsg(got, v)).withCause(err)
+	// Which kinds this leaf takes and how it reads their text is the leaf's,
+	// resolved at compile and held on the node, so the walk decides nothing
+	// about a type here (ADR-0005).
+	if err := n.codec.decode(v, got); err != nil {
+		return newError(momentWalk, ErrValue, n.addr, err.Error()).withCause(err)
 	}
 
-	v.SetString(s)
-
 	return nil
-}
-
-// wrongKindMsg names the kind the plane held and the type that cannot take it,
-// and neither is a value the plane supplied: ADR-0011 makes that rule total,
-// because ferry cannot know which addresses hold secrets.
-func wrongKindMsg(got Value, v reflect.Value) string {
-	return fmt.Sprintf("the plane holds %s and %s cannot take one", got.Kind(), v.Type())
 }
 
 // dumpTo is the Dump direction: hand the plane one Value per address.
@@ -173,8 +165,17 @@ var _ direction = dumpTo{}
 // atLeaf writes one address. It never writes an Absent, which is a Reader-side
 // kind: an omitted address is one that gets no Set call at all rather than one
 // that gets a Set of nothing (ADR-0006).
+//
+// A value the leaf's representation does not cover is reported rather than
+// swallowed, which in core's set is a time.Time outside years 0 to 9999 and
+// nothing else.
 func (d dumpTo) atLeaf(ctx context.Context, n *node, v reflect.Value) error {
-	if err := d.w.Set(ctx, n.addr, String(v.String())); err != nil {
+	out, err := n.codec.encode(v)
+	if err != nil {
+		return newError(momentWalk, ErrValue, n.addr, err.Error()).withCause(err)
+	}
+
+	if err := d.w.Set(ctx, n.addr, out); err != nil {
 		return fromDriver(momentWalk, n.addr, err)
 	}
 

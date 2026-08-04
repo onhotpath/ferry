@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/onhotpath/ferry/ferrytest"
 )
@@ -34,25 +33,6 @@ import (
 // the engine gained the type is what TestEverySkippedTypeStillFails refuses.
 // The ticket that empties it deletes it, and this file with it.
 var engineCannotCarry = map[reflect.Type]string{
-	// #73, the leaves: by kind, and by type identity.
-	reflect.TypeFor[bool]():          "#73",
-	reflect.TypeFor[int]():           "#73",
-	reflect.TypeFor[int8]():          "#73",
-	reflect.TypeFor[int16]():         "#73",
-	reflect.TypeFor[int32]():         "#73",
-	reflect.TypeFor[int64]():         "#73",
-	reflect.TypeFor[uint]():          "#73",
-	reflect.TypeFor[uint8]():         "#73",
-	reflect.TypeFor[uint16]():        "#73",
-	reflect.TypeFor[uint32]():        "#73",
-	reflect.TypeFor[uint64]():        "#73",
-	reflect.TypeFor[float32]():       "#73",
-	reflect.TypeFor[float64]():       "#73",
-	reflect.TypeFor[[]byte]():        "#73",
-	reflect.TypeFor[[3]byte]():       "#73",
-	reflect.TypeFor[time.Duration](): "#73",
-	reflect.TypeFor[time.Time]():     "#73",
-
 	// #75, the dynamic composites. A slice's addresses come from the value, and
 	// a composite with no elements writes Null at its own address.
 	reflect.TypeFor[[]string](): "#75",

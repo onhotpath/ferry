@@ -106,6 +106,11 @@ type node struct {
 	// The leaf's resolved behaviour. A declared default is held as a Value and
 	// decoded per load rather than cached as a Go value, because a cached one
 	// is aliased across every load of one schema (ADR-0006).
+	//
+	// codec is the leaf's own boundary behaviour, resolved by identity and then
+	// by kind once per position per schema rather than re-decided on every walk
+	// (ADR-0005, ADR-0010).
+	codec    leafCodec
 	def      Value
 	hasDef   bool
 	required bool
@@ -322,27 +327,79 @@ func (c *compiler) compileTagged(t reflect.Type, parent *node, s site, value str
 
 // compileValue is the second and third tiers: is each option legal at this
 // field's type, and do two that both survived that conflict (ADR-0006).
+//
+// The leaf lookup runs before the struct arm, and that ordering is ADR-0005's
+// identity-before-kind rule arriving at the compiler. time.Time's kind is
+// struct, so a kind-first compiler walks its three unexported fields, finds no
+// address, and refuses with the maps-no-address rule the very type ferry owns a
+// representation for.
 func (c *compiler) compileValue(t reflect.Type, parent *node, s site, tg tag) int {
+	if cd, ok := leafFor(t); ok {
+		return c.compileLeaf(cd, t, parent, s, tg)
+	}
+
 	if t.Kind() == reflect.Struct {
 		return c.compileNested(t, parent, s, tg)
 	}
 
-	if !isLeafType(t) {
-		c.errAt(s.addr, fmt.Sprintf(
-			"%s is not a type ferry maps to an address: register a codec for it, or model it as a type "+
-				"ferry carries", t))
+	// ADR-0011 splits the two locations by tier and this is below the first, so
+	// the refusal sits at the plane address rather than at the Go field path,
+	// which is what the neighbouring rules in this function already do.
+	c.errAt(s.addr, refusalMsg(t))
 
-		return 0
-	}
+	return 0
+}
 
-	c.checkContradictions(s.addr, tg)
+// compileLeaf records a value that crosses the boundary at one address, with
+// the behaviour that carries it resolved here rather than in the walk.
+func (c *compiler) compileLeaf(cd leafCodec, t reflect.Type, parent *node, s site, tg tag) int {
+	c.checkContradictions(cd, t, s.addr, tg)
 	parent.fields = append(parent.fields, &node{
-		kind: nodeLeaf, addr: s.addr, index: s.index,
+		kind: nodeLeaf, addr: s.addr, index: s.index, codec: cd,
 		def: String(tg.def), hasDef: tg.hasDef, required: tg.required, omitzero: tg.omitzero,
 	})
 	c.leaves = append(c.leaves, leaf{addr: s.addr, field: s.field})
 
 	return 1
+}
+
+// refusalMsg is the diagnosis for a type outside the set, and it is three
+// messages rather than one because ADR-0005 sorts the refusals by what actually
+// limits each and only one group is permanent.
+//
+// Offering registration as the remedy for a chan would be naming a remedy that
+// does not exist, which is the same mistake ADR-0005 corrected for time.Time as
+// a map key.
+func refusalMsg(t reflect.Type) string {
+	head := fmt.Sprintf("%s is not a type ferry maps to an address", t)
+
+	switch {
+	case permanentlyRefused(t.Kind()):
+		return head + fmt.Sprintf(": a %s exists only inside the process that made it, so no text could carry "+
+			"it and no codec can be written for it", t.Kind())
+	case t.Kind() == reflect.Complex64 || t.Kind() == reflect.Complex128:
+		return head + ": no plane in ferry's range has a complex type, so this is a refusal by policy rather " +
+			"than by constraint: register a codec for it if yours does"
+	default:
+		return head + ": register a codec for it, or model it as a type ferry carries"
+	}
+}
+
+// permanentlyRefused is ADR-0005's category (a), the only refusals nothing
+// lifts: a codec has to produce a kind and text and rebuild the value from that
+// text alone, and for these there is nothing text could carry.
+//
+// func is the sharpest of the four and fails on the encode side before the
+// decode side is reached: measured, reflect.TypeFor[func()]().Comparable() is
+// false, so a codec cannot even ask which registered function this is. A chan
+// is comparable, and its identity is a pointer into this process's heap.
+func permanentlyRefused(k reflect.Kind) bool {
+	switch k {
+	case reflect.Chan, reflect.Func, reflect.UnsafePointer, reflect.Uintptr:
+		return true
+	default:
+		return false
+	}
 }
 
 // compileNested is a struct under a name of its own, which is the whole of what
@@ -377,27 +434,36 @@ func (c *compiler) checkStructOptions(t reflect.Type, addr Path, tg tag) {
 // checkContradictions is the third tier, and it runs only over options that
 // cleared the second: a contradiction between two options is only meaningful if
 // both are individually legal here.
-func (c *compiler) checkContradictions(addr Path, tg tag) {
+func (c *compiler) checkContradictions(cd leafCodec, t reflect.Type, addr Path, tg tag) {
 	if tg.required && tg.hasDef {
 		c.errAt(addr, "required and default contradict: a default answers the absence required forbids")
 	}
 
 	// A default equal to the zero value is not a contradiction, because
-	// omitting it and reapplying it land on the same value. The zero of every
-	// type this compiler admits is the empty text, and widening the type set
-	// widens this comparison with it.
-	if tg.omitzero && tg.hasDef && tg.def != "" {
+	// omitting it and reapplying it land on the same value. Which text that is
+	// became the leaf's own question when the type set widened past string:
+	// "0" is int's zero, "false" is bool's and "0s" is time.Duration's, and not
+	// one of them is the empty text a string-only compiler could compare with.
+	if tg.omitzero && tg.hasDef && !declaredZero(cd, t, tg.def) {
 		c.errAt(addr, fmt.Sprintf("omitzero and default=%s contradict: an explicit zero would be omitted "+
 			"and would load back as the default", tg.def))
 	}
 }
 
-// isLeafType reports whether a type crosses the boundary at one address.
+// declaredZero reports whether a declared default decodes to the type's own
+// zero value, through the same parser a load would use.
 //
-// It answers for string today, which is what this compiler admits. The full
-// type set, the composites and the codec chain each widen this one function
-// rather than the compiler around it.
-func isLeafType(t reflect.Type) bool { return t.Kind() == reflect.String }
+// A default that does not decode at all is a different mistake from a
+// contradiction between two options, and reporting this one for it would name
+// the wrong one, so it is not a contradiction here.
+func declaredZero(cd leafCodec, t reflect.Type, def string) bool {
+	v := reflect.New(t).Elem()
+	if err := cd.decode(v, String(def)); err != nil {
+		return true
+	}
+
+	return v.IsZero()
+}
 
 // checkPrefixFree is ADR-0003's collision rule, over the leaf addresses: no
 // leaf address is a prefix of another, and a path is a prefix of itself so this
