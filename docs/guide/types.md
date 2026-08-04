@@ -355,7 +355,7 @@ That catches one class of wrong codec out of four, and it is the class that matt
 What it does not catch is a lossy codec, a constant codec, and a codec that declares the wrong kind, and those are what a proof in `ferrytest` is for.
 
 A registration goes into a `Registry`, which is a value, and it freezes at its first retained schema compile.
-Nothing can be registered after the first `Load` or `Dump`; `Compile` retains no resolution and does not freeze.
+Nothing can be registered after the first `Load`, `Dump`, `Bind` or `BindSink`; `Compile` retains no resolution and does not freeze.
 
 ### Proving your codec
 

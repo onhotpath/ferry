@@ -54,13 +54,13 @@ type retention bool
 
 const (
 	discarded retention = false // Compile: nothing keeps the resolution
-	retained  retention = true  // Load, LoadOver and Dump: the walk runs on it
+	retained  retention = true  // every other verb: something holds the result
 )
 
-// schemaOf is the one door into the compiler. Compile, Load, LoadOver and Dump
-// all reach a compiled type through this function and no other, so the two
-// entry points cannot disagree about whether a type is legal - which would be
-// the two-engines defect at ferry's own front door (ADR-0010).
+// schemaOf is the one door into the compiler. Every verb reaches a compiled
+// type through this function and no other, so no two entry points can disagree
+// about whether a type is legal - which would be the two-engines defect at
+// ferry's own front door (ADR-0010).
 //
 // It resolves the Options first, because an Option list that is wrong is a
 // mistake in the program that wrote it rather than in the type being compiled,

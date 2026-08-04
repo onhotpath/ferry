@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// Option is a setting a caller hands to [Load], [LoadOver], [Dump] or
-// [Compile]. There are two: [TagKey] and [WithRegistry].
+// Option is a setting a caller hands to [Load], [LoadOver], [Dump], [Compile],
+// [Bind] or [BindSink]. There are two: [TagKey] and [WithRegistry].
 //
 // The set is closed, because the interface's one method is unexported. A
 // library built on ferry can therefore change where ferry reads its annotation
@@ -117,7 +117,8 @@ func TagKey(key string) Option {
 // registry.
 //
 // The registry it names freezes at this call if the call retains its schema,
-// which [Load], [LoadOver] and [Dump] do and [Compile] does not.
+// which [Load], [LoadOver], [Dump], [Bind] and [BindSink] do and [Compile] does
+// not.
 //
 // It is refused when supplied twice, and a nil registry is refused rather than
 // read as the default: an empty registry is spelled [NewRegistry], and omitting

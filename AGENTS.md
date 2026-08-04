@@ -93,7 +93,7 @@ Never raise the number, never add a `//nolint`.
 
 ## Tests
 
-One seam: assert through `Load`, `LoadOver`, `Dump` and `Compile`, or through `ferrytest`, which calls those.
+One seam: assert through `Load`, `LoadOver`, `Dump`, `Compile`, `Bind` and `BindSink`, or through `ferrytest`, which calls those.
 `Path`, `AddressSet`, `Value` and `Error` are the exception, because they are the seam.
 
 Every equivalence subtest gets a fresh destination.
