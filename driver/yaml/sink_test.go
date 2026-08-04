@@ -39,7 +39,7 @@ func TestStagingReplacesThePlane(t *testing.T) {
 		t.Errorf("the plane holds %q, want %q", got, want)
 	}
 
-	onlyFile(t, dir, "plane.yaml")
+	onlyPlane(t, dir)
 }
 
 // TestStagingLeavesThePlaneAloneOnFailure is the other half, and it is the half
@@ -78,7 +78,65 @@ func TestStagingLeavesThePlaneAloneOnFailure(t *testing.T) {
 			"not commit must leave the plane byte-identical", got, before)
 	}
 
-	onlyFile(t, dir, "plane.yaml")
+	onlyPlane(t, dir)
+}
+
+// TestUnflushableDirectoryIsADumpThatDidNotCommit is the second sync's own
+// failure, seen from where a caller meets it (#187).
+//
+// A directory with write and execute and no read takes the staged file and takes
+// the rename, and refuses the open a flush of it needs. So the plane is replaced
+// and the flush that would make the replacement durable cannot happen, which is
+// a dump that did not commit: it reports, it carries the class the rename's own
+// failure carries, and it leaves no temporary behind, because the rename has
+// already taken the one there was.
+//
+// The plane holding the new document is asserted rather than tolerated. It is
+// the one case where a save that failed has still replaced the file, and doc.go
+// names it.
+func TestUnflushableDirectoryIsADumpThatDidNotCommit(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root opens a directory with no read bit, so there is no refusal to observe")
+	}
+
+	type config struct {
+		Port int `ferry:"port"`
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plane.yaml")
+
+	if err := os.WriteFile(path, []byte("port: 1\n"), 0o600); err != nil {
+		t.Fatalf("writing the plane: %v", err)
+	}
+
+	if err := os.Chmod(dir, 0o300); err != nil {
+		t.Fatalf("making the directory unreadable: %v", err)
+	}
+
+	err := ferry.Dump(t.Context(), config{Port: 8080}, yaml.NewSink(path))
+
+	// Restored before anything is asserted, because every assertion below reads
+	// the directory this test just made unreadable.
+	if cerr := os.Chmod(dir, 0o700); cerr != nil {
+		t.Fatalf("restoring the directory: %v", cerr)
+	}
+
+	if err == nil {
+		t.Fatal("a dump whose replacement could not be flushed reported that it committed")
+	}
+
+	if !errors.Is(err, ferry.ErrPlane) {
+		t.Errorf("the dump reported %v, want an error carrying ferry.ErrPlane, which is the class the rename's "+
+			"own failure carries", err)
+	}
+
+	if got, want := read(t, path), "port: 8080\n"; got != want {
+		t.Errorf("the plane holds %q, want %q: the rename landed and it is the flush after it that failed", got,
+			want)
+	}
+
+	onlyPlane(t, dir)
 }
 
 // TestUnwritableDirectoryRefusesInsideTheOpen holds the read-only refusal to
@@ -386,7 +444,7 @@ func TestNonUTF8StringIsRefusedPerAddress(t *testing.T) {
 		t.Errorf("the plane holds %q, want %q: a dump that failed leaves the plane byte-identical", got, want)
 	}
 
-	onlyFile(t, filepath.Dir(path), "plane.yaml")
+	onlyPlane(t, filepath.Dir(path))
 }
 
 // TestModeSurvives asserts a dump does not silently re-permission a file
@@ -431,9 +489,12 @@ func read(t *testing.T, path string) string {
 	return string(data)
 }
 
-// onlyFile asserts the directory holds exactly the one file named, which is how
+// planeName is what every test in this package calls its plane.
+const planeName = "plane.yaml"
+
+// onlyPlane asserts the directory holds the plane and nothing else, which is how
 // a staged temporary that was not cleaned up is caught.
-func onlyFile(t *testing.T, dir, name string) {
+func onlyPlane(t *testing.T, dir string) {
 	t.Helper()
 
 	entries, err := os.ReadDir(dir)
@@ -441,7 +502,7 @@ func onlyFile(t *testing.T, dir, name string) {
 		t.Fatalf("reading the plane's directory: %v", err)
 	}
 
-	if len(entries) == 1 && entries[0].Name() == name {
+	if len(entries) == 1 && entries[0].Name() == planeName {
 		return
 	}
 
@@ -451,7 +512,7 @@ func onlyFile(t *testing.T, dir, name string) {
 	}
 
 	t.Errorf("the plane's directory holds %v, want only %q: a staged file that outlives the dump is a temporary "+
-		"left behind", got, name)
+		"left behind", got, planeName)
 }
 
 // openWriter binds a sink over the plane and opens it, which is the two phases

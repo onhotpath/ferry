@@ -35,9 +35,12 @@ const indent = 2
 // every key no field of yours maps - is left as it was. That is what makes a
 // hand-maintained config file survive being loaded and written back.
 //
-// The write is atomic. A temporary file beside yours is renamed into place once
-// everything has been written, and a save that fails leaves your file byte for
-// byte as it was with no temporary left behind.
+// The write is atomic and durable. A temporary file beside yours is renamed into
+// place once everything has been written, and both the new contents and the
+// rename itself are flushed to the disk before the save returns. A save that
+// fails leaves your file byte for byte as it was with no temporary left behind,
+// unless it was the flush of the rename that failed, in which case your file
+// holds the new document and the save says so.
 //
 // It is a separate type from [Source] for the reason recorded there.
 type Sink struct {
@@ -91,16 +94,20 @@ func open(ctx context.Context, path string) (*writer, error) {
 // writer is one open dump: the document being built up, and the file that will
 // become the plane.
 //
-// The staging state is one bool. Commit sets it after the rename has happened,
-// and Close reads it to tell a dump that finished from a dump that was
-// abandoned - which is the whole protocol, because closed-without-Commit is the
-// abort signal and no driver is ever told that it failed (ADR-0004).
+// The staging state is one bool. The rename sets it, and Close reads it to tell
+// a dump that still has a temporary from a dump that no longer does - which is
+// the whole protocol, because closed-without-Commit is the abort signal and no
+// driver is ever told that it failed (ADR-0004).
+//
+// It records the rename rather than the commit, because the two came apart when
+// the directory sync landed after the rename (#187): a sync that fails is a
+// dump that did not commit, and the staged file is gone all the same.
 type writer struct {
 	path string
 	doc  *yamlv3.Node
 	tmp  *os.File
 
-	committed bool
+	swapped bool
 }
 
 // Set writes one value at one address, creating the containers above it.
@@ -147,11 +154,35 @@ func (w *writer) Commit(_ context.Context) error {
 		return err
 	}
 
+	return w.swap()
+}
+
+// swap renames the staged file over the plane and makes the rename itself
+// durable.
+//
+// The emit flushed the staged file's contents, but the rename writes a
+// directory entry and that entry sits in the page cache until the directory it
+// lives in is synced. Without the second sync a crash just after a Dump that
+// returned nil can leave the operator's old document in place with the new
+// one's bytes already on the platter, which is the whole of #187: the expensive
+// half of durability was being paid for and the cheap half was missing.
+//
+// The failure is classed exactly as the rename's own, because a rename that
+// cannot be made durable and a rename that did not happen are the same answer
+// to the caller: the dump did not commit.
+func (w *writer) swap() error {
 	if err := os.Rename(w.tmp.Name(), w.path); err != nil {
 		return fmt.Errorf("%w: the staged document could not replace the plane: %w", ferry.ErrPlane, err)
 	}
 
-	w.committed = true
+	// Set on the rename and not at the end, because from here there is no
+	// staged file left for Close to remove whatever the sync answers.
+	w.swapped = true
+
+	if err := syncDir(filepath.Dir(w.path)); err != nil {
+		return fmt.Errorf("%w: the staged document replaced the plane and the replacement could not be made "+
+			"durable: %w", ferry.ErrPlane, err)
+	}
 
 	return nil
 }
@@ -206,16 +237,20 @@ func (w *writer) inheritMode() error {
 	return nil
 }
 
-// Close removes the staged file where the dump did not commit, and does nothing
-// where it did.
+// Close removes the staged file where it is still staged, and does nothing once
+// the rename has taken it.
 //
 // It runs whether the walk succeeded or failed, and a walk that failed is a
 // Close with no Commit before it, which is the only thing this driver is told
 // about the failure and the only thing it needs: the plane is still byte for
 // byte what it was, and the temporary that would otherwise be left behind is
 // what this removes.
+//
+// It asks about the rename rather than about the commit, because a directory
+// sync that failed after the rename is a dump that did not commit and has no
+// temporary left to remove (#187).
 func (w *writer) Close() error {
-	if w.committed {
+	if w.swapped {
 		return nil
 	}
 

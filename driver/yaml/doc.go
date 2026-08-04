@@ -38,12 +38,23 @@
 // ferry as its own kind and comes back spelled the way it went in. A []byte
 // field is saved as standard YAML !!binary, base64.
 //
-// # Saving is atomic
+// # Saving is atomic, and it is durable
 //
 // A save writes a temporary file beside yours and renames it into place once
-// everything has been written, so nothing ever reads a half-written config. If
-// the save fails, your file is left byte for byte as it was, and no temporary
-// file is left behind.
+// everything has been written, so nothing ever reads a half-written config, and
+// no temporary file is ever left behind. A save that fails leaves your file byte
+// for byte as it was, with one exception, named below.
+//
+// Durability is the second promise. The new file's contents are flushed to the
+// disk, and so is the directory entry that makes your path point at them, so a
+// save that returned nil has reached the disk rather than the page cache.
+// Windows has no way to flush a directory: there the contents are flushed and
+// the durability of the rename is the filesystem's own business.
+//
+// The exception is a directory flush that fails once the rename has already
+// landed. The save reports [ferry.ErrPlane] and your file holds the new
+// document, because what could not be promised is that the replacement survives
+// a crash, not that it happened.
 //
 // # One thing it cannot do
 //
