@@ -404,6 +404,25 @@ Case 12 is the Dump mirror of case 3, and it was added under [#56](https://githu
 Case 3 asks what a driver answers at a container address; case 12 asks whether it was told to expect one at all.
 Without the second, a driver whose static table holds a wildcard shape instead of the container address passes every existing case and refuses a legal write, which is the shape case 9 already guards from the other side.
 
+> **Amended under [#136](https://github.com/onhotpath/ferry/issues/136): case 3 was written against a different fixture from case 12, and never said so.**
+> As published, case 3 read as one universal rule, and against a plane ferry's own `Dump` wrote it is false at two of its four rows.
+> What moves is those two rows and nothing else: a populated list and a missing key still answer `Absent` with a nil error, because nothing was ever written at those addresses, and an empty list and an empty map answer `Null`, because [ADR-0005](0005-the-supported-type-set.md) writes a `Null` at a composite's own address when it has no elements.
+> **The two cases were never over the same fixture, which is why they read as contradicting each other and do not.**
+> Case 3's four shapes are ADR-0005's **source-side** table, measured over a document a human wrote.
+> Case 12's three shapes are **Go values** handed to `Dump`.
+> "An empty list" means a plane node in one sentence and a Go value in the other.
+> **The principle, which is wider than this case: a driver reports what the plane holds.**
+> `Absent` means the plane does not hold this address, and `Null` is a present address carrying that plane's own null.
+> Reporting `Absent` for a stored `Null` deletes an observation rather than renaming one, because [ADR-0006](0006-defaults-and-zero-values.md) makes a `Null` at a container address a write and an `Absent` no write at all.
+> **The tree-document answer, which no ADR gave before**: at an explicit `tags: []` node in a hand-authored document a driver answers `Null`, the same as at `tags: null`.
+> A present-but-empty sequence is a present address holding an empty collection, ferry's vocabulary has one word for it, and ADR-0005 already decided that nil and empty collapse.
+> That is the existing rule applied rather than a new one, and it is written down here so that a tree driver's author does not have to infer it.
+> Measured, and this is what makes the ruling non-arbitrary rather than a coin toss between two sentences: under the `Absent` reading [`LoadOver`](0010-the-entry-point-and-the-schema-cache.md) silently stops clearing a seeded field, a source that cannot enumerate can no longer load an empty composite at all because `Absent` sends the walk looking for children it cannot list, and `required` on an optional section refuses a plane that supplied a null.
+> Through plain `Load` into a zero value the two readings are indistinguishable on every row, so the whole cost sits on the reload path.
+> **Nothing in the engine moves**, and nothing in [ADR-0004](0004-source-and-sink.md), ADR-0005 or ADR-0006 moves; case 12 stands as published.
+> A plane that declares no null is untouched by all of it, because an empty composite is never written there at all, and case 1 owns that refusal by name.
+> Evidence: [`proto/136-container-reads`](https://github.com/onhotpath/ferry/tree/proto/136-container-reads).
+
 **`Codec`, six cases.**
 
 1. `AppendText` and `MarshalText` agree ([ADR-0007](0007-the-codec-chain-and-its-precedence.md); nothing enforces it for a user type, which is why it is a case and not a promise).
