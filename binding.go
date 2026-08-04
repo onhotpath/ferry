@@ -135,9 +135,9 @@ func (b *Binding[T]) LoadOver(ctx context.Context, seed T) (T, error) {
 
 // Dump writes v to the plane this binding was bound to.
 //
-// It is exactly what [Dump] does, minus the compile and the bind, so omitzero,
-// the encode-before-write phase, the [Committer] and [Releaser] protocol and
-// the failure report are all the same.
+// It is exactly what [Dump] does, minus the compile and the bind. The
+// [Committer] and [Releaser] protocol, omitzero and the failure report are all
+// the same, and every value is still encoded before any of them is written.
 func (b *SinkBinding[T]) Dump(ctx context.Context, v T) error {
 	// Through a pointer, for the reason LoadOver takes one.
 	return b.b.dump(ctx, reflect.ValueOf(&v).Elem())
