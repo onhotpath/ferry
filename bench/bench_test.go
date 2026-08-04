@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	xyaml "github.com/gojekfarm/xtools/xload/providers/yaml"
@@ -194,15 +193,24 @@ func BenchmarkStructTagCost(b *testing.B) {
 // sink keeps BenchmarkStructTagCost's result live.
 var sink int
 
-// TestFerryRefusesAStringAtAContainer is the measurement behind the fixture's
-// CSV_TAGS naming, kept as a test rather than as a claim in a comment.
+// TestFerryReadsTheChildrenAndNotTheContainer is the measurement behind the
+// fixture's CSV_TAGS naming, kept as a test rather than as a claim in a
+// comment.
 //
 // ferry addresses a slice element at TAGS_0, so /tags is a container address
 // that holds nothing itself. Setting TAGS as well - the delimited spelling
-// three of the env libraries want - puts a string there, and ferry refuses the
-// whole load rather than guessing which of the two the operator meant. That
-// refusal is why the fixture spells the delimited form CSV_TAGS.
-func TestFerryRefusesAStringAtAContainer(t *testing.T) {
+// three of the env libraries want - puts a string there.
+//
+// Core used to refuse the whole load for that. It no longer does: at a slice or
+// a map, over a source that implements Enumerator, it asks for the container's
+// children before it asks the container's own address, and asks the container's
+// own address only where there were no children (ADR-0003, amended under #209).
+// driver/env enumerates, so TAGS_0.. win and the string at TAGS is never read.
+//
+// The whole struct is compared rather than the one field, because "the load
+// succeeded" would pass just as well if the extra variable had quietly moved
+// something else.
+func TestFerryReadsTheChildrenAndNotTheContainer(t *testing.T) {
 	env := bench.EnvLarge()
 	env["TAGS"] = "checkout,payments,eu"
 
@@ -210,13 +218,13 @@ func TestFerryRefusesAStringAtAContainer(t *testing.T) {
 	t.Cleanup(func() { bench.ApplyEnv(bench.EnvLarge()) })
 	bench.ApplyEnv(env)
 
-	_, err := ferry.Load[bench.Large](context.Background(), ferryenv.New(), ferry.TagKey("yaml"))
-	if err == nil {
-		t.Fatal("ferry loaded a plane holding a string at the container address /tags")
+	got, err := ferry.Load[bench.Large](context.Background(), ferryenv.New(), ferry.TagKey("yaml"))
+	if err != nil {
+		t.Fatalf("ferry refused a plane holding a string at the container address /tags: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "/tags") {
-		t.Errorf("the refusal is %q, want it to name /tags", err)
+	if want := bench.WantLarge(); !reflect.DeepEqual(got, want) {
+		t.Errorf("a string at /tags changed what ferry loaded\n  got:  %#v\n  want: %#v", got, want)
 	}
 }
 

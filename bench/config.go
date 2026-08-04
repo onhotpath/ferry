@@ -66,9 +66,10 @@ type Large struct {
 	// ferry addresses a slice element and a map entry at TAGS_0 and
 	// LIMITS_RPS, so the address /tags is a container and holds nothing
 	// itself. Setting TAGS as well - the delimited spelling the other three
-	// env libraries want - puts a string at that container address, and ferry
-	// refuses the load rather than guessing, which is the right refusal and
-	// is measured in TestFerryRefusesAStringAtAContainer.
+	// env libraries want - puts a string at that container address, which core
+	// no longer reads at all where the plane holds children under it; see the
+	// note on EnvLarge in fixture.go for what that leaves of the reason, and
+	// TestFerryReadsTheChildrenAndNotTheContainer for the measurement.
 	//
 	// So the delimited spelling gets a name of its own, out of the way of the
 	// indexed one. kelseyhightower/envconfig derives its key from the field
