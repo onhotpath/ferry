@@ -1,0 +1,340 @@
+=== RUN   TestCoreDropsAllButTheFirstLocatedCloseFailure
+    core_defect_test.go:59: 
+    core_defect_test.go:60: === Close returns one ErrorAt ===
+    core_defect_test.go:61: %+v: ferry: /q: closing the plane: plane error: the first failure
+          close, plane error, driver
+    core_defect_test.go:62: Elements()  = 1
+    core_defect_test.go:63: Address()   = "/q"
+    core_defect_test.go:64: mentions the first failure  = true
+    core_defect_test.go:65: mentions the second failure = false
+    core_defect_test.go:59: 
+    core_defect_test.go:60: === Close returns errors.Join of two ErrorAt ===
+    core_defect_test.go:61: %+v: ferry: /q: closing the plane: plane error: the first failure
+          close, plane error, driver
+    core_defect_test.go:62: Elements()  = 1
+    core_defect_test.go:63: Address()   = "/q"
+    core_defect_test.go:64: mentions the first failure  = true
+    core_defect_test.go:65: mentions the second failure = false
+--- PASS: TestCoreDropsAllButTheFirstLocatedCloseFailure (0.00s)
+=== RUN   TestTheSameJoinWithoutErrorAtSurvives
+    core_defect_test.go:77: %+v: ferry: closing the plane: plane error: the first failure at /q
+        plane error: the second failure at /r
+          close, plane error, driver
+    core_defect_test.go:78: mentions the first failure  = true
+    core_defect_test.go:79: mentions the second failure = true
+--- PASS: TestTheSameJoinWithoutErrorAtSurvives (0.00s)
+=== RUN   TestTheSameLossAtBind
+    core_defect_test.go:110: %+v: ferry: /q: the driver refused the address set: plane error: the first failure
+          bind, plane error, driver
+    core_defect_test.go:111: Elements()  = 1
+    core_defect_test.go:112: mentions /q = true
+    core_defect_test.go:113: mentions /r = false
+--- PASS: TestTheSameLossAtBind (0.00s)
+=== RUN   TestQ1ConformanceWithAndWithoutASink
+    q1_sink_test.go:171: none                                        with sink: 0   no sink: 0 (+54 nil-sink reports)
+    q1_sink_test.go:171: Children skips a one-element sequence       with sink: 0   no sink: 0 (+54 nil-sink reports)
+    q1_sink_test.go:171: Get hands back the first of a repeated name  with sink: 2   no sink: 0 (+54 nil-sink reports)
+    q1_sink_test.go:175:       with   : plane query: case 3: Get at the container address /list answered string("a"), where nothing was ever written: a composite is read one element at a time, so there is no group value for the container itself to hold
+    q1_sink_test.go:175:       with   : plane query: case 3: Get at the container address /map answered string("v"), where nothing was ever written: a composite is read one element at a time, so there is no group value for the container itself to hold
+    q1_sink_test.go:171: Children answers only static names          with sink: 2   no sink: 0 (+54 nil-sink reports)
+    q1_sink_test.go:175:       with   : plane query: case 5: Children at /list answered [], want [/list#0 /list#1]: an address carries its segment kind, so a sequence element and a mapping member are different answers
+    q1_sink_test.go:175:       with   : plane query: case 5: Children at /map answered [], want [/map/k]: an address carries its segment kind, so a sequence element and a mapping member are different answers
+    q1_sink_test.go:171: Children drops the last position            with sink: 2   no sink: 0 (+54 nil-sink reports)
+    q1_sink_test.go:175:       with   : plane query: case 5: Children at /list answered [/list#0], want [/list#0 /list#1]: an address carries its segment kind, so a sequence element and a mapping member are different answers
+    q1_sink_test.go:175:       with   : plane query: case 5: Children at /map answered [], want [/map/k]: an address carries its segment kind, so a sequence element and a mapping member are different answers
+--- PASS: TestQ1ConformanceWithAndWithoutASink (0.00s)
+=== RUN   TestQ1RoundTripWithAndWithoutASink
+    q1_sink_test.go:233: none                                        with sink: 0   no sink: 0 (+3 nil-sink reports)
+    q1_sink_test.go:233: Children skips a one-element sequence       with sink: 1   no sink: 0 (+3 nil-sink reports)
+    q1_sink_test.go:237:       with   : plane query: []string: case 1: load: ferry: /value: the plane holds string at a container address, which holds absence or a null and nothing else
+    q1_sink_test.go:233: Get hands back the first of a repeated name  with sink: 0   no sink: 0 (+3 nil-sink reports)
+    q1_sink_test.go:233: Children answers only static names          with sink: 3   no sink: 0 (+3 nil-sink reports)
+    q1_sink_test.go:237:       with   : plane query: []string: case 0: load: ferry: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 3, and this address takes one: a repeated name is a sequence and nothing read it as one at /value
+    q1_sink_test.go:237:       with   : plane query: []string: case 1: load: ferry: /value: the plane holds string at a container address, which holds absence or a null and nothing else
+    q1_sink_test.go:237:       with   : plane query: map[string]string: case 0: loaded map[string]string(nil), want map[string]string{"cpu":"1", "mem":"2"}
+    q1_sink_test.go:233: Children drops the last position            with sink: 3   no sink: 0 (+3 nil-sink reports)
+    q1_sink_test.go:237:       with   : plane query: []string: case 0: loaded []string{"a", "b"}, want []string{"a", "b", "c"}
+    q1_sink_test.go:237:       with   : plane query: []string: case 1: load: ferry: /value: the plane holds string at a container address, which holds absence or a null and nothing else
+    q1_sink_test.go:237:       with   : plane query: map[string]string: case 0: loaded map[string]string{"cpu":"1"}, want map[string]string{"cpu":"1", "mem":"2"}
+--- PASS: TestQ1RoundTripWithAndWithoutASink (0.00s)
+=== RUN   TestQ1SinkSpelling
+    q1_sink_test.go:290: repeated       [a          b         ] -> "tags=a&tags=b"          -> {Tags:[a b]}
+    q1_sink_test.go:290: repeated       [a         ] -> "tags=a"                 -> {Tags:[a]}
+    q1_sink_test.go:283: repeated       [] -> DUMP ferry: /tags: the driver failed: plane error: http: address has no key on this plane: this plane holds no value of that kind
+    q1_sink_test.go:290: index-suffixed [a          b         ] -> "tags.0=a&tags.1=b"      -> {Tags:[a b]}
+    q1_sink_test.go:290: index-suffixed [a         ] -> "tags.0=a"               -> {Tags:[a]}
+    q1_sink_test.go:283: index-suffixed [] -> DUMP ferry: /tags: the driver failed: plane error: http: address has no key on this plane: this plane holds no value of that kind
+--- PASS: TestQ1SinkSpelling (0.00s)
+=== RUN   TestQ1InjectivityBypass
+    q1_sink_test.go:306: repeated       DUMP {Tags:[a b] Zero:z} -> ferry: /tags#0: the driver failed: query renders this address and /tags.0 to one plane key, "tags.0", so one of the two would be lost
+    q1_sink_test.go:306: index-suffixed DUMP {Tags:[a b] Zero:z} -> ferry: /tags#0: the driver failed: query renders this address and /tags.0 to one plane key, "tags.0", so one of the two would be lost
+--- PASS: TestQ1InjectivityBypass (0.00s)
+=== RUN   TestQ1DeepInjectivityBypass
+    q1_sink_test.go:331: repeated       DUMP -> ferry: 2 errors: /m/k#0, /m/k#1
+    q1_sink_test.go:338: index-suffixed DUMP {M:map[k:[v1 v2]] X:z}
+    q1_sink_test.go:339: index-suffixed   plane {"m.k":["z"] "m.k.0":["v1"] "m.k.1":["v2"]}
+    q1_sink_test.go:340: index-suffixed   load  ErrPlane: ferry: /m/k: the driver failed: query renders this address and /m.k to one plane key, "m.k", so one of the two would be lost
+--- PASS: TestQ1DeepInjectivityBypass (0.00s)
+=== RUN   TestQ1SetSemantics
+    q1_sink_test.go:369: as-in-193    plane {"tags":["x" "y" "z"]}       -> "q=new&tags=a&tags=b&tags=z"
+    q1_sink_test.go:369: as-in-193    plane {"tags":["x"]}               -> "q=new&tags=a&tags=b"
+    q1_sink_test.go:369: as-in-193    plane {"q":["old"]}                -> "q=new&tags=a&tags=b"
+    q1_sink_test.go:369: append       plane {"tags":["x" "y" "z"]}       -> "q=new&tags=a&tags=b&tags=z"
+    q1_sink_test.go:369: append       plane {"tags":["x"]}               -> "q=new&tags=a&tags=b"
+    q1_sink_test.go:369: append       plane {"q":["old"]}                -> "q=old&q=new&tags=a&tags=b"
+    q1_sink_test.go:369: replace      plane {"tags":["x" "y" "z"]}       -> "q=new&tags=a&tags=b"
+    q1_sink_test.go:369: replace      plane {"tags":["x"]}               -> "q=new&tags=a&tags=b"
+    q1_sink_test.go:369: replace      plane {"q":["old"]}                -> "q=new&tags=a&tags=b"
+--- PASS: TestQ1SetSemantics (0.00s)
+=== RUN   TestQ2Matrix
+    q2_clash_test.go:35: 
+    q2_clash_test.go:36: === refuse-in-children ===
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.0=z   -> ErrPlane: ferry: /tags: the driver failed: plane error: http: this name carries a sequence in two spellings at once: the two spellings address the same position and one of the two values would be lost
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.1=z   -> ErrPlane: ferry: /tags: the driver failed: plane error: http: this name carries a sequence in two spellings at once: the two spellings address the same position and one of the two values would be lost
+    q2_clash_test.go:39:   ?tags=a&tags.0=z          -> ErrPlane: ferry: /tags: the driver failed: plane error: http: this name carries a sequence in two spellings at once: the two spellings address the same position and one of the two values would be lost
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.2=z   -> {Tags:[a b z]}
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.5=z   -> ErrValue: ferry: /tags: the plane holds /tags#5 under a sequence of 3, and a []string is addressed from /tags#0 upwards with no position missing: fill the gap, or model a sequence whose positions are chosen by the plane as a map keyed by those positions
+    q2_clash_test.go:39:   ?tags.0=a&tags.1=b        -> {Tags:[a b]}
+    q2_clash_test.go:39:   ?tags=a&tags=b            -> {Tags:[a b]}
+    q2_clash_test.go:35: 
+    q2_clash_test.go:36: === index-spelling-wins ===
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.0=z   -> {Tags:[z b]}
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.1=z   -> {Tags:[a z]}
+    q2_clash_test.go:39:   ?tags=a&tags.0=z          -> {Tags:[z]}
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.2=z   -> {Tags:[a b z]}
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.5=z   -> ErrValue: ferry: /tags: the plane holds /tags#5 under a sequence of 3, and a []string is addressed from /tags#0 upwards with no position missing: fill the gap, or model a sequence whose positions are chosen by the plane as a map keyed by those positions
+    q2_clash_test.go:39:   ?tags.0=a&tags.1=b        -> {Tags:[a b]}
+    q2_clash_test.go:39:   ?tags=a&tags=b            -> {Tags:[a b]}
+    q2_clash_test.go:35: 
+    q2_clash_test.go:36: === repeated-spelling-wins ===
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.0=z   -> {Tags:[a b]}
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.1=z   -> {Tags:[a b]}
+    q2_clash_test.go:39:   ?tags=a&tags.0=z          -> {Tags:[a]}
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.2=z   -> {Tags:[a b z]}
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.5=z   -> ErrValue: ferry: /tags: the plane holds /tags#5 under a sequence of 3, and a []string is addressed from /tags#0 upwards with no position missing: fill the gap, or model a sequence whose positions are chosen by the plane as a map keyed by those positions
+    q2_clash_test.go:39:   ?tags.0=a&tags.1=b        -> {Tags:[a b]}
+    q2_clash_test.go:39:   ?tags=a&tags=b            -> {Tags:[a b]}
+    q2_clash_test.go:35: 
+    q2_clash_test.go:36: === repeated-wins-audited ===
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.0=z   -> ErrPlane: ferry: /tags#0: closing the plane: plane error: http: this name carries a sequence in two spellings at once: the repeated spelling was read and the index-suffixed one was not
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.1=z   -> ErrPlane: ferry: /tags#1: closing the plane: plane error: http: this name carries a sequence in two spellings at once: the repeated spelling was read and the index-suffixed one was not
+    q2_clash_test.go:39:   ?tags=a&tags.0=z          -> ErrPlane: ferry: /tags#0: closing the plane: plane error: http: this name carries a sequence in two spellings at once: the repeated spelling was read and the index-suffixed one was not
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.2=z   -> {Tags:[a b z]}
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.5=z   -> ErrValue: ferry: /tags: the plane holds /tags#5 under a sequence of 3, and a []string is addressed from /tags#0 upwards with no position missing: fill the gap, or model a sequence whose positions are chosen by the plane as a map keyed by those positions
+    q2_clash_test.go:39:   ?tags.0=a&tags.1=b        -> {Tags:[a b]}
+    q2_clash_test.go:39:   ?tags=a&tags=b            -> {Tags:[a b]}
+    q2_clash_test.go:35: 
+    q2_clash_test.go:36: === first-spelling-wins ===
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.0=z   -> {Tags:[z b]}
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.1=z   -> {Tags:[a z]}
+    q2_clash_test.go:39:   ?tags=a&tags.0=z          -> {Tags:[z]}
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.2=z   -> {Tags:[a b z]}
+    q2_clash_test.go:39:   ?tags=a&tags=b&tags.5=z   -> ErrValue: ferry: /tags: the plane holds /tags#5 under a sequence of 3, and a []string is addressed from /tags#0 upwards with no position missing: fill the gap, or model a sequence whose positions are chosen by the plane as a map keyed by those positions
+    q2_clash_test.go:39:   ?tags.0=a&tags.1=b        -> {Tags:[a b]}
+    q2_clash_test.go:39:   ?tags=a&tags=b            -> {Tags:[a b]}
+    q2_clash_test.go:43: 
+    q2_clash_test.go:44: === indexed, for reference (positions in the name, no second dimension) ===
+    q2_clash_test.go:47:   ?tags=a&tags=b&tags.0=z   -> {Tags:[z]}
+    q2_clash_test.go:47:   ?tags=a&tags=b&tags.1=z   -> ErrValue: ferry: /tags: the plane holds /tags#1 under a sequence of 1, and a []string is addressed from /tags#0 upwards with no position missing: fill the gap, or model a sequence whose positions are chosen by the plane as a map keyed by those positions
+    q2_clash_test.go:47:   ?tags=a&tags.0=z          -> {Tags:[z]}
+    q2_clash_test.go:47:   ?tags=a&tags=b&tags.2=z   -> ErrValue: ferry: /tags: the plane holds /tags#2 under a sequence of 1, and a []string is addressed from /tags#0 upwards with no position missing: fill the gap, or model a sequence whose positions are chosen by the plane as a map keyed by those positions
+    q2_clash_test.go:47:   ?tags=a&tags=b&tags.5=z   -> ErrValue: ferry: /tags: the plane holds /tags#5 under a sequence of 1, and a []string is addressed from /tags#0 upwards with no position missing: fill the gap, or model a sequence whose positions are chosen by the plane as a map keyed by those positions
+    q2_clash_test.go:47:   ?tags.0=a&tags.1=b        -> {Tags:[a b]}
+    q2_clash_test.go:47:   ?tags=a&tags=b            -> ErrPlane: ferry: /tags: the driver failed: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one
+--- PASS: TestQ2Matrix (0.00s)
+=== RUN   TestQ2FirstSpellingIsNotExpressible
+    q2_clash_test.go:69: ?tags=a&tags=b&tags.0=z   -> {"tags":["a" "b"] "tags.0":["z"]}
+    q2_clash_test.go:70: ?tags.0=z&tags=a&tags=b   -> {"tags":["a" "b"] "tags.0":["z"]}
+    q2_clash_test.go:71:    the two wire orders parse to the same plane: true
+    q2_clash_test.go:69: ?tags.0=z&tags=a&tags=b   -> {"tags":["a" "b"] "tags.0":["z"]}
+    q2_clash_test.go:70: ?tags=a&tags.0=z&tags=b   -> {"tags":["a" "b"] "tags.0":["z"]}
+    q2_clash_test.go:71:    the two wire orders parse to the same plane: true
+    q2_clash_test.go:74: 
+    q2_clash_test.go:75: url.Values and http.Header are map[string][]string. The order of two values under one name survives; the order of two different names is not in the type at all, so no driver can read it.
+--- PASS: TestQ2FirstSpellingIsNotExpressible (0.00s)
+=== RUN   TestQ2Reachability
+    q2_clash_test.go:98: refuse-in-children       ferrytest.Driver failures: 0
+    q2_clash_test.go:98: index-spelling-wins      ferrytest.Driver failures: 0
+    q2_clash_test.go:98: repeated-spelling-wins   ferrytest.Driver failures: 0
+    q2_clash_test.go:98: repeated-wins-audited    ferrytest.Driver failures: 0
+    q2_clash_test.go:98: first-spelling-wins      ferrytest.Driver failures: 0
+--- PASS: TestQ2Reachability (0.00s)
+=== RUN   TestQ2WhatTheCallerSees
+    q2_clash_test.go:119: 
+    q2_clash_test.go:120: === refuse-in-children ===
+    q2_clash_test.go:121: %v:  ferry: /tags: the driver failed: plane error: http: this name carries a sequence in two spellings at once: the two spellings address the same position and one of the two values would be lost
+    q2_clash_test.go:122: %+v: ferry: /tags: the driver failed: plane error: http: this name carries a sequence in two spellings at once: the two spellings address the same position and one of the two values would be lost
+          walk, plane error, driver
+    q2_clash_test.go:123: errors.Is(err, ferry.ErrPlane)=true  ferry.ErrDriver=true  ErrTwoSpellings=true
+    q2_clash_test.go:127: element: address="/tags"  ferry: /tags: the driver failed: plane error: http: this name carries a sequence in two spellings at once: the two spellings address the same position and one of the two values would be lost
+    q2_clash_test.go:119: 
+    q2_clash_test.go:120: === repeated-wins-audited ===
+    q2_clash_test.go:121: %v:  ferry: /tags#0: closing the plane: plane error: http: this name carries a sequence in two spellings at once: the repeated spelling was read and the index-suffixed one was not
+    q2_clash_test.go:122: %+v: ferry: /tags#0: closing the plane: plane error: http: this name carries a sequence in two spellings at once: the repeated spelling was read and the index-suffixed one was not
+          close, plane error, driver
+    q2_clash_test.go:123: errors.Is(err, ferry.ErrPlane)=true  ferry.ErrDriver=true  ErrTwoSpellings=true
+    q2_clash_test.go:127: element: address="/tags#0"  ferry: /tags#0: closing the plane: plane error: http: this name carries a sequence in two spellings at once: the repeated spelling was read and the index-suffixed one was not
+--- PASS: TestQ2WhatTheCallerSees (0.00s)
+=== RUN   TestQ2TheAccidentalCase
+    q2_clash_test.go:138: refuse-in-children       form posts tags=a&tags=b with a hidden tags.0=z -> ErrPlane: ferry: /tags: the driver failed: plane error: http: this name carries a sequence in two spellings at once: the two spellings address the same position and one of the two values would be lost
+    q2_clash_test.go:138: index-spelling-wins      form posts tags=a&tags=b with a hidden tags.0=z -> {Tags:[z b]}
+    q2_clash_test.go:138: repeated-spelling-wins   form posts tags=a&tags=b with a hidden tags.0=z -> {Tags:[a b]}
+    q2_clash_test.go:138: repeated-wins-audited    form posts tags=a&tags=b with a hidden tags.0=z -> ErrPlane: ferry: /tags#0: closing the plane: plane error: http: this name carries a sequence in two spellings at once: the repeated spelling was read and the index-suffixed one was not
+    q2_clash_test.go:138: first-spelling-wins      form posts tags=a&tags=b with a hidden tags.0=z -> {Tags:[z b]}
+--- PASS: TestQ2TheAccidentalCase (0.00s)
+=== RUN   TestQ3IsItLiveForTheDriver
+    q3_declaration_test.go:24: === query plane, enumerated, no declaration ===
+    q3_declaration_test.go:41:   ?tags=a&tags=b            -> Tags []string {Tags:[a b]}
+    q3_declaration_test.go:41:   ?tags=a                   -> Tags []string {Tags:[a]}
+    q3_declaration_test.go:41:   ?tags.0=a&tags.1=b        -> Tags []string {Tags:[a b]}
+    q3_declaration_test.go:41:   (nothing)                 -> Tags []string {Tags:[]}
+    q3_declaration_test.go:41:   ?q=a&q=b                  -> Q string      ErrPlane: ferry: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one at /q
+    q3_declaration_test.go:41:   ?q=a                      -> Q string      {Q:a}
+    q3_declaration_test.go:41:   ?q=                       -> Q string      {Q:}
+    q3_declaration_test.go:41:   ?limits.cpu=4&limits.mem=8 -> map[string]int {Limits:map[cpu:4 mem:8]}
+    q3_declaration_test.go:41:   ?limits=a&limits=b        -> map[string]int ErrValue: ferry: /limits: the plane holds /limits#0 under this mapping, and a map[string]int takes one member per name immediately under it || ErrValue: ferry: /limits: the plane holds /limits#1 under this mapping, and a map[string]int takes one member per name immediately under it
+    q3_declaration_test.go:41:   ?tags=a&tags=b&q=z        -> both          {Tags:[a b] Q:z}
+    q3_declaration_test.go:44: 
+    q3_declaration_test.go:45: === header plane, enumerated, no declaration ===
+    q3_declaration_test.go:60:   Accept-Encoding: gzip / br -> []string     {Encodings:[gzip br]}
+    q3_declaration_test.go:60:   Accept-Encoding: gzip      -> []string     {Encodings:[gzip]}
+    q3_declaration_test.go:60:   Accept-Encoding: gzip / br -> string       ErrPlane: ferry: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one at /accept-encoding
+    q3_declaration_test.go:60:   Accept-Encoding: gzip      -> string       {Encoding:gzip}
+--- PASS: TestQ3IsItLiveForTheDriver (0.00s)
+=== RUN   TestQ3TheSharedSourceHazard
+    q3_declaration_test.go:74: === through ferry.Load, one Source, two schemas ===
+    q3_declaration_test.go:80:   handler A, Encodings []string: {Encodings:[gzip]}
+    q3_declaration_test.go:83:   handler B, Encoding  string  : {Encoding:}
+    q3_declaration_test.go:84:   Source.Binds() after two loads = 2
+    q3_declaration_test.go:86: 
+    q3_declaration_test.go:87: === through ferry.Bind, one Source, two bindings ===
+    q3_declaration_test.go:104:   binding A, Encodings []string: {Encodings:[gzip]}
+    q3_declaration_test.go:107:   binding B, Encoding  string  : {Encoding:}
+    q3_declaration_test.go:108:   Source.Binds() after two binds and two loads = 2
+    q3_declaration_test.go:110: 
+    q3_declaration_test.go:111: === the same two schemas with no declaration ===
+    q3_declaration_test.go:117:   handler A, Encodings []string: {Encodings:[gzip]}
+    q3_declaration_test.go:120:   handler B, Encoding  string  : {Encoding:gzip}
+--- PASS: TestQ3TheSharedSourceHazard (0.00s)
+=== RUN   TestQ3DoesTheBindingPinTheSource
+    q3_declaration_test.go:140: three ferry.Load calls over one Source, one schema: Binds() = 3
+    q3_declaration_test.go:155: one ferry.Bind and three Binding.Load calls over one Source: Binds() = 1
+    q3_declaration_test.go:156: so a Source that refused its second Bind would refuse the second ferry.Load of the same schema, and one-schema-per-source is not a rule a Source can enforce for itself
+--- PASS: TestQ3DoesTheBindingPinTheSource (0.00s)
+=== RUN   TestQ3IsTheDeclarationCheckable
+    q3_declaration_test.go:179: a name this schema does not have (a typo)        -> ErrPlane: ferry: the driver refused the address set: plane error: this schema has no address that renders to the declared name "Accept-Encodings"
+    q3_declaration_test.go:179: a name this schema has, as a sequence (correct)  -> {Encodings:[gzip]}
+    q3_declaration_test.go:179: a name this schema has, as a scalar (wrong, and not checkable) -> {Encoding:}
+--- PASS: TestQ3IsTheDeclarationCheckable (0.00s)
+=== RUN   TestQ4WhatACallerSees
+    q4_refusal_test.go:27: 
+    q4_refusal_test.go:28: === close/in-text ===
+    q4_refusal_test.go:29: value: {Q:}
+    q4_refusal_test.go:37: %v : ferry: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one at /q
+    q4_refusal_test.go:38: %+v: ferry: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one at /q
+          close, plane error, driver
+    q4_refusal_test.go:39: Address()            = ""
+    q4_refusal_test.go:40: errors.Is ErrPlane   = true
+    q4_refusal_test.go:41: errors.Is ErrDriver  = true
+    q4_refusal_test.go:42: errors.Is ErrRepeated= true
+    q4_refusal_test.go:43: Elements()           = 1
+    q4_refusal_test.go:27: 
+    q4_refusal_test.go:28: === close/ErrorAt ===
+    q4_refusal_test.go:29: value: {Q:}
+    q4_refusal_test.go:37: %v : ferry: /q: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one
+    q4_refusal_test.go:38: %+v: ferry: /q: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one
+          close, plane error, driver
+    q4_refusal_test.go:39: Address()            = "/q"
+    q4_refusal_test.go:40: errors.Is ErrPlane   = true
+    q4_refusal_test.go:41: errors.Is ErrDriver  = true
+    q4_refusal_test.go:42: errors.Is ErrRepeated= true
+    q4_refusal_test.go:43: Elements()           = 1
+    q4_refusal_test.go:27: 
+    q4_refusal_test.go:28: === close/ErrorAt+text ===
+    q4_refusal_test.go:29: value: {Q:}
+    q4_refusal_test.go:37: %v : ferry: /q: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one
+    q4_refusal_test.go:38: %+v: ferry: /q: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one
+          close, plane error, driver
+    q4_refusal_test.go:39: Address()            = "/q"
+    q4_refusal_test.go:40: errors.Is ErrPlane   = true
+    q4_refusal_test.go:41: errors.Is ErrDriver  = true
+    q4_refusal_test.go:42: errors.Is ErrRepeated= true
+    q4_refusal_test.go:43: Elements()           = 1
+    q4_refusal_test.go:27: 
+    q4_refusal_test.go:28: === get/refuse ===
+    q4_refusal_test.go:29: value: {Q:}
+    q4_refusal_test.go:37: %v : ferry: /q: the driver failed: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one
+    q4_refusal_test.go:38: %+v: ferry: /q: the driver failed: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one
+          walk, plane error, driver
+    q4_refusal_test.go:39: Address()            = "/q"
+    q4_refusal_test.go:40: errors.Is ErrPlane   = true
+    q4_refusal_test.go:41: errors.Is ErrDriver  = true
+    q4_refusal_test.go:42: errors.Is ErrRepeated= true
+    q4_refusal_test.go:43: Elements()           = 1
+    q4_refusal_test.go:27: 
+    q4_refusal_test.go:28: === never (first wins) ===
+    q4_refusal_test.go:29: value: {Q:}
+    q4_refusal_test.go:32: error: <nil>
+--- PASS: TestQ4WhatACallerSees (0.00s)
+=== RUN   TestQ4TwoAddresses
+    q4_refusal_test.go:56: 
+    q4_refusal_test.go:57: === close/in-text, two repeated names ===
+    q4_refusal_test.go:58: %+v: ferry: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one at /q
+        plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one at /r
+          close, plane error, driver
+    q4_refusal_test.go:59: Elements() = 1, first address = ""
+    q4_refusal_test.go:56: 
+    q4_refusal_test.go:57: === close/ErrorAt, two repeated names ===
+    q4_refusal_test.go:58: %+v: ferry: /q: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one
+          close, plane error, driver
+    q4_refusal_test.go:59: Elements() = 1, first address = "/q"
+    q4_refusal_test.go:56: 
+    q4_refusal_test.go:57: === close/ErrorAt+text, two repeated names ===
+    q4_refusal_test.go:58: %+v: ferry: /q: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one (and the same at /r)
+          close, plane error, driver
+    q4_refusal_test.go:59: Elements() = 1, first address = "/q"
+--- PASS: TestQ4TwoAddresses (0.00s)
+=== RUN   TestQ4AlongsideAWalkFailure
+    q4_refusal_test.go:78: %v : ferry: 3 errors: /limits, /limits, /q
+    q4_refusal_test.go:79: %+v: ferry: 3 errors:
+          /limits: the plane holds /limits#0 under this mapping, and a map[string]int takes one member per name immediately under it
+          /limits: the plane holds /limits#1 under this mapping, and a map[string]int takes one member per name immediately under it
+          /q: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one
+    q4_refusal_test.go:82: element 0: address="/limits"  ferry: /limits: the plane holds /limits#0 under this mapping, and a map[string]int takes one member per name immediately under it
+    q4_refusal_test.go:82: element 1: address="/limits"  ferry: /limits: the plane holds /limits#1 under this mapping, and a map[string]int takes one member per name immediately under it
+    q4_refusal_test.go:82: element 2: address="/q"  ferry: /q: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one
+--- PASS: TestQ4AlongsideAWalkFailure (0.00s)
+=== RUN   TestQ4RefuseAtGetAgainstTheSuite
+    q4_refusal_test.go:103: close/in-text        ferrytest.Driver failures: 0
+    q4_refusal_test.go:103: close/ErrorAt        ferrytest.Driver failures: 0
+    q4_refusal_test.go:103: close/ErrorAt+text   ferrytest.Driver failures: 0
+    q4_refusal_test.go:103: get/refuse           ferrytest.Driver failures: 1
+    q4_refusal_test.go:106:       plane query: case 3: Get at the container address /list failed with /list: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one, where a container address holds no value and so has nothing to fail at
+    q4_refusal_test.go:103: never (first wins)   ferrytest.Driver failures: 0
+--- PASS: TestQ4RefuseAtGetAgainstTheSuite (0.00s)
+=== RUN   TestQ4RefuseAtGetOnTheRealCase
+    q4_refusal_test.go:119: %+v: ferry: /q: the driver failed: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one
+          walk, plane error, driver
+    q4_refusal_test.go:120: Address() = "/q"
+--- PASS: TestQ4RefuseAtGetOnTheRealCase (0.00s)
+=== RUN   TestQ4TheSequenceStillWorks
+    q4_refusal_test.go:128: close/in-text        ?tags=a&tags=b -> []string: {Tags:[a b]}
+    q4_refusal_test.go:128: close/ErrorAt        ?tags=a&tags=b -> []string: {Tags:[a b]}
+    q4_refusal_test.go:128: close/ErrorAt+text   ?tags=a&tags=b -> []string: {Tags:[a b]}
+    q4_refusal_test.go:128: get/refuse           ?tags=a&tags=b -> []string: {Tags:[a b]}
+    q4_refusal_test.go:128: never (first wins)   ?tags=a&tags=b -> []string: {Tags:[a b]}
+--- PASS: TestQ4TheSequenceStillWorks (0.00s)
+=== RUN   TestQ4TheTrace
+    q4_refusal_test.go:148: 
+    q4_refusal_test.go:149: === ?q=a&q=b   into Q string ===
+    q4_refusal_test.go:152:     Get /q -> Absent (hiding 2 values at q)
+    q4_refusal_test.go:155:     => ErrPlane: ferry: /q: closing the plane: plane error: http: the plane holds more than one value at this name: it holds 2, and this address takes one: a repeated name is a sequence and nothing read it as one
+    q4_refusal_test.go:148: 
+    q4_refusal_test.go:149: === ?tags=a&tags=b into Tags []string ===
+    q4_refusal_test.go:152:     Children /tags -> [/tags#0 /tags#1]
+    q4_refusal_test.go:152:     Get /tags#0 -> string (position under a repeated name)
+    q4_refusal_test.go:152:     Get /tags#1 -> string (position under a repeated name)
+    q4_refusal_test.go:155:     => {Tags:[a b]}
+--- PASS: TestQ4TheTrace (0.00s)
+PASS
+ok  	github.com/onhotpath/ferry/proto/httpdecisions	0.017s
