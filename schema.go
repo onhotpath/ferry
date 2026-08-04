@@ -46,10 +46,27 @@ import (
 // It returns nil, or one refusal per address, joined and sorted. Range it with
 // [Elements] and match a member with errors.Is against [ErrSchema].
 func Compile[T any](opts ...Option) error {
-	_, err := schemaOf(reflect.TypeFor[T](), opts)
+	_, err := schemaOf(reflect.TypeFor[T](), opts, discarded)
 
 	return err
 }
+
+// retention is whether the schema a compile produces outlives the call that
+// built it, which is what decides whether the compile freezes the registry it
+// resolved against.
+//
+// The distinction is not a convenience. A registry freezes so that no schema is
+// ever resolved against one set of codecs and walked against another, and
+// [Compile] retains nothing to walk: it compiles a schema and discards it. So a
+// Compile in a test, or in an init, does not close the door on a registration a
+// later init has not made yet, and every verb that keeps the resolution does
+// (ADR-0009, ADR-0010).
+type retention bool
+
+const (
+	discarded retention = false // Compile: nothing keeps the resolution
+	retained  retention = true  // Load, LoadOver and Dump: the walk runs on it
+)
 
 // schemaOf is the one door into the compiler. Compile, Load, LoadOver and Dump
 // all reach a compiled type through this function and no other, so the two
@@ -62,10 +79,17 @@ func Compile[T any](opts ...Option) error {
 //
 // It is also where the schema cache lands, for the same reason: a cache in one
 // caller and not the other is two engines again, arrived at by omission.
-func schemaOf(t reflect.Type, opts []Option) (*schema, error) {
+func schemaOf(t reflect.Type, opts []Option, keep retention) (*schema, error) {
 	cfg, err := newConfig(opts)
 	if err != nil {
 		return nil, err
+	}
+
+	// Before the compile rather than after it, because the compile is the first
+	// reader: freezing afterwards would leave the read that resolved this very
+	// schema racing a registration (ADR-0009).
+	if keep {
+		cfg.registry.freeze()
 	}
 
 	return compileSchema(t, cfg)
@@ -413,7 +437,7 @@ func (c *compiler) compileTagged(t reflect.Type, parent *node, s site, value str
 // address, and refuses with the maps-no-address rule the very type ferry owns a
 // representation for.
 func (c *compiler) compileValue(t reflect.Type, parent *node, s site, tg tag) int {
-	if cd, ok := leafFor(t); ok {
+	if cd, ok := c.cfg.registry.leafFor(t); ok {
 		return c.compileLeaf(cd, t, parent, s, tg)
 	}
 
@@ -469,7 +493,7 @@ func (c *compiler) compileValue(t reflect.Type, parent *node, s site, tg tag) in
 // nil writes sits and where a plane is asked whether the section is there at all
 // (ADR-0003).
 func (c *compiler) compilePointer(t reflect.Type, parent *node, s site, tg tag) int {
-	if cd, ok := pointerLeaf(t); ok {
+	if cd, ok := c.cfg.registry.pointerLeaf(t); ok {
 		return c.compileLeaf(cd, t, parent, s, tg)
 	}
 
@@ -534,9 +558,9 @@ func (c *compiler) compileSlice(t reflect.Type, parent *node, s site, tg tag) in
 func (c *compiler) compileMap(t reflect.Type, parent *node, s site, tg tag) int {
 	c.checkDynamicOptions(t, s.addr, tg)
 
-	key, ok := mapKeyFor(t.Key())
+	key, ok := c.cfg.registry.mapKeyFor(t.Key())
 	if !ok {
-		c.errAt(s.addr, mapKeyMsg(t.Key()))
+		c.errAt(s.addr, c.cfg.registry.mapKeyMsg(t.Key()))
 
 		return 0
 	}
