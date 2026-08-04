@@ -230,6 +230,17 @@ The amendment is at [the driver author's call site](#what-a-consumer-writes), wh
 | the suites | `RoundTrip`, `Driver`, `Codec`, `Complete`, `Injective` |
 | the apparatus | `Static`, `Record` |
 | the table | `CoreTypes` |
+| the assertion | `Want`, `DiffErrors`, `CheckErrors` *(added under [#169](https://github.com/onhotpath/ferry/issues/169))* |
+
+> **Amended under [#169](https://github.com/onhotpath/ferry/issues/169): the error assertion is on this list, as apparatus.**
+> As published this table had no row for it, and the omission was not a decision: [ADR-0011](0011-the-error-model.md) publishes `DiffErrors`, `CheckErrors` and `Want`, says "it ships in `ferrytest` only", and hands this ADR the package's surface rather than the semantics.
+> The three names were then absent from both documents at once, so nothing was built, and ferry's own position that message text is not API pointed at a remedy that did not exist.
+> **The row is `the assertion`: `Want`, `DiffErrors`, `CheckErrors`.**
+>
+> **They are apparatus and not suites**, which is the distinction [the stability section](#two-stability-promises-and-only-one-of-them-is-semvers) turns on.
+> A suite may gain a case in a minor release because the rule it executes grew; this check runs no cases and answers a question, so a change to what it reports is a change to what the caller asked for, and it moves only where semver says it may.
+> `CheckErrors` takes the `T` of [the reporting section](#how-a-suite-reports-and-why-it-is-not-testingt) rather than the `*testing.T` ADR-0011 published, and `DiffErrors` returns `[]string`; that is this ADR's own split between a suite and a check, applied to the pair ADR-0011 had already drawn it for.
+> The amendment recording the move is in ADR-0011, where the signature was published.
 
 **One package, and the argument is the import graph rather than taste.**
 Every suite needs `Plane`; the driver suite needs the proof table; the codec suite needs the registry and the relations; all three need the assertion sink.

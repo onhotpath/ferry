@@ -41,10 +41,16 @@
 // struct from a literal instead of from a file, and [Record] answers what a
 // struct actually maps to.
 //
+// Anybody asserting that a call failed the way it should uses [CheckErrors], or
+// [DiffErrors] for the same answer as data. ferry's message text is not API, so
+// the assertion is an exact set of [Want] over the address and the sentinel, and
+// no substring appears in it anywhere.
+//
 // # Two stability promises
 //
 // The apparatus - [Plane], [Instance], [MemPlane], [Static], [Record], [Case],
-// [Type], [Proof] and the relations - is ordinary exported Go API under semver.
+// [Type], [Proof], [Want], [DiffErrors], [CheckErrors] and the relations - is
+// ordinary exported Go API under semver.
 // It ends up embedded in tests that are not about ferry, and it does not move
 // outside a major version.
 //

@@ -118,44 +118,37 @@ The ADRs quote error strings, which makes them look canonical, and somebody will
 Every message in this repository is free to be reworded in a patch release.
 The sentinel set, the address, and the fact that a failed call reports every failure are what ferry commits to.
 
-For precision in a test, assert over the exact set of `(address, class)` pairs rather than over a substring:
+For precision in a test, assert over the exact set of `(address, class)` pairs rather than over a substring.
+That assertion ships, in [`ferrytest`](../../ferrytest/):
 
 ```go
-func wantErrors(t *testing.T, got error, want map[string]error) {
-	t.Helper()
-
-	have := map[string]error{}
-
-	for _, e := range ferry.Elements(got) {
-		fe, ok := errors.AsType[*ferry.Error](e)
-		if !ok {
-			t.Errorf("element ferry did not build: %v", e)
-
-			continue
-		}
-
-		for _, class := range []error{ferry.ErrSchema, ferry.ErrMissing, ferry.ErrValue,
-			ferry.ErrPlane, ferry.ErrDriver, ferry.ErrReadOnly} {
-			if errors.Is(e, class) {
-				have[fe.Address().String()] = class
-			}
-		}
-	}
-
-	if !maps.Equal(have, want) {
-		t.Errorf("errors\n\t%v\nwant\n\t%v", have, want)
-	}
-}
+ferrytest.CheckErrors(t, err,
+	ferrytest.Want{Address: ferry.At("db", "host"), Class: ferry.ErrMissing},
+	ferrytest.Want{Address: ferry.At("db", "port"), Class: ferry.ErrValue},
+	ferrytest.Want{Address: ferry.At("name"), Class: ferry.ErrMissing},
+)
 ```
+
+A difference is one line per expectation nothing matched and one line per failure nothing expected, each naming the address and the class, so you learn which failure moved rather than that a count did:
+
+```
+got /name: missing, and nothing wanted it: ferry: /name: required, and the plane holds nothing at this address
+want /name: invalid value, and nothing reported it
+```
+
+That is the report for the call above with `/name` written as `ferry.ErrValue`: the failure that arrived and the expectation that did not match it, both named.
+
+`ferrytest.DiffErrors(err, want...)` is the same check returning `[]string` instead of failing anything, which is what the conformance suite runs against a third-party driver and what a test asserting that a driver *fails* needs.
+
+Three things worth knowing before you write one:
+
+- `Class` is matched with `errors.Is`, so a subordinate sentinel is a narrower expectation: `ErrReadOnly` matches only a failure that declares it, where `ErrPlane` matches that one and every other plane failure beside it.
+- A `Want` pairs with at most one failure and a failure with at most one `Want`, so two failures at one address need two `Want`s.
+- The zero `Address` is a value and not a wildcard: it matches the failure that has no address, such as a plane that would not close.
 
 **Exact, and not "contains."**
 ferry's schema-compile diagnostics are a suppression order, and the defect they are most likely to develop is firing once too often.
 A field tagged `required,default=v` on a slice must report two errors, not three, and a contains-assertion passes straight through the difference (ADR-0011).
-
-> **Not shipped yet.**
-> ADR-0011 specifies an exact-set assertion in `ferrytest` - `DiffErrors(got error, want ...Want) []string`, `CheckErrors`, and `Want{Address, Class}`.
-> It is not in `ferrytest`'s exported surface today, which is fixed at twenty-three names and asserted mechanically.
-> Until it lands, write the assertion above.
 
 ## ferry never prints a value the plane supplied
 
