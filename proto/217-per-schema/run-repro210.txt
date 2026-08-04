@@ -340,4 +340,4 @@
     q4_refusal_test.go:155:     => {Tags:[a b]}
 --- PASS: TestQ4TheTrace (0.00s)
 PASS
-ok  	github.com/onhotpath/ferry/proto/perschema/repro210	0.016s
+ok  	github.com/onhotpath/ferry/proto/perschema/repro210	(cached)

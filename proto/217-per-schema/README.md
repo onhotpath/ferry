@@ -52,24 +52,34 @@ One `Source` carrying `Repeatable("Accept-Encoding")`, two schemas: `{Encodings:
 Bit-identical through `ferry.Load` and through `ferry.Bind`.
 `Binds()` is 3 for three `ferry.Load` calls and 1 for a held binding.
 
+A fourth #210 result **has** changed, and it is not one of the three: the core defect where a joined `Close` error kept one address and discarded the rest is fixed on this base by #212 and #215, both of which landed after #210.
+`Elements()` is now 2 for two, both located.
+That matters because finding 2's fix puts a refusal at `Close`.
+
 **2. The proposed rule does not hold, and it fails from both sides.**
 Five configurations over one experiment - two handlers, each correct with its own `Source`, sharing one `Source` carrying handler A's configuration:
 
-| configuration | checkable at `Bind` | B's answer changes | B's error |
-| --- | --- | --- | --- |
-| `Repeatable` | no | yes | none - **silent** |
-| `Repeatable`+`Audited` | no | yes | `ErrPlane` - **loud** |
-| `Alias` | **yes** | yes | none - **silent** |
-| `Required` | yes | yes | `ErrPlane` - loud |
-| `Fallback` | **yes** | yes | none - **silent** |
+| configuration | checkable at `Bind` | can be false of a schema | B's answer changes | B's error |
+| --- | --- | --- | --- | --- |
+| `Prefix`, the control | yes | no | yes | none - silent |
+| `Repeatable` | no | **yes** | yes | none - **silent** |
+| `Repeatable`+`Audited` | no | **yes** | yes | `ErrPlane` - **loud** |
+| `Alias` | **yes** | no | yes | none - silent |
+| `Required` | yes | no | yes | `ErrPlane` - loud |
+| `Fallback` | **yes** | no | yes | none - silent |
 
-`Alias` and `Fallback` satisfy the rule and are unsafe.
-`Repeatable`+`Audited` violates it and is safe.
+`Alias` and `Fallback` satisfy the rule and change a second schema's answer silently.
+`Repeatable`+`Audited` violates it and is loud.
 Checkability and safety are two axes, not one.
 
-**3. `B's answer changes` is `yes` on every row**, which is the deeper result.
-A per-schema declaration is per-schema by definition, so a shared `Source` always changes the second schema's answer.
-The only thing that varies is whether anybody is told.
+**3. `B's answer changes` is `yes` on every row, including the control**, which is what stops the experiment from being read as a defect criterion.
+`Prefix` is ordinary plane configuration of exactly the kind ADR-0004's lifetime table blesses, and it lands in the same cell as `Alias` and `Fallback`.
+Any configuration changes the second schema's answer, because that is what configuration does.
+
+**What separates the rows is the `can be false of a schema` column, and only the two `Repeatable` rows are in it.**
+A prefix, an alias and a fallback say where the plane holds something; a caller may not want one, but no schema makes one untrue.
+`Repeatable("accept-encoding")` says the Go type behind that name is a sequence, and against `Encoding string` that is simply false.
+The defect is the one cell that is falsifiable and silent.
 
 **4. An `AddressSet` distinguishes a statically-membered container from a leaf, and cannot distinguish a dynamically-membered one.**
 

@@ -101,84 +101,103 @@
     q2_two_sources_test.go:134:   Binds() = 4
 --- PASS: TestQ2Checkable (0.00s)
 === RUN   TestQ3TheRule
-    q3_rule_test.go:120: configuration         checkable  B differs  B's error through the shared Source
-    q3_rule_test.go:121: -------------------------------------------------------------------------------------
-    q3_rule_test.go:138: Repeatable            false      true       none - SILENT
-    q3_rule_test.go:138: Repeatable+Audited    false      true       ErrPlane+ErrDriver - LOUD
-    q3_rule_test.go:138: Alias                 true       true       none - SILENT
-    q3_rule_test.go:138: Required              true       true       ErrPlane+ErrDriver - LOUD
-    q3_rule_test.go:138: Fallback              true       true       none - SILENT
-    q3_rule_test.go:141: 
-    q3_rule_test.go:142: the same rows in full:
-    q3_rule_test.go:148: 
-    q3_rule_test.go:149:   Repeatable          
-    q3_rule_test.go:150:     A through the shared Source : {Encodings:[gzip]}
-    q3_rule_test.go:151:     B through the shared Source : {Encoding:}
-    q3_rule_test.go:152:     B through its own Source    : {Encoding:gzip}
-    q3_rule_test.go:148: 
-    q3_rule_test.go:149:   Repeatable+Audited  
-    q3_rule_test.go:150:     A through the shared Source : {Encodings:[gzip]}
-    q3_rule_test.go:151:     B through the shared Source : ErrPlane+ErrDriver: ferry: /accept-encoding: closing the plane: plane error: header: a declared sequence was read at an address that is not one: "Accept-Encoding" was declared a sequence and the plane holds 1 value(s) at it, and nothing read it as one
-    q3_rule_test.go:152:     B through its own Source    : {Encoding:gzip}
-    q3_rule_test.go:148: 
-    q3_rule_test.go:149:   Alias               
-    q3_rule_test.go:150:     A through the shared Source : {ID:aliased}
-    q3_rule_test.go:151:     B through the shared Source : {ID:aliased}
-    q3_rule_test.go:152:     B through its own Source    : {ID:real}
-    q3_rule_test.go:148: 
-    q3_rule_test.go:149:   Required            
-    q3_rule_test.go:150:     A through the shared Source : ErrPlane+ErrDriver: ferry: /trace-id: the driver failed: plane error: header: the plane holds nothing at a name this Source declared required: "Trace-Id"
-    q3_rule_test.go:151:     B through the shared Source : ErrPlane+ErrDriver: ferry: /trace-id: the driver failed: plane error: header: the plane holds nothing at a name this Source declared required: "Trace-Id"
-    q3_rule_test.go:152:     B through its own Source    : {ID:}
-    q3_rule_test.go:148: 
-    q3_rule_test.go:149:   Fallback            
-    q3_rule_test.go:150:     A through the shared Source : {ID:from-the-declaration}
-    q3_rule_test.go:151:     B through the shared Source : {ID:from-the-declaration}
-    q3_rule_test.go:152:     B through its own Source    : {ID:}
+    q3_rule_test.go:137: configuration         checkable  falsifiable  B differs  B's error through the shared Source
+    q3_rule_test.go:139: ----------------------------------------------------------------------------------------------------
+    q3_rule_test.go:156: Prefix (plane cfg)    true       false        true       none - SILENT
+    q3_rule_test.go:156: Repeatable            false      true         true       none - SILENT
+    q3_rule_test.go:156: Repeatable+Audited    false      true         true       ErrPlane+ErrDriver - LOUD
+    q3_rule_test.go:156: Alias                 true       false        true       none - SILENT
+    q3_rule_test.go:156: Required              true       false        true       ErrPlane+ErrDriver - LOUD
+    q3_rule_test.go:156: Fallback              true       false        true       none - SILENT
+    q3_rule_test.go:160: 
+    q3_rule_test.go:161: the same rows in full:
+    q3_rule_test.go:167: 
+    q3_rule_test.go:168:   Prefix (plane cfg)  
+    q3_rule_test.go:169:     A through the shared Source : {ID:aliased}
+    q3_rule_test.go:170:     B through the shared Source : {ID:aliased}
+    q3_rule_test.go:171:     B through its own Source    : {ID:real}
+    q3_rule_test.go:167: 
+    q3_rule_test.go:168:   Repeatable          
+    q3_rule_test.go:169:     A through the shared Source : {Encodings:[gzip]}
+    q3_rule_test.go:170:     B through the shared Source : {Encoding:}
+    q3_rule_test.go:171:     B through its own Source    : {Encoding:gzip}
+    q3_rule_test.go:167: 
+    q3_rule_test.go:168:   Repeatable+Audited  
+    q3_rule_test.go:169:     A through the shared Source : {Encodings:[gzip]}
+    q3_rule_test.go:170:     B through the shared Source : ErrPlane+ErrDriver: ferry: /accept-encoding: closing the plane: plane error: header: a declared sequence was read at an address that is not one: "Accept-Encoding" was declared a sequence and the plane holds 1 value(s) at it, and nothing read it as one
+    q3_rule_test.go:171:     B through its own Source    : {Encoding:gzip}
+    q3_rule_test.go:167: 
+    q3_rule_test.go:168:   Alias               
+    q3_rule_test.go:169:     A through the shared Source : {ID:aliased}
+    q3_rule_test.go:170:     B through the shared Source : {ID:aliased}
+    q3_rule_test.go:171:     B through its own Source    : {ID:real}
+    q3_rule_test.go:167: 
+    q3_rule_test.go:168:   Required            
+    q3_rule_test.go:169:     A through the shared Source : ErrPlane+ErrDriver: ferry: /trace-id: the driver failed: plane error: header: the plane holds nothing at a name this Source declared required: "Trace-Id"
+    q3_rule_test.go:170:     B through the shared Source : ErrPlane+ErrDriver: ferry: /trace-id: the driver failed: plane error: header: the plane holds nothing at a name this Source declared required: "Trace-Id"
+    q3_rule_test.go:171:     B through its own Source    : {ID:}
+    q3_rule_test.go:167: 
+    q3_rule_test.go:168:   Fallback            
+    q3_rule_test.go:169:     A through the shared Source : {ID:from-the-declaration}
+    q3_rule_test.go:170:     B through the shared Source : {ID:from-the-declaration}
+    q3_rule_test.go:171:     B through its own Source    : {ID:}
 --- PASS: TestQ3TheRule (0.00s)
 === RUN   TestQ3CheckableAndUnsafe
-    q3_rule_test.go:167: every check the rule asks for passes:
-    q3_rule_test.go:170:   Bind[Trace]        err = <nil>
-    q3_rule_test.go:176:   the name exists in the AddressSet, and NewKeys accepted the renamed key space
-    q3_rule_test.go:177: 
-    q3_rule_test.go:178: and handler B, which has the name and wanted the plane's own key:
-    q3_rule_test.go:179:   through the shared Source : {ID:aliased}
-    q3_rule_test.go:180:   through its own Source    : {ID:real}
-    q3_rule_test.go:181:   error                     : <nil>
-    q3_rule_test.go:182: 
-    q3_rule_test.go:183: so a configuration with no uncheckable half is still silently wrong for a second schema
+    q3_rule_test.go:186: every check the rule asks for passes:
+    q3_rule_test.go:189:   Bind[Trace]        err = <nil>
+    q3_rule_test.go:195:   the name exists in the AddressSet, and NewKeys accepted the renamed key space
+    q3_rule_test.go:196: 
+    q3_rule_test.go:197: and handler B, which has the name and wanted the plane's own key:
+    q3_rule_test.go:198:   through the shared Source : {ID:aliased}
+    q3_rule_test.go:199:   through its own Source    : {ID:real}
+    q3_rule_test.go:200:   error                     : <nil>
+    q3_rule_test.go:201: 
+    q3_rule_test.go:202: so a configuration with no uncheckable half is still silently wrong for a second schema
 --- PASS: TestQ3CheckableAndUnsafe (0.00s)
 === RUN   TestQ3NotCheckableAndSafe
-    q3_rule_test.go:197: nothing more is checkable at Bind than for plain Repeatable:
-    q3_rule_test.go:200:   Bind[Encoding]  err = <nil>
-    q3_rule_test.go:202: 
-    q3_rule_test.go:203: A, Encodings []string, the schema the declaration is correct for:
-    q3_rule_test.go:204:   {Encodings:[gzip br]}
-    q3_rule_test.go:205:   -> correct, and quiet: something read the name as the sequence it was declared to be
-    q3_rule_test.go:207: 
-    q3_rule_test.go:208: B, Encoding string, the schema the declaration is wrong for:
-    q3_rule_test.go:211:   value = {Encoding:}
-    q3_rule_test.go:212:         class    = ErrPlane+ErrDriver
+    q3_rule_test.go:216: nothing more is checkable at Bind than for plain Repeatable:
+    q3_rule_test.go:219:   Bind[Encoding]  err = <nil>
+    q3_rule_test.go:221: 
+    q3_rule_test.go:222: A, Encodings []string, the schema the declaration is correct for:
+    q3_rule_test.go:223:   {Encodings:[gzip br]}
+    q3_rule_test.go:224:   -> correct, and quiet: something read the name as the sequence it was declared to be
+    q3_rule_test.go:226: 
+    q3_rule_test.go:227: B, Encoding string, the schema the declaration is wrong for:
+    q3_rule_test.go:230:   value = {Encoding:}
+    q3_rule_test.go:231:         class    = ErrPlane+ErrDriver
                 Elements = 1
                   [0] at /accept-encoding  ferry: /accept-encoding: closing the plane: plane error: header: a declared sequence was read at an address that is not one: "Accept-Encoding" was declared a sequence and the plane holds 2 value(s) at it, and nothing read it as one
                 %+v:
                 | ferry: /accept-encoding: closing the plane: plane error: header: a declared sequence was read at an address that is not one: "Accept-Encoding" was declared a sequence and the plane holds 2 value(s) at it, and nothing read it as one
                 |   close, plane error, driver
-    q3_rule_test.go:214: 
-    q3_rule_test.go:215: and the same with one value at the name, which is where plain Repeatable was silent:
-    q3_rule_test.go:219:   A, Encodings []string : {Encodings:[gzip]}
-    q3_rule_test.go:222:   B, Encoding  string   : {Encoding:}
-    q3_rule_test.go:223:         class    = ErrPlane+ErrDriver
+    q3_rule_test.go:233: 
+    q3_rule_test.go:234: and the same with one value at the name, which is where plain Repeatable was silent:
+    q3_rule_test.go:238:   A, Encodings []string : {Encodings:[gzip]}
+    q3_rule_test.go:241:   B, Encoding  string   : {Encoding:}
+    q3_rule_test.go:242:         class    = ErrPlane+ErrDriver
                 Elements = 1
                   [0] at /accept-encoding  ferry: /accept-encoding: closing the plane: plane error: header: a declared sequence was read at an address that is not one: "Accept-Encoding" was declared a sequence and the plane holds 1 value(s) at it, and nothing read it as one
                 %+v:
                 | ferry: /accept-encoding: closing the plane: plane error: header: a declared sequence was read at an address that is not one: "Accept-Encoding" was declared a sequence and the plane holds 1 value(s) at it, and nothing read it as one
                 |   close, plane error, driver
-    q3_rule_test.go:225: 
-    q3_rule_test.go:226: and through ferry.Bind, to check the binding changes nothing:
-    q3_rule_test.go:231:   A : {Encodings:[gzip]}
-    q3_rule_test.go:232:   B : ErrPlane+ErrDriver: ferry: /accept-encoding: closing the plane: plane error: header: a declared sequence was read at an address that is not one: "Accept-Encoding" was declared a sequence and the plane holds 1 value(s) at it, and nothing read it as one
+    q3_rule_test.go:244: 
+    q3_rule_test.go:245: and through ferry.Bind, to check the binding changes nothing:
+    q3_rule_test.go:250:   A : {Encodings:[gzip]}
+    q3_rule_test.go:251:   B : ErrPlane+ErrDriver: ferry: /accept-encoding: closing the plane: plane error: header: a declared sequence was read at an address that is not one: "Accept-Encoding" was declared a sequence and the plane holds 1 value(s) at it, and nothing read it as one
 --- PASS: TestQ3NotCheckableAndSafe (0.00s)
+=== RUN   TestQ3TwoWrongDeclarations
+    q3_rule_test.go:274: value = {Enc: Lang:}
+    q3_rule_test.go:275:         class    = ErrPlane+ErrDriver
+                Elements = 2
+                  [0] at /accept-encoding  ferry: /accept-encoding: closing the plane: plane error: header: a declared sequence was read at an address that is not one: "Accept-Encoding" was declared a sequence and the plane holds 2 value(s) at it, and nothing read it as one
+                  [1] at /accept-language  ferry: /accept-language: closing the plane: plane error: header: a declared sequence was read at an address that is not one: "Accept-Language" was declared a sequence and the plane holds 2 value(s) at it, and nothing read it as one
+                %+v:
+                | ferry: 2 errors:
+                |   /accept-encoding: closing the plane: plane error: header: a declared sequence was read at an address that is not one: "Accept-Encoding" was declared a sequence and the plane holds 2 value(s) at it, and nothing read it as one
+                |   /accept-language: closing the plane: plane error: header: a declared sequence was read at an address that is not one: "Accept-Language" was declared a sequence and the plane holds 2 value(s) at it, and nothing read it as one
+    q3_rule_test.go:276: 
+    q3_rule_test.go:277: the driver returned two ErrorAt errors from Close, joined.
+--- PASS: TestQ3TwoWrongDeclarations (0.00s)
 === RUN   TestQ4WhatTheSetHolds
     q4_addressset_test.go:60: type                                    Len   All()
     q4_addressset_test.go:74: struct{ DB struct{Host,Port} }          2     [/db/host /db/port]

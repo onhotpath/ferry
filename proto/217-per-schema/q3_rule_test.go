@@ -2,6 +2,7 @@ package perschema_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/onhotpath/ferry"
@@ -32,6 +33,10 @@ type experiment struct {
 	// AddressSet can answer, which is what the rule asks.
 	checkable bool
 
+	// falsifiable is whether the configuration asserts something that can be
+	// FALSE of a schema, as opposed to merely unwanted by the caller.
+	falsifiable bool
+
 	// a and b run the two handlers against a Source.
 	a func(ferry.Source, context.Context) string
 	b func(ferry.Source, context.Context) string
@@ -59,12 +64,23 @@ func experiments() []experiment {
 
 	return []experiment{
 		{
-			label:     "Repeatable          ",
-			opts:      []ps.Option{ps.Repeatable("Accept-Encoding"), ps.CheckNames()},
-			checkable: false,
-			ctx:       present,
-			a:         loadA,
-			b:         func(s ferry.Source, ctx context.Context) string { return outcome(ferry.Load[Encoding](ctx, s)) },
+			label:       "Prefix (plane cfg)  ",
+			opts:        []ps.Option{ps.Prefix("X")},
+			checkable:   true,
+			falsifiable: false,
+			ctx:         ctxWith(gzip(), [2]string{"Trace-Id", "real"}, [2]string{"X-Trace-Id", "aliased"}),
+			a:           trace,
+			b:           trace,
+			bErr:        traceErr,
+		},
+		{
+			label:       "Repeatable          ",
+			opts:        []ps.Option{ps.Repeatable("Accept-Encoding"), ps.CheckNames()},
+			falsifiable: true,
+			checkable:   false,
+			ctx:         present,
+			a:           loadA,
+			b:           func(s ferry.Source, ctx context.Context) string { return outcome(ferry.Load[Encoding](ctx, s)) },
 			bErr: func(s ferry.Source, ctx context.Context) error {
 				_, err := ferry.Load[Encoding](ctx, s)
 
@@ -72,12 +88,13 @@ func experiments() []experiment {
 			},
 		},
 		{
-			label:     "Repeatable+Audited  ",
-			opts:      []ps.Option{ps.Repeatable("Accept-Encoding"), ps.Audited(), ps.CheckNames()},
-			checkable: false,
-			ctx:       present,
-			a:         loadA,
-			b:         func(s ferry.Source, ctx context.Context) string { return outcome(ferry.Load[Encoding](ctx, s)) },
+			label:       "Repeatable+Audited  ",
+			opts:        []ps.Option{ps.Repeatable("Accept-Encoding"), ps.Audited(), ps.CheckNames()},
+			falsifiable: true,
+			checkable:   false,
+			ctx:         present,
+			a:           loadA,
+			b:           func(s ferry.Source, ctx context.Context) string { return outcome(ferry.Load[Encoding](ctx, s)) },
 			bErr: func(s ferry.Source, ctx context.Context) error {
 				_, err := ferry.Load[Encoding](ctx, s)
 
@@ -117,8 +134,9 @@ func experiments() []experiment {
 // TestQ3TheRule runs every configuration through the same experiment and tables
 // the two axes the rule conflates.
 func TestQ3TheRule(t *testing.T) {
-	t.Logf("%-20s  %-9s  %-9s  %s", "configuration", "checkable", "B differs", "B's error through the shared Source")
-	t.Logf("%s", "-------------------------------------------------------------------------------------")
+	t.Logf("%-20s  %-9s  %-11s  %-9s  %s",
+		"configuration", "checkable", "falsifiable", "B differs", "B's error through the shared Source")
+	t.Logf("%s", strings.Repeat("-", 100))
 
 	for _, e := range experiments() {
 		shared := ps.NewSource(e.opts...)
@@ -135,7 +153,8 @@ func TestQ3TheRule(t *testing.T) {
 			loud = class(err) + " - LOUD"
 		}
 
-		t.Logf("%-20s  %-9t  %-9t  %s", e.label, e.checkable, viaShared != viaOwn, loud)
+		t.Logf("%-20s  %-9t  %-11t  %-9t  %s",
+			e.label, e.checkable, e.falsifiable, viaShared != viaOwn, loud)
 	}
 
 	t.Logf("")
@@ -233,3 +252,27 @@ func TestQ3NotCheckableAndSafe(t *testing.T) {
 }
 
 func errOf[T any](_ T, err error) error { return err }
+
+// TestQ3TwoWrongDeclarations checks the Close-time refusal against #210's own
+// finding that core keeps one address off a joined Close error and discards the
+// rest, because a driver declaring two names that are both wrong reaches it.
+func TestQ3TwoWrongDeclarations(t *testing.T) {
+	type TwoScalars struct {
+		Enc  string `ferry:"accept-encoding"`
+		Lang string `ferry:"accept-language"`
+	}
+
+	src := ps.NewSource(
+		ps.Repeatable("Accept-Encoding", "Accept-Language"),
+		ps.Audited(), ps.CheckNames(),
+	)
+
+	ctx := ctxWith(gzip(), br(),
+		[2]string{"Accept-Language", "en"}, [2]string{"Accept-Language", "fr"})
+
+	got, err := ferry.Load[TwoScalars](ctx, src)
+	t.Logf("value = %+v", got)
+	t.Logf("%s", full(err))
+	t.Logf("")
+	t.Logf("the driver returned two ErrorAt errors from Close, joined.")
+}

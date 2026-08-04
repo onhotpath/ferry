@@ -90,6 +90,14 @@ func Fallback(name, text string) Option {
 	}
 }
 
+// Prefix is ORDINARY PLANE CONFIGURATION, of exactly the kind ADR-0004's
+// lifetime table blesses: every address reads from the plane key with this
+// prefix on it. It names no schema and knows of none.
+//
+// It is here as the control. If it lands in the same cell of the experiment as
+// a per-schema declaration, then the cell is not a defect criterion.
+func Prefix(p string) Option { return func(c *config) { c.prefix = canon(p) } }
+
 // PinSchema makes the Source refuse any address set that is not the first one
 // it was bound to, which is the only self-enforcement a Source can attempt: it
 // cannot count Binds, because a one-shot ferry.Load binds on every call.
@@ -113,6 +121,8 @@ type config struct {
 	// order is every declared name in the order it was given, so a Bind-time
 	// refusal names what it did not find, deterministically.
 	order []string
+
+	prefix string
 
 	audited    bool
 	checkNames bool

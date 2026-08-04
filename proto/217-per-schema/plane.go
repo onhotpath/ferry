@@ -63,7 +63,11 @@ func (c config) keyFunc() ferry.KeyFunc {
 		}
 
 		if to, ok := c.alias[n]; ok {
-			return to, nil
+			n = to
+		}
+
+		if c.prefix != "" {
+			n = canon(c.prefix + sep + n)
 		}
 
 		return n, nil
