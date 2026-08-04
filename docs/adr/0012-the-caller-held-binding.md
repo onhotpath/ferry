@@ -46,7 +46,18 @@ So allocations are quoted as measurements, times as a scale, and one claim an ea
 | where a per-request plane instance is supplied | **yes**: in the `context.Context`, by the driver, and core supplies no mechanism | [The plane](#the-plane-arrives-in-the-context-because-it-is-the-only-per-load-channel-there-is) |
 | whether that is part of the `Source` contract or an escape hatch | **neither**: it is a rule about the driver's own public shape, and `Source` is untouched | [One shape per driver](#a-driver-with-a-per-request-plane-has-one-public-shape-and-that-is-514s-first-item) |
 | whether ferry exposes a caller-facing bind-then-load split | **yes**: `Bind[T]` and `BindSink[T]`, in both directions, and `Load[T]` and `Dump[T]` are literally them with the handle discarded | [The binding](#a-caller-may-hold-a-binding-and-the-one-shot-verb-is-that-binding-with-the-handle-dropped) |
-| whether it amends ADR-0004's signatures | **no signature, one helper**: the static table is the bind's and the minted set is the open's | [The two tiers](#adr-0004s-key-helper-is-amended-the-minted-set-belongs-to-the-open) |
+| whether it amends ADR-0004's signatures | **no signature, one helper**: the static table is the bind's and the minted set is the open's. A signature is untouched and a contract is not; see the note below | [The two tiers](#adr-0004s-key-helper-is-amended-the-minted-set-belongs-to-the-open) |
+
+> **Amended under [#202](https://github.com/onhotpath/ferry/issues/202): the fourth row is true of ADR-0004's signatures and false of ADR-0004's contract, and as published it did not separate the two.**
+>
+> As published the fourth row read **no signature, one helper**, and the second row said in the same breath that `Source` is untouched.
+> The shape claim still holds exactly as written: no method gains a parameter, loses one or changes a type, and the key helper is amended with no interface moving.
+> **What is not untouched is the obligation on the other side of `Source.Bind`.**
+> This ADR's own Consequences put a rule on `OpenFunc` and `OpenWriterFunc` that neither carried before, that they must be safe for concurrent calls, and a driver's `OpenFunc` that writes to what it closed over is now wrong where it used to be fine.
+> That is a change to a driver's obligations, so a driver author reading only ADR-0004 reads an out-of-date contract.
+> The obligation is now published on both function types in `driver.go`, so it reaches the audience that has to satisfy it.
+> Whether [ADR-0004](0004-source-and-sink.md) should carry the sentence as well, given that it owns the two types, is open and is recorded on [#182](https://github.com/onhotpath/ferry/issues/182), which already tracks the conformance case for the same obligation.
+> **Nothing about the contract's shape moves here**, and no ADR-0004 signature is amended by this note or by the change that prompted it.
 
 Two more this ticket inherited:
 
@@ -68,6 +79,40 @@ Two more this ticket inherited:
 
 > Everything below is decided.
 > `Bind[T]`, `BindSink[T]`, `Binding[T]` and `SinkBinding[T]` are **not added to core until the first consumer that needs them is written**, which is the first driver with a per-request plane.
+
+> **Amended under [#202](https://github.com/onhotpath/ferry/issues/202): the trigger is met and the surface ships.**
+>
+> As published, this section withheld `Bind`, `BindSink`, `Binding[T]` and `SinkBinding[T]` from core until the first consumer that needs them was written, and named that consumer: **the first driver whose plane is per request**.
+> That driver is `driver/http`, and it is being written.
+> The binding and the driver are one stack and the binding does not merge on its own, because landing it alone reproduces exactly the state the deferral existed to avoid with the deferral removed.
+> The deferral is therefore discharged on exactly the condition it set for itself, and the surface below lands unchanged: two functions, two types, three methods, no new Option and no new interface.
+>
+> **Nothing in the design moves.**
+> `Load[T]` and `LoadOver` are `Bind[T]` plus the corresponding method with the handle discarded, in the implementation and not only in the prose, and `Dump[T]` is `BindSink[T]` plus its method the same way.
+> The shipped `entry.go` holds one bind half and one walk half per direction, with no type parameter on either, and the generic door and the internal `reflect.Value` seam are both that pair; there is no second code path to drift.
+> `Compile[T]() error` stands, for the reason [the section below](#compilet-error-stands-because-a-binding-is-not-a-schema) gives, so the v0 break ADR-0010 priced against this ticket is still not spent.
+>
+> **The surface count this section argued from is now four functions and two Options becoming six functions, two exported types and three methods, and the fifty per cent growth is paid.**
+> What has changed is the other half of that sentence: there is a consumer on the path being made faster, which is what the section said the growth had to be bought with.
+>
+> **The first row of "What lands now" was already shipped and this amendment records it rather than scheduling it.**
+> `keys.go` implements the amended key helper as published: `Keys` holds the static table and the inverted owner map, both written inside `NewKeys` and never again; `Keys.Open` allocates a fresh minted set per call and checks each mint against the static table and against that open alone; nothing an open mints outlives it.
+> `ferrytest.Driver` case 8 asserts it on the write side, which is where this ADR said it had to be asserted, and core now asserts it through the public API too: one `SinkBinding` dumps a map holding `a-b` and then one holding `a_b` through a sink whose key function folds the two together, and both succeed.
+>
+> **One behaviour changes, and this ADR did not notice that the two checks shared a function.**
+> `Dump` refuses a nil sink before it looks at the value, where before the split it refused a nil root pointer first.
+> `Dump` is `BindSink` plus the method, `BindSink` has no value in hand, and the value check cannot move earlier without breaking the implementation constraint above.
+> The new order is the defensible one rather than a consequence tolerated: a nil sink is a fault in the call and a nil root is a fault in the value, and a call that named no plane at all failed before the value was ever relevant.
+> It is pinned by a test, because no existing one caught it.
+>
+> **What shipping hands [#20](https://github.com/onhotpath/ferry/issues/20) is now a published promise rather than a fact.**
+> `Binding` and `SinkBinding` document themselves as safe for use from many goroutines, which is a compatibility promise, so a later #20 answer that made a walk mutate anything reachable from a binding would break it.
+> That is a constraint #20 inherits and this change does not resolve.
+> Nothing here says anything about whether one load may run its own walk concurrently, which is the sentence #20 owns.
+>
+> **No figure from this ADR, or from any probe since, goes into a doc comment, a README or a guide.**
+> The numbers below are the prototype's, on the prototype's fixture, and the later probe on the perf harness used the memoisation design [ADR-0004](0004-source-and-sink.md) refused, so it is an upper bound rather than a measurement of what shipped.
+> The pipeline measures the shipped binding.
 
 The reason is the surface count, and it is worth stating as a number rather than leaving in prose.
 [ADR-0010](0010-the-entry-point-and-the-schema-cache.md) closed with "four functions and two Options".
@@ -724,6 +769,8 @@ It changes nothing this ADR measured, because no probe here depends on a driver 
   Adding it immediately would take ferry from ADR-0010's four functions and two Options to six functions, two exported types and three methods, which is a fifty per cent growth in the caller-facing surface bought with a performance property, in a library with no consumer on the path being made faster.
   The trigger is named rather than open-ended, and it is the right one because such a driver cannot choose its own shape without this answer.
   The cost is that the accepted ADR set now contains a decision with no code behind it, and that if no per-request driver is ever written this ADR describes a surface ferry never grows.
+  *(Amended under [#202](https://github.com/onhotpath/ferry/issues/202): the named trigger is met and the surface ships, alongside `driver/http` and never on its own.
+  The cost this bullet states, that the accepted ADR set contains a decision with no code behind it, is discharged, and the outcome it named as legitimate, that no per-request driver is ever written and this ADR describes a surface ferry never grows, did not happen.)*
 - **ferry ships a caller-held binding, and the deciding argument is the ancestor.**
   Binding per load, ferry allocates 85 times per request against xload's 22 on the use case xload was pitched at; a held binding brings it to 45.
   The ergonomic argument was not decisive in either direction and the compile-cost argument was already gone, removed by ADR-0010 before this ticket opened.

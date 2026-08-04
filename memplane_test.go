@@ -9,7 +9,7 @@ import (
 )
 
 // This file is the outside of the seam. It is package ferry_test rather than
-// ferry, so it reaches nothing but the four verbs and the plane ferrytest
+// ferry, so it reaches nothing but the published verbs and the plane ferrytest
 // ships, and it is the only place core's own tests can import ferrytest at all
 // without a cycle.
 //

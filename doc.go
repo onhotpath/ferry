@@ -16,7 +16,7 @@
 // about any of them, and reaches one only through [Source] and [Sink]. Planes
 // ship as separate modules under driver/.
 //
-// # The four verbs
+// # The six verbs
 //
 //   - [Load] builds a fresh value of T from a source.
 //   - [LoadOver] does the same over a seed the caller supplies, which is how a
@@ -25,6 +25,10 @@
 //   - [Compile] reports whether a type's annotation is legal, from the type
 //     alone, with no value in hand and no plane reachable. It is what a test
 //     calls.
+//   - [Bind] hands a source the addresses a type names, once, and returns a
+//     value to load through many times. [Load] is [Bind] plus one method.
+//   - [BindSink] is the same on the write side, and [Dump] is [BindSink] plus
+//     one method.
 //
 // Every verb takes the same [Option] values, and there are two of those:
 // [TagKey] names the struct tag key to read, and [WithRegistry] names the codec
@@ -208,10 +212,11 @@
 // [Register] writes to the registry core ships. [NewRegistry] builds another,
 // and [WithRegistry] names it for one call.
 //
-// A registry freezes at the first [Load], [LoadOver] or [Dump] run against it,
-// so register from an init. [Compile] retains nothing and does not freeze. A
-// registration claims its type unconditionally: there is no decline, and
-// "fall through to the next step" is spelled by not registering the type.
+// A registry freezes at the first [Load], [LoadOver], [Dump], [Bind] or
+// [BindSink] run against it, so register from an init. [Compile] retains
+// nothing and does not freeze. A registration claims its type unconditionally:
+// there is no decline, and "fall through to the next step" is spelled by not
+// registering the type.
 //
 // A registry also holds the compiled-schema cache, and nothing evicts from it,
 // so a registry is a value to keep. Build one per program, or one per test.
