@@ -19,26 +19,21 @@ import (
 //	    t.Errorf("registry: %s", s)
 //	}
 //
-// It joins over the union of three tables - core's identity table, one
-// representative type per kind core admits as a leaf, and reg - and returns
-// data rather than asserting, so a registrant appends their own proofs and asks
-// the same question core asks about its own set. A nil registry means core's
-// two tables alone.
+// It asks over three tables: ferry's own supported types, one representative
+// type per kind ferry admits as a leaf, and reg. A nil registry means the first
+// two alone.
 //
-// ADR-0013 is why this is not housekeeping. The compatibility promise ferry
-// makes about what a plane holds is exactly as wide as the proof table, so an
-// admitted member with no row is outside the promise by accident rather than by
-// decision. Run for the first time against the table it replaced, this reported
-// seven admitted members with no proof, and they were the integer widths nobody
-// would think to doubt.
+// It matters because ferry's promise about what a plane holds is exactly as wide
+// as the proof table. A type ferry carries with no proof against it is outside
+// that promise by accident rather than by decision, and this is what makes that
+// visible.
 //
-// The join is by reflect.Type and never by name. Name is a label for a report:
-// two proofs may share one and mean different types, and a check joining on it
-// needs a hand-written special case so that a proof named "[]byte" can discharge
-// a fixed-size array member (ADR-0014).
+// It returns data rather than failing anything, so a caller decides whether an
+// uncovered type is an error or a to-do. The result is sorted, so the report is
+// the same string over repeated runs.
 //
-// The result is sorted, so a report is one string over repeated runs
-// (ADR-0011).
+// The join is by [reflect.Type] and never by [Proof.Name], which is a label for
+// a report: two proofs may share one and mean different types.
 func Complete(reg *ferry.Registry, proofs ...Proof) []string {
 	have := make(map[reflect.Type]bool, len(proofs))
 	for _, p := range proofs {

@@ -31,7 +31,7 @@ var (
 	_ ferry.Enumerator = reader{}
 )
 
-// Source reads a struct's addresses out of a YAML file.
+// Source reads a struct's fields out of a YAML file.
 //
 // It is a separate type from [Sink] rather than the other half of one, so a
 // round trip names the path twice:
@@ -39,30 +39,27 @@ var (
 //	cfg, err := ferry.Load[Config](ctx, yaml.NewSource("config.yaml"))
 //	err = ferry.Dump(ctx, cfg, yaml.NewSink("config.yaml"))
 //
-// The repetition is the price of the refusal being a compile error: a caller
-// holding a Source cannot dump through it, and nothing has to check at runtime
-// to say so (ADR-0004).
+// The repetition buys the refusal being a compile error: code handed only a
+// Source cannot save through it, and nothing has to check at run time to say
+// so.
 type Source struct {
 	path string
 }
 
 // NewSource returns a source over the YAML file at path.
 //
-// It touches nothing. The file is read when a load opens the plane, so a source
-// over a path that does not exist yet is legal to build and legal to bind, and
-// what a load through it observes is that the plane holds no addresses.
+// It touches nothing. The file is read when a load starts, so a source over a
+// path that does not exist yet is legal to build, and a load through it sees a
+// file holding no keys: every field takes its default, and a required field
+// fails.
 func NewSource(path string) Source { return Source{path: path} }
 
-// Bind takes the address set and reads nothing out of it.
+// Bind takes the address set and reads nothing out of it, because this driver
+// walks a document tree and builds no flat key that two fields could collide
+// on.
 //
-// That is the whole of what this driver has to say about Bind, and it is the
-// asymmetry ADR-0003 leaves room for: a flattening driver builds its plane keys
-// here and checks that they are injective over the set, and a driver that walks
-// the segments as a tree has no keys to build and no collision to check for.
-// There is no call to core's key helper anywhere in this package.
-//
-// It does no I/O and cannot fail, which makes it the trivial case of ADR-0004's
-// rule that Bind succeeds against a plane nothing has reached yet.
+// It does no I/O and cannot fail. A file that does not parse is reported when
+// the load reads it, not here.
 func (s Source) Bind(_ *ferry.AddressSet) (ferry.OpenFunc, error) {
 	path := s.path
 

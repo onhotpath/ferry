@@ -25,41 +25,21 @@ var (
 // Record reports every address a value maps to and the boundary [ferry.Value]
 // ferry encodes there, without a plane being touched at all.
 //
-// It is ADR-0001's schema-extraction pattern, and the mechanism is the whole
-// answer: a dump into a sink that keeps what it was handed and writes it
-// nowhere. Nothing else in ferry can answer the question, because what a struct
-// maps to is decided by the compiler and the walk together and neither is
-// reachable from outside.
+// It answers "what does my struct actually map to?", which nothing else can:
+// where a field lands is decided by ferry's tag reading and its walk together,
+// and neither is reachable from outside. Under the hood it is a dump into a sink
+// that keeps what it was handed and writes it nowhere, so what comes back is
+// what a real dump would have written.
 //
 //	mapped, err := ferrytest.Record(ctx, Config{})
 //
 // The value matters as well as its type, because a dump writes what the value
-// holds: a zero value is the way to ask what the *type* maps to, and any other
-// value answers what dumping that value would write.
+// holds. A zero value asks what the type maps to; any other value answers what
+// dumping that value would write.
 //
-// It takes the same [ferry.Option] list as [ferry.Dump] and for the same
-// reason. A [ferry.TagKey] that the extraction could not see would answer about
-// a schema no load will ever build.
-//
-// # Why it is generic where ADR-0014's call site is not
-//
-// ADR-0014 writes the call as Record(ctx, Config{}), which is exactly what this
-// signature accepts: the type parameter is inferred from the value and no call
-// site names it. It cannot be a plain `any` parameter, because [ferry.Dump]
-// compiles the schema from its type parameter rather than from the dynamic type
-// of what it was handed - deliberately, so that the schema and the walk see one
-// type - so an `any` would compile the schema of `interface{}` and every call
-// would be refused for naming no address.
-//
-// # Why the recording sink itself is not exported
-//
-// The combinator underneath is unexported, and that is a decision rather than
-// an omission (ADR-0014). A [ferry.Writer] may also be a [ferry.Committer] and
-// a [ferry.Releaser], both discovered by assertion, and a wrapper that forwards
-// Set and forgets the other two silently turns a staging sink into one that
-// never commits. Handing out the combinator invites exactly that wrapper to be
-// written a second time, by somebody who has no reason to know the assertion is
-// there.
+// It takes the same [ferry.Option] list as [ferry.Dump], and it has to: a
+// [ferry.TagKey] this call could not see would answer about a schema no load
+// will ever build.
 func Record[T any](ctx context.Context, v T, opts ...ferry.Option) (map[ferry.Path]ferry.Value, error) {
 	rec := recording(nowhere{})
 

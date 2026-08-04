@@ -10,15 +10,13 @@ import (
 
 // ErrIllegalName reports an address this plane cannot name at all.
 //
-// Legality is the question a transform cannot rescue, and it is a different
-// question from injectivity (ADR-0003): an empty segment has no environment
-// variable name however it is folded, and a name beginning with a digit is one
-// no shell can set. Both are refused at Bind for a static address and as it is
-// minted for a dynamic one, in either case before the write or the read it
-// belongs to.
+// No fold rescues these two: an empty tag name has no environment variable name
+// however it is folded, and a name beginning with a digit is one no shell can
+// set. A tagged field is refused at Bind, and a map key that mints one is
+// refused as it is minted, in either case before the read it belongs to.
 //
-// It wraps [ferry.ErrPlane], and it stays reachable under ferry's wrapper so a
-// caller's errors.Is answers for it through [ferry.Load].
+// It wraps [ferry.ErrPlane], and it stays reachable under ferry's wrapper, so
+// errors.Is answers for it on what [ferry.Load] returned.
 var ErrIllegalName = errors.New("env: address has no environment variable name")
 
 // driverName is what this driver calls itself in a refusal, so that a schema

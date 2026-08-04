@@ -10,7 +10,12 @@ import (
 
 // Injective reports every pair of the supplied values that ferry writes to one
 // map key, which is the obligation [ferry.Reg.AsMapKey] declares and nothing
-// core can check.
+// ferry can check for you.
+//
+// Two values that become one key are one entry in the loaded map, so one of them
+// is lost. Nobody but you knows which values your program will hold, so pass the
+// ones that are close together: the same address spelled two ways, the same
+// identifier in two cases, a value carrying a zone or a scope.
 //
 //	for _, s := range ferrytest.Injective(reg,
 //	    netip.MustParseAddr("192.0.2.1"),
@@ -20,35 +25,17 @@ import (
 //	    t.Errorf("as a key: %s", s)
 //	}
 //
-// It returns data rather than asserting, and it takes no [context.Context], for
-// the reasons [Complete] and [Driver] give. The result is sorted, so a report is
-// one string over repeated runs (ADR-0011).
+// It returns data rather than failing anything, and it takes no
+// [context.Context], for [Driver]'s reason. The result is sorted, so the report
+// is the same string over repeated runs.
 //
-// # It is separate from Codec and is not folded into it
+// The key text comes from ferry and never from the type's own String method.
+// What addresses a plane is what your registered key codec produces, and a type
+// whose String differs from it would answer about the wrong text, so every value
+// here is resolved through a real dump of a real map.
 //
-// The same argument ADR-0009 makes for [ferry.Reg.AsMapKey] being a keyword
-// rather than an inference applies to the check: [Codec] asks what is true of a
-// codec, and this asks what is true of the values a registrant cares about.
-// Nobody but the registrant knows which values those are, and a codec that is
-// injective over every value anybody will ever hold is not a property core can
-// state or refuse.
-//
-// # T is comparable, because injectivity is over Go's ==
-//
-// A Go map's key identity is ==, so == is what decides how many entries the map
-// holds and therefore what "two keys" means. A constraint of `any` would let a
-// caller ask about values the question cannot be asked of.
-//
-// # The text comes from ferry and never from a format function the caller
-// supplies
-//
-// An earlier shape took a func(T) string, and it measured wrong on the type it
-// was written for: a registrant's own String() gave two distinct texts where
-// ferry wrote one twice, so the check reported no collision on a pair that
-// collides. What addresses a plane is the text ferry's own lookup produces for
-// the key, which is the registered codec's and not the type's idea of itself, so
-// this resolves every value through a real dump of a real map and reads the
-// address ferry minted (ADR-0005, amended under #31).
+// T is comparable because a Go map's key identity is ==, which is what decides
+// how many entries the map holds and therefore what "two keys" means.
 func Injective[T comparable](reg *ferry.Registry, values ...T) []string {
 	var (
 		out  []string

@@ -1,31 +1,34 @@
-// Package env is ferry's environment-variable plane, and it is a source and
-// never a sink.
+// Package env loads configuration from environment variables into a Go struct.
 //
-// It ships outside core because environment variables have no honest Dump: the
-// target people want is a .env file or an environ slice, and .env is a format,
-// which is plane knowledge (ADR-0002). Setting the process's own environment is
-// process-global mutation nobody wants, so the absence of a sink here is a
-// property of the plane rather than a decision about scope (ADR-0004). That
-// absence is carried by the type system rather than by prose: nothing in this
-// package implements ferry.Sink, so dumping to env is a compile error at the
-// call site and never a runtime refusal or an ErrUnsupported nobody reads.
+//	cfg, err := ferry.Load[Config](ctx, env.New())
 //
-// # What the plane holds
+// # Variable names come from the tags
 //
-// A String or an Absent, and never a Null. FOO= is a zero-length string and not
-// a null (ADR-0004), so the distinction between "set to empty" and "not set at
-// all" survives a load intact and a required field can tell the two apart. A
-// value dumped as Bytes is carried as its bytes, because an environment
-// variable is a byte string; nothing else about a value's type survives, since
-// the plane holds no type information of its own.
+// Each part of a field's address is upper-cased, every byte an environment
+// variable name cannot hold becomes an underscore, and nested fields are joined
+// with a separator that defaults to "_". So a field tagged name reads NAME,
+// a nested db.host reads DB_HOST, and a field tagged feature-flags reads
+// FEATURE_FLAGS. Slices and maps read the names that are already there: TAGS_0
+// and TAGS_1 fill a []string, and LIMITS_RPS fills a map under the key rps.
 //
-// # How an address becomes a name
+// Two fields can end up wanting one variable name, because "." and "-" both
+// become "_" as well. When that happens the load fails before reading anything
+// and names both fields. Rename one, or widen the join with [Separator].
 //
-// Segments are folded to upper case, every byte an environment variable name
-// cannot hold becomes an underscore, and the segments are joined with a
-// separator that is a driver option. The fold is a transform rather than a
-// validation, which is what makes a segment such as feature-flags writable at
-// all, and injectivity over the schema's whole address set is what makes the
-// transform safe: an address set the fold collapses is refused at Bind, before
-// any I/O, naming both addresses (ADR-0003).
+// # Set but empty is not the same as unset
+//
+// FOO= loads as the empty string, and FOO not being set at all is a different
+// observation: a field tagged required is satisfied by TOKEN= and fails when
+// TOKEN is unset. Nothing else about a value's type survives the trip, because
+// an environment variable is text and this plane holds no type information of
+// its own.
+//
+// # There is no way to write back
+//
+// This package loads only. Nothing in it implements [ferry.Sink], so
+// [ferry.Dump] with this package does not compile rather than failing at run
+// time. Setting the running process's own environment is rarely what anyone
+// wants, and writing a .env file is a different job for a different package.
+//
+// The design records behind these decisions are in docs/adr/.
 package env

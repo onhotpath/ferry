@@ -24,31 +24,26 @@ import (
 //	    })
 //	}
 //
-// It calls [RoundTrip] rather than restating it, which is what keeps driver/* a
-// single-call CI glob (ADR-0002): a suite a driver author can partially adopt is
-// a suite that measures nothing, so there is one call and no menu.
+// There is one call and no menu, because a suite a driver author can partially
+// adopt measures nothing. It runs everything [RoundTrip] does, so a driver
+// calling this need not call that as well.
 //
-// # It takes no context.Context
+// Fill [Plane.Kinds] in honestly. It is what your plane carries end to end, and
+// the suite turns it into an obligation in both directions: a value of a kind
+// you did not declare has to be refused loudly rather than quietly mangled.
 //
-// Stated here rather than left as an omission (ADR-0014). Every walk it runs
-// uses [context.Background], because a conformance run has no deadline to
-// inherit and no caller to be cancelled by; a driver whose conformance run needs
-// cancellation is #20's question and not this signature's.
+// It takes no [context.Context]. Every walk it runs uses [context.Background],
+// because a conformance run has no deadline to inherit and no caller to cancel
+// it.
 //
 // # A new case does not break a driver
 //
-// The suites may gain cases in a minor release where the apparatus may not, and
-// the difference is not semver's to see: adding a case changes no signature, no
-// type and no exported name, apidiff reports nothing, and a driver's CI goes
-// red. That is affordable for exactly one reason, and it is the reason each case
-// below cites the ADR sentence it executes:
-//
-//	A new conformance case does not break a driver. It reports that the driver
-//	was already broken, against a rule an ADR had already landed.
-//
-// A case asserting a rule no ADR states is not a case, it is a new rule, and it
-// needs the ADR first (ADR-0014).
-func Driver(t T, p Plane, opts ...ferry.Option) { //nolint:gocritic // hugeParam: see Plane.Except.
+// This suite may gain cases in a minor release of ferry, so a driver that passed
+// yesterday can fail today and nothing in the Go toolchain will have warned you
+// first: adding a case changes no signature and no exported name. That is
+// intended. A new case does not break a driver, it reports that the driver was
+// already broken, against a rule that was published before the case existed.
+func Driver(t T, p Plane, opts ...ferry.Option) { //nolint:gocritic // hugeParam: Plane is by value.
 	t.Helper()
 
 	if p.Open == nil {
@@ -74,6 +69,14 @@ func Driver(t T, p Plane, opts ...ferry.Option) { //nolint:gocritic // hugeParam
 
 // driverRun is one Driver call, carried down to the cases so that each of them
 // is a method with no parameter list of its own.
+//
+// It also holds the home for the //nolint on [Driver] and [RoundTrip]. Since
+// #157 added [Plane.Except], a Plane is five words and 80 bytes, which is over
+// gocritic's hugeParam threshold, so both signatures report a heavy by-value
+// parameter. The remedy gocritic names is a *Plane, and that is ADR-0014's
+// published signature and every driver's call site in and out of this
+// repository: a description copied twice per conformance run is not worth a
+// breaking change to all of them.
 type driverRun struct {
 	rep   reporter
 	plane Plane

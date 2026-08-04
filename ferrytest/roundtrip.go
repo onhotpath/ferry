@@ -14,54 +14,29 @@ import (
 //
 //	ferrytest.RoundTrip(t, ferrytest.MemPlane(), proofs)
 //
-// # It reaches the plane through [ferry.Dump] and [ferry.Load] and by no other
-// route
+// It reaches the plane through [ferry.Dump] and [ferry.Load] and by no other
+// route, so what it measures is the engine a caller uses rather than a second
+// walk written to resemble it.
 //
-// That is the whole of what this function is for, rather than a detail of how
-// it is written. A harness with its own walk measures its own walk: one
-// prototype resolved a registered key codec at compile and never called it,
-// because a second walk re-derived the key text against a package global the
-// caller-facing verbs do not install, and every measurement taken through that
-// harness was honest and meaningless. Two more implemented halves of this
-// harness, and the half that ran through the engine could not see a
-// representation at all, so the golden column ADR-0005 calls the whole reason a
-// proof is a triple had never once executed against the engine.
-//
-// So there is no internal shortcut here, not even one that is equivalent today,
-// and the golden is read through a wrapping sink because that is the only
-// position from which what ferry encoded is visible before a driver spells it.
+// This is the call a codec author makes. [Driver] calls it in turn, so a driver
+// author gets it for free and need not call it separately.
 //
 // # What it does not do
 //
-// It does not consult [Plane.Kinds]. Running the proofs a plane can express and
-// demanding a loud refusal for the ones it declared it cannot carry is
-// ADR-0014's Driver case 1, and it is one case with two halves: a suite that
-// skipped the unexpressible kinds without asserting the refusal would turn a
-// flattening driver's data loss into a silence. Driver owns both halves. This
-// function runs what it is given, which is what a registrant proving one codec
-// against the memory plane wants.
+// It does not consult [Plane.Kinds]. It runs every case it is handed, which is
+// what a codec author proving one type against [MemPlane] wants. Running the
+// values a plane can express and demanding a loud refusal for the ones it
+// declared it cannot carry is [Driver]'s job, and [Driver] narrows each proof
+// before handing it here.
 //
-// Driver narrows a proof to the cases the plane declared it carries before
-// handing it over, and a narrowed proof still numbers its cases as [CoreTypes]
-// wrote them. That is Driver reading the declaration, not this function: a proof
-// handed here unnarrowed runs every case it holds.
+// # One Option it cannot honour
 //
-// # What the Option list may not do
-//
-// The proofs are a slice rather than a variadic tail, which is the whole price
-// of a registry reaching the harness as a [ferry.Option] instead of as a
-// parameter: ADR-0014 takes that so ferrytest adds no second way to say what an
-// Option already says, and a core type table returns a slice anyway.
-//
-// One Option cannot be honoured, and it is refused rather than half-applied. A
-// proof's value is a bare value, so the harness supplies the annotated struct
-// it travels in, and [ferry.TagKey] names the key ferry reads for every type in
-// the run - that struct included. A key that is not the one the harness wrote
-// its own wrapper under leaves it unable to compile, and that is reported once
-// here rather than as an identical dump failure per case. It is a real
-// limitation of this signature rather than a decision: an Option is opaque, so
-// the harness cannot apply one to a caller's type and not to its own.
-func RoundTrip(t T, p Plane, proofs []Proof, opts ...ferry.Option) { //nolint:gocritic // hugeParam: see Plane.Except.
+// A proof carries a bare value, so this harness supplies the annotated struct
+// the value travels in. [ferry.TagKey] renames the tag key for every type in the
+// call, that struct included, so a tag key other than the harness's own leaves
+// it unable to compile its own wrapper. That is refused once, up front, rather
+// than reported as an identical failure per case.
+func RoundTrip(t T, p Plane, proofs []Proof, opts ...ferry.Option) { //nolint:gocritic // hugeParam: Plane by value.
 	t.Helper()
 
 	if p.Open == nil {
