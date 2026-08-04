@@ -38,8 +38,46 @@ type Plane struct {
 	// With it, the suite runs the proofs this plane can express and asserts
 	// that the ones it cannot are refused loudly rather than mangled. A plane
 	// that declares a kind and then refuses it is a failure and not a refusal
-	// (ADR-0005).
+	// (ADR-0005), and [Except] is how a plane whose format carries a kind but
+	// not every value of it says so rather than being wrong either way.
 	Kinds []ferry.VKind
+
+	// Except narrows [Kinds] to the values inside a declared kind that this
+	// plane's own format cannot spell, and it is nil for a plane whose format
+	// can spell every value of every kind it declares.
+	//
+	// Kinds is kind-granular and a format need not be. driver/yaml is the first
+	// instance in this repository: a Go string is a byte sequence and a YAML
+	// string is a Unicode one, so the plane carries KindString and cannot carry
+	// the one value of it that is not valid UTF-8. Neither half of the
+	// declaration can say that. Dropping KindString would disclaim every
+	// ordinary string the plane carries perfectly, and declaring it and then
+	// refusing a value of it is a failure and not a refusal (ADR-0005) - so
+	// without this there is no honest declaration to make.
+	//
+	// It is a statement about the format and never a way to drop an
+	// inconvenient case, and what holds it to that is that an excepted value is
+	// held to exactly the standard a kind the plane never declared is held to:
+	// the suite demands a loud refusal for it rather than skipping it. Excepting
+	// a value therefore costs a refusal the driver has to actually make, and a
+	// driver that mangles it instead is reported the same way.
+	//
+	// It is a predicate rather than a list of values because the thing being
+	// declared is a property of the format - "a string that is not valid UTF-8"
+	// - and a list would be a statement about whichever values the suite happens
+	// to carry today.
+	//
+	// # Why the suites carry a //nolint for this field
+	//
+	// It is the fifth word in this struct, which puts a Plane at 80 bytes and
+	// over gocritic's hugeParam threshold, so [Driver] and [RoundTrip] both
+	// report a heavy parameter. The remedy gocritic names is a *Plane, and that
+	// is the one thing this field must not cost: the by-value signature is
+	// ADR-0014's published one and every driver's call site, so an 80-byte copy
+	// made twice per conformance run would be paid for with a breaking change to
+	// every driver in and out of this repository. The suppression is on the two
+	// signatures and names this field, so the reasoning has one home.
+	Except func(v ferry.Value) bool
 
 	// Open mints a fresh, empty [Instance] of the plane.
 	//

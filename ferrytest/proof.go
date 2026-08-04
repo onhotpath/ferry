@@ -67,7 +67,20 @@ type Proof interface {
 	// declared it cannot carry must be refused loudly rather than mangled. It
 	// is a method here for run's reason - the cases are typed - and its
 	// implementation is in driver.go, with the suite it belongs to.
-	refuse(h *harness, carry map[ferry.VKind]bool)
+	refuse(h *harness)
+
+	// only narrows this proof to the cases whose golden satisfies pick,
+	// returning a copy and leaving the receiver alone.
+	//
+	// It is what makes [Driver]'s first case value-granular where [Plane.Kinds]
+	// is kind-granular, and the narrowing is per case rather than per proof for
+	// a reason measured on driver/yaml: its plane carries three of the string
+	// row's four values and cannot spell the fourth, so a proof-level answer
+	// either demands a refusal of every string, which is false, or drops the
+	// three that round trip, which is a silent hole in the one case that proves
+	// them. A narrowed proof keeps each case's own number, so a report still
+	// names the case as [CoreTypes] spells it.
+	only(pick func(ferry.Value) bool) Proof
 
 	// proof keeps [Type] the only constructor.
 	proof()
@@ -147,6 +160,12 @@ type typeProof[T any] struct {
 	name  string
 	eq    func(a, b T) bool
 	cases []Case[T]
+
+	// pick is [Proof.only]'s narrowing, and nil is every case. It is a field
+	// rather than a parameter of run and refuse so that the case list keeps its
+	// own numbering: a filtered slice renumbers, and a report naming case 2 has
+	// to mean the case [CoreTypes] wrote third.
+	pick func(ferry.Value) bool
 }
 
 // Name is the label this proof was built with.
@@ -166,5 +185,18 @@ func (p typeProof[T]) columns() (bool, []ferry.Value) {
 
 	return p.eq != nil, goldens
 }
+
+// only copies the proof with a narrowing attached. The receiver is a value, so
+// the proof it was called on is unchanged and one proof can be narrowed twice
+// into two complementary halves.
+func (p typeProof[T]) only(pick func(ferry.Value) bool) Proof {
+	p.pick = pick
+
+	return p
+}
+
+// picked reports whether one case is inside this proof's narrowing, and an
+// unnarrowed proof picks everything.
+func (p typeProof[T]) picked(want ferry.Value) bool { return p.pick == nil || p.pick(want) }
 
 func (typeProof[T]) proof() {}

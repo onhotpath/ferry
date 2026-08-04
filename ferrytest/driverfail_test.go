@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/ferrytest"
@@ -287,6 +288,47 @@ func TestDriverCase1AcceptsAPlaneThatRefusesWhatItDisclaims(t *testing.T) {
 	}
 }
 
+// TestDriverCase1AcceptsAPlaneThatRefusesAValueItExcepts is [ferrytest.Plane]'s
+// Except from the side that passes, and it is the shape driver/yaml needs.
+//
+// The plane carries KindString and excepts the one string that is not valid
+// UTF-8, which its sink then refuses. Three of the string row's four values
+// still round trip, so the exception costs no coverage of the kind, and the
+// suite is silent - which is the assertion.
+func TestDriverCase1AcceptsAPlaneThatRefusesAValueItExcepts(t *testing.T) {
+	c := &capture{}
+
+	p := wrapPlane("honest-unicode", func(inst *ferrytest.Instance) {
+		inst.Sink = pickyWriteSink{inner: inst.Sink, refuse: refuseNonUTF8}
+	})
+	p.Except = isNonUTF8
+
+	ferrytest.Driver(c, p)
+
+	if len(c.lines) != 0 {
+		t.Errorf("a plane that refuses the value it excepts reported %q, want nothing", c.lines)
+	}
+}
+
+// TestDriverCase1DemandsARefusalForAnExceptedValue is the same declaration
+// broken, and it is what stops Except being a way to skip an inconvenient case.
+//
+// The plane below excepts a value and then takes it, which is a mangling rather
+// than a refusal, and the suite reports it exactly as it reports a kind the
+// plane never declared. One line and not four is the second half: the narrowing
+// is per case, so the three strings this plane does carry are round-tripped
+// rather than swept into the refusal half with the fourth.
+func TestDriverCase1DemandsARefusalForAnExceptedValue(t *testing.T) {
+	c := &capture{}
+
+	p := ferrytest.MemPlane()
+	p.Except = isNonUTF8
+
+	ferrytest.Driver(c, p)
+
+	reportsExactly(t, c, "string: case 2: the plane declares kind string and excepts this value")
+}
+
 // TestDriverCase12ReportsANullAContainerAddressWillNotTake is case 12, negative,
 // and case 3's dump half with it.
 //
@@ -431,6 +473,25 @@ func refuseDynamicKey(addrs *ferry.AddressSet, addr ferry.Path, _ ferry.Value) e
 // cannot carry is refused rather than quietly mangled.
 func refuseNull(_ *ferry.AddressSet, _ ferry.Path, v ferry.Value) error {
 	if v.Kind() == ferry.KindNull {
+		return errNoWrite
+	}
+
+	return nil
+}
+
+// isNonUTF8 is a [ferrytest.Plane.Except] over the one value driver/yaml's
+// format cannot spell, restated here so that this package's own tests do not
+// depend on a driver module.
+func isNonUTF8(v ferry.Value) bool {
+	s, err := v.AsString()
+
+	return err == nil && !utf8.ValidString(s)
+}
+
+// refuseNonUTF8 is a plane doing what excepting a value promises: the value is
+// refused rather than quietly mangled, and every other string is taken.
+func refuseNonUTF8(_ *ferry.AddressSet, _ ferry.Path, v ferry.Value) error {
+	if isNonUTF8(v) {
 		return errNoWrite
 	}
 

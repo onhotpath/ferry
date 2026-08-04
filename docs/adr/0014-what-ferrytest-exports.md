@@ -144,6 +144,32 @@ func TestConformance(t *testing.T) {
 }
 ```
 
+> **Amended under [#157](https://github.com/onhotpath/ferry/issues/157): `Plane` gains an `Except` field, and the exported surface stays at twenty-three names.**
+> As published, `Plane` is `Name`, `Kinds`, `Open` and `Golden`, and `Kinds` is the whole of what a driver says about which values its plane can hold.
+> `Kinds` is kind-granular, and `driver/yaml` is the first plane that is not: it carries `String` and cannot spell the one string that is not valid UTF-8, because a YAML string is Unicode.
+> [ADR-0005](0005-the-supported-type-set.md) owns the rule that makes that unspellable without new machinery, and it is amended there with the reasoning and the measurement.
+> What is this ADR's is the surface:
+>
+> ```go
+> // Except narrows Kinds to the values inside a declared kind that this
+> // plane's own format cannot spell.
+> Except func(v ferry.Value) bool
+> ```
+>
+> **A field and not a name.**
+> The exported list below is fixed by decision and asserted mechanically by `TestExportedSurface`, and a field adds no entry to it, so this is a minor-release addition to the apparatus promise rather than a change to it.
+> That is the same property `Instance` was chosen for under #101 and is why it was reached for again: a struct can gain a member where a signature cannot.
+> A new exported type or function would have been a twenty-fourth name and would have needed this ADR's list changed rather than annotated.
+>
+> **What it costs, stated rather than found later.**
+> `Plane` is now five words and 80 bytes, which is over `gocritic`'s `hugeParam` threshold, so `Driver` and `RoundTrip` both report a heavy by-value parameter.
+> The remedy the linter names is a `*Plane`, and that is the published signature and every driver's call site in and out of this repository.
+> A description copied twice per conformance run is not worth a breaking change, so the two signatures carry a `//nolint` naming the field, and the reasoning lives on the field's own documentation.
+>
+> **It is not a way to skip a case**, and the enforcement is structural rather than a rule in prose.
+> An excepted value is routed to `Driver` case 1's refusal half, which is where a kind the plane never declared goes, so excepting a value buys a refusal the driver has to make rather than a case that stops running.
+> The narrowing is per case and not per proof, so the three string values `driver/yaml` does carry are still round-tripped, and a narrowed proof keeps each case's own number so a report names the case as `CoreTypes()` spells it.
+
 **A registrant, discharging [ADR-0001](0001-what-ferry-supports.md)'s transferred guarantee.**
 ADR-0009 measured that this has to be about four lines or nobody writes it.
 

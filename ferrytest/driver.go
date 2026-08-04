@@ -18,6 +18,7 @@ import (
 //	        Name:  "yaml",
 //	        Kinds: []ferry.VKind{ferry.KindAbsent, ferry.KindNull, ferry.KindBool,
 //	            ferry.KindNumber, ferry.KindString, ferry.KindBytes},
+//	        Except: notUTF8, // it carries String and not every value of it
 //	        Open:   func() ferrytest.Instance { ... },
 //	        Golden: []ferrytest.Artefact{ferrytest.Golden(cfg, "b: !!binary aGk=\n")},
 //	    })
@@ -47,7 +48,7 @@ import (
 //
 // A case asserting a rule no ADR states is not a case, it is a new rule, and it
 // needs the ADR first (ADR-0014).
-func Driver(t T, p Plane, opts ...ferry.Option) {
+func Driver(t T, p Plane, opts ...ferry.Option) { //nolint:gocritic // hugeParam: see Plane.Except.
 	t.Helper()
 
 	if p.Open == nil {
@@ -101,61 +102,76 @@ func (d *driverRun) run() {
 	d.caseNullAtContainer()
 }
 
-// caseKinds is case 1: every proof the plane can express, and a loud refusal for
+// caseKinds is case 1: every value the plane can express, and a loud refusal for
 // every one it declared it cannot carry (ADR-0005, ADR-0004).
 //
 // It is one case with two halves and neither stands alone. Running only the
-// expressible proofs would turn a flattening driver's data loss into a silence,
-// and running all of them would fail every flat driver for having no null -
-// which is the whole reason [Plane.Kinds] is a declaration rather than an
-// inference.
+// expressible half would turn a flattening driver's data loss into a silence,
+// and running everything would fail every flat driver for having no null - which
+// is the whole reason [Plane.Kinds] is a declaration rather than an inference.
 //
-// The expressible half is [RoundTrip], called and not restated.
+// The split is per case and not per proof, and that granularity is the
+// declaration model's rather than this loop's convenience. A plane may carry a
+// kind and not every value of it - driver/yaml carries KindString and cannot
+// spell the one string that is not valid UTF-8 - so a proof is not the unit a
+// plane can answer about. Answering per proof gives two wrong answers and no
+// third: demand a refusal of every string, which the plane must not make, or
+// drop the three that round trip, which is a silent hole in the case that proves
+// them.
+//
+// The expressible half is [RoundTrip], called and not restated, over proofs
+// narrowed to the cases this plane declared it carries.
 func (d *driverRun) caseKinds() {
 	d.rep.Helper()
 
-	var can, cannot []Proof
+	proofs := CoreTypes()
 
-	for _, pr := range CoreTypes() {
-		if d.expressible(pr) {
-			can = append(can, pr)
+	can := make([]Proof, 0, len(proofs))
+	cannot := make([]Proof, 0, len(proofs))
 
-			continue
-		}
-
-		cannot = append(cannot, pr)
+	for _, pr := range proofs {
+		can = append(can, pr.only(d.carries))
+		cannot = append(cannot, pr.only(d.disclaimed))
 	}
 
 	RoundTrip(d.rep, d.plane, can, d.opts...)
 
 	h := &harness{rep: d.rep, plane: d.plane, opts: d.opts}
 	for _, pr := range cannot {
-		pr.refuse(h, d.carry)
+		pr.refuse(h)
 	}
 }
 
-// expressible reports whether every golden this proof pins is a kind the plane
-// declared it can carry. The unit is the proof rather than the case, because a
-// proof is what ADR-0005 hands out and a plane that cannot carry one of its
-// cases has not discharged it.
-func (d *driverRun) expressible(pr Proof) bool {
-	_, goldens := pr.columns()
-	for _, g := range goldens {
-		if !d.carry[g.Kind()] {
-			return false
-		}
+// carries reports whether the plane declared it can hold one value: its kind is
+// in [Plane.Kinds] and [Plane.Except] does not name it.
+//
+// The two are one question here because they are one declaration, read at the
+// only granularity a value has. A plane that declares no kind at all can express
+// nothing and every case falls to the refusal half, which is a description that
+// is wrong rather than a plane that is.
+func (d *driverRun) carries(v ferry.Value) bool {
+	if !d.carry[v.Kind()] {
+		return false
 	}
 
-	return true
+	return d.plane.Except == nil || !d.plane.Except(v)
 }
+
+// disclaimed is carries' complement, and it is what the refusal half is narrowed
+// to: exactly the values the plane said it cannot hold.
+func (d *driverRun) disclaimed(v ferry.Value) bool { return !d.carries(v) }
 
 // refuse is case 1's second half, and it is a method on the proof for the reason
 // run is: the cases are typed by a parameter no suite can name.
-func (p typeProof[T]) refuse(h *harness, carry map[ferry.VKind]bool) {
+//
+// It runs the cases this proof was narrowed to and no others, so which cases it
+// covers is [caseKinds]'s single statement of the declaration rather than a
+// second copy of it here.
+func (p typeProof[T]) refuse(h *harness) {
 	h.rep.Helper()
 
 	for i, c := range p.cases {
-		if carry[c.Want.Kind()] {
+		if !p.picked(c.Want) {
 			continue
 		}
 
@@ -170,6 +186,11 @@ func (p typeProof[T]) refuse(h *harness, carry map[ferry.VKind]bool) {
 // a destination shared across cases is the defect that hides a broken second
 // walk. A plane with no sink is silent here, because the expressible half has
 // already reported it once per case.
+//
+// A value excepted under [Plane.Except] arrives here on the same footing as a
+// kind the plane never declared, and that is what stops Except being a way to
+// skip a case: excepting a value buys a refusal that has to be made, not a case
+// that stops running.
 func (p typeProof[T]) refuseCase(h *harness, i int, c Case[T]) {
 	h.rep.Helper()
 
@@ -183,9 +204,9 @@ func (p typeProof[T]) refuseCase(h *harness, i int, c Case[T]) {
 		return
 	}
 
-	h.rep.Errorf("%s: the plane does not declare kind %s and took %#v at %s without refusing it: "+
-		"a kind a plane cannot carry is a loud refusal and never a value quietly mangled",
-		h.label(p.name, i), c.Want.Kind(), c.Want, holderAddr)
+	h.rep.Errorf("%s: %s, and took %#v at %s without refusing it: a value a plane cannot carry is a loud "+
+		"refusal and never a value quietly mangled",
+		h.label(p.name, i), h.disclaims(c.Want), c.Want, holderAddr)
 }
 
 // caseBind is case 2: Bind succeeds against an unreachable plane, and the

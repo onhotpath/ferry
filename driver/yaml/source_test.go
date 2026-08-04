@@ -11,7 +11,7 @@ import (
 )
 
 // The document the read-side cases are asked about. It carries one of each
-// observation this plane can make, plus the two spellings this driver owns.
+// observation this plane can make, plus the one spelling this driver owns.
 const observed = `nul: null
 empty: ""
 value: 8080
@@ -19,7 +19,6 @@ quoted: "8080"
 yes: true
 ratio: 3.5
 bin: !!binary aGk=
-raw: !ferry:str //4=
 when: 2026-08-02T12:00:00Z
 list:
   - a
@@ -50,7 +49,6 @@ func TestObservations(t *testing.T) {
 		{"a resolved bool is a Bool", ferry.At("yes"), ferry.Bool(true)},
 		{"a float keeps the plane's own spelling", ferry.At("ratio"), ferry.Number("3.5")},
 		{"a !!binary is Bytes", ferry.At("bin"), ferry.Bytes([]byte("hi"))},
-		{"the driver's own raw string tag is a String", ferry.At("raw"), ferry.String("\xff\xfe")},
 		{"a timestamp is a String, because ferry's time codec reads one", ferry.At("when"),
 			ferry.String("2026-08-02T12:00:00Z")},
 		{"a sequence holds no value of its own", ferry.At("list"), ferry.Value{}},
@@ -213,7 +211,6 @@ func TestUnreadableScalars(t *testing.T) {
 	}{
 		{"a hand-written !!bool that is neither true nor false", "v: !!bool yes\n"},
 		{"a !!binary that is not base64", "v: !!binary not-base64!\n"},
-		{"a raw string tag that is not base64", "v: !ferry:str not-base64!\n"},
 	}
 
 	for _, c := range cases {

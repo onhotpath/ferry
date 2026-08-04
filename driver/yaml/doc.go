@@ -45,16 +45,34 @@
 // all kept. A plane holding a stream of several documents is refused rather
 // than half-written, because an address names a place in one of them.
 //
-// # The two spellings this driver owns
+// # The one spelling this driver owns
 //
-// Bytes are written base64 under YAML's own !!binary tag, and a Go string that
-// is not valid UTF-8 is written base64 under the local tag !ferry:str. The
-// second exists because a Go string is a byte sequence and a YAML string is a
-// Unicode one: the emitter refuses invalid UTF-8 under !!str, and writing such
-// a string as !!binary would read back as [ferry.KindBytes] and be handed to a
-// codec that wants a string. Both spellings are pinned by a golden artefact
-// (ADR-0013), so changing an encoder and its decoder together turns CI red
-// rather than silently rewriting what every stored file means.
+// Bytes are written base64 under YAML's own !!binary tag, and that is the whole
+// of it. The spelling is pinned by a golden artefact (ADR-0013), so changing an
+// encoder and its decoder together turns CI red rather than silently rewriting
+// what every stored file means.
+//
+// # A Go string that is not valid UTF-8 does not travel through this plane
+//
+// It is a known limitation rather than a defect, and it is recorded in ADR-0005.
+// A Go string is a byte sequence and is not required to be UTF-8; a YAML string
+// is Unicode, the stream itself has to be valid UTF-8, and the emitter refuses
+// invalid UTF-8 under !!str by name. So this plane carries [ferry.KindString]
+// and cannot carry every value of it.
+//
+// A dump of such a string is refused at that one address, with
+// [ferry.ErrValue], and the error names the address so that a config with twenty
+// strings says which one cannot travel. The dump as a whole then fails, so the
+// plane is left byte for byte as it was: the staging below either replaces it or
+// leaves it alone, and a partial write is not one of the outcomes.
+//
+// The two alternatives were both worse. Writing it as !!binary reads back as
+// [ferry.KindBytes] and reaches a codec that asked for a string. Spelling it
+// under a tag of this driver's own writes ferry's naming into an operator's data
+// file and pins it as a compatibility promise, which is what ADR-0003 already
+// refuses one level up for the canonical rendering. What would lift the
+// limitation is a node-type mechanism the driver does not own alone, which is
+// tracked in issue #156.
 //
 // # The lifecycle
 //

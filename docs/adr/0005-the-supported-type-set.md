@@ -123,6 +123,34 @@ ferry owns the representation, in both directions.
 | `float32`, `float64` | `Number` | `strconv.FormatFloat(f, 'g', -1, bits)`, at the type's own bit size |
 | `[]byte`, `[N]byte` | `Bytes` | the bytes, unmodified |
 
+> **Amended under [#157](https://github.com/onhotpath/ferry/issues/157): `driver/yaml` does not carry a Go string that is not valid UTF-8, and that is a known limitation of the driver rather than a change to the row above.**
+> The `string` row is core's and is unchanged.
+> A Go `string` is a byte sequence, ferry writes the bytes unmodified, and this ADR pins the rule with the value `"\xff\xfe"` in every proof it hands out.
+> What is added is a driver-fidelity statement this ADR had never had to make, because `driver/yaml` is the first plane whose own string type is Unicode.
+> A YAML string is Unicode, the stream itself has to be valid UTF-8, and go.yaml.in/yaml/v3's emitter refuses invalid UTF-8 under `!!str` by name, so the value has no spelling on that plane at all.
+> It is the same shape as the `±Inf` and `NaN` boundary two sections below: ferry's type is wider than the plane's, and the driver must refuse rather than mangle.
+>
+> **What the driver does instead.**
+> A dump of such a string is refused at that one address, with `ErrValue`, and the error names the address so that a config with twenty strings says which one cannot travel.
+> `ErrValue` and not `ErrPlane`, because the plane is reachable and writable and what did not fit is one value.
+> The dump as a whole then fails, and the sink stages, so the plane is left byte for byte as it was rather than half written.
+> The `!!binary` spelling for `Bytes` is untouched and its golden artefact still pins it.
+>
+> **Why an invented tag was rejected rather than kept.**
+> Two spellings were built.
+> Writing the string as `!!binary` reads back as `Bytes` and reaches a codec that asked for a string, which is a silent change of kind.
+> [#85](https://github.com/onhotpath/ferry/issues/85) shipped the second: a local tag `!ferry:str` carrying the value base64, pinned by a golden artefact.
+> The owner ruled that out, and the argument is not about the name chosen.
+> A golden artefact makes the tag a compatibility promise at `driver/yaml`'s major version ([ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md)), and [#155](https://github.com/onhotpath/ferry/issues/155) is already moving the driver's scalar spellings to a caller-supplied Option, so it is a promise nobody could honour.
+> [ADR-0003](0003-how-a-leaf-addresses-a-plane.md) states the principle one level up for the canonical rendering: it is not a plane key, and no driver may write it into a plane as one.
+> Ferry's own naming does not belong in an operator's data file, and a tag is the worse instance of it, because a tag is also what the operator reads.
+>
+> **What would lift it, and what would not.**
+> [#156](https://github.com/onhotpath/ferry/issues/156)'s prototype settles custom node types, and the limitation is held until it does.
+> #156 records that it does not solve this one and that the two must not wait on each other: this is a plain `string` field with no custom type to annotate, and a user cannot know in advance which of their strings will not be valid UTF-8.
+> Evidence: `TestNonUTF8StringIsRefusedPerAddress` and `TestDriver` in `driver/yaml`, and the mutation below.
+> With the refusal replaced by `strings.ToValidUTF8`, the conformance suite reports exactly one line, `string: case 2 ... took string("\xff\xfe") at /value without refusing it`; with the refusal widened to every string, it reports the other three string cases and eight more, and case 2 stays silent.
+
 **Composites.**
 A composite is never itself a value except in the one case below.
 It contributes addresses, and its elements are the leaves.
@@ -1080,6 +1108,38 @@ Value fidelity is core's and is measured on the memory plane.
 Driver fidelity is the driver's, and "this plane cannot carry a null, so a nil pointer is refused rather than loaded as a zero" is a declared property rather than a failure.
 Without the declaration the suite has only two options, both wrong: fail every flat driver, or skip the check and let a nil pointer silently become a zero value.
 
+> **Amended under [#157](https://github.com/onhotpath/ferry/issues/157): the declaration is kind-granular, and the first plane that needed value granularity arrived without it.**
+> Nothing above is withdrawn.
+> The rule is what makes the gap visible rather than what has to give: a plane that *declares* a kind and then refuses a value of it is a failure and not a refusal, so a declaration a driver cannot make honestly is a driver with no legal answer.
+>
+> `Plane.Kinds` is a list of `VKind`, and `driver/yaml` carries `String` and cannot spell the one string that is not valid UTF-8.
+> Both things a driver could say about that were false.
+> Declaring `String` and refusing `"\xff\xfe"` is exactly the failure the rule names.
+> Not declaring `String` disclaims every ordinary string the plane carries perfectly, which drops the whole row from the expressible half and is the silent hole the declaration exists to prevent.
+> Every plane before this one happened to carry a kind entirely or not at all, so the model was never asked the question.
+>
+> **The declaration gains a second half**, and it is a field on the description that already exists rather than a new name on `ferrytest`:
+>
+> ```go
+> // Except narrows Kinds to the values inside a declared kind that this
+> // plane's own format cannot spell.
+> Except func(v ferry.Value) bool
+> ```
+>
+> It is a predicate and not a list of values, because what is declared is a property of the format, "a string that is not valid UTF-8", and a list would be a statement about whichever values `CoreTypes()` carries today.
+> Three of the string row's four values still round trip on that plane, so the exception costs the kind no coverage.
+>
+> **An excepted value is held to exactly what a kind the plane never declared is held to**, and that is what stops this being a way to drop an inconvenient case.
+> The suite routes it to case 1's refusal half rather than skipping it, so excepting a value buys a refusal the driver has to actually make.
+> Measured: with `driver/yaml` mangling the value into valid UTF-8 instead of refusing it, the suite reports one line naming the case, the value and the address; with the exception declared and the refusal in place, it is silent.
+>
+> **The narrowing is per case and not per proof**, and that granularity is forced rather than chosen.
+> A proof is what this ADR hands out and it holds several values, so a proof-level answer has to pick one of two wrong ones: demand a refusal of every string, which the plane must not make, or drop the three that round trip, which is a hole in the one case that proves them.
+> A narrowed proof keeps each case's own number, so a report still names the case as `CoreTypes()` spells it.
+>
+> The field is `ferrytest`'s surface and therefore [ADR-0014](0014-what-ferrytest-exports.md)'s to publish; it is amended there.
+> What is this ADR's is the rule it narrows and the reason the narrowing was needed, which is why both are in this paragraph rather than split across two documents.
+
 - **A registrant** runs their own proofs against the memory plane, which is how ADR-0001's "registration carries the proof" is discharged in the registrant's own tests.
 
 > **Amended under [#35](https://github.com/onhotpath/ferry/issues/35): the shape of this section is now [ADR-0014](0014-what-ferrytest-exports.md)'s, and two things in it were wrong.**
@@ -1174,6 +1234,14 @@ Core's test iterates the identity table and the admitted kind list and asserts t
 - ferry's `float64` is wider than JSON's number, so a JSON driver must refuse `±Inf` and `NaN`.
   ferry's `time.Time` loses the zone name, identically to the stdlib.
   Both are documented properties rather than bugs, and both are conformance cases.
+- **ferry's `string` is wider than YAML's**, so `driver/yaml` refuses one that is not valid UTF-8, per address and loudly.
+  It is the same shape as the line above and the first one that bit a first-party driver, and it is the reason the carryable-kind declaration needed a value-granular half at all.
+  A user who has to move arbitrary bytes through a YAML plane declares the field `[]byte`, which travels as `!!binary` and always has.
+  *(Added under [#157](https://github.com/onhotpath/ferry/issues/157).)*
+- **A declaration a driver cannot make honestly is worse than a declaration it makes wrongly**, because the second fails CI and the first has no legal spelling at all.
+  That was found by a driver rather than anticipated by this ADR, and the mitigation is that the declaration is now two halves: which kinds, and which values inside them.
+  Every plane before `driver/yaml` carried a kind entirely or not at all, so the model held for four drivers and broke on the fifth.
+  *(Added under [#157](https://github.com/onhotpath/ferry/issues/157).)*
 - The type set does not consume ADR-0001's `go 1.27` fallback, verified by building it at `go 1.26` under `GOEXPERIMENT=nojsonv2`.
 - **A type can be a legal leaf and an illegal key**, because a key type's obligation is stated under `==` and a leaf's under the type's own relation, and `==` is the stricter of the two by construction whenever the two differ.
   `time.Time` is the first instance and it is the reason the distinction had to be written down; before [#31](https://github.com/onhotpath/ferry/issues/31) the design had no place to say it.
