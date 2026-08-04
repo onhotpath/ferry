@@ -30,6 +30,11 @@ const (
 	seqTag    = "!!seq"
 )
 
+// mergeTag is the tag YAML resolves for a merge key. This driver neither reads
+// nor writes it: it is the one tag a save has to take off a node it is not
+// otherwise touching, for the reason [untagMerges] records.
+const mergeTag = "!!merge"
+
 // nullText is how this driver writes a Null. The emitter would accept an empty
 // scalar for it and write `key:` with nothing after the colon, which reads back
 // identically and reads worse to a human, so the word is written out.

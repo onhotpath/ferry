@@ -97,9 +97,8 @@ const aliasLimit = 64
 // deref follows an alias to the node it names, which is what makes a document
 // using YAML's anchors readable rather than a subtree of absences.
 //
-// Only the read side follows one. Writing through an alias would change the
-// anchor and every other place that refers to it, so the write side replaces
-// the alias node instead.
+// The read side follows one unconditionally. The write side follows one through
+// [through], which is the same walk under a guard (#198).
 func deref(n *yamlv3.Node) *yamlv3.Node {
 	for range aliasLimit {
 		if n == nil || n.Kind != yamlv3.AliasNode {
@@ -135,6 +134,11 @@ func indexOf(text string) (int, error) {
 // has to go is a file whose shape has moved on from what it was written with,
 // and the dump is what brings it up to date. Every node the addresses do not
 // reach is left exactly as it was parsed.
+//
+// An address reaches a node through an alias where the alias names one of the
+// kind it needs, so the node this answers with may sit somewhere else in the
+// document entirely (#198). [through] is where that is decided, and
+// [writer.claim] is what catches two addresses arriving at one node.
 func place(doc *yamlv3.Node, addr ferry.Path) (*yamlv3.Node, error) {
 	// The segments are collected rather than ranged over, because the write
 	// side needs to look one segment ahead: what a container has to be is
@@ -152,7 +156,7 @@ func place(doc *yamlv3.Node, addr ferry.Path) (*yamlv3.Node, error) {
 			return nil, err
 		}
 
-		n = child
+		n = through(child, wanted(segs, i))
 
 		if i+1 < len(segs) {
 			shape(n, segs[i+1].Kind())
@@ -160,6 +164,47 @@ func place(doc *yamlv3.Node, addr ferry.Path) (*yamlv3.Node, error) {
 	}
 
 	return n, nil
+}
+
+// wanted is the node kind the address needs at step i: the container the next
+// segment is looked up in, or a scalar at the last step, which is the only
+// thing [writer.Set] ever writes.
+func wanted(segs []ferry.Segment, i int) yamlv3.Kind {
+	if i+1 == len(segs) {
+		return yamlv3.ScalarNode
+	}
+
+	if segs[i+1].Kind() == ferry.Index {
+		return yamlv3.SequenceNode
+	}
+
+	return yamlv3.MappingNode
+}
+
+// through follows an alias on the write side, where the node it names is
+// already the kind this address needs (#198).
+//
+// Following it is what keeps the linkage. The alias line stays exactly as the
+// operator wrote it, the value lands on the anchor, and every other alias to it
+// moves - which is the same reading of an anchor that #196 settled for a node
+// ferry replaces, pointed the other way.
+//
+// The guard is where it stops, and it costs nothing. An alias naming a scalar,
+// at an address that has to be a mapping, would have that scalar rewritten into
+// a mapping under every other alias to it; and there is nothing to keep by
+// following it, because an anchored scalar has no members for the reshape to
+// lose. That case replaces the alias node itself, which is what this driver did
+// for every alias before.
+func through(n *yamlv3.Node, kind yamlv3.Kind) *yamlv3.Node {
+	if n == nil || n.Kind != yamlv3.AliasNode {
+		return n
+	}
+
+	if named := deref(n); named != nil && named.Kind == kind {
+		return named
+	}
+
+	return n
 }
 
 // rootFor is the document's content node, minted where the document is empty
@@ -238,6 +283,48 @@ func elementSlot(n *yamlv3.Node, text string) (*yamlv3.Node, error) {
 	}
 
 	return n.Content[i], nil
+}
+
+// untagMerges takes the explicit tag off every merge key in the document, so a
+// save writes back the `<<` the operator wrote rather than `!!merge <<`.
+//
+// The parser tags a `<<` scalar !!merge and the emitter prints any tag it cannot
+// re-derive from the text - and its own resolution of `<<` is !!str, not
+// !!merge - so a merge key that merely passed through a save came out carrying
+// a tag it never had. Clearing it emits the scalar plain, and plain `<<` parses
+// back to the merge key it was.
+//
+// It walks the whole document rather than the addresses being written, because
+// the emitter writes the whole document and a merge key anywhere in it is
+// re-emitted, including in a subtree no field maps.
+func untagMerges(n *yamlv3.Node) {
+	if n.Kind == yamlv3.ScalarNode && n.Tag == mergeTag {
+		n.Tag = ""
+	}
+
+	for _, c := range n.Content {
+		untagMerges(c)
+	}
+}
+
+// hasAlias says whether the document shares any value with itself, which is the
+// only way two of the addresses a dump writes can reach one node (#198).
+//
+// It is asked once at the open and it is what keeps the bookkeeping in
+// [writer.claim] off an ordinary document: a file with no alias in it records
+// nothing at all.
+func hasAlias(n *yamlv3.Node) bool {
+	if n.Kind == yamlv3.AliasNode {
+		return true
+	}
+
+	for _, c := range n.Content {
+		if hasAlias(c) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // children is the immediate children of one address, as addresses.

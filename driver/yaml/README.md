@@ -95,17 +95,35 @@ The alternative is worse.
 Dropping the anchor leaves `*h` pointing at nothing, so the save reports success and writes a file that no reader can parse, including ferry's own load right afterwards.
 That was [#196](https://github.com/onhotpath/ferry/issues/196).
 
-It does not work the other way round.
-A key your struct maps that is itself an alias is saved as its own value and stops sharing the anchor:
+It works the other way round too.
+A key your struct maps that is itself an alias is written through to the anchor it names:
 
 ```yaml
 base: &b 5432
 port: *b
 ```
 
-With `port` mapped, saving it as `5433` writes `port: 5433` and leaves `base: &b 5432` where it was.
-The file still parses and still loads; what is lost is the linkage.
-That is [#198](https://github.com/onhotpath/ferry/issues/198).
+With `port` mapped, saving it as `5433` writes `base: &b 5433` and leaves the `port: *b` line exactly as it was.
+The value moves and the linkage survives.
+Saving it as its own value instead would have written `port: 5433` and quietly unshared the two, which was [#198](https://github.com/onhotpath/ferry/issues/198).
+
+Two things follow from that.
+
+**A save refuses where your struct and the document disagree.**
+With both `base` and `port` above mapped, saving `1` and `2` asks the file to hold two values in one place.
+It fails with `ferry.ErrPlane` naming the second address, and your file is left byte for byte as it was.
+Saving the same value to both is fine, because that is what the document already says.
+
+**An alias naming a scalar is replaced where the address needs a container.**
+
+```yaml
+base: &b 5432
+db: *b
+other: *b
+```
+
+With `db` mapped as a struct, saving it writes `db:` with your fields under it and leaves `base` and `other` alone.
+Following the alias would rewrite `base` into a mapping under `other`, which no field maps, and it would keep nothing: a scalar has no keys of its own for the reshape to lose.
 
 ## Types survive the trip
 
