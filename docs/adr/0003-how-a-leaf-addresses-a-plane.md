@@ -373,14 +373,43 @@ type AppConf struct {
 | ferry address | env | Windows Registry | query param |
 | --- | --- | --- | --- |
 | `/name` | `NAME` | `HKCU\Software\Acme : name` | `name` |
-| `/db/host` | `DB_HOST` | `HKCU\Software\Acme\db : host` | `db[host]` |
-| `/db/auth/user` | `DB_AUTH_USER` | `HKCU\Software\Acme\db\auth : user` | `db[auth][user]` |
-| `/tags#0` | `TAGS_0` | `HKCU\Software\Acme\tags : 0` | `tags[0]` |
-| `/limits/rps` | `LIMITS_RPS` | `HKCU\Software\Acme\limits : rps` | `limits[rps]` |
+| `/db/host` | `DB_HOST` | `HKCU\Software\Acme\db : host` | `db.host` |
+| `/db/auth/user` | `DB_AUTH_USER` | `HKCU\Software\Acme\db\auth : user` | `db.auth.user` |
+| `/tags#0` | `TAGS_0` | `HKCU\Software\Acme\tags : 0` | `tags.0` |
+| `/limits/rps` | `LIMITS_RPS` | `HKCU\Software\Acme\limits : rps` | `limits.rps` |
 
 The YAML driver never produces a key at all, because it walks the segments as a tree.
 The Registry driver reads the address the way the Registry is actually shaped: every segment but the last is a subkey, and the last is a value name.
 None of those spellings appears in the struct, and no driver knows the others exist.
+
+> **Amended under [#184](https://github.com/onhotpath/ferry/issues/184): the query column is a flat join, and as published it was a bracket form.**
+> As published those four rows read `db[host]`, `db[auth][user]`, `tags[0]` and `limits[rps]`, while [ADR-0004](0004-source-and-sink.md) said of the same driver that "its key function is a flat join like env's".
+> Two Accepted ADRs described two key functions for one driver, and `KeyFunc`'s own godoc published the bracket one.
+> **ADR-0004's line is the one that was right, and the spellings above are corrected to match it.**
+> Nothing else in this ADR moves.
+> The query column is an illustration of a driver's key function, and every rule this section exists to demonstrate is indifferent to which spelling fills it.
+>
+> **The decision was taken on a header plane and not on this one.**
+> It was measured on a throwaway prototype, on branch `proto/184-key-form`, carrying a working `Source`, `Sink`, `Reader`, `Writer` and `Enumerator` over both `url.Values` and `http.Header`, with every key going through this ADR's own `NewKeys` so that the legality and injectivity checks are the shipped ones.
+> On the query plane the two forms are interchangeable, and the prototype says so rather than manufacturing a winner: both pass the shipped `ferrytest.Driver`, both round trip a three-level struct, a slice and a map, each refuses exactly one schema the other accepts, and each silently loses exactly one minted map key the other keeps.
+> Injectivity is a draw there.
+> On a header plane it is not close.
+> `[` and `]` are not `tchar`, so they are not legal in an HTTP field name: against a real `httptest` server `net/http` refused to write `db[host]` and `db[auth][user]` with `invalid header field name`, where `Db-Host` and `Db-Auth-User` arrived intact, and `textproto.CanonicalMIMEHeaderKey` leaves `db[host]` untouched because it does not recognise it as a field name at all.
+> **Headers do nest, and the hyphen is how.**
+> `X-Forwarded-For` and `X-Forwarded-Proto` are the IANA registry's own spelling of a nested `x-forwarded` object; the flat join produces both exactly and the bracket form refuses both, which is an assertion that headers do not nest made against a registry that nests all over the place.
+> Run through the shipped conformance suite unmodified, on a header plane, the flat form reported 0 failures and the bracket form 3, at cases 3, 5 and 9.
+> The set of addresses the bracket form can name is therefore a strict subset of the flat join's across the two planes an HTTP driver would serve.
+>
+> **What the bracket form would have bought, recorded here so that it is not relitigated from memory.**
+> `?db[host]=x` is what `qs`, jQuery, Rails and PHP emit, and it is OpenAPI 3's `style: deepObject`; `?db.host=x` is Spring's convention and nobody else's.
+> A query source taking the flat join will not read a browser form serialised by `qs`, and the prototype measured the consequence directly: `?db[host]=x&db[port]=1` loads under the bracket form and leaves the zero value under the flat one, and the reverse holds for `?db.host=x`.
+> Bracket's silent round-trip residue is the rarer one, too: it loses an unbalanced `a][b` where the flat join loses `a.b`, and `a.b` is much the commoner map key.
+> That cost is real, and it is recoverable, because [a separator is a driver option](#the-separator-is-a-driver-option-and-no-separator-is-universally-safe) and a query source can grow one exactly as the env driver did.
+> A `[` in a header field name is not recoverable at all.
+> Go's own parser lends the bracket no standing either way: `url.ParseQuery` reads `?tags[]=a&tags[]=b` as one key literally named `tags[]` holding two values, and `url.Values.Encode` percent-encodes `[` to `%5B` as an inert byte, so a bracket in a query string is a convention held by clients rather than a property of the encoding.
+>
+> What this ADR settles is the form, and the form is a join.
+> Which separator an HTTP driver takes on each plane, and whether it serves one plane or two, are that driver's own and are not decided here.
 
 The same address set gets four different answers to whether it is acceptable, and every one of them lands before any I/O:
 
@@ -388,13 +417,26 @@ The same address set gets four different answers to whether it is acceptable, an
 | --- | --- | --- | --- | --- |
 | a nested `db` plus a flat `db_host` leaf | rejected | ok | ok | ok |
 | two fields differing only in case | rejected | rejected | ok | ok |
-| a map key containing `[` | transformed | ok | ok | rejected |
+| a map key containing `[` | transformed | ok | ok | ok |
 | a map key containing `\` | transformed | rejected | ok | ok |
 | a leaf and a subtree at one segment | rejected by core, so no driver sees it | | | |
 
 That table is the plane-agnosticism veto paying for itself.
 Core has no opinion about hyphens, backslashes, brackets or case, because it cannot have one that is right for all four columns.
 Each driver has the opinion that is right for its plane, and states it as an error naming both offending addresses rather than as a silent overwrite.
+
+> **Amended under [#184](https://github.com/onhotpath/ferry/issues/184): the query plane accepts a map key containing `[`, and as published this row said it rejects one.**
+> As published the row read `a map key containing [ | transformed | ok | ok | rejected`, and the rejection was a consequence of the bracket key function corrected above: a form that spells structure with `[` and `]` has to refuse a segment holding them, or lose one of two addresses.
+> With the join in place there is no such byte, and the cell reads `ok`.
+>
+> **It was wrong on this ADR's own terms even under the bracket form**, which is why the cell moves rather than being restated.
+> [The driver-side rule](#the-collision-rule-driver-side-the-key-function-is-injective-over-the-address-set) says a driver is expected to transform segment text rather than to reject it, and that the injectivity check is what makes transforming safe.
+> Outright rejection is the posture a plane earns by having an external interpreter of the byte, which is `driver/kv`'s stated argument for its own refusals and is not the query plane's: a `[` is an ordinary byte in a query key, and the prototype round tripped one end to end even under the bracket form, `{map[a[b]:2]}` to `limits%5Ba%5Bb%5D%5D=2` and back to `{map[a[b]:2]}`.
+> Where a collision is real the injectivity check already catches it, before any I/O and naming both addresses, which is the whole reason this ADR does not spend rejections on bytes.
+>
+> **No cell moves to `rejected` to replace it**, and the row below still carries the disagreement this table exists to show: a backslash is transformed on env, rejected on the Registry, and held on both of the others.
+> In particular a map key holding the query join's own separator is not a rejection either.
+> It is transformed like any other segment text, it is refused only when it collides with a nested address, and what survives is a Dump-then-Load residue on a key the driver has to parse back - the env driver's residue exactly, and the driver's to document rather than this table's to carry.
 
 ### Prefixing prepends a segment, and cannot concatenate text
 
