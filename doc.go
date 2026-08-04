@@ -14,7 +14,8 @@
 // claim is a pair: the same claim serves Load and Dump, so a type whose two
 // directions would disagree is refused rather than dumped and never loaded.
 //
-//  1. type identity, reflect.Type compared with ==
+//  1. type identity, reflect.Type compared with == - a registration and core's
+//     own two entries, in one table
 //  2. the text pair, encoding.TextAppender or encoding.TextMarshaler together
 //     with encoding.TextUnmarshaler
 //  3. reflect.Kind admission
@@ -291,7 +292,59 @@
 // A named type over time.Duration dumps nanoseconds. Such a type is a distinct
 // reflect.Type, so it misses the identity table and falls to its kind. Matching
 // on the underlying type instead would capture every ordinary `type Port int`,
-// so the remedy is a registered codec rather than a wider rule.
+// so the remedy is [DurationLike] rather than a wider rule.
+//
+// # Registration
+//
+// The type set is closed and its extension is explicit: a registered codec
+// claims a type ferry does not own, and the guarantee about that type transfers
+// to whoever registered it. Registering without proving is permitted and
+// forfeits the guarantee.
+//
+//	func init() {
+//	    if err := ferry.Register(
+//	        ferry.TextCodec[netip.AddrPort](ferry.KindString),
+//	        ferry.DurationLike[PollInterval](),
+//	        ferry.ValueCodec(ferry.KindNumber, encodeBigInt, decodeBigInt),
+//	    ); err != nil {
+//	        panic(err)
+//	    }
+//	}
+//
+// There are three constructors and they differ by what the registrant hands
+// over and by nothing else. [TextCodec] takes a kind and no functions, because
+// both halves come from the type; its purpose is changing the kind rather than
+// rescuing the type, since the chain already claims any type with a text pair.
+// [StringCodec] takes two functions over string. [ValueCodec] takes a kind and
+// two functions over [Value], and it is the only one whose decode half sees the
+// whole Value - which is the only way to accept a Null into a Go type whose
+// kind has no null, and the escape hatch strictness rests on. [DurationLike]
+// closes the named-duration hole at one line per type.
+//
+// Each takes both halves at once, so a half pair, two halves swapped and two
+// halves over different types are build errors rather than run-time refusals.
+// Inference works at every call site with a value argument, so no explicit type
+// argument is written except for [TextCodec] and [DurationLike], which have
+// nothing to infer from.
+//
+// [Register] runs the codec against the zero value of its type before accepting
+// it. That catches one class of wrong codec out of four, and it is the class
+// that matters: the one-line registration a user is most likely to write is not
+// an inverse at the zero value for netip.Addr, netip.AddrPort and netip.Prefix,
+// and since a registration beats the text pair those types already carry,
+// registering it makes the type worse than leaving it alone. What it does not
+// catch - a lossy codec, a constant codec, and a codec that declares the wrong
+// kind - is what a proof in ferrytest is for.
+//
+// A registration goes into a [Registry], which is a value. It freezes at its
+// first retained schema compile, so nothing can be registered after the first
+// [Load] or [Dump]; [Compile] retains no resolution and does not freeze. Core
+// ships a default registry and [Register] writes to it, and [WithRegistry]
+// names another. A registration claims its type unconditionally: there is no
+// decline, and "fall through to the next step" is spelled by not registering
+// the type. A registered type keys a map only if the registration says
+// .AsMapKey(), because a key codec's text has to be injective and nobody else
+// can be asked.
 //
 // # What is refused, and what that costs
 //

@@ -2,7 +2,9 @@ package ferrytest
 
 import (
 	"context"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/onhotpath/ferry"
@@ -141,3 +143,41 @@ func (releasingWriter) Close() error { return nil }
 func (bothWriter) Commit(context.Context) error { return nil }
 
 func (bothWriter) Close() error { return nil }
+
+// TestEveryAdmittedKindHasARepresentative is the drift the panic exists to
+// catch, asserted from inside because a table that agrees with itself has no
+// observable behaviour when it stops agreeing.
+//
+// A kind is not a type, so [Complete] names one member per admitted kind. A
+// kind added to the list and to no representative would be skipped by the one
+// mechanism that would have reported it, which is the failure mode rather than
+// a smaller version of it.
+func TestEveryAdmittedKindHasARepresentative(t *testing.T) {
+	t.Parallel()
+
+	for _, k := range admittedKinds {
+		if representative(k).Kind() != k {
+			t.Errorf("the representative for kind %s is a %s", k, representative(k).Kind())
+		}
+	}
+}
+
+// TestAMissingRepresentativePanics is the same claim from the other side: the
+// lookup takes its table as an argument so that the arm nothing can reach in
+// the shipped tables still has a test.
+func TestAMissingRepresentativePanics(t *testing.T) {
+	t.Parallel()
+
+	defer func() {
+		got, ok := recover().(string)
+		if !ok {
+			t.Fatal("a kind with no representative did not panic with a string")
+		}
+
+		if !strings.Contains(got, reflect.Complex128.String()) {
+			t.Errorf("the panic is %q, and does not name the kind that has no representative", got)
+		}
+	}()
+
+	lookUpRepresentative(reflect.Complex128, map[reflect.Kind]reflect.Type{})
+}

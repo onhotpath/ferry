@@ -40,18 +40,58 @@ type leafCodec struct {
 	// here.
 	parse func(reflect.Value, string) error
 
-	// nullable is the leaf that has a null of its own.
+	// accept is the whole-Value decode half, and it is nil for every leaf whose
+	// rule is core's own: take your own kind or a String, parse the text with
+	// your own parser, and refuse everything else including Null.
 	//
-	// ADR-0006: Null is presence carrying a value, so it is admitted by exactly
-	// the Go types that have a null and refused by every other leaf as a wrong
-	// kind - the same refusal a Bool gets at a string field. In core's leaf set
-	// that is []byte alone: [N]byte has no nil, and neither has any number, any
-	// bool, any string or either identity leaf.
-	nullable bool
+	// It is a hook rather than the bool it replaces, and the bool is what made
+	// the difference invisible. "Accepts Null" spelled as a bool can only mean
+	// one thing, that Null loads as the Go zero, which is right for []byte and
+	// for every pointer leaf and is not what ADR-0009's ValueCodec needs: that
+	// codec's decode half sees the whole Value, which is the only way to accept
+	// a Null into a Go type whose kind has no null and to tell number("7") from
+	// string("7") while doing it. So the accepted set is the codec's rather than
+	// something core derives from the declared kind, and ADR-0006's strictness
+	// rests on exactly that (ADR-0009).
+	accept func(reflect.Value, Value) error
+}
+
+// nullIsZero gives a leaf a null of its own, which in core's set is []byte and
+// every pointer leaf.
+//
+// ADR-0006: Null is presence carrying a value, so it is admitted by exactly the
+// Go types that have a null and refused by every other leaf as a wrong kind -
+// the same refusal a Bool gets at a string field. [N]byte has no nil, and
+// neither has any number, any bool, any string or either identity leaf.
+//
+// The wrapper closes over the codec as it stands before accept is set, so the
+// fall-through below reaches core's own rule and never itself.
+func nullIsZero(cd leafCodec) leafCodec {
+	inner := cd
+
+	cd.accept = func(v reflect.Value, got Value) error {
+		if got.kind == KindNull {
+			v.SetZero()
+
+			return nil
+		}
+
+		return inner.decodeText(v, got)
+	}
+
+	return cd
 }
 
 // leafFor resolves a type to its leaf behaviour, by type identity first, by the
 // text pair second, and by reflect.Kind third.
+//
+// A registration is an entry in the same identity table the chain consults
+// first, so it is asked before core's own entries and before everything else.
+// Registering a type the chain would have claimed is therefore legal and wins,
+// which is not a loophole: it is the mechanism by which a user overrides a
+// representation a dependency chose, and ADR-0007 recorded that exposure and
+// left the remedy here. The two halves of step one cannot collide, because
+// registering a type core owns is refused at the registration call site.
 //
 // The ordering is the whole rule (ADR-0005, ADR-0007). time.Duration's kind is
 // int64 and time.Time's kind is struct, so a kind-first resolution writes a
@@ -69,7 +109,11 @@ type leafCodec struct {
 // dependency adds a text pair, after-kind when somebody exports a field - and
 // the case rests on the first being a visibly serialization-shaped edit and the
 // second not being one.
-func leafFor(t reflect.Type) (leafCodec, bool) {
+func (r *Registry) leafFor(t reflect.Type) (leafCodec, bool) {
+	if reg, ok := r.lookup(t); ok {
+		return reg.codec, true
+	}
+
 	if cd, ok := byIdentity[t]; ok {
 		return cd, true
 	}
@@ -89,17 +133,16 @@ func leafFor(t reflect.Type) (leafCodec, bool) {
 // is a null rather than a second place (ADR-0006). So *int is one address that
 // carries a number or a null, and it is the one shape in the set that tells an
 // explicit zero from an unset field on Dump.
-func pointerLeaf(t reflect.Type) (leafCodec, bool) {
+func (r *Registry) pointerLeaf(t reflect.Type) (leafCodec, bool) {
 	elem := t.Elem()
 
-	inner, ok := leafFor(elem)
+	inner, ok := r.leafFor(elem)
 	if !ok {
 		return leafCodec{}, false
 	}
 
-	return leafCodec{
-		kind:     inner.kind,
-		nullable: true,
+	return nullIsZero(leafCodec{
+		kind: inner.kind,
 		encode: func(v reflect.Value) (Value, error) {
 			if v.IsNil() {
 				return Null(), nil
@@ -121,7 +164,7 @@ func pointerLeaf(t reflect.Type) (leafCodec, bool) {
 
 			return nil
 		},
-	}, true
+	}), true
 }
 
 // byIdentity is the table of types ferry owns the representation of, in both
@@ -139,8 +182,8 @@ func pointerLeaf(t reflect.Type) (leafCodec, bool) {
 // admissibility per entry rather than by table membership, which is the rule
 // that keeps time.Time out of a map key position.
 var byIdentity = map[reflect.Type]leafCodec{
-	reflect.TypeFor[time.Duration](): durationCodec(),
-	reflect.TypeFor[time.Time]():     timeCodec(),
+	reflect.TypeFor[time.Duration](): durationLeaf(),
+	reflect.TypeFor[time.Time]():     timeLeaf(),
 }
 
 // leafByKind is ADR-0005's kind table: bool, string, the five signed and five
@@ -157,23 +200,23 @@ var byIdentity = map[reflect.Type]leafCodec{
 func leafByKind(t reflect.Type) (leafCodec, bool) {
 	switch t.Kind() {
 	case reflect.Bool:
-		return boolCodec(), true
+		return boolLeaf(), true
 	case reflect.String:
-		return stringCodec(), true
+		return stringLeaf(), true
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return signedCodec(t.Bits()), true
+		return signedLeaf(t.Bits()), true
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return unsignedCodec(t.Bits()), true
+		return unsignedLeaf(t.Bits()), true
 	case reflect.Float32, reflect.Float64:
-		return floatCodec(t.Bits()), true
+		return floatLeaf(t.Bits()), true
 	case reflect.Slice, reflect.Array:
-		return bytesCodec(t)
+		return bytesLeaf(t)
 	default:
 		return leafCodec{}, false
 	}
 }
 
-// bytesCodec claims a slice or an array of bytes, and declines every other one
+// bytesLeaf claims a slice or an array of bytes, and declines every other one
 // to the composite rules.
 //
 // Both identities are forced by Go rather than chosen by ferry. Measured,
@@ -183,25 +226,25 @@ func leafByKind(t reflect.Type) (leafCodec, bool) {
 // reflect.TypeFor[[]int32]() is true, so []rune is an indexed composite of
 // numbers rather than text, which is legal and is almost certainly not what a
 // user meant. Both belong in the documentation rather than being discovered.
-func bytesCodec(t reflect.Type) (leafCodec, bool) {
+func bytesLeaf(t reflect.Type) (leafCodec, bool) {
 	if t.Elem().Kind() != reflect.Uint8 {
 		return leafCodec{}, false
 	}
 
 	if t.Kind() == reflect.Slice {
-		return byteSliceCodec(), true
+		return byteSliceLeaf(), true
 	}
 
-	return byteArrayCodec(t.Len()), true
+	return byteArrayLeaf(t.Len()), true
 }
 
-// boolCodec is strconv.FormatBool and its inverse, so the kind carries the
+// boolLeaf is strconv.FormatBool and its inverse, so the kind carries the
 // canonical spelling and never 1 or "yes".
 //
 // ParseBool is the leaf's own parser rather than a wider reading of what a
 // human might have meant, which is why enabled: yes from YAML and ENABLED=yes
 // from env are both refused here instead of being made to agree on a guess.
-func boolCodec() leafCodec {
+func boolLeaf() leafCodec {
 	return leafCodec{
 		kind:   KindBool,
 		encode: func(v reflect.Value) (Value, error) { return Bool(v.Bool()), nil },
@@ -218,7 +261,7 @@ func boolCodec() leafCodec {
 	}
 }
 
-// stringCodec carries the bytes unmodified, and is not required to be UTF-8: a
+// stringLeaf carries the bytes unmodified, and is not required to be UTF-8: a
 // Go string is a byte sequence and a NUL is not a terminator.
 //
 // It accepts String and nothing else, and the refusal that matters is Number.
@@ -226,7 +269,7 @@ func boolCodec() leafCodec {
 // would destroy the quoting distinction the boundary exists to preserve, where
 // port: 8080 arrives as Number and port: "8080" as String and each round-trips
 // back to its own spelling (ADR-0004, ADR-0005).
-func stringCodec() leafCodec {
+func stringLeaf() leafCodec {
 	return leafCodec{
 		kind:   KindString,
 		encode: func(v reflect.Value) (Value, error) { return String(v.String()), nil },
@@ -238,14 +281,14 @@ func stringCodec() leafCodec {
 	}
 }
 
-// signedCodec is one signed width, in base 10.
+// signedLeaf is one signed width, in base 10.
 //
 // The width is the parse's own, not int64's, so an out-of-range value is
 // strconv.ErrRange and therefore an error rather than a truncation or a
 // saturation. koanf's Int64() turning 18446744073709551615 into MaxInt64 with a
 // nil error is one of the silent wrong answers ferry exists in order not to
 // have (ADR-0001).
-func signedCodec(bits int) leafCodec {
+func signedLeaf(bits int) leafCodec {
 	return leafCodec{
 		kind: KindNumber,
 		encode: func(v reflect.Value) (Value, error) {
@@ -264,9 +307,9 @@ func signedCodec(bits int) leafCodec {
 	}
 }
 
-// unsignedCodec is one unsigned width, on the same argument as [signedCodec].
+// unsignedLeaf is one unsigned width, on the same argument as [signedLeaf].
 // It is the half that makes 18446744073709551615 representable at all.
-func unsignedCodec(bits int) leafCodec {
+func unsignedLeaf(bits int) leafCodec {
 	return leafCodec{
 		kind: KindNumber,
 		encode: func(v reflect.Value) (Value, error) {
@@ -296,14 +339,14 @@ const (
 	floatShortest = -1
 )
 
-// floatCodec is one float width, formatted and parsed at its own bit size.
+// floatLeaf is one float width, formatted and parsed at its own bit size.
 //
 // The bit size is load-bearing rather than incidental: a float32 formatted at
 // 64 bits gives 0.10000000149011612, which re-rounds to the same float32 and is
 // a wrong-looking config file. So one third is "0.3333333333333333" at 64 bits
 // and "0.33333334" at 32, and the two rows of the golden table are required to
 // disagree on it.
-func floatCodec(bits int) leafCodec {
+func floatLeaf(bits int) leafCodec {
 	return leafCodec{
 		kind: KindNumber,
 		encode: func(v reflect.Value) (Value, error) {
@@ -322,7 +365,7 @@ func floatCodec(bits int) leafCodec {
 	}
 }
 
-// byteSliceCodec is []byte, and it is the one leaf in core's set with a null.
+// byteSliceLeaf is []byte, and it is the one leaf in core's set with a null.
 //
 // A nil slice writes Null and an empty one writes bytes(""), which is not the
 // composite rule and is not in tension with it: ADR-0005 makes a composite with
@@ -333,10 +376,9 @@ func floatCodec(bits int) leafCodec {
 //
 // Base64 is not ferry's business. Bytes carries the bytes and how a plane
 // spells them is the driver's.
-func byteSliceCodec() leafCodec {
-	return leafCodec{
-		kind:     KindBytes,
-		nullable: true,
+func byteSliceLeaf() leafCodec {
+	return nullIsZero(leafCodec{
+		kind: KindBytes,
 		encode: func(v reflect.Value) (Value, error) {
 			if v.IsNil() {
 				return Null(), nil
@@ -349,10 +391,10 @@ func byteSliceCodec() leafCodec {
 
 			return nil
 		},
-	}
+	})
 }
 
-// byteArrayCodec is [N]byte, which agrees with encoding/json/v2: measured, v2
+// byteArrayLeaf is [N]byte, which agrees with encoding/json/v2: measured, v2
 // marshals [3]byte{1,2,3} as "AQID" while v1 marshals it as [1,2,3], and v1's
 // behaviour survives only through the legacy FormatByteArrayAsArray option.
 //
@@ -360,7 +402,7 @@ func byteSliceCodec() leafCodec {
 // bytes is loud rather than padded or truncated. The message names both
 // lengths, which ADR-0011 permits because a length is structure rather than a
 // value the plane supplied.
-func byteArrayCodec(n int) leafCodec {
+func byteArrayLeaf(n int) leafCodec {
 	return leafCodec{
 		kind: KindBytes,
 		encode: func(v reflect.Value) (Value, error) {
@@ -381,7 +423,7 @@ func byteArrayCodec(n int) leafCodec {
 	}
 }
 
-// durationCodec is time.Duration as 30s, and ferry departs from
+// durationLeaf is time.Duration as 30s, and ferry departs from
 // encoding/json/v2 here deliberately.
 //
 // Measured on go1.27rc2, v2 refuses a duration outright with "no default
@@ -394,7 +436,7 @@ func byteArrayCodec(n int) leafCodec {
 //
 // The kind is int64, so both halves reach the value through reflect's integer
 // accessors and neither needs a type assertion.
-func durationCodec() leafCodec {
+func durationLeaf() leafCodec {
 	return leafCodec{
 		kind: KindString,
 		encode: func(v reflect.Value) (Value, error) {
@@ -413,7 +455,7 @@ func durationCodec() leafCodec {
 	}
 }
 
-// timeCodec is time.Time as RFC 3339 with nanoseconds, through the text pair
+// timeLeaf is time.Time as RFC 3339 with nanoseconds, through the text pair
 // and never through fmt.Stringer.
 //
 // time.Time implements both, and only one of them round-trips: String() gives
@@ -435,7 +477,7 @@ func durationCodec() leafCodec {
 // is keyed by reflect.Type compared with ==, so this codec is reachable from
 // that one entry alone and both Sets below are assignable by construction -
 // which leaves no failure arm that cannot happen and therefore cannot be tested.
-func timeCodec() leafCodec {
+func timeLeaf() leafCodec {
 	return leafCodec{
 		kind: KindString,
 		encode: func(v reflect.Value) (Value, error) {
@@ -474,11 +516,24 @@ func timeCodec() leafCodec {
 // string cannot be converted to type int", which is how the restriction below
 // was found rather than assumed.
 //
-// Rendering cannot fail, because core admits only key types whose text is total
-// over the type. Parsing can, because the text is the plane's.
+// Rendering cannot fail for a key type core admits, because core admits only
+// key types whose text is total over the type. It can for a registered one: a
+// registrant's encode half is theirs, the zero-value check discharges one value
+// of it and no rule discharges the rest, so the error is reported at the
+// container address rather than swallowed into an empty segment (ADR-0009).
+// Parsing can fail either way, because the text is the plane's.
 type mapKey struct {
-	text  func(reflect.Value) string
+	text  func(reflect.Value) (string, error)
 	parse func(reflect.Value, string) error
+}
+
+// coreKey is a key type core admits, whose rendering is total over the type by
+// construction and so has no failure arm to report.
+func coreKey(text func(reflect.Value) string, parse func(reflect.Value, string) error) mapKey {
+	return mapKey{
+		text:  func(v reflect.Value) (string, error) { return text(v), nil },
+		parse: parse,
+	}
 }
 
 // mapKeyFor resolves a type's key behaviour, and declines every type that is not
@@ -494,37 +549,67 @@ type mapKey struct {
 // over 2^20 values plus the extremes found no collision. time.Time is in the
 // same identity table and is refused, which is the whole of what "per entry"
 // means (ADR-0005).
-func mapKeyFor(t reflect.Type) (mapKey, bool) {
-	// Identity before kind, for the reason [leafFor] gives: time.Duration's kind
-	// is int64, so a kind-first resolution would key a map by a nanosecond count
-	// and write /timeouts/30000000000 where ferry writes /timeouts/30s.
+// A registration is asked first and answers for itself either way, which is
+// what makes .AsMapKey() the whole of the question for a registered type: a
+// registered codec that did not say the word is refused here even where its
+// kind would have admitted it, because the registration replaced the
+// representation the kind rule was reasoning about.
+func (r *Registry) mapKeyFor(t reflect.Type) (mapKey, bool) {
+	if reg, ok := r.lookup(t); ok {
+		return registeredKey(reg)
+	}
+
+	// Identity before kind, for the reason [Registry.leafFor] gives:
+	// time.Duration's kind is int64, so a kind-first resolution would key a map
+	// by a nanosecond count and write /timeouts/30000000000 where ferry writes
+	// /timeouts/30s.
 	if t == reflect.TypeFor[time.Duration]() {
-		return mapKey{
-			text:  func(v reflect.Value) string { return time.Duration(v.Int()).String() },
-			parse: durationCodec().parse,
-		}, true
+		return coreKey(func(v reflect.Value) string { return time.Duration(v.Int()).String() },
+			durationLeaf().parse), true
 	}
 
 	switch t.Kind() {
 	case reflect.String:
-		return mapKey{text: reflect.Value.String, parse: stringCodec().parse}, true
+		return coreKey(reflect.Value.String, stringLeaf().parse), true
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return mapKey{
-			text:  func(v reflect.Value) string { return strconv.FormatInt(v.Int(), numBase) },
-			parse: signedCodec(t.Bits()).parse,
-		}, true
+		return coreKey(func(v reflect.Value) string { return strconv.FormatInt(v.Int(), numBase) },
+			signedLeaf(t.Bits()).parse), true
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return mapKey{
-			text:  func(v reflect.Value) string { return strconv.FormatUint(v.Uint(), numBase) },
-			parse: unsignedCodec(t.Bits()).parse,
-		}, true
+		return coreKey(func(v reflect.Value) string { return strconv.FormatUint(v.Uint(), numBase) },
+			unsignedLeaf(t.Bits()).parse), true
 	default:
 		return mapKey{}, false
 	}
 }
 
-// mapKeyMsg refuses a key type, and it is four messages rather than one because
-// only two of them have a remedy that exists.
+// registeredKey is a registered codec doing duty as a key: the address segment
+// is the text its encode half produced, and the key is read back through its own
+// decode half rather than through a second one.
+//
+// The kind the codec declared is discarded here, and that is the same rule the
+// leaf position keeps from the other side: a key never crosses the boundary as a
+// Value, so what a plane would have called this text is not a question anybody
+// is asking at an address segment.
+func registeredKey(reg registration) (mapKey, bool) {
+	if !reg.key {
+		return mapKey{}, false
+	}
+
+	return mapKey{
+		text: func(v reflect.Value) (string, error) {
+			out, err := reg.codec.emit(v)
+			if err != nil {
+				return "", err
+			}
+
+			return out.text, nil
+		},
+		parse: reg.codec.parse,
+	}, true
+}
+
+// mapKeyMsg refuses a key type, and it is five messages rather than one because
+// only three of them have a remedy that exists.
 //
 // A message reading "register an injective codec for it" would be naming a
 // remedy that does not exist for the first two: no text form of time.Time can be
@@ -533,10 +618,12 @@ func mapKeyFor(t reflect.Type) (mapKey, bool) {
 // is the mistake ADR-0005 corrected for time.Time by name.
 //
 // The identity table is consulted before the chain here for the same reason
-// [leafFor] consults it first: time.Time carries a text pair, and one question
-// answered by two lookups is how a chain drifts.
-func mapKeyMsg(t reflect.Type) string {
+// [Registry.leafFor] consults it first: time.Time carries a text pair, and one
+// question answered by two lookups is how a chain drifts.
+func (r *Registry) mapKeyMsg(t reflect.Type) string {
 	switch {
+	case r.registered(t):
+		return registeredKeyMsg(t)
 	case t == reflect.TypeFor[time.Time]():
 		return "time.Time is in core's own set and is not usable as a map key: its text is not injective over " +
 			"the type, because == compares the *Location and no text carries a pointer, so two distinct keys " +
@@ -552,6 +639,29 @@ func mapKeyMsg(t reflect.Type) string {
 			"to parse back out of it, so ferry keys a map by a string or an integer kind - key the map by one, "+
 			"or register a codec for it that declares itself usable as one", t)
 	}
+}
+
+// registered reports whether a registration claims this type, which is the one
+// question about a registry that is not itself a resolution.
+func (r *Registry) registered(t reflect.Type) bool {
+	_, ok := r.lookup(t)
+
+	return ok
+}
+
+// registeredKeyMsg refuses a registered key type whose registrant did not
+// declare it usable as one.
+//
+// The refusal is at schema compile, from reflect.TypeFor[T]() alone, which is
+// the same assertability every other refusal in this design has. And the
+// diagnostic is where the obligation gets communicated rather than merely where
+// it is enforced: a registration is the one moment a registrant is guaranteed
+// to read, and the implied rule's failure is a map entry that ceases to exist
+// on a plane already written (ADR-0009).
+func registeredKeyMsg(t reflect.Type) string {
+	return fmt.Sprintf("%s has a registered codec but is not declared usable as a map key: a key codec's text "+
+		"must be injective over the key type under ==, or two keys that render alike collapse into one address "+
+		"and one entry is lost with no error anywhere - add .AsMapKey() to the registration if it is", t)
 }
 
 // emit is the encode half plus the one thing core can check about a codec it
@@ -585,35 +695,29 @@ func (cd leafCodec) emit(v reflect.Value) (Value, error) {
 // Absent never reaches here: it means ferry does not write to the field at all,
 // which is the walk's decision rather than a leaf's, so a seeded value keeps
 // what it had and a fresh one keeps its zero.
+//
+// A leaf carrying its own accept half owns the whole rule, which is what makes
+// strictness recoverable. Core refuses a Null at a plain int, and a registered
+// codec for its own type accepts one and returns 0; a core that zeroed in the
+// walk instead would put the zeroing before any codec is consulted and nothing
+// would recover strictness for the plain int (ADR-0006, ADR-0009).
 func (cd leafCodec) decode(v reflect.Value, got Value) error {
-	if got.kind == KindNull {
-		return cd.decodeNull(v)
+	if cd.accept != nil {
+		return cd.accept(v, got)
 	}
 
+	return cd.decodeText(v, got)
+}
+
+// decodeText is core's own decode rule: a leaf takes its own kind and a String,
+// parses the text with its own parser, and refuses everything else - a Null
+// among them, because a leaf reaching here has no null of its own.
+func (cd leafCodec) decodeText(v reflect.Value, got Value) error {
 	if got.kind != cd.kind && got.kind != KindString {
 		return &wrongKind{got: got.kind, typ: v.Type()}
 	}
 
 	return cd.parse(v, got.text)
-}
-
-// decodeNull is ADR-0006's per-kind Null rule, which needs no new principle:
-// Null is presence carrying a value, so the question is which Go types can hold
-// that value, and every other leaf refuses it as a wrong kind.
-//
-// The refusal is what makes strictness recoverable. A registered codec for a
-// type accepts Null and returns whatever it likes, so a user who wants
-// "null means zero" has a mechanism; a core that zeroed in the walk would put
-// the zeroing before any codec is consulted and nothing would recover
-// strictness for a plain int.
-func (cd leafCodec) decodeNull(v reflect.Value) error {
-	if !cd.nullable {
-		return &wrongKind{got: KindNull, typ: v.Type()}
-	}
-
-	v.SetZero()
-
-	return nil
 }
 
 // wrongKind is a leaf refusing an observation whose kind it does not take.

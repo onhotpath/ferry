@@ -76,9 +76,14 @@ func TestCaptureIsAT(t *testing.T) {
 // Twenty rather than nineteen since #101, which added Instance: the shape as
 // published could not support its own golden artefact case, because nothing
 // handed a suite the contents of the plane instance it had just dumped to.
+//
+// Nineteen of the twenty since #79, which added Complete: the check joins over
+// the union of three tables and the third of them is a registry, so it could
+// not be written before one existed. The three still missing are Driver, Codec
+// and Injective.
 func TestExportedSurface(t *testing.T) {
 	want := []string{
-		"Artefact", "At", "BitEq", "Case", "CoreTypes", "Eq", "Instance", "MapEq", "MemPlane",
+		"Artefact", "At", "BitEq", "Case", "Complete", "CoreTypes", "Eq", "Instance", "MapEq", "MemPlane",
 		"Plane", "Proof", "PtrEq", "Record", "RoundTrip", "SliceEq", "Static", "T", "Type",
 	}
 
