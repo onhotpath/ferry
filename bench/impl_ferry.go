@@ -33,6 +33,32 @@ const (
 		"everything else in the save. It is not what this row measures."
 )
 
+// ferryNotesBoundLoad and ferryNotesBoundDump are the bound rows' notes.
+const (
+	ferryNotesBoundLoad = "The same job through a caller-held binding. ferry.Bind hands the source the " +
+		"addresses the type names once, when the binding is built, and every load through the " +
+		"binding skips that; ferry.Load does it again on every call. Nothing else differs - the " +
+		"same tag key, the same Registry, the same walk, the same value out - so the distance " +
+		"between this row and ferry's is what holding the binding is worth and nothing else. " +
+		"Building the binding is constructor work, so it lands in the cold column, and this row's " +
+		"cold figure is therefore the same job ferry's cold figure measures."
+	ferryNotesBoundDump = "The dump direction's half of the same thing: ferry.BindSink hands the sink " +
+		"the addresses the type names once and every dump through the binding skips that. It " +
+		"writes its own seeded file, as every dump row does, and it is read back by the same " +
+		"third-party reader as the rest of the table."
+)
+
+// ferryModule is the import path every ferry row is attributed to, the bound
+// rows included: a held binding is not a second library.
+const ferryModule = "github.com/onhotpath/ferry"
+
+// ferryBound is the name of every row measured through a caller-held binding.
+//
+// It carries no "/" and no space, so a benchmark name still splits into four
+// segments and the -N suffix the testing package appends is still the only
+// thing after it.
+const ferryBound = "ferry-bound"
+
 // ferryTag is the pooled struct tag key, which ferry is told to read instead
 // of its own default. ADR-0008 makes the tag key a compile-affecting option
 // and part of the schema cache key, so this is a supported configuration and
@@ -48,7 +74,7 @@ func ferryOpts() []ferry.Option {
 
 func ferryEnv[T any](notes string) Impl {
 	return Impl{
-		Name: "ferry", Module: "github.com/onhotpath/ferry", Notes: notes,
+		Name: "ferry", Module: ferryModule, Notes: notes,
 		New: func(*Fixture) (Loader, error) {
 			opts := ferryOpts()
 
@@ -73,9 +99,53 @@ func ferryEnv[T any](notes string) Impl {
 func ferryEnvSmall() Impl { return ferryEnv[Small](ferryNotesEnv) }
 func ferryEnvLarge() Impl { return ferryEnv[Large](ferryNotesEnv) }
 
+// ferryBoundEnv is ferryEnv with the bind lifted out of the timed loop.
+//
+// Bind goes in New, which is where the harness's cold/warm axis puts anything a
+// library can amortise: cold pays for it on every iteration and warm pays for
+// it once. So the warm figure is a load with the bind taken out of it, and the
+// cold figure is the same three steps ferryEnv's cold figure pays for, since
+// Load is Bind plus Binding.Load with the handle dropped (ADR-0012).
+func ferryBoundEnv[T any]() Impl {
+	return Impl{
+		Name: ferryBound, Module: ferryModule, Notes: ferryNotesBoundLoad, Variant: true,
+		New: func(*Fixture) (Loader, error) {
+			b, err := ferry.Bind[T](ferryenv.New(), ferryOpts()...)
+			if err != nil {
+				return nil, fmt.Errorf("bench: ferry bind: %w", err)
+			}
+
+			return boundLoader(b), nil
+		}}
+}
+
+func ferryBoundEnvSmall() Impl { return ferryBoundEnv[Small]() }
+func ferryBoundEnvLarge() Impl { return ferryBoundEnv[Large]() }
+
+// boundLoader is the timed half of every bound load row: the binding is already
+// built, so all that is left is the load and the assertion the harness charges
+// every column for.
+func boundLoader[T any](b *ferry.Binding[T]) Loader {
+	return func(dst any) error {
+		p, err := dstOf[T](dst)
+		if err != nil {
+			return err
+		}
+
+		v, err := b.Load(context.Background())
+		if err != nil {
+			return fmt.Errorf("bench: ferry bound load: %w", err)
+		}
+
+		*p = v
+
+		return nil
+	}
+}
+
 func ferryYAML[T any](path func(*Fixture) string) Impl {
 	return Impl{
-		Name: "ferry", Module: "github.com/onhotpath/ferry", Notes: ferryNotesYAML,
+		Name: "ferry", Module: ferryModule, Notes: ferryNotesYAML,
 		New: func(f *Fixture) (Loader, error) {
 			opts := ferryOpts()
 			src := ferryyaml.NewSource(path(f))
@@ -101,9 +171,33 @@ func ferryYAML[T any](path func(*Fixture) string) Impl {
 func ferryYAMLSmall() Impl { return ferryYAML[Small](func(f *Fixture) string { return f.YAMLSmall }) }
 func ferryYAMLLarge() Impl { return ferryYAML[Large](func(f *Fixture) string { return f.YAMLLarge }) }
 
+// ferryBoundYAML is ferryYAML with the bind lifted out of the timed loop. The
+// source still reads and parses the document on every load: binding a source is
+// not opening a plane, and this row measures the one and not the other.
+func ferryBoundYAML[T any](path func(*Fixture) string) Impl {
+	return Impl{
+		Name: ferryBound, Module: ferryModule, Notes: ferryNotesBoundLoad, Variant: true,
+		New: func(f *Fixture) (Loader, error) {
+			b, err := ferry.Bind[T](ferryyaml.NewSource(path(f)), ferryOpts()...)
+			if err != nil {
+				return nil, fmt.Errorf("bench: ferry bind: %w", err)
+			}
+
+			return boundLoader(b), nil
+		}}
+}
+
+func ferryBoundYAMLSmall() Impl {
+	return ferryBoundYAML[Small](func(f *Fixture) string { return f.YAMLSmall })
+}
+
+func ferryBoundYAMLLarge() Impl {
+	return ferryBoundYAML[Large](func(f *Fixture) string { return f.YAMLLarge })
+}
+
 func ferryDumpLarge() Impl {
 	return Impl{
-		Name: "ferry", Module: "github.com/onhotpath/ferry", Notes: ferryNotesDump,
+		Name: "ferry", Module: ferryModule, Notes: ferryNotesDump,
 		New: func(f *Fixture) (Loader, error) {
 			path, err := f.Seed("ferry", YAMLLarge)
 			if err != nil {
@@ -121,6 +215,48 @@ func ferryDumpLarge() Impl {
 				return readBackLarge(path, dst)
 			}, nil
 		}}
+}
+
+// ferryBoundDumpLarge is ferryDumpLarge with the bind lifted out of the timed
+// loop, through the sink half of the same surface.
+func ferryBoundDumpLarge() Impl {
+	return Impl{
+		Name: ferryBound, Module: ferryModule, Notes: ferryNotesBoundDump, Variant: true,
+		New: newFerryBoundDump,
+	}
+}
+
+// newFerryBoundDump seeds this row's own file, binds the sink to it once, and
+// hands back the dump the timed loop runs.
+func newFerryBoundDump(f *Fixture) (Loader, error) {
+	// Its own seeded file, like every other dump row, so that one column's
+	// output can never become another's input.
+	path, err := f.Seed(ferryBound, YAMLLarge)
+	if err != nil {
+		return nil, err
+	}
+
+	b, err := ferry.BindSink[Large](ferryyaml.NewSink(path), ferryOpts()...)
+	if err != nil {
+		return nil, fmt.Errorf("bench: ferry bind sink: %w", err)
+	}
+
+	return boundDumper(b, path), nil
+}
+
+// boundDumper is the timed half of the bound dump row: the sink binding is
+// already built, so what is left is the dump and the read-back every dump
+// column is charged for.
+func boundDumper(b *ferry.SinkBinding[Large], path string) Loader {
+	want := WantLarge()
+
+	return func(dst any) error {
+		if err := b.Dump(context.Background(), want); err != nil {
+			return fmt.Errorf("bench: ferry bound dump: %w", err)
+		}
+
+		return readBackLarge(path, dst)
+	}
 }
 
 // readBackLarge is the dump scenario's proof, and it is deliberately the same
