@@ -81,8 +81,9 @@ gets to move.
 
 **Where the libraries differ semantically, the difference is in the notes** under each
 table rather than smoothed over.
-Some of those differences are large: ferry's YAML dump edits an existing document and
-fsyncs it, while the columns beside it serialise a fresh one and do not.
+Some of those differences are large: ferry's YAML dump edits an existing document where the
+columns beside it serialise a fresh one, and two of those four columns fsync what they wrote
+while the other two do not.
 
 **The destination is allocated once, outside the timed loop, and reused across iterations.**
 Funnelling a fifty-one field struct back through an `any` on every iteration would box it,
@@ -192,9 +193,9 @@ the other direction: the same fifty-one leaves written back out to a YAML file, 
 | viper | 2.14ms ±1% | 2.29ms ±2% | 10.80x | 165 KiB | 1697 |
 | stdlib (baseline) | 240µs ±4% | 212µs ±3% | 1.00x, by definition | 123 KiB | 1093 |
 
-- **ferry** (`github.com/onhotpath/ferry`) Edits the existing document in place: it reads and parses the file, writes only the keys the struct maps, and leaves comments, key order, quoting and unmapped keys intact. The replacement is atomic and durable - temp file, fsync, rename - and the fsync is where the bulk of this row's time goes. The other two columns serialise a fresh document and os.WriteFile it with no fsync at all, so this row compares a durable in-place edit against a non-durable whole-file replacement. That is the honest comparison because it is the only one either library offers.
+- **ferry** (`github.com/onhotpath/ferry`) Edits the existing document in place: it reads and parses the file, writes only the keys the struct maps, and leaves comments, key order, quoting and unmapped keys intact. The replacement is atomic and durable - temp file, fsync, rename - and the fsync is where the bulk of this row's time goes. ferry is not the only column that fsyncs: viper's WriteConfigAs ends in f.Sync() too, which is why the two of them land together, and why koanf and the baseline, which os.WriteFile a fresh document and never sync, land far below both. What ferry alone has is both guarantees at once - its write is atomic and fsynced, viper's is fsynced and not atomic, and koanf's and the baseline's are neither. So this row splits on durability rather than on the mapping layer, and what ferry gives up to koanf here is the price of a journal commit rather than of the walk.
 - **koanf** (`github.com/knadh/koanf/v2`) Reflects the struct into a map with fatih/structs, marshals the map to YAML and writes the file whole. Comments, key order and quoting in the existing document are lost, and the write is not atomic.
-- **viper** (`github.com/spf13/viper`) viper holds a settings map rather than a struct, so it needs a struct-to-map bridge to dump one. That is fatih/structs here, which is the same bridge koanf's own structs provider uses internally, so the two dump columns are the same shape: struct to map, map to YAML, whole file replaced. Neither preserves a comment, a key order or a quoting decision, and neither write is atomic or fsynced.
+- **viper** (`github.com/spf13/viper`) viper holds a settings map rather than a struct, so it needs a struct-to-map bridge to dump one. That is fatih/structs here, which is the same bridge koanf's own structs provider uses internally, so the two dump columns are the same shape: struct to map, map to YAML, whole file replaced. Neither preserves a comment, a key order or a quoting decision. The writes differ where it costs: viper opens the target with O_TRUNC and ends writeConfig with f.Sync(), so its write is fsynced but not atomic, and a crash mid-write leaves the operator a truncated file that has been durably committed. koanf's os.WriteFile is neither.
 - **stdlib (baseline)** (`go.yaml.in/yaml/v3`) yaml.Marshal plus os.WriteFile: the document is replaced whole. Comments, key order, quoting and any key no field maps are lost, and the write is not atomic - a crash mid-write truncates the operator's file.
 
 ## The same numbers, drawn
