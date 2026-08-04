@@ -18,14 +18,14 @@ import (
 // This package ships no [ferry.Sink] and never will, which is the whole point of
 // the plane - and it means that the round-trip half of ferrytest.RoundTrip never
 // executes, because ferrytest.Driver guards five of its cases on a nil sink.
-// Measured on proto/210-http: against a Sink: nil plane the suite caught none of
+// Measured on proto/210-http-decisions: against a Sink: nil plane the suite caught none of
 // four injected read-side defects and reported "the plane mints no sink" 54
 // times instead. So the tests supply a stand-in sink over the same fake request,
 // exactly as driver/env does, which exercises the key function against its own
 // inverse as a composed pair. It lives in a _test.go file and is reachable from
 // nowhere else: a sink in this package's exported surface would be the thing the
 // plane exists not to have, and what spelling one should write is a question
-// #210 left open on purpose.
+// #216 left open on purpose.
 //
 // The stand-in takes its plane from the context in exactly the way the shipped
 // source does, because ADR-0012 requires that of both halves and because
@@ -214,7 +214,7 @@ func (w *standInWriter) Set(_ context.Context, addr ferry.Path, v ferry.Value) e
 	// parent's name, so that the collapse of /tags#0 onto "tags" is checked for
 	// injectivity against every other name this dump minted. Swallowing the
 	// refusal here is what silently downgrades the spelling for one element and
-	// keeps it for the rest (#210).
+	// keeps it for the rest (#216).
 	if _, err := w.keys(addr); err != nil {
 		return err
 	}

@@ -36,7 +36,7 @@ func TestDumpingToAnHTTPRequestDoesNotCompile(t *testing.T) {
 		if _, ok := any(src).(ferry.Sink); ok {
 			t.Errorf("*Source satisfies ferry.Sink, so ferry.Dump through the %s plane now compiles: what a "+
 				"write into a request the caller already built should do at a parameter that is already set "+
-				"is undecided, and shipping a sink answers it silently (#210)", name)
+				"is undecided, and shipping a sink answers it silently (#216)", name)
 		}
 	}
 }

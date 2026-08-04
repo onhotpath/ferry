@@ -37,7 +37,7 @@ func newReader(p plane, sep string, keys ferry.KeyFunc, static map[string]ferry.
 // because listing a request's parameters is trivial, and it is what makes a
 // map-typed or slice-typed field loadable from this plane at all (ADR-0004).
 // [ferry.Releaser] is the second, because this plane's one refusal that cannot
-// be made during the walk is made at Close (#193, #210).
+// be made during the walk is made at Close (#193, #208).
 var (
 	_ ferry.Reader     = (*reader)(nil)
 	_ ferry.Enumerator = (*reader)(nil)
@@ -118,7 +118,7 @@ func (r *reader) atPosition(addr ferry.Path) (ferry.Value, bool) {
 // the plane rather than a choice. At the moment such a name is read there is one
 // call at one address and nothing to distinguish a name occurring twice from a
 // name occurring once, so only the walk finishing without having enumerated it
-// settles the question (#193, #208, #210).
+// settles the question (#193, #208).
 //
 // [ferry.ErrorAt] is the outermost wrapper on each element, which is what lets
 // core keep the address; the driver's own sentence is inside it. A request with
