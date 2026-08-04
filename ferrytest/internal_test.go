@@ -2,6 +2,7 @@ package ferrytest
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -180,4 +181,317 @@ func TestAMissingRepresentativePanics(t *testing.T) {
 	}()
 
 	lookUpRepresentative(reflect.Complex128, map[reflect.Kind]reflect.Type{})
+}
+
+// TestCodecReportsAPanic is why every case in the codec suite is guarded.
+//
+// The two defects cases 2 and 3 exist for were panics inside core's own
+// reflection, raised on a value the registrant's codec handled correctly. A
+// suite that let one through would abort at case 2 and say nothing about the
+// four cases after it, and a registrant would read a stack trace out of a
+// package they have never opened.
+func TestCodecReportsAPanic(t *testing.T) {
+	c := &lines{}
+	run := &codecRun{rep: c}
+
+	run.guard(codecNilEncodeNo, func() { panic("the wrapper asserted a nil interface") })
+
+	if len(c.got) != 1 {
+		t.Fatalf("a panicking case reported %q, want exactly one line", c.got)
+	}
+
+	if !strings.Contains(c.got[0], "the wrapper asserted a nil interface") {
+		t.Errorf("report = %q, want the panic's own value in it", c.got[0])
+	}
+}
+
+// TestShellWriterCallsTheFrontAndAnswersForTheInner is the property [Driver]'s
+// lifecycle case rests on.
+//
+// Which optional interfaces the shell carries has to be the driver's answer, or
+// the case would be asserting about the wrapper. Which object the call reaches
+// has to be the front, or a wrapper that counts a Commit would count none.
+func TestShellWriterCallsTheFrontAndAnswersForTheInner(t *testing.T) {
+	counted := &countingWriter{}
+
+	shell := shellWriter(counted, bothWriter{})
+
+	c, ok := shell.(ferry.Committer)
+	if !ok {
+		t.Fatal("the shell over a writer that commits is not a Committer")
+	}
+
+	if err := c.Commit(context.Background()); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	if counted.commits != 1 {
+		t.Errorf("the front was committed %d times, want once", counted.commits)
+	}
+
+	if _, ok := shellWriter(counted, plainWriter{}).(ferry.Committer); ok {
+		t.Error("the shell over a writer that does not commit is a Committer, so a suite asking a driver what " +
+			"it implements would be asking the wrapper")
+	}
+}
+
+// countingWriter is a front that declares both optional interfaces, so that what
+// the shell carries can only be the inner writer's answer.
+type countingWriter struct {
+	plainWriter
+
+	commits int
+	closes  int
+}
+
+func (w *countingWriter) Commit(context.Context) error {
+	w.commits++
+
+	return nil
+}
+
+func (w *countingWriter) Close() error {
+	w.closes++
+
+	return nil
+}
+
+// lines is [T] with nothing behind it, for the two claims above that have no
+// caller-facing seam to be captured through.
+type lines struct{ got []string }
+
+func (l *lines) Errorf(format string, args ...any) {
+	l.got = append(l.got, fmt.Sprintf(format, args...))
+}
+
+func (*lines) Helper() {}
+
+// TestTheCodecProbesAreTotalInBothDirections is the codec suite's own fixtures
+// held to what they claim.
+//
+// A probe that is wrong makes the case it belongs to say nothing, quietly, which
+// is worse than the case failing: cases 2 to 6 are the only thing standing
+// between a registrant and a defect in the registration wrapper, so the values
+// they carry have to be the values the case is about.
+func TestTheCodecProbesAreTotalInBothDirections(t *testing.T) {
+	reg := ferry.NewRegistry()
+	if err := reg.Register(ifaceCodec(), numberCodec(), foldingCodec().AsMapKey()); err != nil {
+		t.Fatalf("the suite's own probes were refused: %v", err)
+	}
+
+	back, err := ferry.Load[ifaceHolder](context.Background(),
+		Static(map[ferry.Path]ferry.Value{probeAddrPath: ferry.String("udp")}),
+		ferry.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("loading a non-nil interface through the probe codec: %v", err)
+	}
+
+	if back.Value == nil || back.Value.Network() != "udp" {
+		t.Errorf("the interface probe decoded to %#v, want a probeUDP: case 3 asserts the nil answer and this "+
+			"is the answer it is distinguished from", back.Value)
+	}
+}
+
+// TestTheFoldingKeysOwnStringIsInjective is the pair [Injective] rests on,
+// asserted from inside because the type is this package's.
+//
+// The check resolves a key through ferry rather than through a format function a
+// caller supplies, and the whole reason is that the two disagree: measured on
+// this type, its own String() gives two texts where the registered codec writes
+// one twice. If that stopped being true the fixture would be proving nothing.
+func TestTheFoldingKeysOwnStringIsInjective(t *testing.T) {
+	if probeMixed.String() == probeShouted.String() {
+		t.Fatalf("the probe key's own String() folds %q and %q together, and the disagreement this fixture "+
+			"demonstrates has gone", probeMixed, probeShouted)
+	}
+
+	reg := ferry.NewRegistry()
+	if err := reg.Register(foldingCodec().AsMapKey()); err != nil {
+		t.Fatalf("registering the folding probe: %v", err)
+	}
+
+	got := Injective(reg, probeMixed, probeShouted)
+	if len(got) != 1 {
+		t.Fatalf("Injective reported %q over a pair ferry writes one text for, want one line", got)
+	}
+}
+
+// TestDumpAndOpenReportsAPlaneItCannotUse covers the three ways one case's
+// fixture never reaches a reader, which no plane in the tests above is broken
+// enough to reach and every real driver can be.
+func TestDumpAndOpenReportsAPlaneItCannotUse(t *testing.T) {
+	cases := map[string]struct {
+		plane Plane
+		want  string
+	}{
+		"the dump fails": {plane: brokenAt(errProbeSet, nil, nil), want: "dumping the fixture"},
+		"the bind fails": {plane: brokenAt(nil, errProbeGet, nil), want: "Source.Bind"},
+		"the open fails": {plane: brokenAt(nil, nil, errProbeGet), want: "opening a reader"},
+		"no sink at all": {plane: Plane{Name: "read-only", Open: func() Instance { return Instance{} }}, want: ""},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := &lines{}
+			d := &driverRun{rep: c, plane: tc.plane, carry: kindSet(nil)}
+
+			if _, ok := dumpAndOpen(d, filledFixture(), leafSet(), caseContainerNo); ok {
+				t.Fatal("a plane that cannot be used handed back a reader")
+			}
+
+			assertOneReport(t, c.got, tc.want)
+		})
+	}
+}
+
+// assertOneReport is the report a broken plane was expected to produce, or the
+// silence a plane with no sink is entitled to.
+func assertOneReport(t *testing.T, got []string, want string) {
+	t.Helper()
+
+	if want == "" {
+		if len(got) != 0 {
+			t.Errorf("reported %q, want nothing", got)
+		}
+
+		return
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("reported %q, want exactly one line", got)
+	}
+
+	if !strings.Contains(got[0], want) {
+		t.Errorf("report = %q, want %q in it", got[0], want)
+	}
+}
+
+// leafSet is the address set the fixture above is read through.
+func leafSet() *ferry.AddressSet { return ferry.NewAddressSet(addrLeaf) }
+
+// brokenAt is the memory plane with one of the three steps between a fixture and
+// a reader made to fail.
+func brokenAt(setErr, bindErr, openErr error) Plane {
+	mem := MemPlane()
+	p := mem
+
+	p.Name = "broken"
+	p.Open = func() Instance {
+		inst := mem.Open()
+		inst.Source = brokenSource{inner: inst.Source, bindErr: bindErr, openErr: openErr}
+		inst.Sink = brokenSink{inner: inst.Sink, setErr: setErr}
+
+		return inst
+	}
+
+	return p
+}
+
+type brokenSource struct {
+	inner   ferry.Source
+	bindErr error
+	openErr error
+}
+
+func (s brokenSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
+	if s.bindErr != nil {
+		return nil, s.bindErr
+	}
+
+	open, err := s.inner.Bind(addrs)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context) (ferry.Reader, error) {
+		if s.openErr != nil {
+			return nil, s.openErr
+		}
+
+		return open(ctx)
+	}, nil
+}
+
+type brokenSink struct {
+	inner  ferry.Sink
+	setErr error
+}
+
+func (s brokenSink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
+	open, err := s.inner.Bind(addrs)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context) (ferry.Writer, error) {
+		w, err := open(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		return brokenWriter{inner: w, err: s.setErr}, nil
+	}, nil
+}
+
+type brokenWriter struct {
+	inner ferry.Writer
+	err   error
+}
+
+func (w brokenWriter) Set(ctx context.Context, addr ferry.Path, v ferry.Value) error {
+	if w.err != nil {
+		return w.err
+	}
+
+	return w.inner.Set(ctx, addr, v)
+}
+
+// TestTheCodecCasesReportAWalkThatFailed is the arm every case has and no
+// registry can reach: the probe is right, the walk refuses anyway.
+//
+// It is driven through an Option list the suite cannot honour, because that is
+// the one way to make a correct probe fail from outside core. What it asserts is
+// that a case which cannot run says so rather than passing, which is the
+// difference between a suite and a suite-shaped silence.
+func TestTheCodecCasesReportAWalkThatFailed(t *testing.T) {
+	cases := map[string]func(*codecRun){
+		"the nil interface, encoding":        (*codecRun).caseNilInterfaceEncode,
+		"the nil interface, decoding":        (*codecRun).caseNilInterfaceDecode,
+		"a codec that accepts what it emits": (*codecRun).caseAcceptsWhatItEmits,
+		"a key codec's own text":             (*codecRun).caseKeyText,
+	}
+
+	for name, run := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := &lines{}
+
+			// A second registry, which core refuses: it resolves against exactly
+			// one, and each case above supplies its own.
+			run(&codecRun{rep: c, opts: []ferry.Option{ferry.WithRegistry(ferry.NewRegistry())}})
+
+			if len(c.got) == 0 {
+				t.Error("a case whose walk was refused reported nothing, which is a case that cannot fail")
+			}
+		})
+	}
+}
+
+// TestProbeRegistryReportsARegistrationCoreRefuses is the arm that fires when
+// the suite's own fixture stops being registrable, which is a change to core's
+// registration rules rather than to any caller's code.
+func TestProbeRegistryReportsARegistrationCoreRefuses(t *testing.T) {
+	c := &lines{}
+	run := &codecRun{rep: c}
+
+	// A type core owns by kind admission: an entry core holds is not replaceable.
+	refused := ferry.ValueCodec[string](ferry.KindString,
+		func(string) (ferry.Value, error) { return ferry.String(""), nil },
+		func(ferry.Value) (string, error) { return "", nil },
+	)
+
+	if _, ok := run.probeRegistry(codecTextNo, refused); ok {
+		t.Fatal("a registration core refuses was taken")
+	}
+
+	assertOneReport(t, c.got, "the suite's own probe codec was refused")
 }

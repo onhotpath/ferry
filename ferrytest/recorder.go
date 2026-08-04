@@ -13,10 +13,11 @@ import (
 var (
 	_ ferry.Sink      = (*recorder)(nil)
 	_ ferry.Writer    = recWriter{}
-	_ ferry.Committer = recCommitter{}
-	_ ferry.Releaser  = recReleaser{}
-	_ ferry.Committer = recBoth{}
-	_ ferry.Releaser  = recBoth{}
+	_ ferry.Writer    = shellPlain{}
+	_ ferry.Committer = shellCommitter{}
+	_ ferry.Releaser  = shellReleaser{}
+	_ ferry.Committer = shellBoth{}
+	_ ferry.Releaser  = shellBoth{}
 	_ ferry.Sink      = nowhere{}
 	_ ferry.Writer    = nowhere{}
 )
@@ -114,32 +115,74 @@ func (r *recorder) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 
 // wrapWriter puts the recording in front of a writer while keeping the optional
 // interfaces that writer had.
+func wrapWriter(w ferry.Writer, seen map[ferry.Path]ferry.Value) ferry.Writer {
+	return shellWriter(recWriter{inner: w, seen: seen}, w)
+}
+
+// shellWriter gives front the optional interfaces w has, and no others.
 //
-// The four shells are the honest spelling and a single shell implementing
+// The shells are the honest spelling and a single shell implementing
 // Commit and Close unconditionally is not, even though core's own entry point
 // could not tell them apart: [ferry.Committer] and [ferry.Releaser] are
 // discovered by assertion, so a wrapper that always answers yes reports that a
 // sink stages when it does not, and a conformance suite asking a driver what it
 // implements would be asking the wrapper instead.
-func wrapWriter(w ferry.Writer, seen map[ferry.Path]ferry.Value) ferry.Writer {
-	rec := recWriter{inner: w, seen: seen}
-	c, commits := w.(ferry.Committer)
-	r, releases := w.(ferry.Releaser)
+//
+// It is written once and shared, because [Driver]'s lifecycle case wraps a
+// third-party writer for exactly the same reason [Record] does, and two
+// spellings of this dance is two places for the shell nobody tested to be wrong.
+//
+// Which interfaces the shell carries is always w's answer. Which object the call
+// goes to is front's where front has the method, so a wrapper that counts a
+// Commit still leaves the driver deciding whether there is one to count.
+func shellWriter(front, w ferry.Writer) ferry.Writer {
+	c, commits := commitsThrough(front, w)
+	r, releases := releasesThrough(front, w)
 
 	switch {
 	case commits && releases:
-		return recBoth{recWriter: rec, commit: c, release: r}
+		return shellBoth{Writer: front, commit: c, release: r}
 	case commits:
-		return recCommitter{recWriter: rec, commit: c}
+		return shellCommitter{Writer: front, commit: c}
 	case releases:
-		return recReleaser{recWriter: rec, release: r}
+		return shellReleaser{Writer: front, release: r}
 	default:
-		return rec
+		return shellPlain{Writer: front}
 	}
 }
 
-// recWriter is the recording itself, and the only one of the four shells that
-// adds behaviour.
+// commitsThrough answers whether the shell is a [ferry.Committer] - which is w's
+// answer, never front's - and which of the two the Commit goes to.
+func commitsThrough(front, w ferry.Writer) (ferry.Committer, bool) {
+	inner, ok := w.(ferry.Committer)
+	if !ok {
+		return nil, false
+	}
+
+	if outer, ok := front.(ferry.Committer); ok {
+		return outer, true
+	}
+
+	return inner, true
+}
+
+// releasesThrough is [commitsThrough] for [ferry.Releaser].
+func releasesThrough(front, w ferry.Writer) (ferry.Releaser, bool) {
+	inner, ok := w.(ferry.Releaser)
+	if !ok {
+		return nil, false
+	}
+
+	if outer, ok := front.(ferry.Releaser); ok {
+		return outer, true
+	}
+
+	return inner, true
+}
+
+// recWriter is the recording itself: it is what [wrapWriter] puts in front of a
+// driver's writer, and the shells above are what give it the driver's own
+// answer to the two optional interfaces.
 type recWriter struct {
 	inner ferry.Writer
 	seen  map[ferry.Path]ferry.Value
@@ -157,40 +200,53 @@ func (w recWriter) Set(ctx context.Context, addr ferry.Path, v ferry.Value) erro
 	return w.inner.Set(ctx, addr, v)
 }
 
-// recCommitter is the shell for a staging sink.
-type recCommitter struct {
-	recWriter
+// shellPlain is the shell for a writer that neither stages nor holds a
+// resource, and it is not the no-op it looks like.
+//
+// The front is what is wrapped, and a front may carry methods of its own: the
+// lifecycle case's counting writer declares Commit and Close unconditionally,
+// because whether the shell around it has them is this function's decision and
+// not the front's. Handing that front back bare would tell core that a driver
+// stages when it does not, which is the exact misreport the four shells exist to
+// prevent. Embedding the interface promotes Set and nothing else.
+type shellPlain struct {
+	ferry.Writer
+}
+
+// shellCommitter is the shell for a staging sink.
+type shellCommitter struct {
+	ferry.Writer
 
 	commit ferry.Committer
 }
 
 // Commit is the wrapped writer's, unchanged.
-func (w recCommitter) Commit(ctx context.Context) error { return w.commit.Commit(ctx) }
+func (w shellCommitter) Commit(ctx context.Context) error { return w.commit.Commit(ctx) }
 
-// recReleaser is the shell for a sink holding a resource.
-type recReleaser struct {
-	recWriter
+// shellReleaser is the shell for a sink holding a resource.
+type shellReleaser struct {
+	ferry.Writer
 
 	release ferry.Releaser
 }
 
 // Close is the wrapped writer's, unchanged.
-func (w recReleaser) Close() error { return w.release.Close() }
+func (w shellReleaser) Close() error { return w.release.Close() }
 
-// recBoth is the shell for a sink that stages and holds a resource, which is
+// shellBoth is the shell for a sink that stages and holds a resource, which is
 // the ordinary shape of a file sink writing through a temporary.
-type recBoth struct {
-	recWriter
+type shellBoth struct {
+	ferry.Writer
 
 	commit  ferry.Committer
 	release ferry.Releaser
 }
 
 // Commit is the wrapped writer's, unchanged.
-func (w recBoth) Commit(ctx context.Context) error { return w.commit.Commit(ctx) }
+func (w shellBoth) Commit(ctx context.Context) error { return w.commit.Commit(ctx) }
 
 // Close is the wrapped writer's, unchanged.
-func (w recBoth) Close() error { return w.release.Close() }
+func (w shellBoth) Close() error { return w.release.Close() }
 
 // nowhere is the sink with no plane behind it: it accepts every address and
 // keeps none of them.
