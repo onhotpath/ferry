@@ -96,6 +96,10 @@ func runLoad(ctx context.Context, dst reflect.Value, src Source, opts []Option) 
 		return err
 	}
 
+	if src == nil {
+		return nilPlane(nilSourceMsg)
+	}
+
 	open, err := src.Bind(sch.addrs)
 	if err != nil {
 		return fromBind(err)
@@ -122,6 +126,10 @@ func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) err
 	root, err := dumpRoot(v)
 	if err != nil {
 		return err
+	}
+
+	if sink == nil {
+		return nilPlane(nilSinkMsg)
 	}
 
 	open, err := sink.Bind(sch.addrs)

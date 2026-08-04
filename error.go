@@ -338,6 +338,33 @@ func fromBind(err error) error {
 	return fromDriver(momentBind, Path{}, err)
 }
 
+// nilPlane is what a plane the caller never supplied becomes, and it is beside
+// fromBind rather than inside it because nothing was ever bound: no driver was
+// asked, so there is no cause from below and no provenance to mark, and routing
+// it through fromBind would attribute core's own refusal to a driver that does
+// not exist.
+//
+// The class is ErrPlane, because a plane that is not there is the limiting case
+// of one that cannot answer, and inventing a sentinel for it would split the one
+// question a caller asks. The moment is bind, which is where the run stops. The
+// location is the zero Path, because a nil plane holds no address: this is an
+// element with no location, and it sorts within its moment the way a close
+// failure does.
+func nilPlane(msg string) *Error {
+	return newError(momentBind, ErrPlane, Path{}, msg)
+}
+
+// The two halves are two sentences on purpose. A caller who passed a nil Source
+// and one who passed a nil Sink made different mistakes, and a shared line would
+// make them read the call site to find out which. The remedy is the same for
+// both, because there are only two ways a plane comes to be nil at all.
+const (
+	nilSourceMsg = "the source is nil, so there is nothing to load from: assign one, or check the error of the " +
+		"constructor that was meant to return it"
+	nilSinkMsg = "the sink is nil, so there is nothing to dump to: assign one, or check the error of the " +
+		"constructor that was meant to return it"
+)
+
 // mine reports whether err is core's own error and not a driver's.
 //
 // It is about the outermost error only, which is why it compares identity

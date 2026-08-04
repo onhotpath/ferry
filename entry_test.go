@@ -503,3 +503,74 @@ func TestAnOptionRefusalFailsTheCall(t *testing.T) {
 		t.Error("a plane was bound under an Option list that does not resolve")
 	}
 }
+
+// TestANilPlaneIsRefusedRatherThanDereferenced is the most ordinary caller
+// mistake there is - a field never assigned, or a constructor whose error was
+// dropped - and ADR-0011 exists so that it arrives as a diagnostic instead of a
+// stack trace. The refusal is core's own, so it carries no provenance, and a
+// plane that is not there holds no address, so the element has no location.
+func TestANilPlaneIsRefusedRatherThanDereferenced(t *testing.T) {
+	t.Parallel()
+
+	load := withoutPanicking(t, func() error {
+		_, err := Load[walkConf](t.Context(), nil)
+
+		return err
+	})
+
+	dump := withoutPanicking(t, func() error { return Dump(t.Context(), filled(), nil) })
+
+	mustRefuseANilPlane(t, load, "the source is nil")
+	mustRefuseANilPlane(t, dump, "the sink is nil")
+
+	// A caller who passed a nil Source and one who passed a nil Sink read the
+	// same report otherwise, and would have to go back to the call site to find
+	// out which half they left unassigned.
+	if reportOf(load) == reportOf(dump) {
+		t.Errorf("both halves report\n\t%+v\nand a caller cannot tell which one was nil", load)
+	}
+}
+
+// withoutPanicking runs one call and turns a panic into a failure of this test.
+//
+// It is the assertion and not scaffolding: the defect under test is a nil
+// dereference, and a dereference in a test binary takes every other test in the
+// package down with it, so a regression here would be a crash with no name on it
+// rather than a red test.
+func withoutPanicking(t *testing.T, call func() error) error {
+	t.Helper()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("a nil plane panicked with %v, want a refusal", r)
+		}
+	}()
+
+	return call()
+}
+
+// mustRefuseANilPlane holds one half's refusal to ADR-0011's shape: the class a
+// caller matches on, the provenance it must not claim, the absent location, and
+// the half it names.
+func mustRefuseANilPlane(t *testing.T, err error, half string) {
+	t.Helper()
+
+	mustBeClass(t, err, ErrPlane)
+
+	if errors.Is(err, ErrDriver) {
+		t.Errorf("%+v claims to come from a driver, and no driver was ever reached", err)
+	}
+
+	e, ok := errors.AsType[*Error](err)
+	if !ok {
+		t.Fatalf("%v is not one of ferry's own errors", err)
+	}
+
+	if e.Address() != (Path{}) {
+		t.Errorf("%+v is located at %s, and a plane that is not there holds no address", err, e.Address())
+	}
+
+	if !strings.Contains(e.Error(), half) {
+		t.Errorf("%+v does not say %q, so it does not name the half that was nil", err, half)
+	}
+}
