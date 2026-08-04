@@ -79,20 +79,29 @@ const (
 //
 // It is also where the schema cache lands, for the same reason: a cache in one
 // caller and not the other is two engines again, arrived at by omission.
+//
+// Retention is what decides both the cache and the freeze, and they are one
+// decision rather than two. ADR-0009's obligation is that once a type has been
+// resolved against a registry, that registry's answer for that type must never
+// change - which is a constraint on a resolution that is kept. A compile whose
+// result is discarded keeps nothing that could go stale, so [Compile] takes
+// neither the cache nor the freeze, and that is one omission rather than two.
 func schemaOf(t reflect.Type, opts []Option, keep retention) (*schema, error) {
 	cfg, err := newConfig(opts)
 	if err != nil {
 		return nil, err
 	}
 
+	if !keep {
+		return compileSchema(t, cfg)
+	}
+
 	// Before the compile rather than after it, because the compile is the first
 	// reader: freezing afterwards would leave the read that resolved this very
 	// schema racing a registration (ADR-0009).
-	if keep {
-		cfg.registry.freeze()
-	}
+	cfg.registry.freeze()
 
-	return compileSchema(t, cfg)
+	return cfg.registry.schemaFor(schemaKey{typ: t, tagKey: cfg.tagKey}, cfg)
 }
 
 // schema is a compiled type: the node tree a walk iterates, and the address set

@@ -356,6 +356,27 @@ func donate(got Value, kind VKind) Value {
 // different codec for one type builds its own with [NewRegistry] and hands it
 // over with [WithRegistry].
 //
+// # A registry is long-lived, because the schema cache hangs off it
+//
+// Every schema a [Load], [LoadOver] or [Dump] compiles is cached on the
+// registry it resolved against, and that cache is unbounded: nothing is ever
+// evicted, because a compiled schema is reachable again from the type that
+// produced it and no eviction policy could know that it will not be. Every
+// library surveyed documents this rather than solving it, and so does ferry.
+//
+// The usual door onto that is a program that mints types at run time, where 200
+// reflect.StructOf types produce 200 entries. ferry has a second, and it opens
+// on ordinary, statically declared types: a registry that is kept alive keeps
+// every schema ever compiled against it alive too. Measured on ADR-0009's
+// prototype, whose cache was one package-level table keyed by the type and the
+// registry together, 10,000 per-call registries produced 10,000 entries, none
+// evictable. Hanging the cache off the registry moves where that lands rather
+// than removing it: the entries are collected with the registry, and what a
+// per-call registry buys instead is a full schema compile on every call with
+// nothing reused, which is the cost the cache exists to remove. Either way the
+// conclusion is ADR-0009's: build one registry per program, or per test, and
+// hand it to every call with [WithRegistry].
+//
 // The zero Registry is empty, unfrozen and usable, and a nil *Registry reads as
 // an empty one so that [Registry.Types] can be asked about a program that
 // registered nothing.
@@ -369,6 +390,16 @@ type Registry struct {
 	frozen atomic.Bool
 
 	byType map[reflect.Type]registration
+
+	// schemas is the schema cache, and it hangs off the registry because the
+	// registry is the outer level of the cache key: two registries that disagree
+	// about one type are two schemas for that type, and a cache they shared would
+	// hand one of them the other's codec (ADR-0009, ADR-0010).
+	//
+	// It is keyed by [schemaKey] and holds *[cacheEntry] and nothing else. mu
+	// does not guard it: a sync.Map is its own synchronisation, and the cache is
+	// written after the freeze where byType is written before it.
+	schemas sync.Map
 }
 
 // registration is one entry of the table: the resolved codec, and whether the
