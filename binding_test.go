@@ -149,15 +149,15 @@ func boundDumpAgrees(t *testing.T) {
 	}
 }
 
-// counting is a Source that records how often each phase of ADR-0004's
+// countingPhases is a Source that records how often each phase of ADR-0004's
 // lifecycle ran. It is the only test here that proves the change did anything.
-type counting struct {
+type countingPhases struct {
 	src   Source
 	binds atomic.Int64
 	opens atomic.Int64
 }
 
-func (c *counting) Bind(addrs *AddressSet) (OpenFunc, error) {
+func (c *countingPhases) Bind(addrs *AddressSet) (OpenFunc, error) {
 	c.binds.Add(1)
 
 	open, err := c.src.Bind(addrs)
@@ -179,7 +179,7 @@ func TestABindingBindsOnce(t *testing.T) {
 
 	const loads = 10
 
-	src := &counting{src: planeSource{p: answering()}}
+	src := &countingPhases{src: planeSource{p: answering()}}
 
 	b, err := Bind[walkConf](src)
 	if err != nil {
@@ -209,7 +209,7 @@ func TestOneShotVerbsStillBindPerCall(t *testing.T) {
 
 	const loads = 3
 
-	src := &counting{src: planeSource{p: answering()}}
+	src := &countingPhases{src: planeSource{p: answering()}}
 
 	for range loads {
 		if _, err := Load[walkConf](t.Context(), src); err != nil {
