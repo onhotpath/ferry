@@ -311,10 +311,11 @@ func donate(got Value, kind VKind) Value {
 // own. Core ships a default one, which [Register] writes to; [NewRegistry]
 // builds another and [WithRegistry] names it for one call.
 //
-// It freezes at the first [Load], [LoadOver] or [Dump] run against it, and a
-// registration after that is a loud error naming the freeze point. So register
-// from an init, where Go's own initialisation order guarantees the ordering.
-// [Compile] retains nothing and does not freeze, so it is safe during init too.
+// It freezes at the first [Load], [LoadOver], [Dump], [Bind] or [BindSink] run
+// against it, and a registration after that is a loud error naming the freeze
+// point. So register from an init, where Go's own initialisation order
+// guarantees the ordering. [Compile] retains nothing and does not freeze, so it
+// is safe during init too.
 //
 // The freeze is what stops a schema being resolved against one set of codecs
 // and walked against another: a compiled schema holds the codec it resolved,
@@ -488,8 +489,8 @@ func (r *Registry) refuse(g Reg) error {
 		return g.err
 	case r.frozen.Load():
 		return regError(fmt.Sprintf("%s: the registry is frozen, because a schema has already been compiled "+
-			"against it - every registration must happen before the first Load or Dump, which is what stops a "+
-			"schema being resolved against one set of codecs and walked against another", g.typ))
+			"against it - every registration must happen before the first Load, Dump or Bind, which is what "+
+			"stops a schema being resolved against one set of codecs and walked against another", g.typ))
 	case g.typ.Kind() == reflect.Pointer:
 		return regError(fmt.Sprintf("%s may not be registered: pointer indirection is structural and a pointer "+
 			"type never reaches the table, so an entry for one would make a nil pointer a leaf and lose the "+

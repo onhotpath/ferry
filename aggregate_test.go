@@ -20,7 +20,7 @@ import (
 // lapse: the claim under test is that aggregation is a property of the
 // scheduler and not of the walk, and there is no way to assert "one walk
 // function, two schedulers" through a seam that publishes one scheduler and no
-// way to choose it. Everything else goes through the four verbs.
+// way to choose it. Everything else goes through the published verbs.
 
 // firstError is the scheduler ferry does not ship: stop at the first failure.
 //

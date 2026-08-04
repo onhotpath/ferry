@@ -105,14 +105,24 @@ Loading and dumping are separate interfaces, so a source with no honest write - 
 
 Anything else is [a driver you write](docs/guide/drivers.md).
 
-## The four verbs and the two options
+## The six verbs and the two options
 
 ```go
 cfg, err := ferry.Load[Config](ctx, src)       // build a fresh Config from a source
 cfg, err := ferry.LoadOver(ctx, seed, src)     // load over a value that already holds some
 err = ferry.Dump(ctx, cfg, sink)               // write a value to a sink
 err = ferry.Compile[Config]()                  // check the type maps, with no plane in sight
+
+b, err := ferry.Bind[Config](src)              // hand the source the addresses once
+cfg, err := b.Load(ctx)                        // ... and load through it as often as you like
+
+w, err := ferry.BindSink[Config](sink)         // the same split on the write side
+err = w.Dump(ctx, cfg)
 ```
+
+`Load` is `Bind` plus one method with the handle dropped, and `Dump` is `BindSink` plus one method, so a program that never holds a binding writes exactly what it wrote before.
+Hold one where the plane is per request, or where the same load runs on a timer: the compile and the driver's own bind happen once instead of on every call.
+A binding is safe to use from many goroutines.
 
 `ferry.TagKey("env")` changes which struct tag key is read.
 It applies to every struct in that call, so pass it everywhere you load that type.
