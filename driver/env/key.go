@@ -64,6 +64,14 @@ func (c config) key(addr ferry.Path) (string, error) {
 func (c config) join(addr ferry.Path) (string, error) {
 	var b strings.Builder
 
+	// One allocation rather than a run of doublings up from nothing. The
+	// rendered address carries one delimiter byte per segment and escaping only
+	// ever lengthens a segment's text, so its length covers the folded name plus
+	// a single-byte separator between every pair of segments. A longer separator
+	// can still outgrow the hint, which costs one more growth on a name that
+	// would otherwise have paid several.
+	b.Grow(len(addr.String()))
+
 	first := true
 
 	for seg := range addr.Segments() {
