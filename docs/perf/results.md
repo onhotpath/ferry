@@ -7,7 +7,7 @@ Nothing here is estimated, extrapolated or carried over from another run.
 A cell reading `not measured` is a measurement that was not taken, and the reason is
 in [what was not measured](#what-was-not-measured).
 
-Generated 2026-08-04T12:25:10Z.
+Generated 2026-08-04T13:07:28Z.
 
 ## The machine, the toolchain and the versions
 
@@ -65,6 +65,20 @@ time and warm does not.
 A library that reflects on every call has nothing to put in the constructor and its two
 columns come out the same; that flat line is the finding, not a missing measurement.
 
+**One column in every scenario is the baseline, and it is a floor rather than a competitor.**
+It is the same job written out by hand with no mapping layer over it: `os.Getenv` plus
+`strconv` for the environment scenarios, a direct `yaml.Unmarshal` for the YAML ones.
+It is measured, and its raw figure is published in every table below, unrounded.
+What it is not is a library. No mapping library can beat the code a mapping library would
+otherwise have to generate, so every row here loses to it by construction, and being told
+which row lost by the least is not information.
+So the baseline is left out of "the fastest other library" and used instead as the
+denominator of one multiple, rendered against every library in the comparison and computed
+the same way for each, ferry included.
+That multiple is what the abstraction costs over the same floor, and it is the figure to
+read: it is the one number in this file that compares a library to something no library
+gets to move.
+
 **Where the libraries differ semantically, the difference is in the notes** under each
 table rather than smoothed over.
 Some of those differences are large: ferry's YAML dump edits an existing document and
@@ -91,15 +105,15 @@ target for this job.
 
 five flat fields out of the process environment, where a mapping layer has the least room to hide.
 
-| library | cold | warm | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- |
-| ferry | 7.68µs ±4% | 2.75µs ±4% | 2.89 KiB | 41 |
-| koanf | 12.4µs ±7% | 12.5µs ±3% | 8.41 KiB | 171 |
-| viper | 8.12µs ±3% | 6.76µs ±2% | 3.61 KiB | 67 |
-| xload | 1.55µs ±2% | 1.55µs ±5% | 936 B | 17 |
-| go-envconfig | 597ns ±4% | 570ns ±4% | 0 B | 0 |
-| kelseyhightower | 2.72µs ±3% | 2.73µs ±7% | 1.21 KiB | 56 |
-| stdlib | 166ns ±1% | 166ns ±15% | 0 B | 0 |
+| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- |
+| ferry | 7.68µs ±4% | 2.75µs ±4% | 16.60x | 2.89 KiB | 41 |
+| koanf | 12.4µs ±7% | 12.5µs ±3% | 75.24x | 8.41 KiB | 171 |
+| viper | 8.12µs ±3% | 6.76µs ±2% | 40.80x | 3.61 KiB | 67 |
+| xload | 1.55µs ±2% | 1.55µs ±5% | 9.34x | 936 B | 17 |
+| go-envconfig | 597ns ±4% | 570ns ±4% | 3.44x | 0 B | 0 |
+| kelseyhightower | 2.72µs ±3% | 2.73µs ±7% | 16.46x | 1.21 KiB | 56 |
+| stdlib (baseline) | 166ns ±1% | 166ns ±15% | 1.00x, by definition | 0 B | 0 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Compiles a schema per type and caches it on the Registry, which is what the cold/warm gap is. Reads only the addresses the schema names, so the size of the environ costs it nothing. Reads TAGS_0.. and LIMITS_* rather than one delimited variable.
 - **koanf** (`github.com/knadh/koanf/v2`) Reads the whole environ on every load and unflattens it into a map, then mapstructure-decodes the map into the struct. Nothing is cached between loads, so there is nothing for the warm column to amortise. Its env provider yields strings, so the []string field needs an explicit split in the TransformFunc - the map falls out of LIMITS_* unflattening for free.
@@ -107,21 +121,21 @@ five flat fields out of the process environment, where a mapping layer has the l
 - **xload** (`github.com/gojekfarm/xtools/xload`) ferry's direct ancestor, and the Load direction only. Reflects the struct on every call and looks up one variable per leaf, so there is nothing to amortise and the two columns are the same number by construction. Reads the delimited CSV_TAGS and KV_LIMITS spellings, one variable each, where ferry and koanf read one variable per element.
 - **go-envconfig** (`github.com/sethvargo/go-envconfig`) Reflects the struct on every call and looks up one variable per leaf. Nothing cached, so cold and warm are the same number. Reads the delimited CSV_TAGS and KV_LIMITS spellings, one variable each.
 - **kelseyhightower** (`github.com/kelseyhightower/envconfig`) Derives every variable name from the Go field name, so the fixture carries no tag for it at all, except on the slice and the map, whose variable names it could not otherwise find. Reflects on every call; nothing cached. Reads the delimited CSV_TAGS and KV_LIMITS spellings, one variable each.
-- **stdlib** Hand-rolled os.Getenv plus strconv, one line per field, no reflection anywhere. Nothing to cache and nothing to configure. Absence is indistinguishable from empty, there is no required, no default, and no error naming the field that failed - the things the other columns are paying for.
+- **stdlib (baseline)** Hand-rolled os.Getenv plus strconv, one line per field, no reflection anywhere. Nothing to cache and nothing to configure. Absence is indistinguishable from empty, there is no required, no default, and no error naming the field that failed - the things the other columns are paying for.
 
 ## `env_large`
 
 fifty-one leaves over three levels, including a slice and a map, out of the process environment.
 
-| library | cold | warm | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- |
-| ferry | 108µs ±4% | 33.5µs ±3% | 27.1 KiB | 293 |
-| koanf | 146µs ±1% | 151µs ±4% | 94.5 KiB | 1873 |
-| viper | 93.9µs ±3% | 82.4µs ±2% | 47.8 KiB | 920 |
-| xload | 23.6µs ±6% | 23.8µs ±6% | 12.9 KiB | 251 |
-| go-envconfig | 10.3µs ±1% | 10.2µs ±3% | 1.36 KiB | 27 |
-| kelseyhightower | 47.2µs ±2% | 48.1µs ±3% | 31.2 KiB | 909 |
-| stdlib | 2.14µs ±4% | 2.15µs ±3% | 1008 B | 5 |
+| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- |
+| ferry | 108µs ±4% | 33.5µs ±3% | 15.58x | 27.1 KiB | 293 |
+| koanf | 146µs ±1% | 151µs ±4% | 70.07x | 94.5 KiB | 1873 |
+| viper | 93.9µs ±3% | 82.4µs ±2% | 38.28x | 47.8 KiB | 920 |
+| xload | 23.6µs ±6% | 23.8µs ±6% | 11.08x | 12.9 KiB | 251 |
+| go-envconfig | 10.3µs ±1% | 10.2µs ±3% | 4.76x | 1.36 KiB | 27 |
+| kelseyhightower | 47.2µs ±2% | 48.1µs ±3% | 22.36x | 31.2 KiB | 909 |
+| stdlib (baseline) | 2.14µs ±4% | 2.15µs ±3% | 1.00x, by definition | 1008 B | 5 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Compiles a schema per type and caches it on the Registry, which is what the cold/warm gap is. Reads only the addresses the schema names, so the size of the environ costs it nothing. Reads TAGS_0.. and LIMITS_* rather than one delimited variable.
 - **koanf** (`github.com/knadh/koanf/v2`) Reads the whole environ on every load and unflattens it into a map, then mapstructure-decodes the map into the struct. Nothing is cached between loads, so there is nothing for the warm column to amortise. Its env provider yields strings, so the []string field needs an explicit split in the TransformFunc - the map falls out of LIMITS_* unflattening for free.
@@ -129,19 +143,19 @@ fifty-one leaves over three levels, including a slice and a map, out of the proc
 - **xload** (`github.com/gojekfarm/xtools/xload`) ferry's direct ancestor, and the Load direction only. Reflects the struct on every call and looks up one variable per leaf, so there is nothing to amortise and the two columns are the same number by construction. Reads the delimited CSV_TAGS and KV_LIMITS spellings, one variable each, where ferry and koanf read one variable per element.
 - **go-envconfig** (`github.com/sethvargo/go-envconfig`) Reflects the struct on every call and looks up one variable per leaf. Nothing cached, so cold and warm are the same number. Reads the delimited CSV_TAGS and KV_LIMITS spellings, one variable each.
 - **kelseyhightower** (`github.com/kelseyhightower/envconfig`) Derives every variable name from the Go field name, so the fixture carries no tag for it at all, except on the slice and the map, whose variable names it could not otherwise find. Reflects on every call; nothing cached. Reads the delimited CSV_TAGS and KV_LIMITS spellings, one variable each.
-- **stdlib** Hand-rolled os.Getenv plus strconv, one line per field, no reflection anywhere. Nothing to cache and nothing to configure. Absence is indistinguishable from empty, there is no required, no default, and no error naming the field that failed - the things the other columns are paying for.
+- **stdlib (baseline)** Hand-rolled os.Getenv plus strconv, one line per field, no reflection anywhere. Nothing to cache and nothing to configure. Absence is indistinguishable from empty, there is no required, no default, and no error naming the field that failed - the things the other columns are paying for.
 
 ## `yaml_small`
 
 the same five fields, read from a YAML file on disk on every iteration.
 
-| library | cold | warm | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- |
-| ferry | 22.1µs ±5% | 17.4µs ±3% | 11.0 KiB | 107 |
-| koanf | 30.0µs ±4% | 30.1µs ±3% | 17.4 KiB | 249 |
-| viper | 26.4µs ±3% | 26.6µs ±14% | 15.5 KiB | 171 |
-| xload | 19.5µs ±3% | 1.74µs ±2% † | 1000 B | 23 |
-| stdlib | 16.6µs ±4% | 16.6µs ±11% | 9.82 KiB | 98 |
+| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- |
+| ferry | 22.1µs ±5% | 17.4µs ±3% | 1.05x | 11.0 KiB | 107 |
+| koanf | 30.0µs ±4% | 30.1µs ±3% | 1.82x | 17.4 KiB | 249 |
+| viper | 26.4µs ±3% | 26.6µs ±14% | 1.61x | 15.5 KiB | 171 |
+| xload | 19.5µs ±3% | 1.74µs ±2% † | 0.10x † | 1000 B | 23 |
+| stdlib (baseline) | 16.6µs ±4% | 16.6µs ±11% | 1.00x, by definition | 9.82 KiB | 98 |
 
 † **xload's warm figure is not comparable with the rest of this table.** xload's YAML provider reads and parses the file once, when the loader is constructed, and every later load is a map lookup against that snapshot. So this warm figure excludes the file read and the YAML parse that ferry, koanf, viper and the stdlib baseline all pay on every single load. The cold column is where these rows are comparable; the warm one measures a different job.
 
@@ -149,39 +163,39 @@ the same five fields, read from a YAML file on disk on every iteration.
 - **koanf** (`github.com/knadh/koanf/v2`) Parses the file into a map, then mapstructure-decodes the map into the struct: two passes over the data and one intermediate map per load, none of it cached.
 - **viper** (`github.com/spf13/viper`) Reads and parses the file into its own settings map, then mapstructure-decodes that map into the struct. The instance is reusable, but it holds data rather than a compiled schema, so warm saves only the file-path setup and not the parse.
 - **xload** (`github.com/gojekfarm/xtools/xload/providers/yaml`) xload is not limited to the environment: its first-party provider module xload/providers/yaml reads the file, unmarshals it and flattens it into a MapLoader. The keys the flatten produces are the document's own, which are lower case, and the pooled env: tag is upper case because go-envconfig shares it, so the loader is wrapped in a one-line LoaderFunc that folds the case - the same shape as xload's own PrefixLoader, and the reason there is no third tag key.
-- **stdlib** (`go.yaml.in/yaml/v3`) go.yaml.in/yaml/v3 Unmarshal straight into the struct: no mapping layer, no intermediate map. yaml.v3 keeps a per-type field cache of its own that no caller can defeat, so its cold column is not a true cold measurement and is the same number as its warm one for that reason rather than for the others'.
+- **stdlib (baseline)** (`go.yaml.in/yaml/v3`) go.yaml.in/yaml/v3 Unmarshal straight into the struct: no mapping layer, no intermediate map. yaml.v3 keeps a per-type field cache of its own that no caller can defeat, so its cold column is not a true cold measurement and is the same number as its warm one for that reason rather than for the others'.
 
 ## `yaml_large`
 
 the same fifty-one leaves, read from a YAML file on disk on every iteration.
 
-| library | cold | warm | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- |
-| ferry | 182µs ±2% | 102µs ±2% | 48.1 KiB | 770 |
-| koanf | 242µs ±3% | 238µs ±2% | 122 KiB | 2423 |
-| viper | 204µs ±5% | 202µs ±2% | 95.9 KiB | 1692 |
-| stdlib | 99.4µs ±7% | 98.2µs ±3% | 39.7 KiB | 750 |
+| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- |
+| ferry | 182µs ±2% | 102µs ±2% | 1.04x | 48.1 KiB | 770 |
+| koanf | 242µs ±3% | 238µs ±2% | 2.43x | 122 KiB | 2423 |
+| viper | 204µs ±5% | 202µs ±2% | 2.06x | 95.9 KiB | 1692 |
+| stdlib (baseline) | 99.4µs ±7% | 98.2µs ±3% | 1.00x, by definition | 39.7 KiB | 750 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Same compile and cache. The YAML source parses the document into a node tree and reads addresses out of it, rather than unmarshalling into the struct.
 - **koanf** (`github.com/knadh/koanf/v2`) Parses the file into a map, then mapstructure-decodes the map into the struct: two passes over the data and one intermediate map per load, none of it cached.
 - **viper** (`github.com/spf13/viper`) Reads and parses the file into its own settings map, then mapstructure-decodes that map into the struct. The instance is reusable, but it holds data rather than a compiled schema, so warm saves only the file-path setup and not the parse.
-- **stdlib** (`go.yaml.in/yaml/v3`) go.yaml.in/yaml/v3 Unmarshal straight into the struct: no mapping layer, no intermediate map. yaml.v3 keeps a per-type field cache of its own that no caller can defeat, so its cold column is not a true cold measurement and is the same number as its warm one for that reason rather than for the others'.
+- **stdlib (baseline)** (`go.yaml.in/yaml/v3`) go.yaml.in/yaml/v3 Unmarshal straight into the struct: no mapping layer, no intermediate map. yaml.v3 keeps a per-type field cache of its own that no caller can defeat, so its cold column is not a true cold measurement and is the same number as its warm one for that reason rather than for the others'.
 
 ## `dump_large`
 
 the other direction: the same fifty-one leaves written back out to a YAML file, then read back to prove the round trip.
 
-| library | cold | warm | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- |
-| ferry | 4.18ms ±44% | 2.35ms ±2% | 180 KiB | 1936 |
-| koanf | 374µs ±5% | 353µs ±3% | 193 KiB | 2358 |
-| viper | 2.14ms ±1% | 2.29ms ±2% | 165 KiB | 1697 |
-| stdlib | 240µs ±4% | 212µs ±3% | 123 KiB | 1093 |
+| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- |
+| ferry | 4.18ms ±44% | 2.35ms ±2% | 11.08x | 180 KiB | 1936 |
+| koanf | 374µs ±5% | 353µs ±3% | 1.66x | 193 KiB | 2358 |
+| viper | 2.14ms ±1% | 2.29ms ±2% | 10.80x | 165 KiB | 1697 |
+| stdlib (baseline) | 240µs ±4% | 212µs ±3% | 1.00x, by definition | 123 KiB | 1093 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Edits the existing document in place: it reads and parses the file, writes only the keys the struct maps, and leaves comments, key order, quoting and unmapped keys intact. The replacement is atomic and durable - temp file, fsync, rename - and the fsync is where the bulk of this row's time goes. The other two columns serialise a fresh document and os.WriteFile it with no fsync at all, so this row compares a durable in-place edit against a non-durable whole-file replacement. That is the honest comparison because it is the only one either library offers.
 - **koanf** (`github.com/knadh/koanf/v2`) Reflects the struct into a map with fatih/structs, marshals the map to YAML and writes the file whole. Comments, key order and quoting in the existing document are lost, and the write is not atomic.
 - **viper** (`github.com/spf13/viper`) viper holds a settings map rather than a struct, so it needs a struct-to-map bridge to dump one. That is fatih/structs here, which is the same bridge koanf's own structs provider uses internally, so the two dump columns are the same shape: struct to map, map to YAML, whole file replaced. Neither preserves a comment, a key order or a quoting decision, and neither write is atomic or fsynced.
-- **stdlib** (`go.yaml.in/yaml/v3`) yaml.Marshal plus os.WriteFile: the document is replaced whole. Comments, key order, quoting and any key no field maps are lost, and the write is not atomic - a crash mid-write truncates the operator's file.
+- **stdlib (baseline)** (`go.yaml.in/yaml/v3`) yaml.Marshal plus os.WriteFile: the document is replaced whole. Comments, key order, quoting and any key no field maps are lost, and the write is not atomic - a crash mid-write truncates the operator's file.
 
 ## The same numbers, drawn
 
@@ -209,21 +223,25 @@ any row is zero - is absent rather than zero.
 
 Derived from the warm `sec/op` column above, not written by hand.
 
+The baseline is in this table, marked, and it stays in it.
+It is a real measurement ferry is really that many times slower than, and the fact that
+nothing in the comparison beats it is a reason to label the row, not to drop it.
+
 | scenario | library | warm | ferry warm | ferry is |
 | --- | --- | --- | --- | --- |
 | `env_small` | xload | 1.55µs | 2.75µs | 1.78x slower |
 | `env_small` | go-envconfig | 570ns | 2.75µs | 4.82x slower |
 | `env_small` | kelseyhightower | 2.73µs | 2.75µs | 1.01x slower |
-| `env_small` | stdlib | 166ns | 2.75µs | 16.60x slower |
+| `env_small` | stdlib (baseline) | 166ns | 2.75µs | 16.60x slower |
 | `env_large` | xload | 23.8µs | 33.5µs | 1.41x slower |
 | `env_large` | go-envconfig | 10.2µs | 33.5µs | 3.27x slower |
-| `env_large` | stdlib | 2.15µs | 33.5µs | 15.58x slower |
+| `env_large` | stdlib (baseline) | 2.15µs | 33.5µs | 15.58x slower |
 | `yaml_small` | xload | 1.74µs | 17.4µs | 10.00x slower |
-| `yaml_small` | stdlib | 16.6µs | 17.4µs | 1.05x slower |
-| `yaml_large` | stdlib | 98.2µs | 102µs | 1.04x slower |
+| `yaml_small` | stdlib (baseline) | 16.6µs | 17.4µs | 1.05x slower |
+| `yaml_large` | stdlib (baseline) | 98.2µs | 102µs | 1.04x slower |
 | `dump_large` | koanf | 353µs | 2.35ms | 6.68x slower |
 | `dump_large` | viper | 2.29ms | 2.35ms | 1.03x slower |
-| `dump_large` | stdlib | 212µs | 2.35ms | 11.08x slower |
+| `dump_large` | stdlib (baseline) | 212µs | 2.35ms | 11.08x slower |
 
 ## What was not measured
 
