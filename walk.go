@@ -687,7 +687,11 @@ func (d dumpTo) atMap(ctx context.Context, s spot, into descend) error {
 		return d.write(ctx, s.at, Null())
 	}
 
-	keys := sortedKeys(s)
+	keys, err := sortedKeys(s)
+	if err != nil {
+		return err
+	}
+
 	errs := make([]error, 0, len(keys))
 
 	for _, k := range keys {
@@ -713,17 +717,26 @@ type entry struct {
 // needs anyway, and it is far the cheaper one: inside the comparator a key's
 // text is recomputed O(n log n) times, measured at 1146337 ns against 158116 ns
 // over 512 keys.
-func sortedKeys(s spot) []entry {
+//
+// A key whose text a registered codec could not produce fails the whole mapping
+// at the mapping's own address, because the key has no address yet: what failed
+// is the thing that would have named one (ADR-0009).
+func sortedKeys(s spot) ([]entry, error) {
 	keys := s.v.MapKeys()
 	out := make([]entry, 0, len(keys))
 
 	for _, k := range keys {
-		out = append(out, entry{key: k, text: s.n.key.text(k)})
+		text, err := s.n.key.text(k)
+		if err != nil {
+			return nil, newError(momentWalk, ErrValue, s.at, err.Error()).withCause(err)
+		}
+
+		out = append(out, entry{key: k, text: text})
 	}
 
 	slices.SortFunc(out, func(a, b entry) int { return cmp.Compare(a.text, b.text) })
 
-	return out
+	return out, nil
 }
 
 // member mints one address and walks the member it belongs to.

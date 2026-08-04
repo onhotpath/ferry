@@ -83,7 +83,7 @@ func Dump[T any](ctx context.Context, v T, sink Sink, opts ...Option) error {
 // runLoad is Load and LoadOver, once. dst is the addressable copy of the seed
 // the walk writes into.
 func runLoad(ctx context.Context, dst reflect.Value, src Source, opts []Option) error {
-	sch, err := schemaOf(dst.Type(), opts)
+	sch, err := schemaOf(dst.Type(), opts, retained)
 	if err != nil {
 		return err
 	}
@@ -106,7 +106,7 @@ func runLoad(ctx context.Context, dst reflect.Value, src Source, opts []Option) 
 
 // runDump is Dump, once.
 func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) error {
-	sch, err := schemaOf(v.Type(), opts)
+	sch, err := schemaOf(v.Type(), opts, retained)
 	if err != nil {
 		return err
 	}
