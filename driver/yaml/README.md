@@ -72,6 +72,41 @@ So `when: !!timestamp 2026-08-04` is saved back as `when: "2026-08-04"`.
 A key no field maps keeps its tag, because it is never touched.
 That is [#155](https://github.com/onhotpath/ferry/issues/155).
 
+## An anchor is kept, so an alias to it moves
+
+There is exactly one case where a key no field of yours maps does not read back as it did.
+
+```yaml
+host: &h localhost
+other: *h
+```
+
+Save `host` as `example` and the file becomes:
+
+```yaml
+host: &h example
+other: *h
+```
+
+`other`'s line is byte for byte what it was, and `other` now reads back as `example` rather than `localhost`.
+That is what an anchor means: the operator who wrote `other: *h` said other is whatever host is, and the alias follows.
+
+The alternative is worse.
+Dropping the anchor leaves `*h` pointing at nothing, so the save reports success and writes a file that no reader can parse, including ferry's own load right afterwards.
+That was [#196](https://github.com/onhotpath/ferry/issues/196).
+
+It does not work the other way round.
+A key your struct maps that is itself an alias is saved as its own value and stops sharing the anchor:
+
+```yaml
+base: &b 5432
+port: *b
+```
+
+With `port` mapped, saving it as `5433` writes `port: 5433` and leaves `base: &b 5432` where it was.
+The file still parses and still loads; what is lost is the linkage.
+That is [#198](https://github.com/onhotpath/ferry/issues/198).
+
 ## Types survive the trip
 
 A number stays a number, a quoted number stays a string, and `null` stays different from a key that is not there at all:

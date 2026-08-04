@@ -30,6 +30,22 @@
 // A file holding a stream of several documents is refused rather than
 // half-written, because an address names a place in one of them.
 //
+// # An anchor is kept, so an alias to it moves
+//
+// An anchor you wrote on a value ferry replaces stays on it, and that is the one
+// case where a key no field maps does not read back as it did. Given
+// `host: &h localhost` and `other: *h`, saving host as "example" writes
+// `host: &h example`, and `other` - whose line is byte for byte what it was -
+// now reads back as "example". That is what an anchor means: other is whatever
+// host is. Dropping the anchor instead would leave `*h` pointing at nothing and
+// the file would no longer parse for any reader.
+//
+// It does not work the other way round. A key your struct maps that is itself an
+// alias, as `port: *b` is, is saved as its own value and stops sharing the
+// anchor: `base: &b 5432` with `port: *b` becomes `base: &b 5432` and
+// `port: 5433`. The file still parses and still loads; what is lost is the
+// linkage.
+//
 // # Types survive the trip
 //
 // YAML resolves a scalar's tag, so `port: 8080` is a number, `port: "8080"` is
