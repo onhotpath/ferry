@@ -1,0 +1,16 @@
+# The harness's own ignores, kept here rather than in the repository root's,
+# because this directory exists only on the perf/ branch and main's .gitignore
+# should not carry lines for a directory it never has.
+#
+# The root file names every binary this repository can produce, for the reason
+# recorded there: a binary named after its own directory carries no extension,
+# so no pattern anyone would think to write catches it, and a 4.3 MB one
+# reached main once already.
+/perfreport
+/bench
+
+# Raw measurement output. The published results file is generated from it and
+# embeds it verbatim; the intermediates themselves are not committed.
+/bench.txt
+/stat.txt
+/stat.csv

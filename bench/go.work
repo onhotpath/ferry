@@ -1,0 +1,19 @@
+// The harness has its own workspace, and that is the whole answer to the
+// `replace` question (see README.md in this directory).
+//
+// The repository root's go.work lists exactly the four shipped modules, and
+// CI asserts that list equals the `driver/*/go.mod` glob, so adding ./bench to
+// it would fail the "go.work uses every discovered module" step. A workspace
+// here instead resolves core and the two drivers sibling-on-disk for anything
+// run from this directory, leaves the root workspace untouched, and keeps this
+// module's go.mod free of the `replace` directive ADR-0002 forbids.
+go 1.27
+
+toolchain go1.27rc2
+
+use (
+	.
+	..
+	../driver/env
+	../driver/yaml
+)

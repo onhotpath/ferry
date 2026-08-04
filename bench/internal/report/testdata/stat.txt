@@ -1,0 +1,65 @@
+goos: linux
+goarch: amd64
+pkg: github.com/onhotpath/ferry/bench
+cpu: 12th Gen Intel(R) Core(TM) i5-1240P
+                                      │ internal/report/testdata/bench.txt │
+                                      │               sec/op               │
+Load/env_small/cold/ferry-6                                   7.664µ ±  4%
+Load/env_small/warm/ferry-6                                   2.795µ ±  9%
+Load/env_small/cold/koanf-6                                   12.86µ ± 12%
+Load/env_small/warm/koanf-6                                   13.06µ ±  3%
+Load/env_small/cold/viper-6                                   8.398µ ±  2%
+Load/env_small/warm/viper-6                                   7.152µ ± 10%
+Load/env_small/cold/xload-6                                   1.592µ ±  2%
+Load/env_small/warm/xload-6                                   1.589µ ±  5%
+Load/env_small/cold/go-envconfig-6                            617.5n ±  2%
+Load/env_small/warm/go-envconfig-6                            586.4n ±  3%
+Load/env_small/cold/kelseyhightower-6                         2.851µ ±  5%
+Load/env_small/warm/kelseyhightower-6                         2.879µ ±  8%
+Load/env_small/cold/stdlib-6                                  176.0n ±  4%
+Load/env_small/warm/stdlib-6                                  173.6n ±  3%
+StructTagCost/pooled-6                                        78.98n ±  3%
+StructTagCost/per_library-6                                   203.8n ±  2%
+geomean                                                       1.518µ
+
+                                      │ internal/report/testdata/bench.txt │
+                                      │                B/op                │
+Load/env_small/cold/ferry-6                                 5.648Ki ± 0%
+Load/env_small/warm/ferry-6                                 2.891Ki ± 0%
+Load/env_small/cold/koanf-6                                 8.430Ki ± 0%
+Load/env_small/warm/koanf-6                                 8.414Ki ± 0%
+Load/env_small/cold/viper-6                                 5.227Ki ± 0%
+Load/env_small/warm/viper-6                                 3.609Ki ± 0%
+Load/env_small/cold/xload-6                                   952.0 ± 0%
+Load/env_small/warm/xload-6                                   936.0 ± 0%
+Load/env_small/cold/go-envconfig-6                            16.00 ± 0%
+Load/env_small/warm/go-envconfig-6                            0.000 ± 0%
+Load/env_small/cold/kelseyhightower-6                       1.227Ki ± 0%
+Load/env_small/warm/kelseyhightower-6                       1.211Ki ± 0%
+Load/env_small/cold/stdlib-6                                  0.000 ± 0%
+Load/env_small/warm/stdlib-6                                  0.000 ± 0%
+StructTagCost/pooled-6                                        0.000 ± 0%
+StructTagCost/per_library-6                                   0.000 ± 0%
+geomean                                                                  ¹
+¹ summaries must be >0 to compute geomean
+
+                                      │ internal/report/testdata/bench.txt │
+                                      │             allocs/op              │
+Load/env_small/cold/ferry-6                                   95.00 ± 0%
+Load/env_small/warm/ferry-6                                   41.00 ± 0%
+Load/env_small/cold/koanf-6                                   172.0 ± 0%
+Load/env_small/warm/koanf-6                                   171.0 ± 0%
+Load/env_small/cold/viper-6                                   89.00 ± 0%
+Load/env_small/warm/viper-6                                   67.00 ± 0%
+Load/env_small/cold/xload-6                                   18.00 ± 0%
+Load/env_small/warm/xload-6                                   17.00 ± 0%
+Load/env_small/cold/go-envconfig-6                            1.000 ± 0%
+Load/env_small/warm/go-envconfig-6                            0.000 ± 0%
+Load/env_small/cold/kelseyhightower-6                         57.00 ± 0%
+Load/env_small/warm/kelseyhightower-6                         56.00 ± 0%
+Load/env_small/cold/stdlib-6                                  0.000 ± 0%
+Load/env_small/warm/stdlib-6                                  0.000 ± 0%
+StructTagCost/pooled-6                                        0.000 ± 0%
+StructTagCost/per_library-6                                   0.000 ± 0%
+geomean                                                                  ¹
+¹ summaries must be >0 to compute geomean
