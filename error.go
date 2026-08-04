@@ -286,26 +286,89 @@ func (e *Error) withCause(cause error) *Error {
 // fromDriver wraps whatever a driver returned. Core supplies the address, the
 // moment and the provenance marker, and a driver can change none of them.
 //
+// It is one ferry error per address the driver named with ErrorAt, because a
+// driver refusing over a whole address set generally dislikes more than one
+// member of it, and ADR-0011's aggregation rule reports every failure that is
+// not a consequence of another one already reported (#211).
+//
 // Where core already knows the address, core's wins, so a driver cannot
-// misattribute a read at one address to another. Where core does not, an
-// address the driver named with ErrorAt is taken, and the carrier is then
-// unwrapped away: leaving it in the chain prints the address twice, once from
-// ferry's location and once from the carrier's own text.
-func fromDriver(m moment, loc Path, err error) *Error {
-	cause := err
+// misattribute a read at one address to another.
+func fromDriver(m moment, loc Path, err error) error {
+	return join(driverErrors(nil, m, loc, err)...)
+}
 
-	if at, ok := errors.AsType[*atError](err); ok {
-		if loc == (Path{}) {
-			loc = at.at
-		}
+// driverErrors is one error per failure a driver reported: one for every
+// carrier ErrorAt left in the tree, and one for the whole of anything that
+// holds no carrier at all.
+//
+// The carrier is unwrapped away where it is found, because leaving it in the
+// chain prints the address twice, once from ferry's location and once from the
+// carrier's own text. Descending is what makes that hold past the first one:
+// errors.AsType returns the first match in tree order, so reading one address
+// off the tree and taking that carrier's inner error as the cause discards
+// every other failure the driver joined beside it (#211).
+//
+// Anything holding no carrier stays whole, which is ADR-0011's flatness
+// promise: ferry cannot attribute addresses to a third party's children, and a
+// tree it can address is one the driver addressed itself with core's own
+// constructor.
+func driverErrors(out []error, m moment, loc Path, err error) []error {
+	at, ok := errors.AsType[*atError](err)
 
-		cause = at.err
+	switch {
+	case !ok:
+		return append(out, driverError(m, loc, err))
+	case identical(at, err):
+		return append(out, driverError(m, coreFirst(loc, at.at), at.err))
 	}
 
+	nested := unwrapped(err)
+	if len(nested) == 0 {
+		return append(out, driverError(m, loc, err))
+	}
+
+	for _, inner := range nested {
+		out = driverErrors(out, m, loc, inner)
+	}
+
+	return out
+}
+
+// driverError is one wrapped driver failure. withCause reads the class off this
+// failure's own cause, so each member of a join a driver returned keeps its own
+// opinion about the class rather than inheriting the first member's.
+func driverError(m moment, loc Path, cause error) *Error {
 	e := newError(m, ErrPlane, loc, driverMsg(m)).withCause(cause)
 	e.driver = true
 
 	return e
+}
+
+// coreFirst is core's address where core has one, and the driver's otherwise.
+func coreFirst(core, named Path) Path {
+	if core == (Path{}) {
+		return named
+	}
+
+	return core
+}
+
+// unwrapped is what an error wraps: a join's elements, the one error a wrapper
+// wraps, or nothing where it wraps nothing.
+//
+// It asks the value in hand rather than the chain behind it, which is why this
+// is an assertion and not errors.As: the question is one step of the tree walk,
+// and errors.As is the whole walk with the answer thrown away.
+func unwrapped(err error) []error {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		return joined.Unwrap()
+	}
+
+	if single, ok := err.(interface{ Unwrap() error }); ok {
+		return []error{single.Unwrap()}
+	}
+
+	return nil
 }
 
 // fromBind is what a failed Bind becomes, and it is the one place a driver
@@ -403,9 +466,14 @@ func driverMsg(m moment) string {
 
 // ErrorAt attaches an address to an error a driver is returning, for the case
 // core cannot supply one: a driver refusing over a whole address set knows
-// which member it disliked, and core does not.
+// which members it disliked, and core does not.
 //
 //	return ferry.ErrorAt(addr, fmt.Errorf("%w: %s", ferry.ErrPlane, why))
+//
+// A driver that disliked several may join several of these, and core reports
+// one failure per address, each keeping its own cause and its own class. What
+// a driver returns without an address on it stays whole and is reported as one
+// failure with no address.
 //
 // It attaches and never classifies. On its own the result is not an [Error] and
 // matches no class; core reads the address off it and wraps it. A nil err

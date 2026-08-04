@@ -396,6 +396,21 @@ driver names /somewhere/else inside a Get at /db/host  ->  /db/host
 
 It returns `error` and not `*Error`, which is what closes the typed-nil trap: there is no concrete return type to smuggle a nil through, so `return ferry.ErrorAt(a, f())` is safe to write.
 
+> **Added under [#211](https://github.com/onhotpath/ferry/issues/211): a driver may name more than one address in one refusal, and core reports one failure per address.**
+>
+> The paragraph above says "which address it disliked", singular, and every measurement in this section was taken on one carrier.
+> A driver refusing over a whole **set** generally dislikes more than one member of it, which is the case the word "set" is there for, and the shipped code read the first carrier in tree order and took that carrier's inner error as the whole cause, so a driver returning two of them reported one address and discarded the other failure entirely - from `%+v`, from `Elements` and from the `errors.Is` chain.
+> That is the [aggregation rule](#aggregation-one-rule-at-every-moment) broken rather than a decision this ADR had left open, so what is added here is the reading, not the rule.
+>
+> **Every carrier in the tree is one failure.** Each keeps its own address, its own cause and its own declared class, so the [extension rule](#extension-a-driver-holds-an-opinion-about-the-class-and-about-nothing-else) is read per failure rather than per call: a driver that declares `ErrValue` on one member and nothing on another gets both answers rather than the first one twice.
+> Core still supplies the moment and the provenance for all of them, and where core already knows the address, core's still wins for all of them.
+>
+> **This qualifies the sentence in [the flatness section](#the-aggregate-is-flat-and-sorted-at-construction) that says a driver's own joined error enters as one element**, and it qualifies it exactly as far as that sentence's own reason reaches.
+> The reason given there is that ferry cannot attribute addresses to a third party's children.
+> Where the driver attached the addresses itself, with core's own constructor, ferry is not attributing anything and there is nothing to guess.
+> So a join with no carrier in it is still one element with its internal shape intact, which is the control this defect was found against, and a join of carriers is one element per carrier.
+> ferry still never nests its own aggregates, and it still never rewrites a tree it cannot read an address out of.
+
 **What a driver can still do wrong, stated rather than implied.**
 It can wrap `ErrSchema` around an infrastructure failure and produce an error `Validate[T]()` would never have caught.
 Nothing checks it.
@@ -583,6 +598,10 @@ The address already encodes the tree, so a `/db` aggregate holding a `/db/host` 
 A driver's own joined error enters as **one** element with its internal shape intact.
 ferry cannot attribute addresses to a third party's children, and rewriting somebody else's error tree is not ferry's business.
 So the promise is precise: *ferry never nests ferry aggregates*, not *the result is always two levels deep*.
+
+> **Qualified under [#211](https://github.com/onhotpath/ferry/issues/211): "one element" holds for a tree ferry cannot read an address out of.**
+> A driver that joined several `ErrorAt` carriers attributed the addresses itself, so [the `ErrorAt` note](#extension-a-driver-holds-an-opinion-about-the-class-and-about-nothing-else) reports one failure per carrier and this paragraph's own reason does not reach it.
+> A join with no carrier in it is unaffected and is still one element.
 
 **Sorted at construction, not in `Format`, and this is the probe that pays for itself.**
 `errors.AsType` returns the first match in **tree order**.
@@ -815,6 +834,9 @@ This ADR fixes the semantics, exact-set over `(address, class)` with no message 
   Thirty-three of fifty-five refusals are one class, which is a strong hint that the interesting axis is the address rather than the classification.
 - **A driver can hold an opinion about the class and about nothing else.**
   It can also be wrong about it, and nothing checks that, which is a conformance case in the same family as ADR-0004's three optional interfaces.
+- **A driver may name more than one address in one refusal, and every one of them is reported**, each keeping its own address, its own cause and its own class.
+  *(Added under [#211](https://github.com/onhotpath/ferry/issues/211); the shipped code read the first carrier and discarded the rest, which is the aggregation rule broken rather than a decision this ADR left open.
+  It qualifies the flatness sentence only as far as that sentence's own reason reaches: a join with no address in it is still one element.)*
 - **ferry's own error text carries no plane value, on every plane, always.**
   Measured at four leaks in five naive messages, on values a Vault or Consul plane makes secret by default.
   The cost is that ferry authors a message for every decode failure mode instead of passing one through, and the carve-out is that a dynamic address segment is plane-supplied and is printed.
