@@ -270,6 +270,26 @@
 // rather than the first one, each naming the address and the type, and the
 // report is sorted.
 //
+// # How an address reaches a plane
+//
+// Core never produces a plane key, because a separator is plane knowledge:
+// flattening is the driver's, always. What a driver is handed instead is the
+// whole address set, before any I/O, and [NewKeys], which computes its plane
+// keys once per schema and checks two different things about them. Legality is
+// the driver's own question - whether its plane can name an address at all -
+// and no transformation rescues it. Injectivity is core's observation about the
+// set: a key function rendering two addresses to one plane key would merge them
+// silently, so it is refused before any backend call, naming both. One rule
+// covers separator collisions, case folding and any normalisation a driver
+// invents, because all three are the same failure.
+//
+// So a driver is expected to transform segment text rather than to reject it,
+// which is what makes an ordinary feature-flags loadable from a plane whose
+// names may not contain a hyphen. An address a value mints - a map key, a
+// sequence index - is checked as it is minted, before the write it belongs to,
+// against the table and against everything the same open has minted. A tree
+// driver walks the segments, builds no key at all, and calls none of this.
+//
 // # Errors
 //
 // ferry reports every failure that is not a consequence of another failure it

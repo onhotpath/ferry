@@ -90,7 +90,7 @@ func runLoad(ctx context.Context, dst reflect.Value, src Source, opts []Option) 
 
 	open, err := src.Bind(sch.addrs)
 	if err != nil {
-		return fromDriver(momentBind, Path{}, err)
+		return fromBind(err)
 	}
 
 	r, err := open(ctx)
@@ -118,7 +118,7 @@ func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) err
 
 	open, err := sink.Bind(sch.addrs)
 	if err != nil {
-		return fromDriver(momentBind, Path{}, err)
+		return fromBind(err)
 	}
 
 	w, err := open(ctx)
