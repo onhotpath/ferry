@@ -27,6 +27,9 @@
 // `when: "2026-08-04"`. A key no field maps keeps its tag, because it is never
 // touched.
 //
+// A file holding a stream of several documents is refused rather than
+// half-written, because an address names a place in one of them.
+//
 // # An anchor is kept, so an alias to it moves
 //
 // An anchor you wrote on a value ferry replaces stays on it, and that is the one
@@ -42,9 +45,6 @@
 // anchor: `base: &b 5432` with `port: *b` becomes `base: &b 5432` and
 // `port: 5433`. The file still parses and still loads; what is lost is the
 // linkage.
-//
-// A file holding a stream of several documents is refused rather than
-// half-written, because an address names a place in one of them.
 //
 // # Types survive the trip
 //
