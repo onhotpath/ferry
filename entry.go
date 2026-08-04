@@ -74,6 +74,14 @@ func LoadOver[T any](ctx context.Context, seed T, src Source, opts ...Option) (T
 // and a sink implementing [Releaser] is closed either way. That is ADR-0004's
 // protocol rather than a lifecycle ferry invents: no driver is ever told that
 // it failed, and closed-without-Commit is the abort signal.
+//
+// Encoding is a phase before any write, so a Dump that fails for a reason ferry
+// could have known without touching the plane leaves the plane untouched: every
+// value is encoded first, and if any of them has no representation, all of those
+// failures are reported and nothing is written. A [Committer] is exempt, because
+// staging already gives it that property and interleaving gives it a better
+// error set - both kinds of failure in one run rather than one kind per round
+// trip. Every refusal the plane makes is aggregated either way.
 func Dump[T any](ctx context.Context, v T, sink Sink, opts ...Option) error {
 	// Through a pointer, so the schema and the walk both see T rather than
 	// whatever dynamic type an interface T would hand reflect.ValueOf.
@@ -90,7 +98,7 @@ func runLoad(ctx context.Context, dst reflect.Value, src Source, opts []Option) 
 
 	open, err := src.Bind(sch.addrs)
 	if err != nil {
-		return fromDriver(momentBind, Path{}, err)
+		return fromBind(err)
 	}
 
 	r, err := open(ctx)
@@ -118,7 +126,7 @@ func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) err
 
 	open, err := sink.Bind(sch.addrs)
 	if err != nil {
-		return fromDriver(momentBind, Path{}, err)
+		return fromBind(err)
 	}
 
 	w, err := open(ctx)
@@ -126,11 +134,7 @@ func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) err
 		return fromDriver(momentOpen, Path{}, err)
 	}
 
-	// The minted set is the walk's own and starts empty on every dump, because
-	// the addresses in it came from this value and the next dump has another.
-	dir := dumpTo{w: w, addrs: sch.addrs, minted: map[Path]struct{}{}}
-
-	walked := newWalker(dir).walk(ctx, spot{n: sch.root, v: root})
+	walked := written(ctx, w, sch, root)
 	if walked == nil {
 		walked = committed(ctx, w)
 	}

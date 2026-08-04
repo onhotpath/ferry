@@ -1,6 +1,7 @@
 package ferry
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -153,9 +154,16 @@ type node struct {
 	// codec is the leaf's own boundary behaviour, resolved by identity and then
 	// by kind once per position per schema rather than re-decided on every walk
 	// (ADR-0005, ADR-0010).
-	codec    leafCodec
-	def      Value
-	hasDef   bool
+	codec  leafCodec
+	def    Value
+	hasDef bool
+
+	// required and omitzero sit on the node that owns the address they are
+	// about, which for a composite under a pointer is the pointer and not the
+	// element (ADR-0003). Both are declared at a position rather than at an
+	// address: a node under a dynamic composite is compiled once at the address
+	// shape its members share, so one declaration applies to every realised
+	// member and the walk needs no second lookup (ADR-0006).
 	required bool
 	omitzero bool
 
@@ -499,6 +507,7 @@ func (c *compiler) compilePointer(t reflect.Type, parent *node, s site, tg tag) 
 	}
 
 	n := &node{kind: nodePointer, addr: s.addr, index: s.index}
+	n.required, n.omitzero = heldAt(s, tg)
 
 	// The element is compiled at the same address, because the pointer mints no
 	// segment, and with the same tag, because the options were written for what
@@ -534,6 +543,7 @@ func (c *compiler) compileSlice(t reflect.Type, parent *node, s site, tg tag) in
 	c.checkDynamicOptions(t, s.addr, tg)
 
 	n := &node{kind: nodeSlice, addr: s.addr, index: s.index}
+	n.required, n.omitzero = heldAt(s, tg)
 
 	// An element inherits no option, for the reason [compileArray] gives: the
 	// tag names the composite, and what each option would mean at an element is
@@ -565,6 +575,7 @@ func (c *compiler) compileMap(t reflect.Type, parent *node, s site, tg tag) int 
 	}
 
 	n := &node{kind: nodeMap, addr: s.addr, index: s.index, key: key}
+	n.required, n.omitzero = heldAt(s, tg)
 
 	count := c.compileValue(t.Elem(), n, shapeSite(s), tag{})
 	if count == 0 {
@@ -643,9 +654,14 @@ func (c *compiler) recordContainer(s site) {
 // enumerate and a slice is not. An array also has no nil, so it takes no
 // container address of its own.
 func (c *compiler) compileArray(t reflect.Type, parent *node, s site, tg tag) int {
-	c.checkArrayOptions(t, s.addr, tg)
+	// An array's N element addresses come from the type, which is the tier
+	// required is admissible in (ADR-0006), and it is not a leaf, so a default
+	// has no single address to sit at.
+	c.checkNoDefault(t, s.addr, tg)
 
 	n := &node{kind: nodeArray, addr: s.addr, index: s.index}
+	n.required, n.omitzero = heldAt(s, tg)
+
 	count := 0
 
 	// The position is counted in uint rather than converted from one, because
@@ -687,15 +703,40 @@ func elemSite(s site, at uint) site {
 
 // compileLeaf records a value that crosses the boundary at one address, with
 // the behaviour that carries it resolved here rather than in the walk.
+//
+// A declared default is held as the text it was written as, wrapped in the
+// String Value a flat plane would have reported, and it is decoded fresh on
+// every load. The alternative was tried and it aliases: two independently
+// loaded structs shared one backing array for a []byte default, and mutating
+// either corrupted the other (ADR-0006).
 func (c *compiler) compileLeaf(cd leafCodec, t reflect.Type, parent *node, s site, tg tag) int {
-	c.checkContradictions(cd, t, s.addr, tg)
-	parent.fields = append(parent.fields, &node{
+	c.checkLeafOptions(cd, t, s.addr, tg)
+
+	n := &node{
 		kind: nodeLeaf, addr: s.addr, index: s.index, codec: cd,
-		def: String(tg.def), hasDef: tg.hasDef, required: tg.required, omitzero: tg.omitzero,
-	})
+		def: String(tg.def), hasDef: tg.hasDef,
+	}
+	n.required, n.omitzero = heldAt(s, tg)
+
+	parent.fields = append(parent.fields, n)
 	c.recordLeaf(s)
 
 	return 1
+}
+
+// heldAt is the two options the node that owns an address carries.
+//
+// A pointer above a composite owns that address (ADR-0003), so the element
+// compiled beneath it carries neither. Both ask a question about one address,
+// and asking it at two nodes answers it twice: a nil *Cred with omitzero would
+// have skipped its own Null and then been asked again, and a required *Cred
+// would have refused twice at one address.
+func heldAt(s site, tg tag) (required, omitzero bool) {
+	if s.nullable {
+		return false, false
+	}
+
+	return tg.required, tg.omitzero
 }
 
 // refusalMsg is the diagnosis for a type outside the set, and it is three
@@ -740,35 +781,84 @@ func permanentlyRefused(k reflect.Kind) bool {
 // compileNested is a struct under a name of its own, which is the whole of what
 // prefixing is under a structured address: the nested struct's tag is the
 // prefix, so there is no concatenation to get wrong and no prefix= to spell.
+//
+// It is also where required on a plain struct is admitted, which is a repair
+// rather than a permission. required names an address and is admissible exactly
+// where that address's children come from the type (ADR-0006), and a struct's
+// do: it means the plane supplied at least one of them, which is the same thing
+// it means on *struct. An earlier draft refused it here on the ground that a
+// struct has no address of its own, and ADR-0006 quotes that sentence in order
+// to overturn it.
 func (c *compiler) compileNested(t reflect.Type, parent *node, s site, tg tag) int {
-	c.checkStructOptions(t, s, tg)
+	c.checkNoDefault(t, s.addr, tg)
 
 	n, count := c.compileStruct(t, s, nil)
+	n.required, n.omitzero = heldAt(s, tg)
 	parent.fields = append(parent.fields, n)
 
 	return count
 }
 
-// checkStructOptions is the second tier at a struct. A non-pointer struct has
-// no address of its own (ADR-0003), so required has nothing to assert about;
-// under a pointer the same struct does have one, which is the whole difference
-// between Auth Cred and Auth *Cred. omitzero is admissible at every type,
-// because it asks a question about the Go value rather than about an address.
-func (c *compiler) checkStructOptions(t reflect.Type, s site, tg tag) {
-	if tg.required && !s.nullable {
-		c.errAt(s.addr, fmt.Sprintf(
-			"required is not available on %s: a struct has no address of its own for required to assert "+
-				"about, so put it on the field that has to be there", t))
+// checkLeafOptions is the second and third tiers at a leaf, in that order, and
+// the ordering is what stops one field's single mistake reporting as three
+// errors (ADR-0006).
+//
+// The second tier is that a declared default has to be text this leaf's own
+// parser accepts. It is checked from reflect.TypeFor[T]() alone, with no value
+// in hand and no plane reachable, through exactly the decode a load will run
+// over the same text - a default validated by one parser and applied by another
+// would be the two conversion authorities ferry exists in order not to have.
+//
+// The third tier runs only over options that cleared the second, and both of
+// its contradictions involve a default, so it is reached only where there is
+// one and it parsed. A default that does not parse has no value to compare
+// against zero, so naming the contradiction for it would name the wrong
+// mistake.
+func (c *compiler) checkLeafOptions(cd leafCodec, t reflect.Type, addr Path, tg tag) {
+	if !tg.hasDef {
+		return
 	}
 
-	c.checkNoDefault(t, s.addr, tg)
+	v := reflect.New(t).Elem()
+	if err := cd.decode(v, String(tg.def)); err != nil {
+		c.errBecause(addr, badDefaultMsg(t, tg.def, err), err)
+
+		return
+	}
+
+	if tg.required {
+		c.errAt(addr, "required and default contradict: a default answers the absence required forbids")
+	}
+
+	// A default equal to the zero value is not a contradiction, because
+	// omitting it and reapplying it land on the same value. Which text that is
+	// became the leaf's own question when the type set widened past string:
+	// "0" is int's zero, "false" is bool's and "0s" is time.Duration's, and not
+	// one of them is the empty text a string-only compiler could compare with.
+	if tg.omitzero && !v.IsZero() {
+		c.errAt(addr, fmt.Sprintf("omitzero and default=%s contradict: an explicit zero would be omitted "+
+			"and would load back as the default", tg.def))
+	}
 }
 
-// checkArrayOptions is the second tier at an array. Its N element addresses come
-// from the type, which is the tier required is admissible in (ADR-0006), and it
-// is not a leaf, so a default has no single address to sit at.
-func (c *compiler) checkArrayOptions(t reflect.Type, addr Path, tg tag) {
-	c.checkNoDefault(t, addr, tg)
+// badDefaultMsg refuses a declared default whose text this leaf's own parser
+// does not accept.
+//
+// It names the text, and that is not the leak ADR-0011 forbids: the rule is
+// about a value the plane supplied, and this one was written in the tag by the
+// person reading the message. The cause is named where there is one, because
+// "invalid syntax" and "value out of range" are different mistakes with
+// different fixes, and it stays reachable either way so errors.Is against
+// strconv's own sentinels still answers.
+func badDefaultMsg(t reflect.Type, def string, err error) string {
+	head := fmt.Sprintf("default %q is not a valid %s", def, t)
+
+	cause := errors.Unwrap(err)
+	if cause == nil {
+		return head + ": a declared default is text, parsed by exactly the parser a value from the plane is"
+	}
+
+	return head + ": " + cause.Error()
 }
 
 // checkNoDefault refuses a declared default on a composite. A default is text
@@ -834,40 +924,6 @@ func carriedBy(t reflect.Type) []reflect.Type {
 	default:
 		return nil
 	}
-}
-
-// checkContradictions is the third tier, and it runs only over options that
-// cleared the second: a contradiction between two options is only meaningful if
-// both are individually legal here.
-func (c *compiler) checkContradictions(cd leafCodec, t reflect.Type, addr Path, tg tag) {
-	if tg.required && tg.hasDef {
-		c.errAt(addr, "required and default contradict: a default answers the absence required forbids")
-	}
-
-	// A default equal to the zero value is not a contradiction, because
-	// omitting it and reapplying it land on the same value. Which text that is
-	// became the leaf's own question when the type set widened past string:
-	// "0" is int's zero, "false" is bool's and "0s" is time.Duration's, and not
-	// one of them is the empty text a string-only compiler could compare with.
-	if tg.omitzero && tg.hasDef && !declaredZero(cd, t, tg.def) {
-		c.errAt(addr, fmt.Sprintf("omitzero and default=%s contradict: an explicit zero would be omitted "+
-			"and would load back as the default", tg.def))
-	}
-}
-
-// declaredZero reports whether a declared default decodes to the type's own
-// zero value, through the same parser a load would use.
-//
-// A default that does not decode at all is a different mistake from a
-// contradiction between two options, and reporting this one for it would name
-// the wrong one, so it is not a contradiction here.
-func declaredZero(cd leafCodec, t reflect.Type, def string) bool {
-	v := reflect.New(t).Elem()
-	if err := cd.decode(v, String(def)); err != nil {
-		return true
-	}
-
-	return v.IsZero()
 }
 
 // checkPrefixFree is ADR-0003's collision rule, over the leaf addresses: no
@@ -964,4 +1020,12 @@ func (c *compiler) errAt(loc Path, msg string) {
 // cause reachable so errors.Is against strconv's own sentinels still answers.
 func (c *compiler) errFor(loc Path, err error) {
 	c.errs = append(c.errs, newError(momentCompile, ErrSchema, loc, err.Error()).withCause(err))
+}
+
+// errBecause records a refusal ferry worded itself over a cause worth keeping,
+// which is a declared default the leaf's own parser refused: the message is
+// ferry's and the cause stays reachable, so errors.Is against strconv.ErrRange
+// answers through it.
+func (c *compiler) errBecause(loc Path, msg string, cause error) {
+	c.errs = append(c.errs, newError(momentCompile, ErrSchema, loc, msg).withCause(cause))
 }
