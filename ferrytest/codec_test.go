@@ -78,6 +78,73 @@ func TestCodecReportsATextPairThatDisagrees(t *testing.T) {
 	}
 }
 
+// TestCodecIsSilentWhereFerryNeverConsultsTheTextPair is #143.
+//
+// The type's two spellings disagree and the registration is a StringCodec, so
+// registration beats the text pair and ferry calls neither half. Reporting the
+// disagreement would be a false positive whose explanation is false with it: the
+// plane holds neither of the two strings.
+func TestCodecIsSilentWhereFerryNeverConsultsTheTextPair(t *testing.T) {
+	reg := ferry.NewRegistry()
+
+	err := reg.Register(ferry.StringCodec[disagreeingText](
+		func(d disagreeingText) string { return d.text },
+		func(s string) (disagreeingText, error) { return disagreeingText{text: s}, nil },
+	))
+	if err != nil {
+		t.Fatalf("registering the probe: %v", err)
+	}
+
+	c := &capture{}
+
+	ferrytest.Codec(c, reg)
+
+	if len(c.lines) != 0 {
+		t.Errorf("the codec suite reported %q about two methods ferry never calls for this type", c.lines)
+	}
+}
+
+// TestCodecReportsAZeroThatIsNotAFixedPoint is case 3, per-registrant.
+//
+// The codec is total over the zero value, which is all registration checks, and
+// its two halves still disagree there: the zero encodes to one text and what
+// that text loads as encodes to another. Nothing but a walk over the
+// registrant's own type can see it, and no proof is needed to reach it.
+func TestCodecReportsAZeroThatIsNotAFixedPoint(t *testing.T) {
+	reg := ferry.NewRegistry()
+
+	err := reg.Register(ferry.StringCodec[wandering](
+		func(w wandering) string {
+			if w == "" {
+				return "zero"
+			}
+
+			return "x:" + string(w)
+		},
+		func(s string) (wandering, error) { return wandering(s), nil },
+	))
+	if err != nil {
+		t.Fatalf("registering the probe: %v", err)
+	}
+
+	c := &capture{}
+
+	ferrytest.Codec(c, reg)
+
+	only := onlyLine(t, c)
+	if !strings.Contains(only, "codec case 3") {
+		t.Errorf("report = %q, want case 3 and only case 3", only)
+	}
+
+	if !strings.Contains(only, "disagree at the one value they are both guaranteed to see") {
+		t.Errorf("report = %q, want the two halves named", only)
+	}
+}
+
+// wandering is a codec's type whose zero encoding is not a fixed point of the
+// pair, and which registration accepts because neither half errors.
+type wandering string
+
 // TestCodecReportsThroughT is the third reason T exists, applied to this suite.
 func TestCodecReportsThroughT(t *testing.T) {
 	c := &capture{}
