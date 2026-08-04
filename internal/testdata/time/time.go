@@ -14,7 +14,7 @@
 // byte what the standard library's produce, while both reflect.Type values
 // differ from theirs under ==. A ferry that matched by name would give these
 // types the pinned representations, and a ferry that matches by identity gives
-// Duration its kind's and refuses Time for mapping no address.
+// Duration its kind's and Time its own text pair's (ADR-0007).
 //
 // It lives under testdata because the go command never matches a directory
 // named testdata against ./... at any depth, so a second package called time is
@@ -39,14 +39,15 @@ func (d Duration) String() string {
 }
 
 // Time is a distinct reflect.Type from time.Time, with the same shape: a struct
-// whose fields are all unexported, so it maps no address and core refuses it.
+// whose fields are all unexported, so nothing but a codec can carry it.
 type Time struct {
 	wall uint64
 	ext  int64
 }
 
 // MarshalText gives it the same text pair the standard library's carries, so
-// what refuses it is the identity table's absence and not a missing method.
+// ADR-0007's chain claims it at step 2 and writes this constant - which is not
+// the text the identity table's entry would have produced for it.
 func (Time) MarshalText() ([]byte, error) { return []byte("2026-08-02T12:00:00Z"), nil }
 
 // UnmarshalText is the inverse half, present for the same reason.

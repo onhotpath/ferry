@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/netip"
 	"slices"
 	"strings"
 	"testing"
@@ -248,10 +247,10 @@ func TestTheMapsNoAddressBackstopCountsMintedShapes(t *testing.T) {
 // is minted and contributes nothing, so the loss the rule exists for is back.
 type (
 	mapOfNothing struct {
-		M map[string]netip.Addr `ferry:"m"`
+		M map[string]time.Location `ferry:"m"`
 	}
 	sliceOfNothing struct {
-		S []netip.Addr `ferry:"s"`
+		S []time.Location `ferry:"s"`
 	}
 	mapOfAny struct {
 		M map[string]any `ferry:"m"`
@@ -270,12 +269,12 @@ func TestAnElementThatMapsNoAddressIsRefusedAtItsShape(t *testing.T) {
 	run(t, []compileCase{{
 		name:     "a map of a struct that maps no address",
 		run:      Compile[mapOfNothing],
-		want:     []string{"/M/*:", "netip.Addr maps no address"},
+		want:     []string{"/M/*:", "time.Location maps no address"},
 		elements: 1,
 	}, {
 		name:     "a slice of one",
 		run:      Compile[sliceOfNothing],
-		want:     []string{"/S/*:", "netip.Addr maps no address"},
+		want:     []string{"/S/*:", "time.Location maps no address"},
 		elements: 1,
 	}, {
 		name:     "and a map of a type outside the set entirely",
