@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ferry">
+  <!--
+    ferry logo, variant 2: a double-ended vessel in a channel that runs both ways.
+    The hull is raked at both ends and has no stern, and the route it sits in carries
+    an arrowhead at each end: same cargo, either direction.
+
+    Palette, stated once here because GitHub sanitises SVG in markdown and drops style blocks,
+    so every colour below is an inline presentation attribute rather than a custom property.
+      circle              #D9E7ED
+      cast shadow         #C2D7E0
+      channel             #1E6F8E
+      hull                #F0A93B   boot-top #14536B
+      superstructure      #F4F8FA   glass #0E2733
+      funnel              #F0A93B   cap #0E2733
+
+    Light backgrounds: usable as is, but the circle is only a faint tint on white.
+    For a white page, deepen the circle to #C3D9E3 and the shadow to #AEC8D5.
+  -->
+
+  <circle cx="256" cy="256" r="240" fill="#D9E7ED"/>
+  <path fill="#C2D7E0" d="M 362 194 L 487.5 319.5 A 240 240 0 0 1 234 495 L 66 327 Z"/>
+
+  <!-- vessel: symmetric about the centreline, so it reads the same way round -->
+  <g>
+    <path fill="#F0A93B" d="M 154 338 L 358 338 L 384 248 L 128 248 Z"/>
+    <path fill="#14536B" d="M 154 338 L 358 338 L 371.9 290 L 140.1 290 Z"/>
+  </g>
+  <g fill="#F4F8FA">
+    <path d="M 150 194 L 362 194 L 362 248 L 150 248 Z"/>
+    <path d="M 212 158 L 300 158 L 300 194 L 212 194 Z"/>
+  </g>
+  <path fill="#F0A93B" d="M 242 118 L 270 118 L 270 158 L 242 158 Z"/>
+  <g fill="#0E2733">
+    <path d="M 242 118 L 270 118 L 270 130 L 242 130 Z"/>
+    <path d="M 166 208 L 188 208 L 188 228 L 166 228 Z M 204 208 L 226 208 L 226 228 L 204 228 Z M 242 208 L 264 208 L 264 228 L 242 228 Z M 280 208 L 302 208 L 302 228 L 280 228 Z M 318 208 L 340 208 L 340 228 L 318 228 Z"/>
+    <path d="M 224 168 L 288 168 L 288 184 L 224 184 Z"/>
+  </g>
+
+  <!-- the channel, drawn over the hull so the vessel sits in it rather than on it -->
+  <path fill="#1E6F8E" d="M 66 327 L 126 270 L 126 302 L 386 302 L 386 270 L 446 327 L 386 384 L 386 352 L 126 352 L 126 384 Z"/>
+</svg>
