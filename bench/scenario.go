@@ -78,6 +78,22 @@ type Impl struct {
 	// over the same floor, which is the comparison worth having.
 	Baseline bool
 
+	// Variant marks a row that is not a library of its own.
+	//
+	// It measures a library already in the same table, through a different
+	// entry point that library publishes. ferry has one: every verb takes the
+	// source and binds it on the call, and a caller may instead hold the
+	// binding and load through it, which is the same job with one step lifted
+	// out of the loop.
+	//
+	// It is measured and published in every table it appears in, and it is left
+	// out of the two places that rank libraries against each other, because a
+	// row that is the same library cannot be a library that beat it. What it
+	// gets instead is a section of its own, rendered against the row it varies,
+	// so that the distance between the two - which is the only reason to
+	// measure one - is published rather than left to a reader to divide.
+	Variant bool
+
 	// WarmCaveat, when set, says that this implementation's warm figure is not
 	// comparable with the other rows' and why.
 	//
@@ -189,7 +205,7 @@ func envSmallScenario() Scenario {
 		NewDst: func() any { return new(Small) },
 		Want:   WantSmall(),
 		Impls: []Impl{
-			ferryEnvSmall(), koanfEnvSmall(), viperEnvSmall(), xloadEnvSmall(),
+			ferryEnvSmall(), ferryBoundEnvSmall(), koanfEnvSmall(), viperEnvSmall(), xloadEnvSmall(),
 			goEnvconfigEnvSmall(), kelseyEnvSmall(), stdlibEnvSmall(),
 		},
 	}
@@ -204,7 +220,7 @@ func envLargeScenario() Scenario {
 		NewDst: func() any { return new(Large) },
 		Want:   WantLarge(),
 		Impls: []Impl{
-			ferryEnvLarge(), koanfEnvLarge(), viperEnvLarge(), xloadEnvLarge(),
+			ferryEnvLarge(), ferryBoundEnvLarge(), koanfEnvLarge(), viperEnvLarge(), xloadEnvLarge(),
 			goEnvconfigEnvLarge(), kelseyEnvLarge(), stdlibEnvLarge(),
 		},
 	}
@@ -218,7 +234,8 @@ func yamlSmallScenario() Scenario {
 		NewDst: func() any { return new(Small) },
 		Want:   WantSmall(),
 		Impls: []Impl{
-			ferryYAMLSmall(), koanfYAMLSmall(), viperYAMLSmall(), xloadYAMLSmall(), stdlibYAMLSmall(),
+			ferryYAMLSmall(), ferryBoundYAMLSmall(), koanfYAMLSmall(), viperYAMLSmall(),
+			xloadYAMLSmall(), stdlibYAMLSmall(),
 		},
 	}
 }
@@ -231,7 +248,7 @@ func yamlLargeScenario() Scenario {
 		NewDst: func() any { return new(Large) },
 		Want:   WantLarge(),
 		Impls: []Impl{
-			ferryYAMLLarge(), koanfYAMLLarge(), viperYAMLLarge(), stdlibYAMLLarge(),
+			ferryYAMLLarge(), ferryBoundYAMLLarge(), koanfYAMLLarge(), viperYAMLLarge(), stdlibYAMLLarge(),
 		},
 	}
 }
@@ -245,7 +262,7 @@ func dumpLargeScenario() Scenario {
 		NewDst: func() any { return new(Large) },
 		Want:   WantLarge(),
 		Impls: []Impl{
-			ferryDumpLarge(), koanfDumpLarge(), viperDumpLarge(), stdlibDumpLarge(),
+			ferryDumpLarge(), ferryBoundDumpLarge(), koanfDumpLarge(), viperDumpLarge(), stdlibDumpLarge(),
 		},
 	}
 }

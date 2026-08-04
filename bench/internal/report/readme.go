@@ -201,15 +201,17 @@ func writeSummaryExclusions(b *strings.Builder, byScenario map[string][]string, 
 // ferry against it produces a headline the results file's own footnote
 // contradicts, and the headline is the part people quote.
 //
+// A variant row is skipped for a different reason again, and it is not one of
+// the excluded names: it is not a library that was left out of the comparison,
+// it is ferry measured through a second entry point, so naming it as the
+// fastest other library would report ferry as the thing ferry lost to. The
+// results file gives it a section of its own against the row it varies.
+//
 // The excluded names come back so the summary can say who is missing from the
 // comparison rather than dropping them silently.
 func fastestOther(in *Input, sc ScenarioDoc) (best float64, name string, excluded []string) {
 	for _, impl := range sc.Impls {
-		if impl.Name == ferryImpl || impl.Baseline {
-			continue
-		}
-
-		got, ok := warmSeconds(in, sc.Name, impl.Name)
+		got, ok := rankableWarm(in, sc.Name, impl)
 		if !ok {
 			continue
 		}
@@ -220,10 +222,30 @@ func fastestOther(in *Input, sc ScenarioDoc) (best float64, name string, exclude
 			continue
 		}
 
-		if name == "" || got < best {
-			best, name = got, impl.Name
-		}
+		best, name = quicker(best, name, got, impl.Name)
 	}
 
 	return best, name, excluded
+}
+
+// rankableWarm is the warm figure of a row this ranking may consider, and false
+// for one it may not: ferry's own two rows, the baseline, and anything the run
+// did not measure. A row carrying a caveat comes back measured, because the
+// summary has to name it as left out rather than drop it.
+func rankableWarm(in *Input, scenario string, impl ImplDoc) (float64, bool) {
+	if !competitor(impl) || impl.Baseline {
+		return 0, false
+	}
+
+	return warmSeconds(in, scenario, impl.Name)
+}
+
+// quicker keeps whichever of the two figures is the smaller, and takes the
+// candidate unconditionally where there is no incumbent yet.
+func quicker(best float64, name string, got float64, candidate string) (float64, string) {
+	if name == "" || got < best {
+		return got, candidate
+	}
+
+	return best, name
 }

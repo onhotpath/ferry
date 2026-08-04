@@ -166,9 +166,11 @@ func Chart(in *Input, th Theme) string {
 	return b.String()
 }
 
+// chartAriaLabel counts rows rather than libraries, because not every row is
+// one: the baseline is a floor and a variant is a library already counted.
 func chartAriaLabel(in *Input) string {
-	return fmt.Sprintf("ferry against %d config libraries: time and allocations per load, "+
-		"cold and warm, over %d scenarios", len(implOrder(in)), len(in.Scenarios))
+	return fmt.Sprintf("time and allocations per load, cold and warm, over %d rows "+
+		"in each of %d scenarios", len(implOrder(in)), len(in.Scenarios))
 }
 
 func panelWidth() float64 {
@@ -217,23 +219,42 @@ func chartGroups(in *Input) []chartGroup {
 	out := make([]chartGroup, 0, len(in.Scenarios))
 
 	for _, sc := range in.Scenarios {
-		caveats, baselines := map[string]bool{}, map[string]bool{}
-
-		for _, impl := range sc.Impls {
-			caveats[impl.Name] = impl.WarmCaveat != ""
-			baselines[impl.Name] = impl.Baseline
-		}
+		flags := flagsOf(sc)
 
 		rows := make([]chartRow, 0, len(all))
 		for _, name := range all {
 			r := buildRow(in, sc.Name, name)
-			r.Caveat = caveats[name]
-			r.IsBaseline = baselines[name]
+			f := flags[name]
+			r.Caveat, r.IsBaseline, r.IsFerry = f.caveat, f.baseline, f.ferry
 			rows = append(rows, r)
 		}
 
 		sortRows(rows)
 		out = append(out, chartGroup{Scenario: sc.Name, Rows: rows})
+	}
+
+	return out
+}
+
+// implFlags is what a scenario says about one of its rows that no measurement
+// can: whether the figure is comparable, whether the row is the floor, and
+// whether it is ferry.
+type implFlags struct{ caveat, baseline, ferry bool }
+
+// flagsOf reads them off one scenario.
+//
+// A variant is ferry for the ring's purposes and for no other: it is the same
+// library through a second entry point, so a reader looking for ferry has to be
+// able to find both of its rows.
+func flagsOf(sc ScenarioDoc) map[string]implFlags {
+	out := make(map[string]implFlags, len(sc.Impls))
+
+	for _, impl := range sc.Impls {
+		out[impl.Name] = implFlags{
+			caveat:   impl.WarmCaveat != "",
+			baseline: impl.Baseline,
+			ferry:    impl.Name == ferryImpl || impl.Variant,
+		}
 	}
 
 	return out
@@ -255,7 +276,7 @@ func sortRows(rows []chartRow) {
 }
 
 func buildRow(in *Input, scenario, impl string) chartRow {
-	r := chartRow{Impl: impl, IsFerry: impl == ferryImpl}
+	r := chartRow{Impl: impl}
 
 	cold, coldOK := in.Stats.Lookup(Key{Scenario: scenario, Mode: "cold", Impl: impl})
 	warm, warmOK := in.Stats.Lookup(Key{Scenario: scenario, Mode: "warm", Impl: impl})

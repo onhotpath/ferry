@@ -346,6 +346,7 @@ func scenarioDocs() []report.ScenarioDoc {
 				Module:     impl.Module,
 				Notes:      impl.Notes,
 				Baseline:   impl.Baseline,
+				Variant:    impl.Variant,
 				WarmCaveat: impl.WarmCaveat,
 			})
 		}

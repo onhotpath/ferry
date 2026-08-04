@@ -117,14 +117,14 @@ func fixtureScenarios() []report.ScenarioDoc {
 		// zero or a blank.
 		Name:  "no_such_scenario",
 		What:  "a scenario nothing was measured for.",
-		Impls: []report.ImplDoc{{Name: "ferry", Module: "github.com/onhotpath/ferry", Notes: "n/a"}},
+		Impls: []report.ImplDoc{{Name: "ferry", Module: ferryModule, Notes: "n/a"}},
 	}}
 }
 
 // fixtureYAMLImpls carries the one WarmCaveat in the fixture.
 func fixtureYAMLImpls() []report.ImplDoc {
 	return []report.ImplDoc{
-		{Name: "ferry", Module: "github.com/onhotpath/ferry", Notes: "Reads and parses on every load."},
+		{Name: "ferry", Module: ferryModule, Notes: "Reads and parses on every load."},
 		{Name: "koanf", Module: "github.com/knadh/koanf/v2", Notes: "Reads and parses on every load."},
 		{Name: "viper", Module: "github.com/spf13/viper", Notes: "Reads and parses on every load."},
 		{
@@ -138,9 +138,25 @@ func fixtureYAMLImpls() []report.ImplDoc {
 	}
 }
 
+// ferryModule is the import path both ferry rows are attributed to. A variant
+// is the same library, so it carries the same path.
+const ferryModule = "github.com/onhotpath/ferry"
+
+// fixtureImpls carries the one variant in the fixture, and the captured CSV has
+// no rows for it. That is the shape this golden is for: a variant the run did
+// not measure has to reach the file as words in every one of its cells, in the
+// scenario table and in the section that renders it against ferry, and never as
+// a zero or a ratio computed against one.
+//
+// The measured shape is pinned by TestVariantIsPublishedAgainstTheRowItVaries,
+// over a CSV written for it.
 func fixtureImpls() []report.ImplDoc {
 	return []report.ImplDoc{
-		{Name: "ferry", Module: "github.com/onhotpath/ferry", Notes: "Compiles once, caches the schema."},
+		{Name: "ferry", Module: ferryModule, Notes: "Compiles once, caches the schema."},
+		{
+			Name: "ferry-bound", Module: ferryModule, Variant: true,
+			Notes: "The same job through a caller-held binding.",
+		},
 		{Name: "koanf", Module: "github.com/knadh/koanf/v2", Notes: "Reads the whole environ per load."},
 		{Name: "viper", Module: "github.com/spf13/viper", Notes: "Needs every key registered."},
 		{Name: "xload", Module: "github.com/gojekfarm/xtools/xload", Notes: "Reflects per call."},
@@ -148,6 +164,158 @@ func fixtureImpls() []report.ImplDoc {
 		{Name: "kelseyhightower", Module: "github.com/kelseyhightower/envconfig", Notes: "Reflects per call."},
 		{Name: "stdlib", Module: "", Notes: "Hand-rolled os.Getenv.", Baseline: true},
 	}
+}
+
+// variantCSV is written for these three tests rather than captured, because the
+// case they cover is a variant that came out faster than the row it varies and
+// faster than every other library in its scenario, which is exactly the shape
+// that would corrupt a ranking. No captured run is needed to state it and none
+// of these figures reaches a published file.
+const variantCSV = `goos: linux
+goarch: amd64
+pkg: github.com/onhotpath/ferry/bench
+cpu: a test fixture
+
+,bench.txt,
+,sec/op,CI
+Load/env_small/cold/ferry-6,4e-06,2%
+Load/env_small/warm/ferry-6,2e-06,2%
+Load/env_small/cold/ferry-bound-6,4e-06,2%
+Load/env_small/warm/ferry-bound-6,1e-06,2%
+Load/env_small/cold/koanf-6,3e-06,2%
+Load/env_small/warm/koanf-6,3e-06,2%
+Load/env_small/cold/stdlib-6,15e-07,2%
+Load/env_small/warm/stdlib-6,15e-07,2%
+geomean,2.5e-06,
+
+,B/op,CI
+Load/env_small/warm/ferry-6,8000,1%
+Load/env_small/warm/ferry-bound-6,3200,1%
+Load/env_small/warm/koanf-6,17000,1%
+Load/env_small/warm/stdlib-6,800,1%
+geomean,5000,
+
+,allocs/op,CI
+Load/env_small/warm/ferry-6,100,1%
+Load/env_small/warm/ferry-bound-6,40,1%
+Load/env_small/warm/koanf-6,220,1%
+Load/env_small/warm/stdlib-6,10,1%
+geomean,72,
+`
+
+// variantInput is one scenario, with ferry, a variant of it, one library and
+// the baseline, all measured.
+func variantInput(t *testing.T) *report.Input {
+	t.Helper()
+
+	stats, err := report.ParseCSV(variantCSV)
+	if err != nil {
+		t.Fatalf("parsing the CSV: %v", err)
+	}
+
+	return &report.Input{
+		Meta:  report.Meta{Generated: "2026-08-05T00:00:00Z"},
+		Stats: stats,
+		Scenarios: []report.ScenarioDoc{{
+			Name:  "env_small",
+			What:  "five flat fields out of the process environment.",
+			Impls: fixtureImpls()[:2:2],
+		}},
+	}
+}
+
+// withCompetitors puts a library and the baseline back beside the two ferry
+// rows, for the two tests that are about ranking.
+func withCompetitors(in *report.Input) *report.Input {
+	in.Scenarios[0].Impls = append(in.Scenarios[0].Impls,
+		report.ImplDoc{Name: "koanf", Module: "github.com/knadh/koanf/v2", Notes: "n/a"},
+		report.ImplDoc{Name: "stdlib", Notes: "n/a", Baseline: true},
+	)
+
+	return in
+}
+
+// TestVariantIsPublishedAgainstTheRowItVaries is the reason a variant is
+// measured at all: the distance between it and the row it varies, computed from
+// the two warm figures rather than described.
+func TestVariantIsPublishedAgainstTheRowItVaries(t *testing.T) {
+	got := report.Results(variantInput(t))
+
+	i := strings.Index(got, "## The same library, measured a second way")
+	if i < 0 {
+		t.Fatal("the results file has no section rendering the variant against the row it varies")
+	}
+
+	row := section(got[i+1:])
+
+	// 2µs against 1µs on the warm figure, and 100 allocations against 40.
+	for _, want := range []string{"ferry-bound", "2.00µs", "1.00µs", "2.00x faster", "| 40 |", "| 100 |"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("the variant section does not carry %q:\n%s", want, row)
+		}
+	}
+}
+
+// TestVariantIsNotALibraryThatBeatFerry is the rule the flag exists for.
+//
+// The variant in the fixture is the fastest warm figure in its scenario bar the
+// baseline's. It is ferry, so reporting it as the fastest other library, or as
+// a library ferry lost to, would put "ferry is 2.00x slower than ferry" in two
+// published documents.
+func TestVariantIsNotALibraryThatBeatFerry(t *testing.T) {
+	in := withCompetitors(variantInput(t))
+
+	const variant = "ferry-bound"
+
+	cell := summaryRow(t, report.Summary(in), "env_small")[fastestOtherCell]
+	if strings.Contains(cell, "("+variant+")") {
+		t.Errorf("the summary names %s as the fastest other library: %q\n"+
+			"It is ferry through a second entry point, so it is not another library at all.", variant, cell)
+	}
+
+	if !strings.Contains(cell, "(koanf)") {
+		t.Errorf("the summary's fastest-other cell is %q, want the one real library in the scenario", cell)
+	}
+
+	for line := range strings.SplitSeq(losses(t, report.Results(in)), "\n") {
+		if strings.Contains(line, variant) {
+			t.Errorf("\"where ferry loses\" lists %s: %q", variant, line)
+		}
+	}
+}
+
+// TestVariantIsNotSilentlyDropped is the other half of the same rule, and it
+// exists so that excluding a variant from the rankings cannot become a way to
+// leave a number out.
+func TestVariantIsNotSilentlyDropped(t *testing.T) {
+	in := withCompetitors(variantInput(t))
+	got := report.Results(in)
+
+	cells := scenarioRow(t, got, "env_small", report.ImplDoc{Name: "ferry-bound"})
+	if strings.Contains(strings.Join(cells, "|"), "not measured") {
+		t.Errorf("the variant's own row in the scenario table is not fully published: %q", cells)
+	}
+}
+
+// losses returns the "where ferry loses" section.
+func losses(t *testing.T, results string) string {
+	t.Helper()
+
+	i := strings.Index(results, "## Where ferry loses")
+	if i < 0 {
+		t.Fatal("the results file has no \"where ferry loses\" section")
+	}
+
+	return section(results[i+1:])
+}
+
+// section returns what precedes the next "## " heading.
+func section(rest string) string {
+	if j := strings.Index(rest, "\n## "); j > 0 {
+		return rest[:j]
+	}
+
+	return rest
 }
 
 func TestParseCSVReadsTheCapturedRun(t *testing.T) {

@@ -41,6 +41,18 @@ type ImplDoc struct {
 	// library including ferry.
 	Baseline bool
 
+	// Variant marks a row that is not a library of its own: it measures a
+	// library already in the same table, through a different entry point that
+	// library publishes.
+	//
+	// It is published in every table it appears in, and it is left out of the
+	// two places that rank libraries against each other - "the fastest other
+	// library" in the README, and "where ferry loses" in the results file -
+	// because a row that is the same library cannot be a library that beat it.
+	// What it gets instead is a section of its own, where it is rendered
+	// against the row it varies.
+	Variant bool
+
 	// WarmCaveat, when set, says the warm figure is not comparable with the
 	// other rows' and why. It marks the cell rather than only the prose.
 	WarmCaveat string

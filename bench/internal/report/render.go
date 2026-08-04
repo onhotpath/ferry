@@ -40,6 +40,7 @@ func Results(in *Input) string {
 	}
 
 	writeChartRef(&b, in, chartBasenames)
+	writeVariants(&b, in)
 	writeGeomean(&b, in)
 	writeLosses(&b, in)
 	writeAbsences(&b, in)
@@ -368,6 +369,101 @@ func writeChartRef(b *strings.Builder, in *Input, name func(string) string) {
 const chartAlt = "Time and allocations per load for every library in every scenario, cold and warm, " +
 	"with benchstat's confidence interval. Time is a log scale; allocations are linear from zero."
 
+// variantsHeading is spelled once, because it is a "## " heading and
+// republish.go's section reader stops at those.
+const variantsHeading = "## The same library, measured a second way"
+
+// writeVariants publishes what a variant row is worth against the row it
+// varies, derived from the same warm measurements every table above carries.
+//
+// A variant is not a competitor, which is why it is out of every ranking. That
+// is not a reason to leave it unquantified: the distance between it and the row
+// it varies is the only reason to measure one at all, so it is computed here
+// rather than left to a reader to divide two cells.
+//
+// The section is absent when the run declared no variant, because a table of
+// nothing is not a measurement that was not taken.
+func writeVariants(b *strings.Builder, in *Input) {
+	if !hasVariant(in) {
+		return
+	}
+
+	fmt.Fprint(b, variantsHeading+"\n\n")
+	fmt.Fprint(b, "A row here is not a second library. It is `"+ferryImpl+"`, measured through a different\n")
+	fmt.Fprint(b, "entry point ferry publishes, which is why it is left out of \"the fastest other library\"\n")
+	fmt.Fprint(b, "and out of \"where ferry loses\" below. What it did differently is in its scenario's notes.\n\n")
+	fmt.Fprint(b, "| scenario | variant | warm | `"+ferryImpl+"` warm | the variant is | allocs/op | "+
+		"`"+ferryImpl+"` allocs/op |\n")
+	fmt.Fprint(b, "| --- | --- | --- | --- | --- | --- | --- |\n")
+
+	for _, sc := range in.Scenarios {
+		writeVariantRows(b, in, sc)
+	}
+
+	fmt.Fprint(b, "\n")
+}
+
+func writeVariantRows(b *strings.Builder, in *Input, sc ScenarioDoc) {
+	for _, impl := range sc.Impls {
+		if !impl.Variant {
+			continue
+		}
+
+		fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s | %s | %s |\n",
+			sc.Name, impl.Name,
+			warmCell(in, sc.Name, impl.Name, unitSec),
+			warmCell(in, sc.Name, ferryImpl, unitSec),
+			variantVerdict(in, sc.Name, impl.Name),
+			warmCell(in, sc.Name, impl.Name, unitAllocs),
+			warmCell(in, sc.Name, ferryImpl, unitAllocs),
+		)
+	}
+}
+
+// warmCell is one warm metric of one row, or the marker.
+func warmCell(in *Input, scenario, impl, unit string) string {
+	m, ok := in.Stats.Lookup(Key{Scenario: scenario, Mode: "warm", Impl: impl})
+
+	return measured(m, ok, unit)
+}
+
+// variantVerdict says which way the two figures came out, and never which way
+// they were expected to.
+func variantVerdict(in *Input, scenario, impl string) string {
+	got, gotOK := warmSeconds(in, scenario, impl)
+	ref, refOK := warmSeconds(in, scenario, ferryImpl)
+
+	switch {
+	case !gotOK || !refOK:
+		return notMeasured
+	case got < ref:
+		return ratio(ref, got) + " faster"
+	default:
+		return ratio(got, ref) + " slower"
+	}
+}
+
+// hasVariant reports whether any scenario declared one.
+func hasVariant(in *Input) bool {
+	for _, sc := range in.Scenarios {
+		if scenarioHasVariant(sc) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func scenarioHasVariant(sc ScenarioDoc) bool {
+	for _, impl := range sc.Impls {
+		if impl.Variant {
+			return true
+		}
+	}
+
+	return false
+}
+
 // writeGeomean publishes benchstat's geometric mean over every benchmark in
 // the run, which is the one number that summarises a whole run and the one it
 // is easiest to quote without saying where it came from.
@@ -401,6 +497,9 @@ func writeGeomean(b *strings.Builder, in *Input) {
 // writeLosses is the section the owner asked for first, and it is derived from
 // the measurements rather than written: for every scenario, every library that
 // beat ferry on the warm number, with the ratio.
+//
+// A variant row is not one of them. It is ferry through a second entry point,
+// and listing it here would report ferry as a library that beat ferry.
 func writeLosses(b *strings.Builder, in *Input) {
 	fmt.Fprint(b, "## Where ferry loses\n\n")
 	fmt.Fprint(b, "Derived from the warm `sec/op` column above, not written by hand.\n\n")
@@ -432,7 +531,7 @@ func writeLossRows(b *strings.Builder, in *Input, sc ScenarioDoc) int {
 	rows := 0
 
 	for _, impl := range sc.Impls {
-		if impl.Name == ferryImpl {
+		if !competitor(impl) {
 			continue
 		}
 
@@ -448,6 +547,15 @@ func writeLossRows(b *strings.Builder, in *Input, sc ScenarioDoc) int {
 	}
 
 	return rows
+}
+
+// competitor reports whether a row is a library ferry can be ranked against.
+//
+// Neither of ferry's own rows is: the plain one is the subject of every
+// ranking, and a variant is that same library through a second entry point, so
+// ranking against it would report ferry as the thing ferry lost to.
+func competitor(impl ImplDoc) bool {
+	return impl.Name != ferryImpl && !impl.Variant
 }
 
 func warmSeconds(in *Input, scenario, impl string) (float64, bool) {
