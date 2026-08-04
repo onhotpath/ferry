@@ -45,7 +45,7 @@ func firstError(tasks []func() error) error {
 func loadUnder(t *testing.T, run sched, p *plane) error {
 	t.Helper()
 
-	sch, err := schemaOf(reflect.TypeFor[walkConf](), nil)
+	sch, err := schemaOf(reflect.TypeFor[walkConf](), nil, discarded)
 	if err != nil {
 		t.Fatalf("compile: %+v", err)
 	}
@@ -229,7 +229,7 @@ func mustBeOneRemediation(t *testing.T, err error, want Path, class error) {
 		t.Fatalf("nothing was reported, want one failure at %s", want)
 	}
 
-	if got := addressesOf(err); len(got) != 1 || got[0] != want {
+	if got := reportedAddresses(err); len(got) != 1 || got[0] != want {
 		t.Fatalf("the report names %v, want exactly [%s]:\n%+v", got, want, err)
 	}
 
