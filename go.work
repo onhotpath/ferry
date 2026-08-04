@@ -13,6 +13,7 @@ toolchain go1.27rc2
 use (
 	.
 	./driver/env
+	./driver/http
 	./driver/kv
 	./driver/yaml
 )
