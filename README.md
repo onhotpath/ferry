@@ -1,10 +1,14 @@
-# ferry
+<p align="center">
+  <img src="docs/assets/logo/ferry.svg" alt="" width="132" height="132">
+</p>
+
+<h1 align="center">ferry</h1>
+
+<p align="center">Two-way data mapping for Go structs: load from any source, dump to any sink.</p>
 
 [![CI](https://github.com/onhotpath/ferry/actions/workflows/ci.yml/badge.svg)](https://github.com/onhotpath/ferry/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/onhotpath/ferry/graph/badge.svg?token=A33mpdyMRa)](https://codecov.io/gh/onhotpath/ferry)
 [![Go Reference](https://pkg.go.dev/badge/github.com/onhotpath/ferry.svg)](https://pkg.go.dev/github.com/onhotpath/ferry)
-
-Two-way data mapping for Go structs: load from any source, dump to any sink.
 
 One annotated struct, one tag grammar, two directions.
 The same `Config` type reads from a YAML file, from environment variables, and from a Consul-shaped key-value store, and writes back to any of them that can be written to.
