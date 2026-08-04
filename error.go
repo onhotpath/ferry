@@ -322,6 +322,50 @@ func fromDriver(m moment, loc Path, err error) *Error {
 	return e
 }
 
+// fromBind is what a failed Bind becomes, and it is the one place a driver
+// hands core an error core itself wrote.
+//
+// A driver's own refusal is wrapped as one. A refusal [NewKeys] produced is
+// not: it reached the driver only because the driver called core's key helper,
+// it already carries core's moment, core's class and one address per element,
+// and wrapping it would attribute core's own report to the driver and collapse
+// a sorted set into a single element that [Elements] cannot range.
+func fromBind(err error) error {
+	if mine(err) {
+		return err
+	}
+
+	return fromDriver(momentBind, Path{}, err)
+}
+
+// mine reports whether err is core's own error and not a driver's.
+//
+// It is about the outermost error only, which is why it compares identity
+// rather than taking the first match in the chain: a driver that wrapped core's
+// refusal added context of its own, and that context is the driver's.
+//
+// The aggregate is asked about first, because errors.AsType returns the first
+// match in tree order and an aggregate of core's own errors holds one.
+func mine(err error) bool {
+	if l, ok := errors.AsType[*errorList](err); ok {
+		return identical(l, err)
+	}
+
+	e, ok := errors.AsType[*Error](err)
+
+	return ok && identical(e, err)
+}
+
+// identical reports whether the match found by unwrapping is the value that was
+// unwrapped.
+//
+// It takes any rather than error deliberately, and that is the whole of it: the
+// question is about the dynamic value in hand and not about the chain behind it,
+// which is the question errors.Is exists to answer differently. Comparing two
+// any values cannot panic here either, because two different dynamic types are
+// unequal before either value is examined.
+func identical(found, whole any) bool { return found == whole }
+
 // driverMsg is what ferry says about a driver failure before the driver's own
 // text. It is the moment in words, which is ferry's own text and so always
 // safe, and it is what stops a location-less driver error rendering as the bare
