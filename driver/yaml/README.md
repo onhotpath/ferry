@@ -90,11 +90,18 @@ A `[]byte` field is saved as standard YAML `!!binary`, base64.
 `yaml.NewSource(path)` reads and `yaml.NewSink(path)` writes, so the path is written twice.
 That is deliberate: code handed only a `Source` cannot save through it, and passing one to `ferry.Dump` does not compile rather than failing halfway through a write.
 
-## Saving is atomic
+## Saving is atomic, and it is durable
 
 A save writes a temporary file beside yours and renames it into place once everything has been written.
-Nothing ever reads a half-written config.
-If the save fails, your file is left byte for byte as it was, and no temporary file is left behind.
+Nothing ever reads a half-written config, and no temporary file is ever left behind.
+A save that fails leaves your file byte for byte as it was, with one exception, named below.
+
+Durability is the second promise.
+The new file's contents are flushed to the disk, and so is the directory entry that makes your path point at them, so a save that returned `nil` has reached the disk rather than the page cache.
+Windows has no way to flush a directory: there the contents are flushed and the durability of the rename is the filesystem's own business.
+
+The exception is a directory flush that fails once the rename has already landed.
+The save reports `ferry.ErrPlane` and your file holds the new document, because what could not be promised is that the replacement survives a crash, not that it happened.
 
 ## One thing it cannot do
 

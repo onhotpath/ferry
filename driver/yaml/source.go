@@ -115,11 +115,12 @@ func (r reader) Children(_ context.Context, prefix ferry.Path) ([]ferry.Path, er
 // has not been written yet holds none of them, and a dump to a path with no
 // file at it is how the first one gets written.
 //
-// The one suppression in this package is here. gosec's G304 reports a file
-// opened from a variable, and for this driver the variable is the plane: the
-// caller names the file, that naming is the whole of the constructor's API, and
-// there is nothing to validate it against that would not be this package
-// deciding which of its user's files are allowed to exist.
+// This package suppresses gosec's G304 here and in syncDir, and both are the
+// same suppression. G304 reports a file opened from a variable, and for this
+// driver the variable is the plane: the caller names the file, that naming is
+// the whole of the constructor's API, and there is nothing to validate it
+// against that would not be this package deciding which of its user's files are
+// allowed to exist.
 func readDoc(ctx context.Context, path string) (*yamlv3.Node, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
