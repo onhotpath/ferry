@@ -763,6 +763,24 @@ type Want struct { Address ferry.Path; Class error }
 Exact-set semantics over `(address, class)` pairs, in segment-wise order, with a diff rather than a boolean.
 The primitive returns `[]string` and takes no `*testing.T`, because the conformance suite runs against third-party drivers and wants the result as data.
 
+> **Amended under [#169](https://github.com/onhotpath/ferry/issues/169): `CheckErrors` takes `ferrytest.T`, and the three names now ship.**
+> As published the second signature read `func CheckErrors(t *testing.T, got error, want ...Want)`, and none of the three was ever built, which left the position this section exists to support - message text is not API, get the precision from the test helper - pointing at an API a user could not call.
+> [ADR-0014](0014-what-ferrytest-exports.md) is where the reasoning in the paragraph above was generalised: every entry point in `ferrytest` reports through a two-method `T` that `*testing.T` satisfies for free, and a check that answers a question returns `[]string`.
+> `DiffErrors` is unchanged and is exactly that split's other half.
+> `CheckErrors` moves because this section's own argument applies to it: a caller asserting that a driver *fails* has to be able to capture what the check said, and `*testing.T` would make it the one entry point in the package a probe cannot run and `ferrytest`'s own tests cannot assert on.
+> **No semantics move.**
+
+> **Added under [#169](https://github.com/onhotpath/ferry/issues/169): what "exact set over `(address, class)` pairs" means when one element answers to two sentinels.**
+>
+> The classification is `errors.Is` and the vocabulary is not disjoint: `ErrReadOnly` is subordinate to `ErrPlane` and `ErrWrongKind` to `ErrValue`, and `ErrDriver` crosses all four.
+> So a `Want` naming `ErrPlane` matches a read-only refusal as well as a plain one, and "the set of pairs" is not a set of keys that can be compared with `maps.Equal`.
+>
+> **A `Want` pairs with at most one element and an element with at most one `Want`**, which is what keeps it a set rather than a filter, and it is the reading ADR-0006 forces: one field can produce two errors at one address, so two failures at one address need two `Want`s.
+> The pairing is a maximum matching and not a greedy pass, because greedy is order-dependent where the classes overlap.
+> Measured on a dump whose `Commit` declares `ErrReadOnly` and whose `Close` declares nothing, both location-less: `Want{ErrPlane}` beside `Want{ErrReadOnly}` matches exactly under the matching, and under a greedy pass reports two differences that are not there in one of the two orders.
+>
+> The rest falls out rather than being decided: the zero `Address` is a value and not a wildcard, so it matches an element that has no location and nothing else; a `Want` carrying no class matches nothing and is reported as the mistake it is; and an element ferry did not build has no address to read, so it reports as one with none and no class.
+
 **Exact rather than "contains", and the prototype shows why.**
 ADR-0008's tiers are a suppression order, and the defect they are most likely to develop is firing once too often.
 Measured against a suppression rule that reports a consequence it should have suppressed:
