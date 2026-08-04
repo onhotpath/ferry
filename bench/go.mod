@@ -25,8 +25,10 @@ module github.com/onhotpath/ferry/bench
 go 1.27
 
 require (
+	github.com/fatih/structs v1.1.0
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/gojekfarm/xtools/xload v0.10.0
+	github.com/gojekfarm/xtools/xload/providers/yaml v0.10.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/knadh/koanf/parsers/yaml v1.1.1
 	github.com/knadh/koanf/providers/env/v2 v2.0.1
@@ -39,7 +41,6 @@ require (
 )
 
 require (
-	github.com/fatih/structs v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/knadh/koanf/maps v0.1.2 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
@@ -53,4 +54,5 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

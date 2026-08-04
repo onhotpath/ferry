@@ -308,7 +308,12 @@ func scenarioDocs() []report.ScenarioDoc {
 	for _, sc := range scs {
 		impls := make([]report.ImplDoc, 0, len(sc.Impls))
 		for _, impl := range sc.Impls {
-			impls = append(impls, report.ImplDoc{Name: impl.Name, Module: impl.Module, Notes: impl.Notes})
+			impls = append(impls, report.ImplDoc{
+				Name:       impl.Name,
+				Module:     impl.Module,
+				Notes:      impl.Notes,
+				WarmCaveat: impl.WarmCaveat,
+			})
 		}
 
 		out = append(out, report.ScenarioDoc{Name: sc.Name, What: sc.What, Impls: impls})

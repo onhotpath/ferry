@@ -62,6 +62,18 @@ type Impl struct {
 	// than no comparison.
 	Notes string
 
+	// WarmCaveat, when set, says that this implementation's warm figure is not
+	// comparable with the other rows' and why.
+	//
+	// It exists because one library in this comparison does its file read and
+	// its parse in the constructor, so its warm column measures map lookups
+	// against a snapshot while every other row's measures a whole load. That
+	// is a real property of that library and it is neither hidden nor
+	// corrected for; it is declared here, next to the code that causes it, so
+	// that the renderer can mark the number itself rather than trusting a
+	// reader to find a sentence underneath it.
+	WarmCaveat string
+
 	// New builds the loader, and is the half a warm run pays for once.
 	New func(*Fixture) (Loader, error)
 }
@@ -190,7 +202,7 @@ func yamlSmallScenario() Scenario {
 		NewDst: func() any { return new(Small) },
 		Want:   WantSmall(),
 		Impls: []Impl{
-			ferryYAMLSmall(), koanfYAMLSmall(), viperYAMLSmall(), stdlibYAMLSmall(),
+			ferryYAMLSmall(), koanfYAMLSmall(), viperYAMLSmall(), xloadYAMLSmall(), stdlibYAMLSmall(),
 		},
 	}
 }
@@ -217,7 +229,7 @@ func dumpLargeScenario() Scenario {
 		NewDst: func() any { return new(Large) },
 		Want:   WantLarge(),
 		Impls: []Impl{
-			ferryDumpLarge(), koanfDumpLarge(), stdlibDumpLarge(),
+			ferryDumpLarge(), koanfDumpLarge(), viperDumpLarge(), stdlibDumpLarge(),
 		},
 	}
 }
@@ -242,9 +254,24 @@ func Absences() []NotMeasured {
 	return []NotMeasured{
 		{
 			Library:  "github.com/gojekfarm/xtools/xload",
-			Scenario: "yaml_small, yaml_large, dump_large",
-			Why: "xload loads only, from a Loader that returns a string per key, " +
-				"and ships no YAML loader. There is no dump direction at all.",
+			Scenario: "yaml_large",
+			Why: "its first-party provider cannot produce this struct, and the failure is in the " +
+				"flatten rather than in the tag grammar. xload.FlattenMap does not descend " +
+				"into a YAML sequence: it hands the whole sequence to spf13/cast.ToString, " +
+				"which returns the empty string, so /tags arrives as one empty key and its " +
+				"three elements are gone from the loader's map and unrecoverable from it. " +
+				"(A mapping fares better and is merely reshaped: /limits explodes into " +
+				"limits_rps and its siblings, where the tag addresses the map through one " +
+				"delimited key.) Rebuilding the sequence would mean this harness parsing the " +
+				"document itself and charging xload for the result, which would measure the " +
+				"harness. Pinned by TestXloadYAMLProviderDropsASequence. yaml_small has no " +
+				"sequence and no mapping, and xload is measured there with no bridge at all.",
+		},
+		{
+			Library:  "github.com/gojekfarm/xtools/xload",
+			Scenario: "dump_large",
+			Why: "xload is the Load direction only. Its whole contract is a Loader that returns " +
+				"a string for a key, and there is no inverse of it in the package.",
 		},
 		{
 			Library:  "github.com/sethvargo/go-envconfig",
@@ -255,13 +282,6 @@ func Absences() []NotMeasured {
 			Library:  "github.com/kelseyhightower/envconfig",
 			Scenario: "yaml_small, yaml_large, dump_large",
 			Why:      "environment variables only, by design. No file format and no dump direction.",
-		},
-		{
-			Library:  "github.com/spf13/viper",
-			Scenario: "dump_large",
-			Why: "viper writes the settings map it holds, not a struct. WriteConfigAs serialises " +
-				"what was read into viper, and there is no struct-to-sink path to compare, " +
-				"so measuring it would measure a different job.",
 		},
 		{
 			Library:  "github.com/caarlos0/env",

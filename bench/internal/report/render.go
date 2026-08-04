@@ -175,6 +175,8 @@ func writeScenario(b *strings.Builder, in *Input, sc ScenarioDoc) {
 
 	fmt.Fprint(b, "\n")
 
+	writeCaveats(b, sc)
+
 	for _, impl := range sc.Impls {
 		fmt.Fprintf(b, "- **%s**%s %s\n", impl.Name, moduleSuffix(impl), impl.Notes)
 	}
@@ -186,13 +188,41 @@ func writeScenarioRow(b *strings.Builder, in *Input, sc ScenarioDoc, impl ImplDo
 	cold, coldOK := in.Stats.Lookup(Key{Scenario: sc.Name, Mode: "cold", Impl: impl.Name})
 	warm, warmOK := in.Stats.Lookup(Key{Scenario: sc.Name, Mode: "warm", Impl: impl.Name})
 
-	fmt.Fprintf(b, "| %s | %s | %s | %s | %s |\n",
+	fmt.Fprintf(b, "| %s | %s | %s%s | %s | %s |\n",
 		impl.Name,
 		measured(cold, coldOK, unitSec),
-		measured(warm, warmOK, unitSec),
+		measured(warm, warmOK, unitSec), caveatMark(impl),
 		measured(warm, warmOK, unitBytes),
 		measured(warm, warmOK, unitAllocs),
 	)
+}
+
+// caveatMark is the dagger that goes on the number itself.
+//
+// A sentence underneath a table is something a reader may not reach before
+// quoting the figure above it, so a warm column that is not comparable is
+// marked where it is read.
+func caveatMark(impl ImplDoc) string {
+	if impl.WarmCaveat == "" {
+		return ""
+	}
+
+	return " " + caveatDagger
+}
+
+// caveatDagger is spelled once.
+const caveatDagger = "†"
+
+// writeCaveats prints the footnote for every marked cell in one scenario.
+func writeCaveats(b *strings.Builder, sc ScenarioDoc) {
+	for _, impl := range sc.Impls {
+		if impl.WarmCaveat == "" {
+			continue
+		}
+
+		fmt.Fprintf(b, "%s **%s's warm figure is not comparable with the rest of this table.** %s\n\n",
+			caveatDagger, impl.Name, impl.WarmCaveat)
+	}
 }
 
 func measured(m map[string]Metric, ok bool, unit string) string {

@@ -84,7 +84,7 @@ const (
 	groupHead    = 26.0
 	groupGap     = 12.0
 	headerHeight = 118.0
-	footerHeight = 46.0
+	footerHeight = 62.0
 	axisHeight   = 30.0
 	markRadius   = 3.6
 	capHalf      = 3.0
@@ -94,6 +94,10 @@ const (
 type chartRow struct {
 	Impl    string
 	IsFerry bool
+
+	// Caveat is set when this row's warm mark is not comparable with the
+	// others', which the label says with a dagger.
+	Caveat bool
 
 	// Measured is false when the CSV carries no benchmark for this pairing at
 	// all, which is a labelled gap rather than a bar.
@@ -197,9 +201,16 @@ func chartGroups(in *Input) []chartGroup {
 	out := make([]chartGroup, 0, len(in.Scenarios))
 
 	for _, sc := range in.Scenarios {
+		caveats := map[string]bool{}
+		for _, impl := range sc.Impls {
+			caveats[impl.Name] = impl.WarmCaveat != ""
+		}
+
 		rows := make([]chartRow, 0, len(all))
 		for _, name := range all {
-			rows = append(rows, buildRow(in, sc.Name, name))
+			r := buildRow(in, sc.Name, name)
+			r.Caveat = caveats[name]
+			rows = append(rows, r)
 		}
 
 		sortRows(rows)

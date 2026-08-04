@@ -5,8 +5,14 @@ all unless every library produces the identical struct from the identical source
 
 | scenario | ferry (warm) | fastest other | |
 | --- | --- | --- | --- |
-| `env_small` | 2.80µs | 174ns (stdlib) | ferry 16.10x slower |
+| `env_small` | 2.75µs | 166ns (stdlib) | ferry 16.60x slower |
+| `yaml_small` | 17.4µs | 16.6µs (stdlib) | ferry 1.05x slower |
 | `no_such_scenario` | not measured | not measured | |
+
+Left out of the comparison above because its warm figure measures a different job:
+`xload` in `yaml_small`.
+The results file says what the difference is, and gives the column where those
+rows are comparable.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/perf/perf-dark.svg">

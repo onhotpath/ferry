@@ -30,6 +30,10 @@ type ImplDoc struct {
 
 	// Notes is the semantic difference stated out loud.
 	Notes string
+
+	// WarmCaveat, when set, says the warm figure is not comparable with the
+	// other rows' and why. It marks the cell rather than only the prose.
+	WarmCaveat string
 }
 
 // AbsenceDoc is a library that belongs in the comparison and was not measured.

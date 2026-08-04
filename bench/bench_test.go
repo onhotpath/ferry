@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	xyaml "github.com/gojekfarm/xtools/xload/providers/yaml"
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/bench"
@@ -214,5 +217,50 @@ func TestFerryRefusesAStringAtAContainer(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "/tags") {
 		t.Errorf("the refusal is %q, want it to name /tags", err)
+	}
+}
+
+// TestXloadYAMLProviderDropsASequence pins the measurement behind xload's
+// absence from yaml_large, so that the reason in Absences is checked rather
+// than asserted.
+//
+// xload's own YAML provider flattens the document with xload.FlattenMap, which
+// recurses into a nested mapping and does not recurse into a sequence: the
+// sequence goes through spf13/cast.ToString, which yields the empty string. So
+// a []string field is unreachable, and unreachable from the loader's output
+// rather than merely awkward - the elements are not anywhere in the map.
+func TestXloadYAMLProviderDropsASequence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large.yaml")
+	if err := os.WriteFile(path, []byte(bench.YAMLLarge), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	flat, err := xyaml.NewFileLoader(path, "_")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The scalars are all there, so this is about the sequence and not about
+	// the provider being broken.
+	if got := flat["server_http_port"]; got != "8081" {
+		t.Fatalf("the provider did not flatten a nested scalar: /server/http/port = %q", got)
+	}
+
+	if got, ok := flat["tags"]; !ok || got != "" {
+		t.Errorf(`flat["tags"] = %q, present=%v; want the empty string, `+
+			`which is what cast.ToString makes of a sequence`, got, ok)
+	}
+
+	for _, k := range []string{"tags_0", "tags_1", "tags_2"} {
+		if _, ok := flat[k]; ok {
+			t.Errorf("flat[%q] exists, so the provider does index sequences after all "+
+				"and xload's absence from yaml_large needs revisiting", k)
+		}
+	}
+
+	// A mapping is reshaped rather than lost, which is the contrast that makes
+	// the sequence the blocking case.
+	if got := flat["limits_rps"]; got != "1000" {
+		t.Errorf(`flat["limits_rps"] = %q, want "1000"; a mapping is flattened per entry`, got)
 	}
 }

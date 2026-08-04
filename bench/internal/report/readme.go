@@ -59,10 +59,13 @@ func Summary(in *Input) string {
 	fmt.Fprint(&b, "| scenario | ferry (warm) | fastest other | |\n")
 	fmt.Fprint(&b, "| --- | --- | --- | --- |\n")
 
+	excluded := make(map[string][]string, len(in.Scenarios))
+
 	for _, sc := range in.Scenarios {
-		writeSummaryRow(&b, in, sc)
+		excluded[sc.Name] = writeSummaryRow(&b, in, sc)
 	}
 
+	writeSummaryExclusions(&b, excluded, in.Scenarios)
 	writeSummaryChart(&b, in)
 
 	fmt.Fprintf(&b, "\nFull results, the machine, the toolchain, the competitor versions, what each library\n")
@@ -86,10 +89,10 @@ func writeSummaryChart(b *strings.Builder, in *Input) {
 		in.Meta.ChartDarkLink, chartAlt, in.Meta.ChartLightLink)
 }
 
-func writeSummaryRow(b *strings.Builder, in *Input, sc ScenarioDoc) {
+func writeSummaryRow(b *strings.Builder, in *Input, sc ScenarioDoc) (excluded []string) {
 	ferry, ferryOK := warmSeconds(in, sc.Name, ferryImpl)
 
-	best, bestName := fastestOther(in, sc)
+	best, bestName, excluded := fastestOther(in, sc)
 
 	switch {
 	case !ferryOK || bestName == "":
@@ -101,11 +104,49 @@ func writeSummaryRow(b *strings.Builder, in *Input, sc ScenarioDoc) {
 		fmt.Fprintf(b, "| `%s` | %s | %s (%s) | ferry %s faster |\n",
 			sc.Name, formatDuration(ferry), formatDuration(best), bestName, ratio(best, ferry))
 	}
+
+	return excluded
+}
+
+// writeSummaryExclusions names every library left out of the comparison above,
+// with the scenario it was left out of.
+//
+// Leaving one out silently would be the same defect as omitting a library that
+// lost: the table would read as the whole field when it is not.
+func writeSummaryExclusions(b *strings.Builder, byScenario map[string][]string, order []ScenarioDoc) {
+	var lines []string
+
+	for _, sc := range order {
+		names := byScenario[sc.Name]
+		if len(names) == 0 {
+			continue
+		}
+
+		lines = append(lines, fmt.Sprintf("`%s` in `%s`", strings.Join(names, "`, `"), sc.Name))
+	}
+
+	if len(lines) == 0 {
+		return
+	}
+
+	fmt.Fprintf(b, "\nLeft out of the comparison above because its warm figure measures a different job:\n"+
+		"%s.\nThe results file says what the difference is, and gives the column where those\n"+
+		"rows are comparable.\n", strings.Join(lines, "; "))
 }
 
 // fastestOther is the quickest warm measurement in a scenario that is not
 // ferry's, with its name. An empty name means nothing else was measured.
-func fastestOther(in *Input, sc ScenarioDoc) (best float64, name string) {
+//
+// A row carrying a WarmCaveat is skipped, and skipping it is the whole point.
+// The caveat says that warm figure measures a different job from the rest of
+// the column - xload's YAML provider parses in its constructor, so its warm
+// number excludes the file read and the parse every other row pays. Ranking
+// ferry against it produces a headline the results file's own footnote
+// contradicts, and the headline is the part people quote.
+//
+// The excluded names come back so the summary can say who is missing from the
+// comparison rather than dropping them silently.
+func fastestOther(in *Input, sc ScenarioDoc) (best float64, name string, excluded []string) {
 	for _, impl := range sc.Impls {
 		if impl.Name == ferryImpl {
 			continue
@@ -116,10 +157,16 @@ func fastestOther(in *Input, sc ScenarioDoc) (best float64, name string) {
 			continue
 		}
 
+		if impl.WarmCaveat != "" {
+			excluded = append(excluded, impl.Name)
+
+			continue
+		}
+
 		if name == "" || got < best {
 			best, name = got, impl.Name
 		}
 	}
 
-	return best, name
+	return best, name, excluded
 }

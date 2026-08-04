@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/fatih/structs"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 )
@@ -17,6 +18,11 @@ const (
 		"mapstructure-decodes that map into the struct. The instance is reusable, but " +
 		"it holds data rather than a compiled schema, so warm saves only the file-path " +
 		"setup and not the parse."
+	viperNotesDump = "viper holds a settings map rather than a struct, so it needs a struct-to-map " +
+		"bridge to dump one. That is fatih/structs here, which is the same bridge koanf's " +
+		"own structs provider uses internally, so the two dump columns are the same shape: " +
+		"struct to map, map to YAML, whole file replaced. Neither preserves a comment, a key " +
+		"order or a quoting decision, and neither write is atomic or fsynced."
 )
 
 // viperTag tells viper's mapstructure decoder to read the pooled yaml: tag
@@ -105,3 +111,43 @@ func viperYAML[T any](path func(*Fixture) string) Impl {
 
 func viperYAMLSmall() Impl { return viperYAML[Small](func(f *Fixture) string { return f.YAMLSmall }) }
 func viperYAMLLarge() Impl { return viperYAML[Large](func(f *Fixture) string { return f.YAMLLarge }) }
+
+// viperDumpLarge is the dump direction through viper.
+//
+// It exists because excluding viper for needing a struct-to-map bridge while
+// measuring koanf through exactly such a bridge was not a defensible line:
+// koanf's own structs provider is fatih/structs, and this is the same call.
+func viperDumpLarge() Impl {
+	return Impl{
+		Name: "viper", Module: "github.com/spf13/viper", Notes: viperNotesDump,
+		New: func(f *Fixture) (Loader, error) {
+			path, err := f.Seed("viper", YAMLLarge)
+			if err != nil {
+				return nil, err
+			}
+
+			want := WantLarge()
+
+			return func(dst any) error {
+				// A fresh instance per iteration, for the same reason koanf
+				// gets one: an instance that already holds the settings would
+				// be measuring a second write rather than a dump.
+				v := viper.New()
+				v.SetConfigFile(path)
+
+				st := structs.New(want)
+				st.TagName = ferryTag
+
+				if err := v.MergeConfigMap(st.Map()); err != nil {
+					return fmt.Errorf("bench: viper merge: %w", err)
+				}
+
+				if err := v.WriteConfigAs(path); err != nil {
+					return fmt.Errorf("bench: viper write: %w", err)
+				}
+
+				return readBackLarge(path, dst)
+			}, nil
+		},
+	}
+}

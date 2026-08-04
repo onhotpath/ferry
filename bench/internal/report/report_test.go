@@ -98,6 +98,19 @@ func fixtureScenarios() []report.ScenarioDoc {
 		What:  "five flat fields out of the process environment.",
 		Impls: fixtureImpls(),
 	}, {
+		// A scenario carrying a warm figure that is not comparable with the
+		// rest of its column. This is the real yaml_small shape: xload's YAML
+		// provider parses in its constructor, so its warm number is a map
+		// lookup while every other row's is a whole load.
+		//
+		// The fixture had no such scenario, and that is exactly how the
+		// summary came to rank ferry against a figure the results file's own
+		// footnote called incomparable. A golden that covers only the easy
+		// shape pins only the easy shape.
+		Name:  "yaml_small",
+		What:  "five flat fields out of a small YAML document.",
+		Impls: fixtureYAMLImpls(),
+	}, {
 		// A scenario the CSV carries no rows for at all, which is the case
 		// that must render as "not measured" in every cell rather than as a
 		// zero or a blank.
@@ -105,6 +118,23 @@ func fixtureScenarios() []report.ScenarioDoc {
 		What:  "a scenario nothing was measured for.",
 		Impls: []report.ImplDoc{{Name: "ferry", Module: "github.com/onhotpath/ferry", Notes: "n/a"}},
 	}}
+}
+
+// fixtureYAMLImpls carries the one WarmCaveat in the fixture.
+func fixtureYAMLImpls() []report.ImplDoc {
+	return []report.ImplDoc{
+		{Name: "ferry", Module: "github.com/onhotpath/ferry", Notes: "Reads and parses on every load."},
+		{Name: "koanf", Module: "github.com/knadh/koanf/v2", Notes: "Reads and parses on every load."},
+		{Name: "viper", Module: "github.com/spf13/viper", Notes: "Reads and parses on every load."},
+		{
+			Name:   "xload",
+			Module: "github.com/gojekfarm/xtools/xload",
+			Notes:  "Its YAML provider parses in the constructor.",
+			WarmCaveat: "xload's YAML provider reads and parses the file once, when the loader is " +
+				"constructed, so this warm figure excludes the read and the parse every other row pays.",
+		},
+		{Name: "stdlib", Module: "", Notes: "Direct yaml.Unmarshal."},
+	}
 }
 
 func fixtureImpls() []report.ImplDoc {
@@ -178,6 +208,56 @@ func TestResultsGolden(t *testing.T) {
 
 func TestSummaryGolden(t *testing.T) {
 	golden(t, "want_summary.md", report.Summary(input(t)))
+}
+
+// TestSummaryNeverRanksAgainstACaveatedFigure is the README's half of the rule
+// the results file states in a footnote.
+//
+// A warm figure carrying a WarmCaveat measures a different job from the rest of
+// its column: xload's YAML provider parses in its constructor, so its warm
+// number excludes the file read and the parse every other row pays. Ranking
+// ferry against it produced "ferry 10.00x slower" on yaml_small, a headline the
+// footnote directly under it contradicted, and the headline is the part people
+// quote. The summary must skip it and say that it did.
+func TestSummaryNeverRanksAgainstACaveatedFigure(t *testing.T) {
+	in := input(t)
+
+	caveated := map[string][]string{}
+
+	for _, sc := range in.Scenarios {
+		for _, impl := range sc.Impls {
+			if impl.WarmCaveat != "" {
+				caveated[sc.Name] = append(caveated[sc.Name], impl.Name)
+			}
+		}
+	}
+
+	if len(caveated) == 0 {
+		t.Skip("no caveated warm figure in the fixture, so there is nothing to exclude")
+	}
+
+	got := report.Summary(in)
+
+	for scenario, names := range caveated {
+		for _, name := range names {
+			// The row for that scenario must not name it as the comparison.
+			for line := range strings.SplitSeq(got, "\n") {
+				if !strings.HasPrefix(line, "| `"+scenario+"`") {
+					continue
+				}
+
+				if strings.Contains(line, "("+name+")") {
+					t.Errorf("summary ranks ferry against %s in %s, whose warm figure is "+
+						"marked not comparable:\n%s", name, scenario, line)
+				}
+			}
+
+			if !strings.Contains(got, "`"+name+"` in `"+scenario+"`") {
+				t.Errorf("summary drops %s from %s silently; it must say the row was left out",
+					name, scenario)
+			}
+		}
+	}
 }
 
 // TestChartGolden pins both themes against real captured benchmark output.
