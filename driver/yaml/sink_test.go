@@ -340,6 +340,55 @@ func TestSinkRefusesAnAbsent(t *testing.T) {
 	}
 }
 
+// TestNonUTF8StringIsRefusedPerAddress is this driver's one known limitation,
+// asserted from where a caller meets it (ADR-0005, #157).
+//
+// A Go string is a byte sequence and a YAML string is a Unicode one, so this
+// plane carries KindString and cannot spell every value of it. What it does
+// instead is refuse the one address, loudly and with the value's own class, and
+// leave the plane exactly as it was: the alternative that was rejected is a tag
+// of ferry's own invention written into an operator's file.
+//
+// The address is what makes it actionable, and it is the field's rather than the
+// document's: a config with twenty strings names the one that cannot travel.
+func TestNonUTF8StringIsRefusedPerAddress(t *testing.T) {
+	type config struct {
+		Kept string `ferry:"kept"`
+		Raw  string `ferry:"raw"`
+	}
+
+	path := write(t, "kept: here\n")
+
+	err := ferry.Dump(t.Context(), config{Kept: "here", Raw: "\xff\xfe"}, yaml.NewSink(path))
+	if err == nil {
+		t.Fatal("a string that is not valid UTF-8 was dumped, and this plane has no spelling for one")
+	}
+
+	if !errors.Is(err, ferry.ErrValue) {
+		t.Errorf("the refusal was %v, want an error carrying ferry.ErrValue: the plane is writable and one "+
+			"value did not fit its format", err)
+	}
+
+	if !errors.Is(err, ferry.ErrDriver) {
+		t.Errorf("the refusal was %v, want ferry.ErrDriver, because the cause came from below", err)
+	}
+
+	e, ok := errors.AsType[*ferry.Error](err)
+	if !ok {
+		t.Fatalf("the refusal was %T, want a *ferry.Error carrying the address", err)
+	}
+
+	if got, want := e.Address(), ferry.At("raw"); got != want {
+		t.Errorf("the refusal names %s, want %s: one address is what an operator acts on", got, want)
+	}
+
+	if got, want := read(t, path), "kept: here\n"; got != want {
+		t.Errorf("the plane holds %q, want %q: a dump that failed leaves the plane byte-identical", got, want)
+	}
+
+	onlyFile(t, filepath.Dir(path), "plane.yaml")
+}
+
 // TestModeSurvives asserts a dump does not silently re-permission a file
 // somebody else set up.
 func TestModeSurvives(t *testing.T) {

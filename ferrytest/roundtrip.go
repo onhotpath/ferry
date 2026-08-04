@@ -3,6 +3,7 @@ package ferrytest
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/onhotpath/ferry"
 )
@@ -40,6 +41,11 @@ import (
 // function runs what it is given, which is what a registrant proving one codec
 // against the memory plane wants.
 //
+// Driver narrows a proof to the cases the plane declared it carries before
+// handing it over, and a narrowed proof still numbers its cases as [CoreTypes]
+// wrote them. That is Driver reading the declaration, not this function: a proof
+// handed here unnarrowed runs every case it holds.
+//
 // # What the Option list may not do
 //
 // The proofs are a slice rather than a variadic tail, which is the whole price
@@ -55,7 +61,7 @@ import (
 // here rather than as an identical dump failure per case. It is a real
 // limitation of this signature rather than a decision: an Option is opaque, so
 // the harness cannot apply one to a caller's type and not to its own.
-func RoundTrip(t T, p Plane, proofs []Proof, opts ...ferry.Option) {
+func RoundTrip(t T, p Plane, proofs []Proof, opts ...ferry.Option) { //nolint:gocritic // hugeParam: see Plane.Except.
 	t.Helper()
 
 	if p.Open == nil {
@@ -103,6 +109,21 @@ func (h *harness) label(name string, i int) string {
 	return fmt.Sprintf("plane %s: %s: case %d", h.plane.Name, name, i)
 }
 
+// disclaims names which half of the plane's declaration a value fell outside
+// of, because the two are different repairs on the driver's side: a kind the
+// plane never declared is a [Plane.Kinds] entry, and a value inside a kind it
+// did declare is [Plane.Except].
+//
+// It is a linear scan over a slice that is at most six long, on a path that has
+// already decided to report a failure.
+func (h *harness) disclaims(v ferry.Value) string {
+	if !slices.Contains(h.plane.Kinds, v.Kind()) {
+		return "the plane does not declare kind " + v.Kind().String()
+	}
+
+	return "the plane declares kind " + v.Kind().String() + " and excepts this value"
+}
+
 // run is [Proof]'s half of RoundTrip, and it is a method on the proof because
 // the cases are typed by a parameter no suite can name.
 func (p typeProof[T]) run(h *harness) {
@@ -120,6 +141,14 @@ func (p typeProof[T]) run(h *harness) {
 	}
 
 	for i, c := range p.cases {
+		// A narrowed proof runs the cases it was narrowed to and numbers them
+		// as [CoreTypes] wrote them. This is not RoundTrip consulting
+		// [Plane.Kinds] - it never does - it is RoundTrip running the proof it
+		// was handed, which is what [Driver] narrows before handing one over.
+		if !p.picked(c.Want) {
+			continue
+		}
+
 		p.runCase(h, i, c)
 	}
 }

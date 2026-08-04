@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/driver/yaml"
@@ -14,8 +15,8 @@ import (
 //
 // The plane declares all six kinds, which is a declaration and not a wish: a
 // resolved tag gives this plane a null, a boolean, a number and a string that
-// stay apart, and the two spellings this driver owns give it bytes. A kind
-// declared and then refused is a failure rather than a refusal (ADR-0005).
+// stay apart, and !!binary gives it bytes. A kind declared and then refused is a
+// failure rather than a refusal (ADR-0005).
 func TestDriver(t *testing.T) {
 	ferrytest.Driver(t, plane(t))
 }
@@ -32,6 +33,7 @@ func plane(t *testing.T) ferrytest.Plane {
 			ferry.KindAbsent, ferry.KindNull, ferry.KindBool,
 			ferry.KindNumber, ferry.KindString, ferry.KindBytes,
 		},
+		Except: notUnicode,
 		Open: func() ferrytest.Instance {
 			path := filepath.Join(t.TempDir(), "plane.yaml")
 
@@ -45,8 +47,23 @@ func plane(t *testing.T) ferrytest.Plane {
 	}
 }
 
-// golden pins this driver's own spelling of three fixed values, which is the
-// one thing a round trip structurally cannot see: a round trip tests a function
+// notUnicode is this plane's one exception to the kinds above, and it is a
+// property of YAML rather than of the values the suite happens to carry: a Go
+// string is a byte sequence and a YAML string is a Unicode one, so a string that
+// is not valid UTF-8 has no spelling here.
+//
+// Declaring it costs a refusal rather than buying a skip. The suite holds an
+// excepted value to exactly what it holds a kind this plane never declared to,
+// so a driver that mangled such a string instead of refusing it would be
+// reported here (ADR-0005, and #157 for the limitation itself).
+func notUnicode(v ferry.Value) bool {
+	s, err := v.AsString()
+
+	return err == nil && !utf8.ValidString(s)
+}
+
+// golden pins this driver's own spelling of two fixed values, which is the one
+// thing a round trip structurally cannot see: a round trip tests a function
 // against its own inverse, so changing an encoder and its decoder together is
 // invisible to it (ADR-0013).
 //
@@ -66,20 +83,17 @@ func golden() []ferrytest.Artefact {
 		B []byte `ferry:"b"`
 	}
 
-	type raw struct {
-		S string `ferry:"s"`
-	}
-
 	return []ferrytest.Artefact{
 		// The five values the typed boundary is for. A stringified boundary
 		// writes all five as text and loses four of them permanently.
 		ferrytest.Golden(typed{Port: 8080, Label: "8080", Debug: true, Ratio: 3.5},
 			"port: 8080\nlabel: \"8080\"\ndebug: true\nratio: 3.5\ntags: null\n"),
 		// Bytes are base64 under YAML's own tag, and this row is what makes
-		// moving both halves of that encoding at once turn CI red.
+		// moving both halves of that encoding at once turn CI red. It is the
+		// only spelling this driver owns: a Go string that is not valid UTF-8
+		// has no row here because it has no spelling, and pinning one would make
+		// a name of ferry's own a compatibility promise inside an operator's
+		// file (ADR-0005, #157).
 		ferrytest.Golden(binary{B: []byte("hi")}, "b: !!binary aGk=\n"),
-		// A Go string that is not valid UTF-8, under the one tag this driver
-		// invents.
-		ferrytest.Golden(raw{S: "\xff\xfe"}, "s: !ferry:str //4=\n"),
 	}
 }

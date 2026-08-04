@@ -28,19 +28,6 @@ const (
 	binaryTag = "!!binary"
 	mapTag    = "!!map"
 	seqTag    = "!!seq"
-
-	// rawStrTag is this driver's own, and it is the one tag here that YAML did
-	// not already have.
-	//
-	// A Go string is a byte sequence and is not required to be UTF-8, which
-	// ADR-0005 states as a rule and pins with the value "\xff\xfe". A YAML
-	// string is Unicode, the stream itself has to be valid UTF-8, and the
-	// emitter refuses invalid UTF-8 under !!str by name. The three ways out are
-	// to refuse the value, which fails a kind this plane declares it carries;
-	// to write it as !!binary, which reads back as Bytes and reaches a codec
-	// that asked for a string; or to spell it. So it is spelled, base64 under a
-	// local tag, and the tag says whose spelling it is.
-	rawStrTag = "!ferry:str"
 )
 
 // nullText is how this driver writes a Null. The emitter would accept an empty
@@ -126,8 +113,27 @@ func numberTag(text string) string {
 	return intTag
 }
 
-// spellString writes the string, base64 under [rawStrTag] where it is not valid
-// UTF-8.
+// spellString writes the string, and refuses one this plane has no way to hold.
+//
+// A Go string is a byte sequence and is not required to be UTF-8, which ADR-0005
+// states as a rule and pins with the value "\xff\xfe". A YAML string is Unicode,
+// the stream itself has to be valid UTF-8, and the emitter refuses invalid UTF-8
+// under !!str by name. So this plane carries KindString and cannot carry every
+// value of it, and ADR-0005 records that as a known limitation of this driver.
+//
+// The two alternatives were both worse. Writing it as !!binary reads back as
+// [ferry.KindBytes] and reaches a codec that asked for a string, which is a
+// silent change of kind. Spelling it under a tag of this driver's own writes
+// ferry's naming into an operator's data file and pins it as a compatibility
+// promise, which ADR-0003 already refuses one level up for the canonical
+// rendering: ferry's own naming is not a plane key and no driver may write it
+// into a plane as one. A tag is worse than a key, because it is also
+// configurable in principle and nothing here could honour a change to it.
+//
+// The class is [ferry.ErrValue] and not [ferry.ErrPlane]: the plane is reachable
+// and writable, and what failed is one value at one address not fitting the
+// format. The address comes from [writer.Set], which is where the caller's
+// address is known.
 func spellString(v ferry.Value) (*yamlv3.Node, error) {
 	s, err := v.AsString()
 	if err != nil {
@@ -135,7 +141,7 @@ func spellString(v ferry.Value) (*yamlv3.Node, error) {
 	}
 
 	if !utf8.ValidString(s) {
-		return leaf(rawStrTag, base64.StdEncoding.EncodeToString([]byte(s))), nil
+		return nil, fmt.Errorf("%w: a YAML string is Unicode and this one is not valid UTF-8", ferry.ErrValue)
 	}
 
 	return leaf(strTag, s), nil
@@ -178,8 +184,6 @@ func valueOf(n *yamlv3.Node) (ferry.Value, error) {
 		return ferry.Number(n.Value), nil
 	case binaryTag:
 		return bytesOf(n.Value)
-	case rawStrTag:
-		return rawStringOf(n.Value)
 	default:
 		return ferry.String(n.Value), nil
 	}
@@ -213,18 +217,7 @@ func bytesOf(text string) (ferry.Value, error) {
 	return ferry.Bytes(b), nil
 }
 
-// rawStringOf decodes this driver's own non-UTF-8 string spelling back to the
-// bytes the Go string had.
-func rawStringOf(text string) (ferry.Value, error) {
-	b, err := decode64(text)
-	if err != nil {
-		return ferry.Value{}, err
-	}
-
-	return ferry.String(string(b)), nil
-}
-
-// decode64 undoes the base64 both spellings share.
+// decode64 undoes the base64 a !!binary is written in.
 //
 // The whitespace is stripped first because YAML lets a !!binary scalar be
 // folded across lines, and an operator's hand-written or generated file is
