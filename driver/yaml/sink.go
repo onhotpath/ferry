@@ -35,6 +35,10 @@ const indent = 2
 // every key no field of yours maps - is left as it was. That is what makes a
 // hand-maintained config file survive being loaded and written back.
 //
+// An anchor is the exception, and it is deliberate. A value ferry replaces keeps
+// the anchor you wrote on it, so a key no field maps that aliases it reads back
+// as the value just written: its line does not change and its value does.
+//
 // The write is atomic. A temporary file beside yours is renamed into place once
 // everything has been written, and a save that fails leaves your file byte for
 // byte as it was with no temporary left behind.
@@ -125,6 +129,14 @@ func (w *writer) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
 	// The comments around the value are the operator's and survive the value
 	// being replaced. The value, the tag and the style are ferry's.
 	spelled.HeadComment, spelled.LineComment, spelled.FootComment = at.HeadComment, at.LineComment, at.FootComment
+
+	// So is the anchor, for the same reason and with a sharper consequence
+	// (#196): dropping it leaves every alias to this node dangling, so the save
+	// reports success and writes a document no reader can parse. Keeping it
+	// means an alias at an address no field maps now reads back as the value
+	// just written here, which is what the operator asked for by writing one.
+	spelled.Anchor = at.Anchor
+
 	*at = *spelled
 
 	return nil

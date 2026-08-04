@@ -197,6 +197,108 @@ alpha:
 	}
 }
 
+// TestAnchorSurvivesASave is a regression test for a save that destroyed the
+// file it was saving (#196).
+//
+// Replacing a scalar dropped the anchor the operator had written on it, while
+// every alias to it still emitted its `*name`. So the dump reported success and
+// left a document that no reader could parse, including the load right after it.
+// The assertion is the whole round trip, because "the dump returned nil" is
+// exactly what the defect also did.
+func TestAnchorSurvivesASave(t *testing.T) {
+	type config struct {
+		Host string `ferry:"host"`
+	}
+
+	path := write(t, "host: &h localhost\nother: *h\n")
+
+	if err := ferry.Dump(t.Context(), config{Host: "example"}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if _, err := ferry.Load[config](t.Context(), yaml.NewSource(path)); err != nil {
+		t.Fatalf("loading back what the dump wrote: %v\nthe plane holds:\n%s", err, read(t, path))
+	}
+}
+
+// TestAnchorSurvivesAContainerBeingReshaped is the same defect one level up: the
+// address written is under the anchored node rather than at it, so what drops
+// the anchor is the reshape into a container rather than the scalar write.
+//
+// It reaches the file the same way, and a document whose `db` was a scalar and
+// is now a mapping is exactly the shape the reshape exists to bring up to date.
+func TestAnchorSurvivesAContainerBeingReshaped(t *testing.T) {
+	type db struct {
+		Port int `ferry:"port"`
+	}
+
+	type config struct {
+		DB db `ferry:"db"`
+	}
+
+	path := write(t, "db: &d hello\nreplica: *d\n")
+
+	if err := ferry.Dump(t.Context(), config{DB: db{Port: 5432}}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, want := read(t, path), "db: &d\n  port: 5432\nreplica: *d\n"; got != want {
+		t.Errorf("the plane holds %q, want %q", got, want)
+	}
+
+	if _, err := ferry.Load[config](t.Context(), yaml.NewSource(path)); err != nil {
+		t.Fatalf("loading back what the dump wrote: %v\nthe plane holds:\n%s", err, read(t, path))
+	}
+}
+
+// TestAnAliasFollowsTheValueItNames pins the consequence of keeping the anchor,
+// which is the one place a key no field maps does not read back as it did.
+//
+// An operator who writes `other: *h` is saying other is whatever host is, so a
+// dump at host changes what other holds. The line's text is byte-identical
+// before and after; its value is not. This is a decision and not an accident,
+// and a change to it changes this test.
+func TestAnAliasFollowsTheValueItNames(t *testing.T) {
+	type mapped struct {
+		Host string `ferry:"host"`
+	}
+
+	type both struct {
+		Host  string `ferry:"host"`
+		Other string `ferry:"other"`
+	}
+
+	path := write(t, "host: &h localhost\nother: *h\n")
+
+	before, err := ferry.Load[both](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if before.Other != "localhost" {
+		t.Fatalf("other read back as %q before the dump, want %q", before.Other, "localhost")
+	}
+
+	if err := ferry.Dump(t.Context(), mapped{Host: "example"}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, want := read(t, path), "host: &h example\nother: *h\n"; got != want {
+		t.Errorf("the plane holds %q, want %q", got, want)
+	}
+
+	after, err := ferry.Load[both](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("loading back what the dump wrote: %v", err)
+	}
+
+	if after.Other != "example" {
+		t.Errorf("other read back as %q after a dump that wrote host, want %q: an alias follows the value its "+
+			"anchor names, so a dump at a mapped key changes what an unmapped alias to it holds", after.Other,
+			"example")
+	}
+}
+
 // TestTypedBoundary is the five values the typed boundary is for: dumped and
 // loaded back, five of five return exactly.
 //

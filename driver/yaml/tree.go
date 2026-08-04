@@ -178,6 +178,11 @@ func rootFor(doc *yamlv3.Node, k ferry.SegmentKind) *yamlv3.Node {
 // shape turns a node into the container that a segment of kind k is looked up
 // in, leaving it alone where it is one already - which is what keeps the
 // comments, the ordering and the untouched keys of an existing document.
+//
+// The anchor is carried over the reshape for the reason [writer.Set] carries it
+// over a replaced scalar (#196): it is the operator's name for this place, and
+// a reshape that dropped it would leave every alias to this node dangling and
+// the document unparseable.
 func shape(n *yamlv3.Node, k ferry.SegmentKind) {
 	kind, tag := yamlv3.MappingNode, mapTag
 	if k == ferry.Index {
@@ -188,8 +193,8 @@ func shape(n *yamlv3.Node, k ferry.SegmentKind) {
 		return
 	}
 
-	*n = yamlv3.Node{Kind: kind, Tag: tag, HeadComment: n.HeadComment, LineComment: n.LineComment,
-		FootComment: n.FootComment}
+	*n = yamlv3.Node{Kind: kind, Tag: tag, Anchor: n.Anchor, HeadComment: n.HeadComment,
+		LineComment: n.LineComment, FootComment: n.FootComment}
 }
 
 // slot is the node one segment names under n, appended where n does not have it
