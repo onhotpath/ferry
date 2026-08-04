@@ -6,6 +6,19 @@
 // A caller wraps whatever store they have in [Client] - Consul, etcd, a Redis
 // hash, a table with two columns - and the driver never learns which.
 //
+// # Experimental
+//
+// This module is experimental. Neither its Go API nor the spelling it gives a
+// value on the plane is under ADR-0013's compatibility promise yet, and both may
+// move in a release that is not a new major version of this module - which
+// ADR-0002 tags independently of core.
+//
+// The reason is the first sentence taken literally: Consul-shaped rather than
+// Consul. The only implementation of [Client] in this repository is an in-repo
+// test fake, so nothing here has been run against a real key-value store, and
+// the shape of [Client] and [ACL] is a design read off a specification rather
+// than one confirmed against a backend.
+//
 // # What this plane can carry, and what it refuses
 //
 // A store key holds bytes and nothing else, so the boundary kind does not
