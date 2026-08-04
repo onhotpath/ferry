@@ -10,8 +10,9 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// Codec is the codec conformance suite: six cases over one registry, and about
-// four lines for a registrant to adopt.
+// Codec is the codec conformance suite: six cases over the registration
+// machinery, and every one of them that the zero value can reach run again over
+// each codec the registry actually holds.
 //
 //	func TestCodec(t *testing.T) {
 //	    reg := ferry.NewRegistry()
@@ -26,42 +27,67 @@ import (
 // It takes no [context.Context], for [Driver]'s reason, and every case cites the
 // ADR sentence it executes.
 //
-// # What it asserts that a proof cannot
+// # What it promises, exactly
 //
-// A registrant's proof already exercises their codec through the ordinary walk,
-// under ADR-0005's triple, and that is where a lossy codec, a constant codec and
-// a codec declaring the wrong kind are caught. This suite is for the layer under
-// that one: the generic wrapper is the single piece of reflection the
-// registration API owns, it exists precisely so that a registrant never writes a
-// reflect.Value, and a defect in it is a defect in every codec anybody ever
-// registers. Two such defects were found three prototypes in, both one token
-// wide, and neither was catchable by any proof a registrant could write, because
-// the codec itself was correct (ADR-0009). Cases 2 and 3 are those two.
+// Two things, and the second is bounded in a way worth reading before relying
+// on it.
 //
-// # Why the cases run against this package's own probe types
+// The registration machinery works in this build of core. The generic wrapper
+// is the single piece of reflection the registration API owns, it exists so
+// that a registrant never writes a reflect.Value, and a defect in it is a
+// defect in every codec anybody ever registers. Two such defects were found
+// three prototypes in, both one token wide, and neither was catchable by any
+// proof a registrant could write, because the codec itself was correct
+// (ADR-0009). Cases 2 and 3 are those two, and they run against probes declared
+// here, because what they assert is a property of the machinery rather than of
+// any one registration.
 //
-// Cases 2 to 6 register a codec here and walk it, rather than walking the
-// caller's. That is forced rather than chosen, and it is the same wall #109
-// records for [Golden]: [ferry.Dump] compiles its schema from its type
-// parameter, a type parameter is fixed at compile time, and what
-// [ferry.Registry.Types] hands back is a reflect.Type. There is no route from a
-// runtime type to a walk over it, so a suite handed only a registry cannot dump
-// a value of a type it did not name in its own source.
+// And every codec in reg survives its own zero value. For each type the
+// registry holds, the suite builds an annotated root around that type and walks
+// it: the zero value encodes, what ferry wrote loads back, encoding what came
+// back writes the same thing again, and the same text spelled String loads
+// identically, which is core's donation seen end to end. The zero value is the
+// bound because it is the only value core holds without being handed one.
 //
-// What that costs is exactly what it does not cost. The properties these cases
-// assert belong to the registration machinery rather than to any one
-// registration - the wrapper's behaviour at a nil interface, core's donation of
-// String to a declared kind, the refusal of a codec that drifts off the kind it
-// declared, and where a map key's text comes from - so a probe discharges them
-// for the caller's build of core, which is what a registrant's CI is testing.
-// The per-registration half is the proof, and it runs through [RoundTrip].
+// # What it does not promise
 //
-// Case 1 is the exception and reads the caller's own types, because it is a
-// property of a type rather than of a codec.
+// It does not check your codec away from its zero value, and most of what makes
+// a codec wrong lives there. A lossy codec, a constant codec and a codec that
+// declares one kind and emits another all pass every case here, because all
+// three are correct at the zero value. So do two keys that fold to one address,
+// which need two values to see at all.
+//
+// Cases 4 and 6 stay on this package's probes for that reason rather than for
+// want of reach: they need a value away from the zero and two distinct keys
+// respectively, and nothing core holds supplies either.
+//
+// The gate that closes this is [Complete], which reports every registered type
+// with no [Proof] against it, and [RoundTrip], which drives the registrant's own
+// values through the real engine. Run all three. A green Codec on its own says
+// the machinery is sound and your codec is sound at one value, and that is the
+// whole of it.
+//
+// # It compiles against reg
+//
+// A registry freezes at its first retained schema compile, and this suite
+// performs one for every type reg holds. So reg is frozen when Codec returns,
+// and every [ferry.Registry.Register] call must happen before the call to
+// Codec rather than after it.
 func Codec(t T, reg *ferry.Registry, opts ...ferry.Option) {
 	t.Helper()
 
 	c := &codecRun{rep: t, reg: reg, opts: opts}
+
+	// The seam, checked once. Without it the per-registrant half of the suite
+	// cannot run at all and case 1 falls back to guessing which arm a
+	// registration used, which is #143 - so this is a refusal rather than a
+	// degraded run.
+	if !coreWalkOK {
+		t.Errorf("this build of ferry publishes no reflect.Value-rooted walk on the seam ferrytest reads, so " +
+			"no case here can reach a type it was handed as a reflect.Type")
+
+		return
+	}
 
 	// The Option list, resolved once against a struct with nothing registered
 	// behind it, so a list that cannot be honoured is one report rather than one
@@ -99,6 +125,127 @@ func (c *codecRun) run() {
 	c.guard(codecKindNo, c.caseDeclaredKind)
 	c.guard(codecAcceptNo, c.caseAcceptsWhatItEmits)
 	c.guard(codecKeyNo, c.caseKeyText)
+
+	c.registered()
+}
+
+// registered is the per-registrant half: cases 2, 3 and 5 again, over every
+// type the caller's registry actually holds, at the zero value.
+//
+// The six cases above are about the machinery, and they stay: a defect in the
+// wrapper is a defect in every codec anybody registers, and a caller whose
+// registry is empty still wants that answered. This pass is the other half of
+// the same question, and what it costs is stated where the cost lands - it
+// compiles a schema against the caller's registry, so the registry is frozen
+// when Codec returns.
+//
+// It stops at the zero value, and that bound is structural rather than an
+// omission. Cases 4 and 6 need a value away from the zero and two distinct keys
+// respectively, and nothing core holds supplies either: they stay probe-only
+// under any seam, and the per-registrant version of them is a [Proof].
+func (c *codecRun) registered() {
+	c.rep.Helper()
+
+	for _, t := range c.reg.Types() {
+		var (
+			wrote ferry.Value
+			ok    bool
+		)
+
+		c.guard(codecNilEncodeNo, func() { wrote, ok = c.zeroEncodes(t) })
+
+		if !ok {
+			continue
+		}
+
+		c.guard(codecNilDecodeNo, func() { c.zeroDecodes(t, wrote) })
+		c.guard(codecAcceptNo, func() { c.acceptsString(t, wrote) })
+	}
+}
+
+// zeroEncodes is case 2 for one registered type: the wrapper encodes the zero
+// value without panicking and without an error.
+//
+// [ferry.Registry.Register] already runs the codec against this value, so the
+// gain here is not a new value but a named report: the two defects cases 2 and
+// 3 exist for were panics, and a panic at registration is a stack trace out of
+// a package the registrant has never opened.
+func (c *codecRun) zeroEncodes(t reflect.Type) (ferry.Value, bool) {
+	c.rep.Helper()
+
+	got, err := c.dumpZero(t)
+	if err != nil {
+		c.fail(codecNilEncodeNo, fmt.Sprintf("%s: dumping the zero value through the registered codec failed "+
+			"with %v: the zero value is the one value core holds without being handed one, and a codec that "+
+			"cannot write it cannot write a field nobody set", t, err))
+
+		return ferry.Value{}, false
+	}
+
+	return got, true
+}
+
+// zeroDecodes is case 3 for one registered type: what ferry wrote for the zero
+// value loads back, and encoding what came back writes the same thing again.
+//
+// The second half is what registration does not do. Its totality check encodes
+// the zero and decodes the result, and asserts only that neither errors - so a
+// codec whose decode half answers something else entirely passes it, and the
+// plane text is not a fixed point of the pair.
+func (c *codecRun) zeroDecodes(t reflect.Type, wrote ferry.Value) {
+	c.rep.Helper()
+
+	back, err := c.loadInto(t, wrote)
+	if err != nil {
+		c.fail(codecNilDecodeNo, fmt.Sprintf("%s: loading back the %#v ferry wrote for the zero value failed "+
+			"with %v: a codec that cannot read its own output cannot round trip anything", t, wrote, err))
+
+		return
+	}
+
+	again, err := c.dumpRoot(back)
+	if err != nil {
+		c.fail(codecNilDecodeNo, fmt.Sprintf("%s: re-encoding what %#v loaded as failed with %v", t, wrote, err))
+
+		return
+	}
+
+	if again != wrote {
+		c.fail(codecNilDecodeNo, fmt.Sprintf("%s: the zero value encodes to %#v, and loading that back and "+
+			"encoding it again writes %#v: the codec's two halves disagree at the one value they are both "+
+			"guaranteed to see", t, wrote, again))
+	}
+}
+
+// acceptsString is case 5 for one registered type: the codec loads its own
+// output back from a plane that spells it String.
+//
+// Core donates String to the declared kind before any codec is called, because
+// a codec seeing the raw value fails on env, query parameters and Consul. This
+// asserts the donation end to end for the registrant's own codec, and it is
+// silent for a codec that declares String already, where there is nothing to
+// donate.
+func (c *codecRun) acceptsString(t reflect.Type, wrote ferry.Value) {
+	c.rep.Helper()
+
+	text, ok := textOf(wrote)
+	if !ok || wrote.Kind() == ferry.KindString {
+		return
+	}
+
+	back, err := c.loadInto(t, ferry.String(text))
+	if err != nil {
+		c.fail(codecAcceptNo, fmt.Sprintf("%s: the codec declares %s and refused the same text spelled String, "+
+			"with %v: String is donated to the declared kind before any codec is called, so this is what a "+
+			"plane with no types of its own hands it", t, wrote.Kind(), err))
+
+		return
+	}
+
+	if again, err := c.dumpRoot(back); err != nil || again != wrote {
+		c.fail(codecAcceptNo, fmt.Sprintf("%s: the same text spelled String loaded as something that encodes "+
+			"to %#v, want %#v (err %v)", t, again, wrote, err))
+	}
 }
 
 // caseTextPair is case 1: AppendText and MarshalText agree (ADR-0007).
@@ -113,6 +260,22 @@ func (c *codecRun) run() {
 // It reads the registrant's own types, and it asks the one value core holds
 // without being given one: the zero value. A wider question needs values, and
 // values are what a [Proof] carries.
+//
+// # Why it observes rather than assumes
+//
+// The two spellings disagreeing only matters where ferry uses them, and
+// registration is step one of ADR-0007's chain and beats the text pair - so a
+// type registered through [ferry.StringCodec] or [ferry.ValueCodec] carries a
+// disagreement ferry will never consult. Reporting that is a false positive
+// with a false explanation attached, because the plane holds neither string
+// (#143).
+//
+// So this case does not guess which arm a registration used. It dumps the zero
+// value through the caller's own registry and reads what ferry actually wrote,
+// and only then asks whether the pair is in play. That is a question about
+// behaviour rather than about a registration's internals, which is why it needs
+// no accessor on [ferry.Reg] and leaves ADR-0009's "no accessor" finding
+// standing.
 func (c *codecRun) caseTextPair() {
 	c.rep.Helper()
 
@@ -138,11 +301,17 @@ func (c *codecRun) textPairAgrees(t reflect.Type) {
 	appended, appendErr := appender.AppendText(nil)
 	marshalled, marshalErr := marshaler.MarshalText()
 
-	switch {
-	case appendErr != nil && marshalErr != nil:
+	if appendErr != nil && marshalErr != nil {
 		// Both halves refusing the zero value is the type's own business: what
 		// this case is about is the two of them disagreeing.
 		return
+	}
+
+	if !c.ferryWritesTheAppender(t, appended, appendErr) {
+		return
+	}
+
+	switch {
 	case appendErr != nil || marshalErr != nil:
 		c.fail(codecTextNo, fmt.Sprintf("%s: AppendText failed with %v and MarshalText with %v: ferry calls "+
 			"whichever is present and prefers the appender, so one half failing is one half of the type "+
@@ -154,6 +323,41 @@ func (c *codecRun) textPairAgrees(t reflect.Type) {
 	default:
 		return
 	}
+}
+
+// ferryWritesTheAppender is #143's fix: whether ferry's own output for this
+// type is the appender's bytes.
+//
+// It answers by dumping the zero value through the caller's registry and
+// reading what landed, so it cannot mistake a [ferry.StringCodec] registration
+// for a [ferry.TextCodec] one, and it needs to know nothing about how the
+// registration was built.
+//
+// Two shapes, and the second is the narrow one. Where the appender succeeds, it
+// is in play exactly when ferry wrote its text - kind included or not, because
+// a TextCodec may declare any kind and the question is about the bytes. Where
+// the appender fails, it is in play exactly when the dump failed too, since a
+// registration that bypassed it would have written something.
+//
+// A codec that writes precisely what the appender would is not a false
+// positive, and the answer here is the true one: the plane really does hold the
+// appender's bytes, so a reader expecting the marshaler's is really reading
+// somebody else's.
+func (c *codecRun) ferryWritesTheAppender(t reflect.Type, appended []byte, appendErr error) bool {
+	c.rep.Helper()
+
+	wrote, err := c.dumpZero(t)
+	if appendErr != nil {
+		return err != nil
+	}
+
+	if err != nil {
+		return false
+	}
+
+	text, ok := textOf(wrote)
+
+	return ok && text == string(appended)
 }
 
 // caseNilInterfaceEncode is case 2: a registered interface codec at its nil zero
