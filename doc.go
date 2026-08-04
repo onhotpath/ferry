@@ -300,6 +300,14 @@
 // errors.AsType[*ferry.Error] and [Error.Address]; there is no concrete type to
 // switch on, and no enum.
 //
+// On Dump the aggregation is preceded by a phase: every value is encoded before
+// any of them is written, so a Dump that fails for a reason ferry could have
+// known without touching the plane writes nothing at all. A sink implementing
+// [Committer] is exempt, because staging already gives it that property, and it
+// gets a better report for it - both kinds of failure in one run, where a sink
+// that cannot stage learns the plane's own refusals only once the values it
+// could not encode are fixed.
+//
 // Message text is not API. Match on the sentinels and on the address rather
 // than on a string, and get precision from the ferrytest assertions. ferry's own
 // text never repeats a value the plane supplied - the cause stays in the chain

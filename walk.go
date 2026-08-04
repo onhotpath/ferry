@@ -350,6 +350,19 @@ func (loadFrom) apply(s spot, got Value) error {
 }
 
 // atStatic walks a struct or an array and then answers required at its address.
+//
+// The early return is the one suppression bit the walk owns, and it is here
+// rather than in the scheduler because only the walk can see the subtree
+// relationship it turns on. ADR-0011's rule is to report every failure that is
+// not a consequence of another it is already reporting, and a composite's own
+// required failure is the summary of what its children just said: a required
+// child absent under a required parent is two errors and one remediation, so
+// the parent's is suppressed where a child under it already reported.
+//
+// The neighbouring case needs nothing, which is why this is one bit and not a
+// redesign: a child that is present and fails to decode is a failure at the
+// child's address, and the parent's required never had a second thing to say
+// about it.
 func (l loadFrom) atStatic(_ context.Context, s spot, into descend) error {
 	before := *l.wrote
 
@@ -433,6 +446,10 @@ func (l loadFrom) container(ctx context.Context, s spot) (more bool, err error) 
 // a shallow copy of the seed, so a walk that wrote through the seed's own
 // pointer would publish a partial load into a value the caller still holds and
 // the property would break in silence.
+//
+// The early return is [loadFrom.atStatic]'s suppression bit at the other
+// composite shape, and it is one rule rather than two: a pointer's required is
+// the same summary of the same children.
 func (l loadFrom) materialise(s spot, into descend) error {
 	fresh := reflect.New(s.v.Type().Elem())
 	if !s.v.IsNil() {
