@@ -1,7 +1,6 @@
 package ferrytest
 
 import (
-	"context"
 	"fmt"
 	"slices"
 
@@ -151,7 +150,7 @@ func (p typeProof[T]) runCase(h *harness, i int, c Case[T]) {
 	}
 
 	rec := recording(inst.Sink)
-	if err := ferry.Dump(context.Background(), holder[T]{Value: c.Value}, rec, h.opts...); err != nil {
+	if err := ferry.Dump(inst.ctx(), holder[T]{Value: c.Value}, rec, h.opts...); err != nil {
 		h.rep.Errorf("%s: dump: %v", h.label(p.name, i), err)
 
 		return
@@ -189,7 +188,7 @@ func (p typeProof[T]) checkGolden(h *harness, i int, got, want ferry.Value) {
 func (p typeProof[T]) checkTrip(h *harness, i int, inst Instance, c Case[T]) {
 	h.rep.Helper()
 
-	back, err := ferry.Load[holder[T]](context.Background(), inst.Source, h.opts...)
+	back, err := ferry.Load[holder[T]](inst.ctx(), inst.Source, h.opts...)
 	if err != nil {
 		h.rep.Errorf("%s: load: %v", h.label(p.name, i), err)
 
