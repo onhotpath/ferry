@@ -413,8 +413,8 @@ func (l loadFrom) atNullable(ctx context.Context, s spot, into descend) error {
 	return l.materialise(s, into)
 }
 
-// container answers a container address, and reports whether the walk should go
-// on to what is under it.
+// container answers a container address, and reports whether the plane left the
+// answer to what is under it.
 //
 // The three observations are three answers, and they are the same three at a
 // pointer and at a dynamic composite. A Null is the plane saying the container
@@ -559,28 +559,32 @@ func (l loadFrom) atMap(ctx context.Context, s spot, into descend) error {
 	return l.buildMap(s, kids, into)
 }
 
-// members is a dynamic container's own address answered first, and then what
-// the plane holds under it.
+// members is what a dynamic container holds, asked in one of two orders
+// depending on whether the source can list.
 //
-// The order is the rule rather than a convenience. A Null at the container
-// address is a complete answer and a source that cannot list can still give it;
-// only after Absent does the walk need the members, and only then is a source
-// that cannot enumerate a refusal. Nothing under an Absent container address is
-// nothing written, so a seed keeps what it had: a container with no children is
-// indistinguishable from an absent one on every plane surveyed, and ADR-0006
-// puts that row under "does not write".
+// Over an Enumerator the walk asks Children first and asks the container's own
+// address only where nothing came back, which is what makes the question
+// answerable on a plane whose element addresses collapse onto the container's
+// own name (ADR-0003). An address arrives at Get carrying no kind and no arity,
+// so being asked for children is the only signal a driver gets that core
+// considers the address a dynamic container.
+//
+// Over a source that cannot list the order is the other one, and the reason for
+// it is unchanged: a Null at the container address is a complete answer and a
+// source that cannot list can still give it; only after Absent does the walk
+// need the members, and only then is a source that cannot enumerate a refusal.
+//
+// Both orders agree wherever both run. Nothing under an Absent container address
+// is nothing written, so a seed keeps what it had: a container with no children
+// is indistinguishable from an absent one on every plane surveyed, and ADR-0006
+// puts that row under "does not write". What the first order gives up is an
+// answer at the container's own address where there are children under it, which
+// is never read, and ADR-0003 states that cost rather than leaving it to be
+// found.
 func (l loadFrom) members(ctx context.Context, s spot) (kids []Path, more bool, err error) {
-	answered, err := l.container(ctx, s)
-	if !answered {
-		return nil, false, err
-	}
-
 	lister, ok := l.r.(Enumerator)
 	if !ok {
-		return nil, false, newError(momentWalk, ErrPlane, s.at, fmt.Sprintf(
-			"the addresses under a %s come from the value, and %T cannot list what a plane holds under an "+
-				"address: a source that does not implement ferry.Enumerator reaches every static address and "+
-				"no dynamic one, which is a property of that plane rather than of this schema", s.v.Type(), l.r))
+		return l.unlistable(ctx, s)
 	}
 
 	kids, err = lister.Children(ctx, s.at)
@@ -588,7 +592,36 @@ func (l loadFrom) members(ctx context.Context, s spot) (kids []Path, more bool, 
 		return nil, false, fromDriver(momentWalk, s.at, err)
 	}
 
-	return kids, len(kids) > 0, nil
+	if len(kids) == 0 {
+		// The container's own address is the whole answer where the plane holds
+		// nothing under it, and it is asked second so that a driver whose element
+		// values live under the container's own name is never asked for a value
+		// there while it is holding some (ADR-0003).
+		_, err = l.container(ctx, s)
+
+		return nil, false, err
+	}
+
+	return kids, true, nil
+}
+
+// unlistable is a dynamic container over a source that cannot list: its own
+// address is the only thing there is to ask, and anything short of a complete
+// answer there is a refusal.
+//
+// The refusal names the field and the source rather than loading an empty
+// composite, which is the most plausible-looking wrong answer available and the
+// silent one ADR-0001 rules out (ADR-0004).
+func (l loadFrom) unlistable(ctx context.Context, s spot) (kids []Path, more bool, err error) {
+	answered, err := l.container(ctx, s)
+	if !answered {
+		return nil, false, err
+	}
+
+	return nil, false, newError(momentWalk, ErrPlane, s.at, fmt.Sprintf(
+		"the addresses under a %s come from the value, and %T cannot list what a plane holds under an "+
+			"address: a source that does not implement ferry.Enumerator reaches every static address and "+
+			"no dynamic one, which is a property of that plane rather than of this schema", s.v.Type(), l.r))
 }
 
 // buildSlice fills a sequence the length of what the plane enumerated, and

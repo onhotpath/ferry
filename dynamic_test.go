@@ -637,9 +637,9 @@ func TestLoadingADynamicCompositeNeedsASourceThatCanList(t *testing.T) {
 	}
 }
 
-// TestANullAtTheContainerAddressNeedsNoEnumerator is the reason the container's
-// own address is asked before the members are: a Null is a complete answer, and
-// a source that cannot list can still give it.
+// TestANullAtTheContainerAddressNeedsNoEnumerator is why a source that cannot
+// list is asked its container addresses at all: a Null there is a complete
+// answer, and a source that cannot list can still give it.
 func TestANullAtTheContainerAddressNeedsNoEnumerator(t *testing.T) {
 	t.Parallel()
 
@@ -653,6 +653,238 @@ func TestANullAtTheContainerAddressNeedsNoEnumerator(t *testing.T) {
 	if got.Tags != nil {
 		t.Errorf("loaded %v, want nil: a null at a container address is the plane saying it holds nothing", got.Tags)
 	}
+}
+
+// counting is a plane that can list and that records how often each side of the
+// boundary was called, which is the only way to price the order the walk asks a
+// dynamic container in.
+type counting struct {
+	values   map[Path]Value
+	children map[Path][]Path
+
+	gets, lists int
+}
+
+func (c *counting) Bind(*AddressSet) (OpenFunc, error) {
+	return func(context.Context) (Reader, error) { return c, nil }, nil
+}
+
+func (c *counting) Get(_ context.Context, addr Path) (Value, error) {
+	c.gets++
+
+	return c.values[addr], nil
+}
+
+func (c *counting) Children(_ context.Context, prefix Path) ([]Path, error) {
+	c.lists++
+
+	return c.children[prefix], nil
+}
+
+// flat is the same plane without the optional interface, written out rather than
+// embedded because Enumerator is discovered by assertion and an embedded field
+// would promote the method it exists to withhold.
+type flat struct {
+	values map[Path]Value
+	gets   int
+}
+
+func (f *flat) Bind(*AddressSet) (OpenFunc, error) {
+	return func(context.Context) (Reader, error) { return f, nil }, nil
+}
+
+func (f *flat) Get(_ context.Context, addr Path) (Value, error) {
+	f.gets++
+
+	return f.values[addr], nil
+}
+
+// asked is one row of what a source that can list is asked at a dynamic
+// container: the plane, the two call counts, and what the field ends up holding.
+type asked struct {
+	name        string
+	src         *counting
+	gets, lists int
+	want        []string
+}
+
+// check loads one row over a seeded destination and prices it.
+//
+// The seed is what tells the two rows apart that share a call count: an absent
+// container writes nothing and keeps it, which is ADR-0006's does-not-write row,
+// and a Null at the container address is the plane saying the container is there
+// and holds nothing, which zeroes it.
+func (c asked) check(t *testing.T) {
+	t.Helper()
+
+	got, err := LoadOver(t.Context(), tagsOnly{Tags: []string{"seed"}}, c.src)
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if !slices.Equal(got.Tags, c.want) {
+		t.Errorf("loaded %v, want %v", got.Tags, c.want)
+	}
+
+	mustAsk(t, c.src, c.gets, c.lists)
+}
+
+func mustAsk(t *testing.T, src *counting, gets, lists int) {
+	t.Helper()
+
+	if src.gets != gets || src.lists != lists {
+		t.Errorf("the plane was asked Get=%d Children=%d, want Get=%d Children=%d",
+			src.gets, src.lists, gets, lists)
+	}
+}
+
+// TestWhatASourceIsAskedAtADynamicContainer prices the order, at the boundary,
+// through the one seam.
+//
+// A source that can list is asked for children first and asked the container's
+// own address only where nothing came back, so a populated container costs one
+// Get fewer and a container answering Null costs one Children more. Only a plane
+// that can report Null at a container address reaches that row at all.
+func TestWhatASourceIsAskedAtADynamicContainer(t *testing.T) {
+	t.Parallel()
+
+	tags := At("tags")
+
+	// Fresh per case, because a plane that has already been asked cannot report
+	// what asking it costs.
+	cases := []asked{{
+		name: "a populated sequence, whose own address is never asked",
+		src: &counting{
+			values:   map[Path]Value{tags.Elem(0): String("a"), tags.Elem(1): String("b")},
+			children: map[Path][]Path{tags: {tags.Elem(0), tags.Elem(1)}},
+		},
+		gets:  2,
+		lists: 1,
+		want:  []string{"a", "b"},
+	}, {
+		name:  "an absent one, which is the same observation as an empty one",
+		src:   &counting{},
+		gets:  1,
+		lists: 1,
+		want:  []string{"seed"},
+	}, {
+		name:  "and a null at the container's own address, which costs the extra list",
+		src:   &counting{values: map[Path]Value{tags: Null()}},
+		gets:  1,
+		lists: 1,
+		want:  nil,
+	}}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			c.check(t)
+		})
+	}
+}
+
+// TestASourceThatCannotListIsAskedExactlyAsItAlwaysWas is the other half of the
+// order, and it is a byte-for-byte assertion on purpose.
+//
+// The reordering is for sources that enumerate. A source that cannot list is
+// asked its container address first, as it always was, and gets the same refusal
+// in the same words at the same address.
+func TestASourceThatCannotListIsAskedExactlyAsItAlwaysWas(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a null there is still a complete answer, at one Get", aNullNeedsNoLister)
+	t.Run("and anything less is the same refusal it always was", theSameRefusalAsAlways)
+}
+
+func aNullNeedsNoLister(t *testing.T) {
+	t.Parallel()
+
+	src := &flat{values: map[Path]Value{At("tags"): Null()}}
+
+	got, err := LoadOver(t.Context(), tagsOnly{Tags: []string{"seed"}}, src)
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if got.Tags != nil || src.gets != 1 {
+		t.Errorf("loaded %v after Get=%d, want nil after Get=1", got.Tags, src.gets)
+	}
+}
+
+func theSameRefusalAsAlways(t *testing.T) {
+	t.Parallel()
+
+	src := &flat{}
+
+	_, err := Load[limitsOnly](t.Context(), src)
+
+	want := "ferry: /limits: the addresses under a map[string]int come from the value, and *ferry.flat " +
+		"cannot list what a plane holds under an address: a source that does not implement " +
+		"ferry.Enumerator reaches every static address and no dynamic one, which is a property of that " +
+		"plane rather than of this schema\n  walk, plane error"
+	if report := reportOf(err); report != want {
+		t.Errorf("report\n\t%s\nwants to be\n\t%s", report, want)
+	}
+
+	if src.gets != 1 {
+		t.Errorf("the plane was asked Get=%d, want Get=1", src.gets)
+	}
+
+	mustBeClass(t, err, ErrPlane)
+}
+
+// TestAnAnswerAtAContainerAddressWithChildrenUnderItIsNotRead is what the order
+// takes away, asserted rather than left to be discovered.
+//
+// Over a source that can list, the container's own address is not asked where
+// the plane holds children under it, so a driver can no longer refuse there and
+// a Null there no longer wins. ADR-0003 states both as the cost of the order,
+// and neither was a place a driver was entitled to answer from: ADR-0014's third
+// conformance case already forbids failing at a container Get, and a plane
+// reporting Null over children is contradicting itself.
+func TestAnAnswerAtAContainerAddressWithChildrenUnderItIsNotRead(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		at   Value
+	}{
+		{name: "a value the rule forbids there", at: String("everything")},
+		{name: "and a null, which the rule allows", at: Null()},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			mustReadTheChildren(t, c.at)
+		})
+	}
+}
+
+// mustReadTheChildren loads a one-element sequence whose container address also
+// carries at, and asserts the element won and the container address was not
+// asked at all.
+func mustReadTheChildren(t *testing.T, at Value) {
+	t.Helper()
+
+	tags := At("tags")
+	src := &counting{
+		values:   map[Path]Value{tags: at, tags.Elem(0): String("z")},
+		children: map[Path][]Path{tags: {tags.Elem(0)}},
+	}
+
+	got, err := Load[tagsOnly](t.Context(), src)
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if !slices.Equal(got.Tags, []string{"z"}) {
+		t.Errorf("loaded %v, want [z]: the children are what the plane holds", got.Tags)
+	}
+
+	mustAsk(t, src, 1, 1)
 }
 
 // TestChildrenReturnsKindedAddresses is why the interface hands back addresses
