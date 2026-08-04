@@ -22,15 +22,15 @@ const (
 		"and reads addresses out of it, rather than unmarshalling into the struct."
 	ferryNotesDump = "Edits the existing document in place: it reads and parses the file, writes only " +
 		"the keys the struct maps, and leaves comments, key order, quoting and unmapped " +
-		"keys intact. The replacement is atomic and durable - temp file, fsync, rename - " +
-		"and the fsync is where the bulk of this row's time goes. ferry is not the only " +
-		"column that fsyncs: viper's WriteConfigAs ends in f.Sync() too, which is why the " +
-		"two of them land together, and why koanf and the baseline, which os.WriteFile a " +
-		"fresh document and never sync, land far below both. What ferry alone has is both " +
-		"guarantees at once - its write is atomic and fsynced, viper's is fsynced and not " +
-		"atomic, and koanf's and the baseline's are neither. So this row splits on " +
-		"durability rather than on the mapping layer, and what ferry gives up to koanf " +
-		"here is the price of a journal commit rather than of the walk."
+		"keys intact. The replacement is atomic: a temporary file beside the plane is " +
+		"renamed over it, so nothing ever reads a half-written config and a save that " +
+		"fails leaves the file byte for byte as it was. It is not flushed to the disk " +
+		"unless the caller asks for that, and this row measures the default, so what is " +
+		"timed here offers the same durability koanf and the baseline do. viper is the " +
+		"one column that fsyncs: its WriteConfigAs ends in f.Sync(), which is why it " +
+		"sits an order of magnitude above the other three. ferry's durable mode is " +
+		"yaml.Durable(), and it is opt-in because the journal commit it costs dwarfs " +
+		"everything else in the save. It is not what this row measures."
 )
 
 // ferryTag is the pooled struct tag key, which ferry is told to read instead
