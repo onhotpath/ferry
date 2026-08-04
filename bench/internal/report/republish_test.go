@@ -11,7 +11,14 @@ import (
 // The two published results files this package is tested against, both real.
 //
 //   - published_ci.md was produced by .github/workflows/perf.yml on
-//     ubuntu-latest, which is the ordinary case.
+//     ubuntu-latest, which is the ordinary case. It has since been carried
+//     forward once, by re-rendering it with the harness change that added the
+//     variant rows: a published file cannot round-trip through a harness that
+//     describes itself differently from the one that wrote it, and re-rendering
+//     is the operation that change implies for every published file rather than
+//     a way around the assertion. Not one figure in it moved, and the two
+//     appendices every table in it is derived from are byte for byte what the
+//     workflow embedded.
 //   - published_workstation.md was produced by hand on a developer's machine,
 //     and its provenance table says "a developer workstation, not a CI runner"
 //     and "working tree on perf/bench-harness". Neither is a value any workflow

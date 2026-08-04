@@ -14,9 +14,12 @@ import (
 // rather than copied, because a second copy of a hundred-kilobyte published file
 // is a second thing that can go stale.
 //
-// published_ci.md was written by .github/workflows/perf.yml. The CSV and the
-// recheck file are benchstat over the raw output that file embeds, the recheck
-// one deliberately under a different filename.
+// published_ci.md was written by .github/workflows/perf.yml, and is carried
+// forward by re-rendering it whenever the harness's description of itself
+// changes; see the note on it in republish_test.go. The CSV and the recheck
+// file are benchstat over the raw output that file embeds, the recheck one
+// deliberately under a different filename, and neither has to move when it is
+// carried forward, because the raw output never does.
 const (
 	fixtures = "../../internal/report/testdata"
 
@@ -59,6 +62,10 @@ func rerenderOpts(t *testing.T, dir string) *opts {
 // the file that was published, and the two charts beside it. Anything less and
 // the diff a reviewer reads is a mix of the correction that was intended and
 // whatever the re-render moved on its own.
+//
+// When the harness's own description of itself does change - a note corrected,
+// a row added - the fixture is re-rendered once and committed, and that diff is
+// the review. What may never move in it is a measurement.
 //
 // It is also where every recovered field is proved at once: the provenance
 // table carries the runner, both revisions, the flags, the command and the

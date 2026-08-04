@@ -178,6 +178,23 @@ really published.
 
 Never give a library an easier struct to make it pass.
 
+## Measuring one library a second way
+
+A library that publishes more than one entry point for the same job gets a second `Impl`
+with `Variant: true` on it, in the same scenario, beside the first.
+ferry has one: every verb takes the source and binds it on the call, and a caller may
+instead hold the binding and load through it.
+`ferry-bound` is that, and the bind sits in `New`, which is where the cold/warm axis puts
+anything a library can amortise, so its warm figure is a load with the bind taken out of it
+and its cold figure is the same job `ferry`'s cold figure measures.
+
+A variant is measured, gated by the equivalence check and published like any other row.
+What it is not is a competitor: it is left out of "the fastest other library" in the README
+and out of "where ferry loses" in the results file, because a row that is the same library
+cannot be a library that beat it.
+It gets a section of its own instead, rendering it against the row it varies, which is the
+only reason to measure one at all.
+
 ## The chart
 
 `perfreport` emits two SVGs, one per GitHub theme, referenced from a `<picture>` with a

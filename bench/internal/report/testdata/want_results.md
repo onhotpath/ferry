@@ -103,6 +103,7 @@ five flat fields out of the process environment.
 | library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
 | --- | --- | --- | --- | --- | --- |
 | ferry | 7.68µs ±4% | 2.75µs ±4% | 16.60x | 2.89 KiB | 41 |
+| ferry-bound | not measured | not measured | not measured | not measured | not measured |
 | koanf | 12.4µs ±7% | 12.5µs ±3% | 75.24x | 8.41 KiB | 171 |
 | viper | 8.12µs ±3% | 6.76µs ±2% | 40.80x | 3.61 KiB | 67 |
 | xload | 1.55µs ±2% | 1.55µs ±5% | 9.34x | 936 B | 17 |
@@ -111,6 +112,7 @@ five flat fields out of the process environment.
 | stdlib (baseline) | 166ns ±1% | 166ns ±15% | 1.00x, by definition | 0 B | 0 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Compiles once, caches the schema.
+- **ferry-bound** (`github.com/onhotpath/ferry`) The same job through a caller-held binding.
 - **koanf** (`github.com/knadh/koanf/v2`) Reads the whole environ per load.
 - **viper** (`github.com/spf13/viper`) Needs every key registered.
 - **xload** (`github.com/gojekfarm/xtools/xload`) Reflects per call.
@@ -157,6 +159,16 @@ table above, so the chart and the tables cannot disagree.
   <source media="(prefers-color-scheme: dark)" srcset="perf-dark.svg">
   <img alt="Time and allocations per load for every library in every scenario, cold and warm, with benchstat's confidence interval. Time is a log scale; allocations are linear from zero." src="perf-light.svg">
 </picture>
+
+## The same library, measured a second way
+
+A row here is not a second library. It is `ferry`, measured through a different
+entry point ferry publishes, which is why it is left out of "the fastest other library"
+and out of "where ferry loses" below. What it did differently is in its scenario's notes.
+
+| scenario | variant | warm | `ferry` warm | the variant is | allocs/op | `ferry` allocs/op |
+| --- | --- | --- | --- | --- | --- | --- |
+| `env_small` | ferry-bound | not measured | 2.75µs ±4% | not measured | not measured | 41 |
 
 ## benchstat's geometric mean
 
