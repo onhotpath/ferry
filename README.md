@@ -150,7 +150,27 @@ ferry uses `errors.AsType` and the 1.27 standard library, and core takes no non-
 ## Performance
 
 <!-- ferry:perf:begin -->
-No benchmark results have been published yet.
+Measured, not claimed.
+The table is machine-generated from a benchmark run; the harness refuses to run at
+all unless every library produces the identical struct from the identical source.
+
+| scenario | ferry (warm) | fastest other | |
+| --- | --- | --- | --- |
+| `env_small` | 2.88µs | 172ns (stdlib) | ferry 16.78x slower |
+| `env_large` | 34.5µs | 2.20µs (stdlib) | ferry 15.69x slower |
+| `yaml_small` | 18.4µs | 17.1µs (stdlib) | ferry 1.08x slower |
+| `yaml_large` | 104µs | 102µs (stdlib) | ferry 1.02x slower |
+| `dump_large` | 2.38ms | 221µs (stdlib) | ferry 10.76x slower |
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/perf/perf-dark.svg">
+  <img alt="Time and allocations per load for every library in every scenario, cold and warm, with benchstat's confidence interval. Time is a log scale; allocations are linear from zero." src="docs/perf/perf-light.svg">
+</picture>
+
+Full results, the machine, the toolchain, the competitor versions, what each library
+actually did and what was not measured: [docs/perf/results.md](docs/perf/results.md).
+
+Run on a developer workstation, not a CI runner, `-count 10`, `-benchtime 1s`, Go go1.27rc2.
 <!-- ferry:perf:end -->
 
 ## Licence
