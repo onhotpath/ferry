@@ -63,6 +63,12 @@ type Proof interface {
 	// the suite it belongs to.
 	run(h *harness)
 
+	// refuse is the other half of [Driver]'s first case: the cases this plane
+	// declared it cannot carry must be refused loudly rather than mangled. It
+	// is a method here for run's reason - the cases are typed - and its
+	// implementation is in driver.go, with the suite it belongs to.
+	refuse(h *harness, carry map[ferry.VKind]bool)
+
 	// proof keeps [Type] the only constructor.
 	proof()
 }
