@@ -562,7 +562,11 @@ func writeVerb(f fmt.State, verb rune, r rendered) {
 // One failure returns the leaf bare, as errors.Join does, and no aggregate ever
 // holds a nil element, which the errors package documents as invalid.
 func join(errs ...error) error {
-	out := make([]error, 0, len(errs))
+	// out is left nil until the first failure, so a successful walk aggregates
+	// nothing and allocates nothing here. On a walk that does fail the append
+	// grows it, which costs a little more than one exact make and is not a path
+	// that is hot.
+	var out []error
 	for _, err := range errs {
 		out = appendElement(out, err)
 	}
