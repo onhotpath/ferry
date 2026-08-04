@@ -2,49 +2,157 @@
 
 [![CI](https://github.com/onhotpath/ferry/actions/workflows/ci.yml/badge.svg)](https://github.com/onhotpath/ferry/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/onhotpath/ferry/graph/badge.svg?token=A33mpdyMRa)](https://codecov.io/gh/onhotpath/ferry)
+[![Go Reference](https://pkg.go.dev/badge/github.com/onhotpath/ferry.svg)](https://pkg.go.dev/github.com/onhotpath/ferry)
 
 Two-way data mapping for Go structs: load from any source, dump to any sink.
 
-One annotated struct, one tag grammar, two directions, over a plane the library has no opinion about.
+One annotated struct, one tag grammar, two directions.
+The same `Config` type reads from a YAML file, from environment variables, and from a Consul-shaped key-value store, and writes back to any of them that can be written to.
 
-```go
-type DB struct {
-    Host string `ferry:"host,required"`
-    Port int    `ferry:"port,default=5432"`
-}
-
-type Config struct {
-    Name string   `ferry:"name"`
-    DB   DB       `ferry:"db"`
-    Tags []string `ferry:"tags"`
-}
-
-cfg, err := ferry.Load[Config](ctx, yaml.Source{Path: "app.yaml"})
-err = ferry.Dump(ctx, cfg, yaml.Sink{Path: "app.yaml"})
+```
+go get github.com/onhotpath/ferry
+go get github.com/onhotpath/ferry/driver/yaml
 ```
 
-The same struct loads from environment variables, from a Consul-shaped KV, and from anything anybody writes two methods for.
+## A worked example
+
+```go
+type Config struct {
+	Name    string        `ferry:"name,required"`
+	Timeout time.Duration `ferry:"timeout,default=30s"`
+	DB      DB            `ferry:"db"`
+	Tags    []string      `ferry:"tags"`
+}
+
+type DB struct {
+	Host string `ferry:"host"`
+	Port int    `ferry:"port,default=5432"`
+}
+```
+
+Given `app.yaml`:
+
+```yaml
+# the service this config is for
+name: checkout
+db:
+  host: db.internal
+tags:
+  - a
+```
+
+load it, change something, and write it back:
+
+```go
+cfg, err := ferry.Load[Config](ctx, yaml.NewSource("app.yaml"))
+// {Name:checkout Timeout:30s DB:{Host:db.internal Port:5432} Tags:[a]}
+
+cfg.Tags = append(cfg.Tags, "b")
+
+err = ferry.Dump(ctx, cfg, yaml.NewSink("app.yaml"))
+```
+
+The file afterwards:
+
+```yaml
+# the service this config is for
+name: checkout
+db:
+  host: db.internal
+  port: 5432
+tags:
+  - a
+  - b
+timeout: 30s
+```
+
+The comment survived, and so did the key order.
+Saving edits the file rather than replacing it, so only the keys your struct names are touched.
+
+`timeout` was written because the field holds a value, and `port` because a default was applied on the way in.
+A default is applied when the plane holds nothing at that address, and it is text parsed by exactly the parser that field's own kind uses, so `default=30s` and a `timeout: 30s` in the file mean the same thing (ADR-0006).
+
+## Why it exists
+
+Most Go configuration libraries go one way.
+They fill a struct from somewhere and stop, so writing the same struct back means a second set of tags, a second mapping, and a second place for the two to drift apart.
+
+ferry drives both directions off one annotation, over a backend it has no opinion about.
+Three things follow from that rather than being features bolted on top:
+
+- **A config file a person maintains stays one.**
+  A save through `driver/yaml` edits the document in place, so comments, key order and keys your struct does not map all survive.
+- **Plane-to-plane transfer is free.**
+  Load from one source and dump to another sink, with no intermediate format: a YAML file into a KV store is two calls.
+- **A backend is two methods.**
+  `Bind` is handed the address set your type determined, and the function it returns does the I/O.
+  Nothing else is required, and the conformance suite that proves you got it right is one call.
+
+## Drivers
+
+| module | plane | directions |
+| --- | --- | --- |
+| [`driver/env`](driver/env/) | environment variables | load |
+| [`driver/yaml`](driver/yaml/) | a YAML file, edited in place | load and dump |
+| [`driver/kv`](driver/kv/) | a Consul-shaped key-value store, client supplied by you | load and dump, experimental |
+
+Each is a module of its own, versioned separately, and each has a README of its own behind the link.
+Loading and dumping are separate interfaces, so a source with no honest write - environment variables are the case - is a compile error at the `ferry.Dump` call site rather than a runtime refusal.
+
+Anything else is [a driver you write](docs/guide/drivers.md).
+
+## The four verbs and the two options
+
+```go
+cfg, err := ferry.Load[Config](ctx, src)       // build a fresh Config from a source
+cfg, err := ferry.LoadOver(ctx, seed, src)     // load over a value that already holds some
+err = ferry.Dump(ctx, cfg, sink)               // write a value to a sink
+err = ferry.Compile[Config]()                  // check the type maps, with no plane in sight
+```
+
+`ferry.TagKey("env")` changes which struct tag key is read.
+It applies to every struct in that call, so pass it everywhere you load that type.
+
+`ferry.WithRegistry(reg)` names a registry other than the default one.
+A registry holds the codecs you registered and caches the compiled schema, so it is a value to keep: one per program, or one per test.
+
+## Documentation
+
+The guides under [`docs/guide/`](docs/guide/) are the long-form documentation:
+
+- [The supported type set](docs/guide/types.md) - every type ferry carries, in one table, and the sharp edges that are easier to meet in production than to guess at from the rules.
+- [Tags, defaults and absence](docs/guide/tags.md) - the whole tag grammar, and what `Absent` and `Null` mean to a Go field.
+- [Errors](docs/guide/errors.md) - what a failed call carries, how to match on it, and why the message text is not API.
+- [Plane compatibility](docs/guide/compatibility.md) - the second promise ferry makes, its three tiers, and what a representation change costs.
+- [Writing a driver](docs/guide/drivers.md) - the two required methods, the three optional interfaces, and the one-call conformance suite.
+
+The design records behind every one of these decisions are in [`docs/adr/`](docs/adr/).
+The ADRs are the specification: where a guide and an ADR disagree, the ADR wins and the guide is wrong.
+Start with [ADR-0001](docs/adr/0001-what-ferry-supports.md) for what ferry supports and what is ruled out, then [ADR-0010](docs/adr/0010-the-entry-point-and-the-schema-cache.md) for the shape a caller sees.
+
+Package documentation is on [pkg.go.dev](https://pkg.go.dev/github.com/onhotpath/ferry).
 
 ## Status
 
-Under construction, and not yet usable.
+**v0, and deliberately so.**
+v0 is the only place semver allows a decision to be taken back, and ferry is using it (ADR-0002).
+Both the Go API and the text ferry writes into a plane are still free to move.
+The trigger for v1 is the tag grammar surviving real use, and the golden table that pins what a plane holds settling (ADR-0013).
 
-The design is finished and the implementation is not.
-Fourteen architectural decision records in [`docs/adr/`](docs/adr/) settle the address model, the source and sink contract, the type set, defaults and absence, the codec chain, the tag grammar, registration, the entry point and schema cache, the error model, the caller-held binding, plane compatibility and the conformance package.
-Every one of them is Accepted.
+**The Go floor is 1.27**, declared by every module in this repository.
+Go 1.27 is not GA at the time of writing: `go1.27rc2` is what exists, and it is what this repository's `go.work` pins.
+ferry uses `errors.AsType` and the 1.27 standard library, and core takes no non-stdlib dependency at all.
 
-The build that turns them into code is tracked in [#63](https://github.com/onhotpath/ferry/issues/63).
+## Performance
 
-## Reading the design
-
-The ADRs are the specification, and they are meant to be read rather than summarised.
-Where this README and an ADR disagree, the ADR wins and this README is wrong.
-
-Start with [ADR-0001](docs/adr/0001-what-ferry-supports.md) for what ferry supports and what is ruled out, then [ADR-0010](docs/adr/0010-the-entry-point-and-the-schema-cache.md) for the shape a caller sees.
+<!-- ferry:perf:begin -->
+No benchmark results have been published yet.
+<!-- ferry:perf:end -->
 
 ## Contributing
 
 `make help` lists the developer targets.
-`make check` is what to run before pushing.
+`make check` and `make lint` are what CI runs, and both must be green.
 
-Documentation proper is [#87](https://github.com/onhotpath/ferry/issues/87), and this file will be replaced by it.
+Read the ADR that owns a decision before proposing a change to it.
+A proposal that contradicts an accepted ADR should say so out loud rather than quietly overriding it.
