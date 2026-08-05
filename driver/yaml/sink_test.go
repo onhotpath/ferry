@@ -736,6 +736,96 @@ func TestAnAliasNoFieldMapsIsUntouched(t *testing.T) {
 	}
 }
 
+// TestAnUnhandledTagSurvivesThreeStages is the acceptance bar for the tag a
+// save used to destroy (#155): load, dump, load, with the third stage compared
+// against the first, and the file's own text asserted alongside.
+//
+// !!timestamp is a tag this driver has no reading of its own for, at a key the
+// struct maps, so the save rewrites that scalar and used to write it back as a
+// plain quoted string. The tag is the operator's, the way #199 found the anchor
+// to be, and a dump that was asked to change nothing must change nothing.
+func TestAnUnhandledTagSurvivesThreeStages(t *testing.T) {
+	type config struct {
+		When    string `ferry:"when"`
+		Timeout string `ferry:"timeout"`
+		Port    int    `ferry:"port"`
+	}
+
+	// Two tags, because YAML resolves one of them back from the bare text and
+	// cannot resolve the other at all, and a save has to keep both lines.
+	const doc = "when: !!timestamp 2026-08-02T12:00:00Z\ntimeout: !mycompany:duration 30s\nport: 5432\n"
+
+	path := write(t, doc)
+
+	first, err := ferry.Load[config](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("the first load: %v", err)
+	}
+
+	if err := ferry.Dump(t.Context(), first, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got := read(t, path); got != doc {
+		t.Errorf("the plane holds %q, want %q: the tag at a mapped key is the operator's and the save was asked "+
+			"to change no value", got, doc)
+	}
+
+	third, err := ferry.Load[config](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("the third load: %v", err)
+	}
+
+	if third != first {
+		t.Errorf("the third stage is %+v and the first was %+v", third, first)
+	}
+}
+
+// TestTheDriversOwnSpellingBeatsTheTagItReplaces is the first guard on carrying
+// a tag: this driver has a spelling for !!float and for !!int, so the tag it
+// writes wins over the one that was there.
+//
+// Without the guard a value could be written under a tag contradicting it, and
+// the file would say !!float over an integer nothing rounded.
+func TestTheDriversOwnSpellingBeatsTheTagItReplaces(t *testing.T) {
+	type config struct {
+		Port int `ferry:"port"`
+	}
+
+	path := write(t, "port: 3.5\n")
+
+	if err := ferry.Dump(t.Context(), config{Port: 8080}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, want := read(t, path), "port: 8080\n"; got != want {
+		t.Errorf("the plane holds %q, want %q: a tag this driver spells itself is not the operator's to keep",
+			got, want)
+	}
+}
+
+// TestATagIsDroppedWhereTheKindChanged is the second guard: the address held a
+// string under a tag this driver does not read, and now holds a number.
+//
+// The tag described the value that was there, so it is stale in the way a
+// copied quoting style is, and keeping it would leave the file claiming a
+// timestamp over an integer.
+func TestATagIsDroppedWhereTheKindChanged(t *testing.T) {
+	type config struct {
+		When int `ferry:"when"`
+	}
+
+	path := write(t, "when: !!timestamp 2026-08-02T12:00:00Z\n")
+
+	if err := ferry.Dump(t.Context(), config{When: 5}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, want := read(t, path), "when: 5\n"; got != want {
+		t.Errorf("the plane holds %q, want %q: a tag over a value of another kind is stale", got, want)
+	}
+}
+
 // TestAnAliasedDocumentSurvivesThreeStages is the acceptance bar a lossy round
 // trip hides from: load, dump, load, with the third stage compared against the
 // first.

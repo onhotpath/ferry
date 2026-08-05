@@ -180,8 +180,15 @@ func (w *writer) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
 	}
 
 	// The comments around the value are the operator's and survive the value
-	// being replaced. The value, the tag and the style are ferry's.
+	// being replaced. The value and the style are ferry's.
 	spelled.HeadComment, spelled.LineComment, spelled.FootComment = at.HeadComment, at.LineComment, at.FootComment
+
+	// So is the tag, where this driver has no spelling of its own for it and
+	// the kind at the address has not changed (#155). A !!timestamp is the
+	// operator's the way the anchor below is: this driver did not write it, it
+	// reads the scalar as a String whatever the tag says, and dropping it made
+	// a document lose on a save what a save had not been asked to touch.
+	carryTag(at, spelled)
 
 	// So is the anchor, for the same reason and with a sharper consequence
 	// (#196): dropping it leaves every alias to this node dangling, so the save

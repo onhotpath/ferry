@@ -175,23 +175,94 @@ func spellBytes(v ferry.Value) (*yamlv3.Node, error) {
 // at all. ADR-0003 reads a composite one element at a time, so there is no
 // group value for a container to hold, and a driver answering one is a driver
 // core cannot interpret.
+//
+// The kind comes from [kindOf], so the read and the guard [carryTag] applies
+// on the way out cannot drift apart: a tag is carried across a save exactly
+// where the kind it reads as has not changed.
 func valueOf(n *yamlv3.Node) (ferry.Value, error) {
 	if n == nil || n.Kind != yamlv3.ScalarNode {
 		return ferry.Value{}, nil
 	}
 
-	switch n.Tag {
-	case nullTag:
+	switch kindOf(n.Tag) {
+	case ferry.KindNull:
 		return ferry.Null(), nil
-	case boolTag:
+	case ferry.KindBool:
 		return boolOf(n.Value)
-	case intTag, floatTag:
+	case ferry.KindNumber:
 		return ferry.Number(n.Value), nil
-	case binaryTag:
+	case ferry.KindBytes:
 		return bytesOf(n.Value)
 	default:
 		return ferry.String(n.Value), nil
 	}
+}
+
+// kindOf is the kind this plane reads one tag as.
+//
+// A tag this driver has no arm for is a String, and that is the deliberate half
+// of #155 rather than a fall-through nobody chose: an unhandled tag is carried
+// and not interpreted, so `when: !!timestamp 2026-08-04` arrives as the text
+// the operator wrote and reaches whichever codec the field declared, and the
+// save writes the tag back untouched. Refusing it instead would fail a document
+// this driver can read perfectly well, and a permissive default cannot be
+// tightened once it has shipped. Reading a tag as some other kind is
+// interpretation, needs a mechanism to say so, and is #156.
+func kindOf(tag string) ferry.VKind {
+	switch tag {
+	case nullTag:
+		return ferry.KindNull
+	case boolTag:
+		return ferry.KindBool
+	case intTag, floatTag:
+		return ferry.KindNumber
+	case binaryTag:
+		return ferry.KindBytes
+	default:
+		return ferry.KindString
+	}
+}
+
+// ownTag says whether this driver has a spelling of its own for a tag.
+//
+// The empty tag is one of them, and deliberately: a node the merge minted, or a
+// merge key [untagMerges] cleared, carries no tag the operator wrote, and
+// leaving it empty would hand the emitter's own resolution the last word on the
+// value's type.
+func ownTag(tag string) bool {
+	switch tag {
+	case "", nullTag, boolTag, intTag, floatTag, strTag, binaryTag, mapTag, seqTag, mergeTag:
+		return true
+	default:
+		return false
+	}
+}
+
+// carryTag puts the operator's tag on the node replacing theirs, where this
+// driver has no spelling of its own for it (#155).
+//
+// A tag at an address is the operator's in the way an anchor turned out to be
+// (#196). This driver never wrote !!timestamp, reads it as a String, and used
+// to drop it on a save, so a document a load and a dump had merely passed
+// through came back holding less than it went in with.
+//
+// The two guards are what make carrying safe. A tag this driver spells itself
+// loses to that spelling, or a value could be written under a tag that
+// contradicts it. And a tag whose kind is no longer the value's is stale in the
+// way a copied style is (see [leaf]), because the read would then answer a kind
+// the value is not.
+//
+// TaggedStyle goes with it, and it is the one style bit a write ever keeps. It
+// is not the operator's quoting, which is what [leaf] refuses to copy: it says
+// the tag is written out rather than left to the reader's own resolution, so
+// the line comes back spelled as it was written rather than as whatever YAML
+// would have resolved the bare text to.
+func carryTag(at, spelled *yamlv3.Node) {
+	if at.Kind != yamlv3.ScalarNode || ownTag(at.Tag) || kindOf(at.Tag) != kindOf(spelled.Tag) {
+		return
+	}
+
+	spelled.Tag, spelled.Style = at.Tag, spelled.Style|yamlv3.TaggedStyle
 }
 
 // boolOf reads a !!bool, refusing a spelling YAML's own resolution would never

@@ -22,10 +22,11 @@
 // content is comments, the original indentation, which is two spaces on the way
 // out, and the column a trailing comment sat in.
 //
-// There is one more and it is bigger. A scalar's tag, at a key your struct maps,
-// is dropped: `when: !!timestamp 2026-08-04` is saved back as
-// `when: "2026-08-04"`. A key no field maps keeps its tag, because it is never
-// touched.
+// A scalar's tag is not on that list. A tag this package has no reading of its
+// own for survives a save at a key your struct maps, so `when: !!timestamp
+// 2026-08-04` is saved back with its tag still on it. Two cases replace it: a
+// tag this package writes itself, and a tag whose value is no longer the kind
+// it was, which is stale in the way the old quoting would be.
 //
 // A file holding a stream of several documents is refused rather than
 // half-written, because an address names a place in one of them.
@@ -68,6 +69,12 @@
 // key that is simply not there is different again. Each of the five crosses
 // ferry as its own kind and comes back spelled the way it went in. A []byte
 // field is saved as standard YAML !!binary, base64.
+//
+// A tag this package does not read is carried and not interpreted. `!!timestamp
+// 2026-08-04` and `!mycompany:duration 30s` both load as the string after the
+// tag, whatever the tag says, and reach whichever codec your field declared. So
+// a field of a type that parses that text works today, and the tag itself
+// changes nothing about how the value is read.
 //
 // # Saving is atomic, and durable if you ask
 //
