@@ -16,4 +16,5 @@ use (
 	./driver/http
 	./driver/kv
 	./driver/yaml
+	./examples
 )

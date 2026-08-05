@@ -46,30 +46,48 @@ flowchart LR
 Core cannot tell a reload from a first load, and that is the design: bind-once, open-many was built long before watching, and watching is just a caller driving it on a signal.
 
 ```go
-func Watch[T any](ctx context.Context, b *ferry.Binding[T], signal <-chan struct{}) (iter.Seq[T], func() error) {
+func Watch[T any](ctx context.Context, b *ferry.Binding[T], signal <-chan struct{}) (seq iter.Seq[T], errf func() error) {
 	var streamErr error
-	seq := func(yield func(T) bool) {
-		for {
-			select {
-			case <-ctx.Done():
-				streamErr = ctx.Err()
-				return
-			case _, ok := <-signal:
-				if !ok {
-					return
-				}
-			}
-			v, err := b.Load(ctx)
-			if err != nil {
-				streamErr = err
-				return
-			}
-			if !yield(v) {
-				return
-			}
-		}
+	seq = func(yield func(T) bool) {
+		streamErr = stream(ctx, b, signal, yield)
 	}
 	return seq, func() error { return streamErr }
+}
+
+// stream is the loop itself, returning the error that ended it: nil when the
+// driver closed the signal or the caller stopped ranging.
+func stream[T any](ctx context.Context, b *ferry.Binding[T], signal <-chan struct{}, yield func(T) bool) error {
+	for {
+		v, ok, err := reload(ctx, b, signal)
+		if err != nil {
+			return err
+		}
+		if !ok || !yield(v) {
+			return nil
+		}
+	}
+}
+
+// reload waits for one signal and loads through the binding.
+//
+// ok is false with a nil error for the one clean ending it can see, which is
+// the driver closing the signal. A cancelled context and a failed load are both
+// errors, and both end the stream.
+func reload[T any](ctx context.Context, b *ferry.Binding[T], signal <-chan struct{}) (v T, ok bool, err error) {
+	var zero T
+	select {
+	case <-ctx.Done():
+		return zero, false, ctx.Err()
+	case _, open := <-signal:
+		if !open {
+			return zero, false, nil
+		}
+	}
+	v, err = b.Load(ctx)
+	if err != nil {
+		return zero, false, err
+	}
+	return v, true, nil
 }
 ```
 

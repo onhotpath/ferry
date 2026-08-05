@@ -50,6 +50,12 @@ jobs:
   # as a hand-maintained list, so a driver added later is picked up whether or
   # not anyone edits this workflow. Every other job takes its module list from
   # here, so there is one place where discovery happens.
+  #
+  # examples/ is a module too, and it is discovered here for the same reason:
+  # a published example that no longer compiles is worse than no example, so it
+  # is held to the same build, vet, test and lint as everything else. It is not
+  # a driver and passes no conformance suite; it is a consumer of core, built
+  # the way a reader is being told to build.
   modules:
     name: Discover modules
     runs-on: ubuntu-latest
@@ -59,14 +65,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Glob driver/* for module directories
+      - name: Glob driver/* and examples for module directories
         id: discover
         run: |
           set -euo pipefail
           shopt -s nullglob
 
-          dirs=(.)
+          drivers=()
           for f in driver/*/go.mod; do
+            drivers+=("${f%/go.mod}")
+          done
+
+          dirs=(. "${drivers[@]}")
+          for f in examples/go.mod; do
             dirs+=("${f%/go.mod}")
           done
 
@@ -75,7 +86,9 @@ jobs:
 
           # A glob that silently matches nothing is the failure mode this whole
           # scheme has, so it is the one thing asserted about the glob itself.
-          if [ "${#dirs[@]}" -lt 2 ]; then
+          # The count asserted is the driver one specifically: examples/ matching
+          # must not be able to stand in for every driver having disappeared.
+          if [ "${#drivers[@]}" -eq 0 ]; then
             echo "FAIL: driver/*/go.mod matched nothing."
             echo "      Either every driver module lost its go.mod, or the glob"
             echo "      stopped working and this workflow was about to test core"
