@@ -43,3 +43,13 @@ A miniature of core's walk, with the parts #122 and #20 argue about and nothing 
    `recover.go`: the recover fence wraps exactly the user-code call (codec half), never ferry's own logic.
    One panicking codec -> one typed `errCodecPanic` carrying the address, healthy siblings still load, ordinary refusals aggregate next to it, deferred release still closes-without-Commit.
    A panic outside the fence (ferry's own bug) still crashes - proven by test.
+
+## Round 3 additions (the owner's #20 scenario, and who writes `go`)
+
+8. **The multi-service Load** (`multisvc.go`): 8 keys routed 2/3/3 across three backends (1ms/2ms/3ms).
+   Identical destinations proven; round trips: serial 8, core per-address fanout with MaxConcurrency(3) still 8, backend-grouped batches 3 (one per service).
+   Wall clock: serial 18.3ms, core fanout 7.1ms, backend batches 3.4ms - the owner's "wall-clock = longest backend", and only the driver can group, because only it knows the routing.
+9. **Who writes `go`: core does, gated and bounded** (`capability.go`).
+   Core's scheduler fans out per address only when BOTH the caller allowed it (`MaxConcurrency(n)` Option) and the driver's instance asserted the optional capability (`ConcurrentSafe`, the Releaser/Committer idiom).
+   Proven: an instance without the capability never sees an overlapped call under `MaxConcurrency(4)` (peak inflight 1); a capable one overlaps within the bound (2..4).
+   env/yaml simply never assert it; kv/S3/Consul do.
