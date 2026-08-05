@@ -9,6 +9,8 @@ Long-form documentation for people using ferry.
 | [Errors](errors.md) | what a failed call carries, how to match on it, and why the message text is not API |
 | [Plane compatibility](compatibility.md) | ferry's second promise, its three tiers, what a representation change costs, and the pinned `encoding/json/v2` option set |
 | [Writing a driver](drivers.md) | the two required methods, the three optional interfaces, the two checks before any I/O, declaring carryable kinds, and the one-call conformance suite |
+| [Concurrency](concurrency.md) | the two axes, why driver batching beats fanout, the one budget both layers honour, and what a caller-supplied function may assume |
+| [Watch and reload](watch-reload.md) | why reload is `Load`, the thirty-line watcher, the delivery shape and its error convention, and the sharp edges a watch loop inherits |
 
 These guides are written for a reader who wants to use ferry.
 The **specification** is the architectural decision records in [`../adr/`](../adr/), and where a guide and an ADR disagree, the ADR wins and the guide is wrong.
