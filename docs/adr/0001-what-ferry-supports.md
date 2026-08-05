@@ -70,12 +70,27 @@ A milestoned entry therefore cannot rot into a broken promise: if the mechanism 
 | Drift detection: value drift | Enabled | Load a fresh value, dump both, diff by plane key. |
 | Plane-to-plane transfer | Enabled | Falls out of the pluggable design. Ships as an example. |
 | Drift detection: plane inspection | Milestoned | Needs observable presence ([#8](https://github.com/onhotpath/ferry/issues/8)) and optional source enumeration ([#5](https://github.com/onhotpath/ferry/issues/5)). |
-| Watch and reload | Milestoned | Machinery lands in core when it lands. [#13](https://github.com/onhotpath/ferry/issues/13). |
+| Watch and reload | **Enabled** | Was Milestoned; the machinery landed, so the feature builds outside. [#13](https://github.com/onhotpath/ferry/issues/13), [ADR-0020](0020-watch-and-reload.md). |
 | Delta and partial dump | Milestoned | The commitment is that the sink contract does not preclude it, so it can arrive later as an Option with the complexity hidden by the implementor. |
 
 Template generation and watch are the two buckets side by side.
 Template generation is Enabled: core ships the walk, the sink contract and typed values, and the thing that writes a starter artefact ships outside.
 Watch is Milestoned: the machinery does not exist yet, and building it is core's job when it comes.
+
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): watch moved from Milestoned to Enabled, and the paragraph above is the reason rather than a casualty.**
+>
+> As published, the table's watch row read Milestoned with the note "machinery lands in core when it lands", and this paragraph used watch as the contrast case against template generation.
+> The machinery landed: the bind-open split in [ADR-0004](0004-source-and-sink.md), `Load` returning a value in [ADR-0010](0010-the-entry-point-and-the-schema-cache.md), the caller-held binding in [ADR-0012](0012-the-caller-held-binding.md), and the per-open minted set that stops a long-lived binding retaining an address per key ever seen.
+> Every one of those shipped for its own reason, which is what milestoning a mechanism rather than a feature was supposed to produce.
+> [ADR-0020](0020-watch-and-reload.md) is where the move is argued, with a watcher built against the real shipped module as its evidence.
+>
+> **Nothing about the bucket rule changes**, and this is the first row to move between buckets in the direction the rule predicts: a capability leaves Milestoned by having its mechanism completed, and lands in Enabled because Enabled is the default landing place.
+> **The commitment this ADR made is discharged in the exact terms it made it**: the mechanism, in core, and never the feature.
+> ferry ships no watcher, and the contrast in the paragraph above is now between a capability that was always buildable and one that had to wait, rather than between two buckets.
+>
+> Plane inspection and delta dump stay Milestoned on their own terms and are untouched.
+
+
 
 **Schema extraction needs no new core surface.**
 Dump a zero-valued or defaulted struct into a sink that records what it sees, and you have every mapped key and its Go type without touching a plane.
@@ -205,6 +220,8 @@ Stated as open rather than left to omission.
   ferry makes a clean break from xload's tag grammar and owes it nothing.
 - **Whether ferry has a concurrent mode at all**, in either direction.
   [#20](https://github.com/onhotpath/ferry/issues/20).
+  *(Closed by [ADR-0019](0019-the-concurrency-model.md): it does, layered - a driver batches at open, and core fans out only where the caller allowed it and the driver consented, bounded by one budget honoured at both layers.
+  Absence of the driver's consent is serial, so this entry closes without changing what any existing driver does.)*
 
 ## Consequences
 

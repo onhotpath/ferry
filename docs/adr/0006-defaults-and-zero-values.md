@@ -65,6 +65,8 @@ Five questions this ADR had to answer that the ticket did not name, all of which
   The resolution is that a reload produces a new value rather than mutating a live one, which is [#16](https://github.com/onhotpath/ferry/issues/16)'s and [#13](https://github.com/onhotpath/ferry/issues/13)'s to spell.
 - **ferry has no way to say "delete this address".**
   An omission is the absence of a `Set` call, which a replacing sink and a patching sink read differently, and both readings are legal.
+  *(Both halves of this bullet are closed under [#254](https://github.com/onhotpath/ferry/issues/254): only one reading is legal, and ferry has a delete verb.
+  See [the amendment below](#a-struct-merges-and-a-composite-replaces).)*
 
 ### One rule under all of it: Absent does not write
 
@@ -114,6 +116,26 @@ So the fix is not a different absence rule, it is that **a reload produces a new
 This ADR does not decide the entry point, which is [#16](https://github.com/onhotpath/ferry/issues/16)'s, and it does not decide the watch API, which is [#13](https://github.com/onhotpath/ferry/issues/13)'s.
 It states the constraint both inherit: whatever they are, loading into a destination that already holds a previous load's results is not the operation this ADR describes, and offering it without saying so would ship the erasure defect ADR-0001 is trying to avoid.
 
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the entry point exists, so the constraint above has a name and two sharp edges, and both are published rather than left as a warning about an unwritten API.**
+>
+> As published this section said the fix is that a reload produces a new value rather than mutating a live one, and handed the spelling to [#16](https://github.com/onhotpath/ferry/issues/16) and [#13](https://github.com/onhotpath/ferry/issues/13).
+> Both have answered.
+> [ADR-0010](0010-the-entry-point-and-the-schema-cache.md) shipped `Load[T]`, which produces a new value, and `LoadOver(ctx, seed, src)`, which does not.
+> [ADR-0020](0020-watch-and-reload.md) rules that **reload is `Load`**, with no second verb, on exactly this section's argument.
+> **What is new is that `LoadOver` is now the thing a reader will reach for by mistake**, so its two traps are stated here, where the rule they violate lives, and measured on a watcher built against the real module.
+>
+> **A lost address keeps the previous load's value.**
+> That is the measurement above, unchanged, and it is the whole reason reload is not `LoadOver`.
+> Delete `/port` from the plane and reload over the held value, and the field still reads `5432`, from a plane that no longer says so.
+>
+> **A composite is replaced wholesale rather than merged**, which is the section below applied to a seed the caller thought of as a base rather than as a previous result.
+> A `map` or a slice in the seed does not survive the plane having any child under its address, and it survives entirely when the plane has none.
+> Neither is wrong; both are surprising in a loop that runs every time a file changes.
+>
+> `LoadOver` remains exactly what this ADR describes and what ADR-0010 shipped: a load over a caller-supplied **seed**, which is a source of defaults, and not a refresh of a value a previous load populated.
+
+
+
 #### A struct merges and a composite replaces
 
 The rule is stated as though it says one thing at every kind.
@@ -134,6 +156,41 @@ A composite is a single decision: the plane either has children under that addre
 
 There is no third option available.
 Merging a slice or a map would mean deciding what an absent index or an absent key means against a seeded one, and neither question has an answer the plane can supply, because ADR-0005 already established that a plane cannot report present-and-empty at a container address.
+
+> **Amended under [#254](https://github.com/onhotpath/ferry/issues/254): the replace rule gains one clarifying line, and the Dump side of it is stated rather than left as the open question this ADR filed against itself.**
+>
+> As published this section stated replace on the Load side and the "two things this ADR does not close" list said, in full, that "ferry has no way to say delete this address" and that an omission is the absence of a `Set` call which a replacing sink and a patching sink read differently, and that both readings are legal.
+> **Both readings are no longer legal.** One is:
+>
+> > **Omission is no statement, and the plane is untouched.**
+> > Retraction is always explicit.
+> > Replace governs every address the dump **speaks about**, and no address it is silent at.
+>
+> That is the symmetric twin of the rule this ADR is built on.
+> Absence does not write into the struct; omission does not write into the plane.
+> Under it `omitzero` means what its name says, and under the other reading it would mean delete: a zero-valued Go field beside an operator-owned key would silently remove that key on the next dump, and every `omitzero` in a schema would be a landmine on a plane ferry does not exclusively own.
+>
+> Worked, on a struct whose `Comment string` carries `omitzero`, dumping `{Host: "db2", Comment: ""}` over a plane holding `host: db1` and `comment: keep me`:
+>
+> ```
+> omission is no statement   ->  host: db2      comment: keep me
+> strict projection          ->  host: db2      (comment gone)
+> ```
+>
+> **Deleting an address is now expressible, and it is a verb rather than a silence.**
+> [ADR-0004](0004-source-and-sink.md) gains the optional `Unsetter` capability, refused at open where the driver lacks it, and a `Null` at a container address still retracts the subtree as this ADR already said.
+> So the sentence "ferry has no way to say delete this address" is discharged, and the way it is said is one nobody can reach by accident.
+>
+> **The word replace is unchanged and it is the scope that was ambiguous.**
+> A composite the dump writes at all is replaced, exactly as above.
+> A composite the dump never mentions is not a composite the dump replaced with nothing.
+>
+> **And merge is not the other half of a pair.**
+> Replace is the only dump semantics ferry has; merge semantics exist only behind an explicit Option, and no such Option ships.
+> That is the same asymmetry [refusing is the reversible direction](#refusing-is-the-reversible-direction) states for every other rule here: replacing is the loud behaviour, a merge is the permissive one, and the permissive one is not retractable once it is on by default.
+> A delta write is admissible under the same rule and on one further condition, which is that reconciliation is guaranteed: efficient, but never wrong.
+
+
 
 ### Absent and Null, per kind
 
@@ -642,17 +699,14 @@ Measured, dumping a struct with one `omitzero` field at its zero value:
 
 This keeps `Writer` at one method with no special value, and it is what ADR-0001's Milestoned delta and partial dump needs from the sink contract.
 
-**Omission is not deletion, and this is the part with no answer today.**
-Measured, the same one-call dump into two sinks over an existing plane:
+**Omission is not deletion**, and it is the patching sink's reading that survives.
 
-```
-patching sink   ->  loads back {A:x B:stale}
-replacing sink  ->  loads back {A:x B:""}
-```
-
-ferry has no verb for "ensure nothing is here", so the two sinks disagree and both are legal.
-An omission means only that ferry did not write at that address.
-Whether ferry ever needs a delete is a question for ADR-0001's Milestoned delta dump when it arrives, and this ADR records that the contract does not preclude one rather than adding it.
+> **Amended under [#254](https://github.com/onhotpath/ferry/issues/254): as published this subsection measured two sinks disagreeing, called both legal, and left "ensure nothing is here" to ADR-0001's Milestoned delta dump.**
+>
+> Only the patching reading is legal now, and the missing verb is [ADR-0004](0004-source-and-sink.md)'s `Unsetter`, which is a capability of the sink contract rather than anything delta dump has to arrive before.
+> A sink that replaces an address ferry was silent at is wrong, and the reason is [the amendment above](#a-struct-merges-and-a-composite-replaces): omission is no statement, so there is nothing at that address for a dump to have replaced.
+> The measured disagreement is now one sink conforming and one sink failing a conformance case.
+> The rest of this subsection stands: an omission still means only that ferry did not write, `Writer` still has one method, and no `Set` ever carries an `Absent`.
 
 ### Observable presence is an observation of a Load, not a property of a field
 
@@ -740,6 +794,39 @@ Measured on the same walk with each probe attached, it is 595.7 ns against the p
 That is a real difference and it is not what "expensive" implies.
 The correctness half of 5.7 reproduces exactly, and it is the whole argument.
 
+> **Amended under [#122](https://github.com/onhotpath/ferry/issues/122): the bit becomes an outcome value, and the sentence above is what makes the change safe rather than what has to change.**
+>
+> As published this section said the walk returns, **per subtree**, whether any address beneath it was present, and the consequences said "the walk now returns a bool per subtree".
+> **The rule survives and the shape does not.**
+> The bit becomes one field of a value, because the walk turned out to have **three** per-subtree facts and not one, and shared mutable state was carrying the other two:
+>
+> ```go
+> type outcome struct {
+>     wrote  bool     // this section's bit; still exactly what materialises a *T
+>     minted []string // the dynamic addresses this subtree realised
+>     writes []string // the writes this subtree staged
+> }
+> ```
+>
+> The two new fields are **lists and not bits**, which is the part that does the work.
+> A parent needs the addresses themselves, not the fact that there were some, and carrying them upward is what retires the two shared collections the walk kept beside the bit: the minted set the Dump side accumulated, and the staged-write list the encode phase accumulated.
+>
+> **They compose by append in task order and the bit composes by OR**, so a parent's answer is a function of its children's returns and of nothing a sibling wrote.
+> Task order rather than completion order is what keeps the result and the error report deterministic under any scheduler.
+>
+> **A shared counter gives a deterministically wrong answer**, and that is why the shape moved rather than the count.
+> Reproduced: a sibling's write increments the counter a parent reads, so a pointer subtree that wrote nothing materialises because its neighbour did.
+> That is row two of the table above, arriving through a different door, on the write path, five years after xload committed the same class of mistake with `reflect.DeepEqual`.
+> An outcome value composes at each container by combining children rather than by reading a location any of them may have written, so the parent's answer is a function of its own subtree and of nothing else.
+>
+> **And it is what makes [ADR-0010](0010-the-entry-point-and-the-schema-cache.md)'s scheduler seam usable.**
+> ADR-0010 handed [#20](https://github.com/onhotpath/ferry/issues/20) a hazard rather than a drop-in: it reproduced a data race under `-race` on this ADR's own bit, at `present = present || p`.
+> A value returned per task has nothing to race on, and [ADR-0019](0019-the-concurrency-model.md) is where that is measured and relied on.
+>
+> Evidence: `prototype/concwalk` on [`proto/04-concurrency`](https://github.com/onhotpath/ferry/tree/proto/04-concurrency), which materialises the shared-counter defect deterministically, asserts that outcomes compose, and runs the walk under `-race`.
+
+
+
 ### What this hands [#11](https://github.com/onhotpath/ferry/issues/11)
 
 #11 is blocked on this ticket and owns every spelling, so this is the interface between them, stated as obligations rather than as suggestions.
@@ -818,8 +905,10 @@ Where a declaration attaches is decided here, not there: it attaches to the stat
 - An array element with a declaration behaves like a struct field and a slice element does not, which is the second place ADR-0005's static-against-dynamic difference surfaces as a behavioural difference between two types a user will treat as interchangeable.
 - `Absent` is a `Reader`-side kind only, so ferry's value model is asymmetric between the directions, and that asymmetry is a conformance case rather than a note.
   A sink is never handed an observation it has no honest answer for, which is the prototype defect ADR-0004 recorded on itself.
-- An omission is the absence of a `Set` call and not a deletion, so a replacing sink and a patching sink give different results for one dump and both are correct.
-  ferry has no delete verb and this ADR does not add one.
+- An omission is the absence of a `Set` call and not a deletion, so the plane is untouched at every address the dump was silent at.
+  *(Amended under [#254](https://github.com/onhotpath/ferry/issues/254): as published this bullet read that a replacing sink and a patching sink give different results for one dump and both are correct, and that ferry has no delete verb and this ADR does not add one.
+  Both halves are false now.
+  Only the patching reading is correct, because omission is no statement; and deletion is expressible, as [ADR-0004](0004-source-and-sink.md)'s optional `Unsetter`, which is a verb a caller reaches deliberately and can never reach by accident.)*
 - Presence survives the walk, which is the mechanism ADR-0001's plane-inspection milestone commits to, and it costs nothing measurable.
   It is an observation of a Load rather than a property of a field, so it adds no type to the closed set and no schema view.
 - `required` is a presence assertion and nothing more, so `FOO=` satisfies it and `Null` at a `*T` satisfies it while yielding nil.
@@ -836,7 +925,10 @@ Where a declaration attaches is decided here, not there: it attaches to the stat
   Until one of them lands, that hazard exists in whatever the working entry point is.
 - A struct merges into a seeded value field by field and a slice or a map is replaced wholesale.
   Both follow from the one rule and neither looks like it does, so this is a documentation obligation rather than a design choice.
-- The walk now returns a bool per subtree, which is a change to the walk's own signature rather than a new interface, and it is what makes both `*T` materialisation and the presence observation possible from one pass.
+- The walk now returns a presence fact per subtree, which is a change to the walk's own signature rather than a new interface, and it is what makes both `*T` materialisation and the presence observation possible from one pass.
+  *(Amended under [#122](https://github.com/onhotpath/ferry/issues/122): as published this bullet said the walk returns a **bool** per subtree.
+  It returns an `outcome` value whose first field is that bool, and whose other two fields are the minted-address list and the staged-write list that shared collections used to carry.
+  The rule and the signature change are unaffected; the return type is wider.)*
 
 ## Items from the xload survey
 
@@ -877,7 +969,10 @@ It is cited here because its underlying cause, that a later source can never ove
 - *The non-deterministic select on a cancelled context.*
   Concurrency, and [#20](https://github.com/onhotpath/ferry/issues/20)'s.
   This ADR neither fixes nor worsens it.
-  It does add one thing #20 should know: the walk now returns a bool per subtree, so a concurrent walk would have to combine those bits rather than only its errors.
+  It does add one thing #20 should know: the walk now returns a presence fact per subtree, so a concurrent walk would have to combine those rather than only its errors.
+  *(Amended under [#122](https://github.com/onhotpath/ferry/issues/122): this was published as "combine those bits", and the hazard it names was real - [ADR-0010](0010-the-entry-point-and-the-schema-cache.md) later reproduced a data race on exactly that bit under a goroutine-per-task scheduler.
+  It is discharged rather than inherited: the per-subtree facts are returned as one `outcome` value that composes from children, so there is no shared location for a scheduler to combine in place.
+  [ADR-0019](0019-the-concurrency-model.md) is #20's answer and it relies on this.)*
 - *Value receivers on `Error()` where pointers are returned.*
   Bears on the `required` failure and on the default-validation refusals, which are the error types this ADR produces.
   Deferred to [#9](https://github.com/onhotpath/ferry/issues/9)'s convention rather than pre-empted, as ADR-0003, ADR-0004 and ADR-0005 all did.

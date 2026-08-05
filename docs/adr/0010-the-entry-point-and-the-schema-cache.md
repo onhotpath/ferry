@@ -585,6 +585,32 @@ Read at 0x... by goroutine 15:
 So the seam exists and it is not free: #20's scheduler cannot be plugged into this walk without the presence bit being combined rather than OR-ed in place.
 That is handed over explicitly, because a seam that looks like a drop-in and is not is worse than no seam.
 
+> **Amended under [#122](https://github.com/onhotpath/ferry/issues/122) and [#176](https://github.com/onhotpath/ferry/issues/176): the seam takes a count and one body, and the hazard this section handed over has been discharged.**
+>
+> As published the seam read `type sched func(tasks []func() error) error`, and it was measured at one indirect call per container against an inlined loop, 1141 ns/op against 1079.
+> **That measurement is right and it measured the wrong cost.**
+> It compared dispatch, and the seam's real cost is that building the batch allocates a heap closure per member, because each one captures the walker, the context and the member and therefore escapes.
+> Measured on a 20-member container:
+>
+> | | ns/op | B/op | allocs/op |
+> | --- | --- | --- | --- |
+> | a slice of closures | 417 | 480 | **21** |
+> | a count and one body | 45 | 0 | **0** |
+>
+> On the `env_large` fixture that is 94 allocations per load, 32 per cent of the total, spent on a seam whose purpose is to keep aggregation out of the walk.
+>
+> ```go
+> type sched func(n int, run func(i int) error) error
+> ```
+>
+> One closure per **container** rather than one per member, and every property this section argued for survives: a first-error scheduler still swaps in against an aggregating one and gives 1 error against 2 on the same plane, so the aggregation seam keeps its premise, and a concurrent scheduler still runs `run(i)` from n goroutines.
+>
+> **And the hazard above is discharged rather than inherited.**
+> [ADR-0006](0006-defaults-and-zero-values.md) is amended so that the walk returns an outcome **value** per subtree instead of writing a shared bit, so there is no `present = present || p` for a scheduler to race on.
+> [ADR-0019](0019-the-concurrency-model.md) is the answer this section handed to [#20](https://github.com/onhotpath/ferry/issues/20), and it plugs a scheduler into this walk without either change being made for it.
+>
+> Evidence: `prototype/concwalk` on [`proto/04-concurrency`](https://github.com/onhotpath/ferry/tree/proto/04-concurrency), `BenchmarkClosureSeam`, `BenchmarkIndexSeam` and `TestIndexSeamAggregationIsTheSchedulers`.
+
 #### And the equivalence test, which is the other half of the constraint
 
 Survey 5.2's sharpest detail is that xload's own serial-against-concurrent test *cannot* catch its divergence, because `input` is a pointer built once in the table literal and both subtests share it: the serial subtest populates it, and any field the concurrent path fails to set is still correct.

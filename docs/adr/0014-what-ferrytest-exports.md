@@ -257,9 +257,11 @@ Two places is one more than one.
 - **No `Recorder` type.**
   ADR-0001's schema-extraction pattern is one call, `Record`, and ADR-0004's `Recorder` combinator is what implements it.
   Exporting the combinator would invite a user to wrap a sink and drop its optional interfaces, which is [#10](https://github.com/onhotpath/ferry/issues/10)'s own recorded defect.
-- **Nothing from a `Reg`.**
-  ADR-0009 established that a proof needs *nothing* from a registration, because it exercises the codec through the ordinary walk, and that this is what keeps `Reg` opaque.
+- **Nothing from a `Codec`.**
+  ADR-0009 established that a proof needs *nothing* from a registration, because it exercises the codec through the ordinary walk, and that this is what keeps a registration opaque.
   It stays true.
+  *(Amended under [#227](https://github.com/onhotpath/ferry/issues/227): this bullet named the type `Reg`, which [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md) renames to `Codec`, with `KeyCodec` for the key form.
+  The constraint is unchanged and is easier to state: a registration is still opaque, and `ferrytest` still needs nothing from one.)*
   The one thing the package needs is `(*ferry.Registry).Types() []reflect.Type`, which is a property of the registry and opens no registration.
 
 ### How a registry reaches the harness
@@ -429,6 +431,20 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 11. A **golden artefact**: a fixed value, dumped, compared against fixed expected plane contents ([ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md)).
 12. A sink accepts `Set` of a `Null` at a **container address** - a nil composite, an empty composite, and a nil optional section - and that address was in the set its `Bind` received ([ADR-0003](0003-how-a-leaf-addresses-a-plane.md), [ADR-0005](0005-the-supported-type-set.md)).
 
+> **Amended under [#182](https://github.com/onhotpath/ferry/issues/182) and [#269](https://github.com/onhotpath/ferry/issues/269): the list is owed four more cases, and they are recorded here rather than filed one per issue.**
+>
+> As published, the twelve cases above were the whole `Driver` list, and each of them is a rule some ADR had already stated.
+> [ADR-0004](0004-source-and-sink.md) has since been amended to carry the held-binding contract, and a contract is exactly the thing this package exists to hold third-party code to.
+> Four of its rules have no case:
+>
+> - **Concurrent opens.** One binding, many goroutines calling the driver's open at once, clean under `-race`, with each open's minted set independent of every other's. That is the obligation ADR-0004 now states and the one this ADR's case 8 asserts only one open at a time.
+> - **A second dump through one held sink binding**, with a different value each time, neither refused by the other's minted addresses. Case 9 asserts a dynamic address arrives; this asserts the binding is not spent by the first one.
+> - **`(nil, nil)` is refused**, as an error naming the driver rather than a dereference: a `Bind` returning a nil `OpenFunc` with a nil error, and an open returning a nil `Reader` with a nil error. This is the negative half of the suite rather than a driver behaviour, so it belongs in the failure list beside the other structural violations.
+> - **`MemPlane` satisfies all of the above**, which is [#269](https://github.com/onhotpath/ferry/issues/269): the memory plane is the one plane whose whole job is to be the reference implementation, and it does not currently hold the concurrent-open line.
+>
+> **Nothing here is a new decision**, which is why this is a note rather than an ADR: every one is a rule already written down, missing its check.
+> They are implementation-phase work and they land with the binding-contract batch, not on their own.
+
 > **Amended under [#185](https://github.com/onhotpath/ferry/issues/185): case 10 had never run, because nothing in this ADR let a `Plane` describe a driver it applies to.**
 > As published, and after [#101](https://github.com/onhotpath/ferry/issues/101) made `Open` return an `Instance`, the description is a plane minted directly by `Plane.Open` and it mentions no `context.Context` anywhere.
 > A driver whose plane is per request carries no contents in its `Source` at all, so there was no field it could fill in, and the case shipped as an unconditional skip against every plane.
@@ -587,7 +603,7 @@ That is weaker than a compile-time signal and it is the only shape available, be
 - **The package carries two promises**, and a driver author can have their CI turned red by a minor upgrade.
   That is the price of a suite that is allowed to grow, and ADR-0002 already priced the alternative.
 - **One thing is exported from `ferry` for this package's sake**: `(*Registry).Types()`.
-  ADR-0009's constraint that `ferrytest` needs nothing from a `Reg` survives intact; a registry is not a registration.
+  ADR-0009's constraint that `ferrytest` needs nothing from a registration survives intact; a registry is not a registration.
 - **The recording sink stops being a convenience.**
   It is the only way to see what ferry encoded before a driver spelled it, because ADR-0012's `Observe` is Load-side only, so ADR-0002's admission of it as apparatus is load-bearing for the first time.
 - **The `Driver` list is twelve cases**, the twelfth asserting that a container address reached the driver's `Bind`.

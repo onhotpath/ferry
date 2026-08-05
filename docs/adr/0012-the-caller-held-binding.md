@@ -59,6 +59,20 @@ So allocations are quoted as measurements, times as a scale, and one claim an ea
 > Whether [ADR-0004](0004-source-and-sink.md) should carry the sentence as well, given that it owns the two types, is open and is recorded on [#182](https://github.com/onhotpath/ferry/issues/182), which already tracks the conformance case for the same obligation.
 > **Nothing about the contract's shape moves here**, and no ADR-0004 signature is amended by this note or by the change that prompted it.
 
+> **Amended under [#182](https://github.com/onhotpath/ferry/issues/182): the question the note above left open is answered, and the contract text now lives in [ADR-0004](0004-source-and-sink.md).**
+>
+> The note above asked whether ADR-0004 should carry the concurrent-open sentence, given that it owns `OpenFunc` and `OpenWriterFunc`, and left it open.
+> It should and it now does.
+> ADR-0004 carries the whole held-binding contract in one place: the concurrent-open obligation, the caller's ownership of anything callable a driver is handed, the bind-mints-no-resources invariant with the driver-owned `Close` escape valve it implies, the reuse contract, and the refusal of `(nil, nil)` from a driver.
+>
+> **This is a move and not a change.**
+> Every one of those rules is either stated in this ADR already or falls out of what it shipped, and none of them is decided differently by the move.
+> What changes is the audience: a driver author reads ADR-0004 because it is the driver contract, and reads this ADR only if they are asking why a caller may hold a handle at all.
+> **This ADR keeps the genealogy**, which is the part ADR-0004 cannot tell: the obligation exists because `Bind` is expensive and its result is reusable, and it became load-bearing at the moment `Binding[T]` shipped rather than when the two function types were written.
+>
+> One rule this ADR published stays here in full, because it is about the caller-facing surface rather than about a driver: `Binding` and `SinkBinding` document themselves as safe for use from many goroutines, and that is a compatibility promise a later concurrency answer may not break.
+> [ADR-0019](0019-the-concurrency-model.md) is that answer, and it does not break it.
+
 Two more this ticket inherited:
 
 | Handed over by | Closed | Where |
