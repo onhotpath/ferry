@@ -588,10 +588,10 @@ This is the largest question the ticket owns.
 > **Three sections below therefore describe a mechanism that no longer exists, and are kept as the record of why the replacement is the shape it is**: [what freezes](#what-freezes-the-registry-not-each-type), [the default registry and the init-order question](#the-default-registry-and-the-init-order-question-it-has-to-answer), and [why freezing keeps the registry out of #20's problem](#and-freezing-is-what-keeps-the-registry-out-of-20s-problem).
 > The last of those is strengthened rather than weakened: a registry with no mutators is immutable from birth, so it is out of [#20](https://github.com/onhotpath/ferry/issues/20)'s problem without needing a freeze point at all, which [ADR-0019](0019-the-concurrency-model.md) relies on.
 >
-> **One thing neither ADR answers, recorded here rather than guessed at.**
+> **One thing neither ADR answered at first, recorded here rather than guessed at - since decided.**
 > The default registry as published is a **mutable** one: `func init() { ferry.Register(...) }` is a package-level mutator, and ADR-0017 has no mutators, so that shape cannot survive in any form.
-> What is genuinely open is whether a **frozen** default registry still exists for the caller who registers nothing and wants core's own types - and if so, how a caller adds one codec to it without a mutator.
-> The design campaign did not decide it, and it is owed before the registry rebuild lands.
+> What was genuinely open is whether a **frozen** default registry still exists for the caller who registers nothing and wants core's own types - and if so, how a caller adds one codec to it without a mutator.
+> [ADR-0017's amendment](0017-the-registration-api-and-the-value-it-builds.md) now rules it: the built-ins survive as an unexported frozen base, `NewRegistry` composes the caller's codecs over that base, and a caller codec claiming a built-in type refuses at construction like any duplicate.
 
 Three candidates were built and run against each other.
 The fixtures all register **after** a schema has been compiled, because a fixture that registers first cannot see the question at all, and that is the shape of mistake the prior sessions each made once.

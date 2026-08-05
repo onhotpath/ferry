@@ -158,6 +158,20 @@ An illegal **state** that cannot be represented beats an illegal transition that
 **A nil half panics at composition**, at the `NewRegistry` call site, rather than returning an error.
 That is a programming error at a program's birth, in the same family as `regexp.MustCompile`, and the alternative is an error return on a line nobody checks.
 
+> **Amended under [#273](https://github.com/onhotpath/ferry/issues/273): the default-registry question ADR-0009's supersession note recorded as owed is now decided.**
+>
+> As published, this ADR replaced ADR-0009's mutable surface and left one question open, recorded there rather than guessed at: whether a frozen default registry still exists for the caller who registers nothing, and how a caller adds one codec without a mutator.
+> The ruling, in three sentences:
+>
+> > **Core's built-in type set survives as an unexported frozen base, and it is what a caller who passes no registry gets.**
+> > **`NewRegistry` always composes the caller's codecs over that base**, so registering one type never costs the caller `string`, `int`, `bool` or any other built-in.
+> > **A caller codec claiming a type the base already owns refuses at `NewRegistry`**, exactly as any duplicate does.
+>
+> The first sentence keeps ADR-0010's zero-configuration entry points working unchanged.
+> The second makes the common case - the built-ins plus a handful of domain types - the only spelling there is, so there is no empty-registry trap where a one-line `NewRegistry` silently loses the standard library.
+> The third is the duplicate rule already stated above, applied to the base with no special case: overriding a built-in codec would make user code a second authority over the standard types, and if a real need for that ever appears it is its own decision with its own name, not a silent capability of this constructor.
+> How a caller adds one codec without a mutator is therefore the constructor itself: `NewRegistry(ferry.NumberText[big.Int]())` is the built-ins plus `big.Int`, complete on the line it is born.
+
 ### `NullValue` is one modifier over any registration
 
 A registration says how a `T` crosses the boundary.
