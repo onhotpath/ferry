@@ -21,6 +21,7 @@ about `Value` and the spelling seam:
 - the driver memo restoring an operator's original spelling when the
   value is unchanged — the lean-boundary backpropagation, minimal.
 
-Run it with `go test ./prototype/valueseam/`.
+Run it with `cd prototype/valueseam && GOWORK=off go test .` — the module
+stays out of `go.work` deliberately.
 The design record lives on the lavish session boards; outcomes get
 folded into ADR amendments when the series closes.
