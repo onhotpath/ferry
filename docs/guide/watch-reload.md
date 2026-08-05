@@ -46,7 +46,9 @@ flowchart LR
 Core cannot tell a reload from a first load, and that is the design: bind-once, open-many was built long before watching, and watching is just a caller driving it on a signal.
 
 ```go
-func Watch[T any](ctx context.Context, b *ferry.Binding[T], signal <-chan struct{}) (seq iter.Seq[T], errf func() error) {
+func Watch[T any](
+	ctx context.Context, b *ferry.Binding[T], signal <-chan struct{},
+) (seq iter.Seq[T], errf func() error) {
 	var streamErr error
 	seq = func(yield func(T) bool) {
 		streamErr = stream(ctx, b, signal, yield)

@@ -44,7 +44,9 @@ import (
 // the plane it watches fires its own signal, so mark or compare those writes if
 // the echo matters. And the first value arrives on the first signal, never
 // before it: load once through the binding for the value to start from.
-func Watch[T any](ctx context.Context, b *ferry.Binding[T], signal <-chan struct{}) (seq iter.Seq[T], errf func() error) {
+func Watch[T any](
+	ctx context.Context, b *ferry.Binding[T], signal <-chan struct{},
+) (seq iter.Seq[T], errf func() error) {
 	var streamErr error
 	seq = func(yield func(T) bool) {
 		streamErr = stream(ctx, b, signal, yield)
