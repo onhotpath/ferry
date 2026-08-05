@@ -62,6 +62,55 @@ type TrailingWord struct {
 	Host string `ferry:"host" notatag`
 }
 
+// ForeignKeySuffix carries one malformed tag under a key that merely ends in
+// ferry's own, which a substring match claims as ferry's (#261).
+type ForeignKeySuffix struct {
+	Host string `xferry:"oops`
+}
+
+// ForeignKeyJSON is the same field under json, which is the answer every key
+// ferry does not own has to get.
+type ForeignKeyJSON struct {
+	Host string `json:"oops`
+}
+
+// ForeignEnvSuffix is the suffix case under TagKey("env"), where the keys in
+// use are short enough that the collision is common rather than contrived.
+type ForeignEnvSuffix struct {
+	Host string `myenv:"oops`
+}
+
+// ForeignDBSuffix is the same under TagKey("db").
+type ForeignDBSuffix struct {
+	Host string `sqldb:"oops`
+}
+
+// ForeignKeyPromoted carries the suffix key on an embedded field, which
+// promotes because ferry finds no tag of its own on it.
+type ForeignKeyPromoted struct {
+	Promoted `xferry:"oops`
+}
+
+// Promoted is the struct ForeignKeyPromoted promotes.
+type Promoted struct {
+	Host string `ferry:"host"`
+}
+
+// UnexportedForeign carries another library's malformed tag on a field reflect
+// can never set.
+type UnexportedForeign struct {
+	broken string `xferry:"oops`
+	OK     string `ferry:"ok"`
+}
+
+// UnexportedMalformed carries a malformed tag under ferry's own key on a field
+// reflect can never set, which is the one place ferry's own key is not ferry's
+// to refuse.
+type UnexportedMalformed struct {
+	broken string `ferry:"oops`
+	OK     string `ferry:"ok"`
+}
+
 // DashOption asks for an option beside "-", which names no segment for the
 // option to be about.
 type DashOption struct {

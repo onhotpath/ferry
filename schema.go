@@ -311,6 +311,14 @@ func (c *compiler) compileField(f *reflect.StructField, parent *node, s site) in
 		dynamic: s.dynamic,
 	}
 
+	// An unexported field is dispatched before the tag is scanned, because a
+	// field reflect can never set has nothing to report about (#261). An
+	// anonymous field is not one of these: Go promotes it whether or not its
+	// type is exported, so it keeps the scan and the diagnosis.
+	if !f.Anonymous && !f.IsExported() {
+		return c.compileUnexported(f, at)
+	}
+
 	r, err := scanTag(string(f.Tag), c.cfg.tagKey)
 	if err != nil {
 		c.errFor(at.field, err)
@@ -321,10 +329,6 @@ func (c *compiler) compileField(f *reflect.StructField, parent *node, s site) in
 	switch {
 	case f.Anonymous:
 		return c.compileEmbedded(f, parent, at, r)
-	case !f.IsExported():
-		c.checkUnexported(f, at, r)
-
-		return 0
 	case !r.found:
 		c.errAt(at.field, c.noTagMsg(f.Name))
 
@@ -332,6 +336,22 @@ func (c *compiler) compileField(f *reflect.StructField, parent *node, s site) in
 	}
 
 	return c.compileTagged(f.Type, parent, at, r.value)
+}
+
+// compileUnexported is the field rule for a field reflect cannot set. It reads
+// the tag only to refuse one that can never do anything, and a tag that will
+// not scan is not refused at all: the field is skipped either way, so the
+// diagnosis would name a mistake with no consequence, on a field the caller may
+// not even own (#261).
+func (c *compiler) compileUnexported(f *reflect.StructField, s site) int {
+	r, err := scanTag(string(f.Tag), c.cfg.tagKey)
+	if err != nil {
+		return 0
+	}
+
+	c.checkUnexported(f, s, r)
+
+	return 0
 }
 
 // compileEmbedded is the field rule for an anonymous field, which costs the
