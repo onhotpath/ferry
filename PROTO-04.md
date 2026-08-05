@@ -53,3 +53,9 @@ A miniature of core's walk, with the parts #122 and #20 argue about and nothing 
    Core's scheduler fans out per address only when BOTH the caller allowed it (`MaxConcurrency(n)` Option) and the driver's instance asserted the optional capability (`ConcurrentSafe`, the Releaser/Committer idiom).
    Proven: an instance without the capability never sees an overlapped call under `MaxConcurrency(4)` (peak inflight 1); a capable one overlaps within the bound (2..4).
    env/yaml simply never assert it; kv/S3/Consul do.
+10. **The hybrid: subdividing one service's keys within the leftover budget** (`hybrid.go`, owner's round-4 question).
+    12 keys routed 2/4/6; budget 6.
+    Size-dependent cost (base 1ms + 0.5ms/key): one-batch-per-backend 4.4ms, hybrid 2.4ms - the subdivision pays.
+    Flat cost per round trip: 3.27ms vs 3.32ms and twice the requests - a wash.
+    Core cannot know which model a plane has; the driver does.
+    So the budget is one number: the caller sets `MaxConcurrency(n)`, core obeys it in its own fanout, and the same number rides the open's ctx so the driver can size its request parallelism inside it.
