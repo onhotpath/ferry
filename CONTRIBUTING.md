@@ -36,8 +36,9 @@ A driver module carries no `require` on core until core is tagged.
 ## Where decisions live: `docs/adr/`
 
 An architectural decision record is a numbered file in [`docs/adr/`](docs/adr/) that settles one question and states the evidence it was settled on.
-There are fifteen, all Accepted.
+There are twenty-one, all Accepted.
 Fourteen were written before the code, and [ADR-0015](docs/adr/0015-two-spellings-of-one-address.md) is the one exception: it records a rule the first multimap driver reached first, and it says so.
+[ADR-0016](docs/adr/0016-the-sealed-address-model.md) to [ADR-0021](docs/adr/0021-the-multi-key-extension-mechanism.md) are the v0 design campaign, written before their code and each carrying the prototype branch it was decided on.
 
 **The ADRs are the specification.**
 Where an issue and an ADR disagree, the ADR wins.
@@ -47,8 +48,8 @@ Read the ADR that owns a decision before proposing a change to it.
 A proposal that contradicts an accepted ADR should say so out loud.
 If `docs/adr/` has no entry on a topic, that decision has not been made yet, and guessing at it is how a library ends up with two answers.
 
-Three questions are parked deliberately and must get no silent answer: tag-grammar extension, concurrency, and watch/reload.
-Nothing may ship that anticipates them.
+Three questions were parked deliberately and have now been answered, each in its own ADR and none of them silently: tag-grammar extension in [ADR-0021](docs/adr/0021-the-multi-key-extension-mechanism.md), concurrency in [ADR-0019](docs/adr/0019-the-concurrency-model.md), and watch and reload in [ADR-0020](docs/adr/0020-watch-and-reload.md).
+The rule that produced them stands: a question with no ADR gets no answer in code first.
 
 **Corrections amend the ADR in place**, with a blockquoted note saying what it read as published, what moved, and why.
 The number stays; the history stays legible.

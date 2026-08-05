@@ -599,6 +599,23 @@ Two keys on one field give two address sets and nothing in the tag says which is
 ADR-0001 ruled out a built-in precedence ladder for sources; the same reasoning applies to a ladder of tag keys.
 This is the reversible direction: a list can be added later, and nothing depends on it being refused.
 
+> **Amended under [#34](https://github.com/onhotpath/ferry/issues/34): ferry may be told to read a key that is not its own, and this rule is unchanged by that.**
+>
+> As published, this section's last rule read that ferry reads exactly one key and a list is refused, and it was the whole of what this ADR said about a second key on a field.
+> The parked tag-grammar question has since been answered, and the answer is [ADR-0021](0021-the-multi-key-extension-mechanism.md): an extension declares its **own** struct-tag key, ferry parses that key with that extension's vocabulary, and hands the result back without acting on it.
+>
+> **Nothing in this ADR moves.**
+> ferry's four words are ferry's four words; every one of the eleven refusals below stands; the near-miss tiers stand and gain a fourth vocabulary to draw suggestions from rather than a fourth tier.
+> `ferry:"host,mylib.retry=3"` is still refused, because ferry's namespace never opened.
+>
+> **And the rule above is about the thing it was always about.**
+> It refuses reading **ferry's grammar** under two keys, because two keys then give two address sets and nothing says which is meant.
+> A declared extension key carries no ferry vocabulary and mints no address, so it is not a second answer to a question ferry asks, and `ferry:"a" mylib:"b"` still yields exactly one address, `/a`.
+> The list this rule refuses is still refused.
+>
+> One thing this ADR shipped is a precondition for the other: `tagScan` substring-matches the configured key, so a foreign tag beside a `ferry` tag can be misread today.
+> That is [#261](https://github.com/onhotpath/ferry/issues/261), it is worth fixing regardless, and nothing in ADR-0021 lands before it.
+
 ### What is not in the vocabulary, and why each is a refusal rather than an omission
 
 Every word below was considered and left unspent.
