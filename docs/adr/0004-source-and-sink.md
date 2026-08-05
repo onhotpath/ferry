@@ -97,7 +97,7 @@ Everything beyond that is opt-in.
 > A `Bind` returning a nil `OpenFunc` with a nil error, or an open returning a nil `Reader` with a nil error, is a driver defect, and core reports it as an error naming the driver rather than dereferencing it.
 > That is [ADR-0011](0011-the-error-model.md)'s "ferry itself never panics" applied at the one boundary where a third party can produce the nil.
 >
-> **Three optional capabilities join the three above**, discovered by assertion and never required, in exactly the `Releaser` idiom:
+> **Three optional capabilities join the three this section lists**, discovered by assertion and never required, in exactly the `Releaser` idiom:
 >
 > ```go
 > type Unsetter   interface { Unset(ctx context.Context, addr CompositeAddr) error }
@@ -112,7 +112,8 @@ Everything beyond that is opt-in.
 > `Concurrent` is the driver's own bound on how many of its calls may be in flight at once, and it is described by [ADR-0019](0019-the-concurrency-model.md) rather than here.
 >
 > The sealed address types in those signatures are [ADR-0016](0016-the-sealed-address-model.md)'s, and that ADR is also where `Reader`, `Prober` and `Enumerator` become three interfaces over three address kinds rather than one `Get` over an untyped `Path`.
-> **The sentence above therefore reads four required interfaces and five optional ones**, and every optional one is still opt-in.
+> **The sentence above therefore reads four required interfaces and six optional ones** - `Releaser`, `Committer`, `Enumerator`, `Unsetter`, `Ensurer` and `Concurrent` - and every one of them is still opt-in.
+> `Prober` joins them in ADR-0016 and brings it to seven; that count is stated there, with the split it belongs to.
 
 ### `Bind` is a separate phase because the two halves have different lifetimes
 
@@ -601,7 +602,9 @@ It blocks nothing in this ADR; the contract above is the same either way.
 - Core owns a key-function helper that runs ADR-0003's legality and injectivity checks.
   That is ADR-0002 route (b), and it means a driver that hand-rolls its own key table silently opts out of the check.
   The conformance suite has to test for that, not just for the checks themselves.
-- Three optional interfaces mean three prose rules the compiler cannot enforce: implement `Committer` if your writes are not durable until the end, implement `Releaser` if you hold a resource, implement `Enumerator` if your plane can list.
+- Six optional interfaces mean six prose rules the compiler cannot enforce: implement `Committer` if your writes are not durable until the end, implement `Releaser` if you hold a resource, implement `Enumerator` if your plane can list, implement `Unsetter` if your plane can forget an address, implement `Ensurer` if it can hold an empty section, and implement `Concurrent` if it tolerates overlapping calls.
+  *(Amended under [#182](https://github.com/onhotpath/ferry/issues/182): this bullet read **three** as published, before the three capabilities above joined the set, and [ADR-0016](0016-the-sealed-address-model.md)'s `Prober` makes it seven.
+  The trade the rest of this bullet describes is unchanged and the count is the thing that keeps getting larger, which is [#201](https://github.com/onhotpath/ferry/issues/201)'s whole argument.)*
   Each failure mode is caught by a conformance case that has to exist anyway, and that is the entire argument for the trade.
   It is also the argument this ADR is least able to make in advance, because it depends on the suite being written well.
 - A driver serving both directions ships two types.

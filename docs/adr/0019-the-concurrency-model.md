@@ -18,7 +18,7 @@ The question the ticket was originally asking is whether the **walk** runs concu
 The scenario it exists for turned out to be a different question: eight configuration keys that live across three backend services, where the wall clock a caller cares about is the slowest service and not the sum.
 
 This ADR is written from the prototype on branch [`proto/04-concurrency`](https://github.com/onhotpath/ferry/tree/proto/04-concurrency), module `prototype/concwalk`, out of `go.work`, run with `GOWORK=off go test -race -count=5 .`.
-It carries 23 tests and 2 benchmarks.
+It carries 21 tests and 2 benchmarks.
 Every number below is from it.
 
 ## Decision
@@ -165,8 +165,8 @@ Reproduced and fixed in the prototype, and it is [#254](https://github.com/onhot
 - **The walk changes this rests on are three amendments in three ADRs rather than a fourth model here.**
   The outcome value is ADR-0006's, the index seam is ADR-0010's, and the recover fence is ADR-0011's; each is amended where its rule already lives.
   Deferred release is not an amendment at all, because ADR-0004 already says `Close` always runs and the shipped code does not.
-- **Two required deliverables ride this decision**: `docs/concurrency.md` and a runnable `examples/concurrent-driver`, because a capability a driver author cannot see worked end to end is a capability nobody implements correctly.
+- **Two required deliverables ride this decision**: `docs/guide/concurrency.md` and a runnable `examples/concurrent-driver`, because a capability a driver author cannot see worked end to end is a capability nobody implements correctly.
 - **[ADR-0012](0012-the-caller-held-binding.md)'s published promise survives.**
   A binding is safe from many goroutines, and nothing here makes a walk mutate anything reachable from one: the static key table is written once, the minted set is per open, and every per-subtree fact is now a return value.
 
-Evidence: `prototype/concwalk` on [`proto/04-concurrency`](https://github.com/onhotpath/ferry/tree/proto/04-concurrency), 23 tests under `-race -count=5` and 2 benchmarks, including `TestSharedCounterMaterialisesOnSiblingWrite`, `TestOutcomeComposesUnderConcurrentScheduler`, `TestConcurrentErrorsByteIdenticalToSerial`, `TestIndexSeamAggregationIsTheSchedulers`, `TestRoundTripLedger`, `TestMultiRoundTripLedger`, `TestCapabilityGate`, `TestHybridPaysWhenCostGrowsWithSize`, `TestHybridIsAWashWhenCostIsFlat`, `TestShippedShapeLeaksOnPanic` and `TestDeferredReleaseClosesOnPanic`.
+Evidence: `prototype/concwalk` on [`proto/04-concurrency`](https://github.com/onhotpath/ferry/tree/proto/04-concurrency), 21 tests under `-race -count=5` and 2 benchmarks, including `TestSharedCounterMaterialisesOnSiblingWrite`, `TestOutcomeComposesUnderConcurrentScheduler`, `TestConcurrentErrorsByteIdenticalToSerial`, `TestIndexSeamAggregationIsTheSchedulers`, `TestRoundTripLedger`, `TestMultiRoundTripLedger`, `TestCapabilityGate`, `TestHybridPaysWhenCostGrowsWithSize`, `TestHybridIsAWashWhenCostIsFlat`, `TestShippedShapeLeaksOnPanic` and `TestDeferredReleaseClosesOnPanic`.

@@ -67,7 +67,7 @@ That is [ADR-0001](0001-what-ferry-supports.md)'s own split arriving on schedule
 ADR-0001 committed to the mechanism and never to the feature, and the mechanism is `Bind` plus open-many plus `Load` returning a value plus per-open minted sets.
 Every one of those shipped for its own reasons.
 
-**What is required is documentation rather than code**: `docs/watch-reload.md` and a runnable `examples/watcher`, which are this decision's deliverables, because a capability whose whole argument is "you can build it" is worth nothing if nobody is shown the thirty lines.
+**What is required is documentation rather than code**: `docs/guide/watch-reload.md` and a runnable `examples/watcher`, which are this decision's deliverables, because a capability whose whole argument is "you can build it" is worth nothing if nobody is shown the thirty lines.
 
 ### A reload is `Load`, and there is no second verb
 
@@ -189,7 +189,7 @@ That is the rule of three applied one door down, and it is the same trigger [ADR
 - **Watch moves from Milestoned to Enabled and core grows no surface**, so [ADR-0001](0001-what-ferry-supports.md)'s capability table gains its first row to change bucket.
   The proof is a watcher built against the real shipped module through a nested workspace rather than against a sketch, which is the only form of evidence this claim can take.
 - **The commitment ADR-0001 made was honoured**: the mechanism landed, in core, piece by piece, and the feature ships outside, which is what milestoning promised and what Enabled means.
-- **The deliverables are two documents rather than an API**: `docs/watch-reload.md` and a runnable `examples/watcher`.
+- **The deliverables are two documents rather than an API**: `docs/guide/watch-reload.md` and a runnable `examples/watcher`.
   A capability argued as buildable is worthless undemonstrated.
 - **A reload is `Load` and no alias ships**, so there is one spelling of one operation.
   `LoadOver`'s two traps - a lost address keeping its stale value, and a composite replaced wholesale - are published in its godoc and in the guide, because the shape a reader reaches for first is the wrong one.

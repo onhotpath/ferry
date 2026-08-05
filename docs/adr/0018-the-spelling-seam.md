@@ -125,9 +125,9 @@ kv   any []byte         kv.Raw(), C = []byte            ->  no text conversion a
 
 `/m/WARN` and a `WARN` leaf agree because a map key is the `String` spelling of the key type on this plane: one table, both positions, which is [#230](https://github.com/onhotpath/ferry/issues/230).
 
-### The five laws, and purity is one of them
+### Six laws, five about the spelling and one about the closures
 
-Every spelling, shipped or supplied, must satisfy all five.
+Five are about the spelling itself, and every spelling, shipped or supplied, must satisfy all five.
 
 1. **`parse(render(v)) == v`** for every value of the kind. Round-trip closure.
 2. **The write form is always inside the accept set**, and the accept set may be wider. Wider in, canonical out.

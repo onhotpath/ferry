@@ -575,6 +575,24 @@ This is the largest question the ticket owns.
 > **A registry freezes at its first use**, which is the first schema compiled against it, and a registration after that is a loud error.
 > Core ships a default registry, and the package-level `Register` writes to it.
 
+> **Amended under [#227](https://github.com/onhotpath/ferry/issues/227): the freeze mechanics are superseded by [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md), and every argument this ADR makes for them is why the replacement works.**
+>
+> As published, this ADR's whole surface is a `*Registry` built empty and filled by `Register` calls, three constructors returning an opaque `Reg` with a kind argument, a freeze at first use, and a default registry the package-level `Register` writes to.
+> ADR-0017 replaces that surface: `NewRegistry(codecs ...Codec) *Registry` is a complete-set constructor with **no mutators at all**, `Reg` becomes `Codec` and `KeyCodec`, and the kind moves into each constructor's name so there is no kind argument to validate.
+>
+> **What is superseded is the mechanics, and what is kept is the reasoning, in full.**
+> Everything below about why a registry must be long-lived, why global-and-mutable is unsound three ways, why a scoped registry has to be part of the schema cache key, and what a per-call registry costs is unchanged and is exactly why construction-is-the-freeze is safe.
+> The replacement removes the window between construction and freeze rather than guarding it, so the defect class [#227](https://github.com/onhotpath/ferry/issues/227) and [#262](https://github.com/onhotpath/ferry/issues/262) name has nowhere to live.
+> **An illegal state that cannot be represented beats an illegal transition that cannot be taken**, which is also why the staged typestate view pair this ADR's follow-ups drew is retired unbuilt.
+>
+> **Three sections below therefore describe a mechanism that no longer exists, and are kept as the record of why the replacement is the shape it is**: [what freezes](#what-freezes-the-registry-not-each-type), [the default registry and the init-order question](#the-default-registry-and-the-init-order-question-it-has-to-answer), and [why freezing keeps the registry out of #20's problem](#and-freezing-is-what-keeps-the-registry-out-of-20s-problem).
+> The last of those is strengthened rather than weakened: a registry with no mutators is immutable from birth, so it is out of [#20](https://github.com/onhotpath/ferry/issues/20)'s problem without needing a freeze point at all, which [ADR-0019](0019-the-concurrency-model.md) relies on.
+>
+> **One thing neither ADR answers, recorded here rather than guessed at.**
+> The default registry as published is a **mutable** one: `func init() { ferry.Register(...) }` is a package-level mutator, and ADR-0017 has no mutators, so that shape cannot survive in any form.
+> What is genuinely open is whether a **frozen** default registry still exists for the caller who registers nothing and wants core's own types - and if so, how a caller adds one codec to it without a mutator.
+> The design campaign did not decide it, and it is owed before the registry rebuild lands.
+
 Three candidates were built and run against each other.
 The fixtures all register **after** a schema has been compiled, because a fixture that registers first cannot see the question at all, and that is the shape of mistake the prior sessions each made once.
 
