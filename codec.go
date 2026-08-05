@@ -128,11 +128,11 @@ func textPair(t reflect.Type) (leafCodec, bool) {
 func encodeText(v reflect.Value) (Value, error) {
 	switch enc := receiver(v).Interface().(type) {
 	case encoding.TextAppender:
-		text, err := enc.AppendText(nil)
+		text, err := appendedText(enc)
 
 		return textValue(v, text, err)
 	case encoding.TextMarshaler:
-		text, err := enc.MarshalText()
+		text, err := marshalledText(enc)
 
 		return textValue(v, text, err)
 	default:
@@ -144,7 +144,7 @@ func encodeText(v reflect.Value) (Value, error) {
 // arm is written once.
 func textValue(v reflect.Value, text []byte, err error) (Value, error) {
 	if err != nil {
-		return Value{}, &encodeFailure{typ: v.Type(), err: err}
+		return Value{}, encodeFailed(v, err)
 	}
 
 	return String(string(text)), nil
@@ -182,8 +182,8 @@ func parseText(v reflect.Value, text string) error {
 		return &parseFailure{typ: v.Type(), err: errNoTextArm}
 	}
 
-	if err := dec.UnmarshalText([]byte(text)); err != nil {
-		return &parseFailure{typ: v.Type(), err: err}
+	if err := unmarshalledText(dec, []byte(text)); err != nil {
+		return parseFailed(v, err)
 	}
 
 	v.Set(fresh.Elem())

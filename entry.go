@@ -15,7 +15,8 @@ import (
 //
 // On failure it returns the zero value of T and never a partly built one. Range
 // the failure with [Elements], and match a member against [ErrSchema],
-// [ErrMissing], [ErrValue], [ErrPlane], [ErrDriver] or [ErrReadOnly].
+// [ErrMissing], [ErrValue], [ErrPlane], [ErrPanic], [ErrDriver] or
+// [ErrReadOnly].
 //
 // It is [LoadOver] with the zero seed, so anything said about one holds for the
 // other, and it is [Bind] plus [Binding.Load] with the handle dropped.
@@ -129,16 +130,22 @@ func newBound(t reflect.Type, src Source, opts []Option) (*bound, error) {
 // Everything it touches is either the binding's own immutable state or minted
 // here, which is what lets [Binding] promise goroutine safety with no lock
 // anywhere (ADR-0012).
-func (b *bound) load(ctx context.Context, dst reflect.Value) error {
+//
+// The release is deferred, which is ADR-0004's "Close always runs" written so
+// that it holds on every exit rather than on the two the straight line covers.
+// A panic the fence does not catch unwinds through here, and the reader was
+// left open by a release the unwind skipped (#254).
+func (b *bound) load(ctx context.Context, dst reflect.Value) (err error) {
 	r, err := b.open(ctx)
 	if err != nil {
 		return fromDriver(momentOpen, Path{}, err)
 	}
 
-	dir := loadFrom{r: r, wrote: new(int)}
-	walked := newWalker(dir).walk(ctx, spot{n: b.sch.root, v: loadRoot(dst)})
+	defer func() { err = join(err, released(r)) }()
 
-	return join(walked, released(r))
+	dir := loadFrom{r: r, wrote: new(int)}
+
+	return newWalker(dir).walk(ctx, spot{n: b.sch.root, v: loadRoot(dst)})
 }
 
 // boundSink is bound on the write side, and [SinkBinding] is this plus T.
@@ -172,7 +179,12 @@ func newBoundSink(t reflect.Type, sink Sink, opts []Option) (*boundSink, error) 
 
 // dump is the per-dump half: refuse a nil root, open, encode and write, commit,
 // release.
-func (b *boundSink) dump(ctx context.Context, v reflect.Value) error {
+//
+// The release is deferred for the reason [bound.load] gives, and the commit is
+// not: a panic that unwinds past the walk is not a walk that succeeded, so the
+// sink is closed with no Commit and ADR-0004's abort signal survives the path
+// nothing was going to report on (#254).
+func (b *boundSink) dump(ctx context.Context, v reflect.Value) (err error) {
 	root, err := dumpRoot(v)
 	if err != nil {
 		return err
@@ -183,12 +195,14 @@ func (b *boundSink) dump(ctx context.Context, v reflect.Value) error {
 		return fromDriver(momentOpen, Path{}, err)
 	}
 
+	defer func() { err = join(err, released(w)) }()
+
 	walked := written(ctx, w, b.sch, root)
 	if walked == nil {
 		walked = committed(ctx, w)
 	}
 
-	return join(walked, released(w))
+	return walked
 }
 
 // runLoad is [LoadOver] for a caller holding a reflect.Value rather than a T,

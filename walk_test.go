@@ -46,8 +46,11 @@ type plane struct {
 	commits   int
 
 	// onGet runs before the value is answered, which is how a cancellation is
-	// made to arrive in the middle of a walk.
+	// made to arrive in the middle of a walk. onSet is its twin on the write
+	// side, and both are also how a panic is made to arrive from below the
+	// boundary and outside the codec fence.
 	onGet func()
+	onSet func()
 }
 
 func newPlane(values map[Path]Value) *plane {
@@ -73,6 +76,10 @@ func (p *plane) Get(_ context.Context, addr Path) (Value, error) {
 
 func (p *plane) Set(_ context.Context, addr Path, v Value) error {
 	p.set = append(p.set, addr)
+
+	if p.onSet != nil {
+		p.onSet()
+	}
 
 	if err := p.fail[addr]; err != nil {
 		return err

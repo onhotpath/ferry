@@ -92,6 +92,18 @@ var ErrPlane = errors.New("plane error")
 // [ErrValue] is always pointless and retrying a driver's read is sometimes not.
 var ErrDriver = errors.New("driver")
 
+// ErrPanic is a codec that panicked rather than returning, recovered at the
+// address it was called for.
+//
+// It is its own class because it is neither the plane's fault nor the value's:
+// it is a bug in the codec, reported at the address that reached it and beside
+// every other failure the same run found, so one broken codec costs one address
+// rather than the whole report. The recovered value is in the message.
+//
+// ferry recovers nothing else. A panic from anywhere but a codec keeps
+// unwinding.
+var ErrPanic = errors.New("panic")
+
 // ErrReadOnly is a plane that is writable in principle but not right now: a KV
 // with no write ACL, a file sink over an unwritable directory.
 //
@@ -119,6 +131,7 @@ var classRules = [...]classRule{
 	{ErrMissing, ErrMissing},
 	{ErrValue, ErrValue},
 	{ErrPlane, ErrPlane},
+	{ErrPanic, ErrPanic},
 	{ErrReadOnly, ErrPlane},
 	{ErrWrongKind, ErrValue},
 }
@@ -144,7 +157,7 @@ func declaredClass(err error) error {
 //
 // It has one accessor, [Error.Address], and no exported fields, so there is
 // nothing to switch on: the class is matched with errors.Is against
-// [ErrSchema], [ErrMissing], [ErrValue], [ErrPlane], [ErrDriver] or
+// [ErrSchema], [ErrMissing], [ErrValue], [ErrPlane], [ErrPanic], [ErrDriver] or
 // [ErrReadOnly].
 //
 // The address is the plane address, except at schema compile, where it is the

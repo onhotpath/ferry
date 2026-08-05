@@ -161,12 +161,24 @@ func StringCodec[T any](format func(T) string, parse func(string) (T, error)) Re
 	return Reg{
 		typ: reflect.TypeFor[T](),
 		codec: leafCodec{
-			kind: KindString,
-			encode: func(v reflect.Value) (Value, error) {
-				return String(format(valueOf[T](v))), nil
-			},
-			parse: parseInto(parse),
+			kind:   KindString,
+			encode: encodeString(format),
+			parse:  parseInto(parse),
 		},
+	}
+}
+
+// encodeString is [StringCodec]'s encode half, lifted out for the reason
+// [encodeValue] is: the constructor stays one expression, and the call into the
+// registrant's own function is one call under the fence.
+func encodeString[T any](format func(T) string) func(reflect.Value) (Value, error) {
+	return func(v reflect.Value) (Value, error) {
+		text, err := formatted(format, valueOf[T](v))
+		if err != nil {
+			return Value{}, err
+		}
+
+		return String(text), nil
 	}
 }
 
@@ -190,9 +202,9 @@ func StringCodec[T any](format func(T) string, parse func(string) (T, error)) Re
 // at Dump.
 func ValueCodec[T any](kind VKind, enc func(T) (Value, error), dec func(Value) (T, error)) Reg {
 	accept := func(v reflect.Value, got Value) error {
-		out, err := dec(donate(got, kind))
+		out, err := decodedValue(dec, donate(got, kind))
 		if err != nil {
-			return &parseFailure{typ: v.Type(), err: err}
+			return parseFailed(v, err)
 		}
 
 		setFrom(v, out)
@@ -218,9 +230,9 @@ func ValueCodec[T any](kind VKind, enc func(T) (Value, error), dec func(Value) (
 // one expression.
 func encodeValue[T any](enc func(T) (Value, error)) func(reflect.Value) (Value, error) {
 	return func(v reflect.Value) (Value, error) {
-		out, err := enc(valueOf[T](v))
+		out, err := encodedValue(enc, valueOf[T](v))
 		if err != nil {
-			return Value{}, &encodeFailure{typ: v.Type(), err: err}
+			return Value{}, encodeFailed(v, err)
 		}
 
 		return out, nil
@@ -279,9 +291,9 @@ func setFrom[T any](v reflect.Value, out T) {
 // by [DurationLike].
 func parseInto[T any](parse func(string) (T, error)) func(reflect.Value, string) error {
 	return func(v reflect.Value, text string) error {
-		out, err := parse(text)
+		out, err := parsedFrom(parse, text)
 		if err != nil {
-			return &parseFailure{typ: v.Type(), err: err}
+			return parseFailed(v, err)
 		}
 
 		setFrom(v, out)
