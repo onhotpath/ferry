@@ -283,6 +283,37 @@ func TestOneCompilerBehindEveryVerb(t *testing.T) {
 	}
 }
 
+// TestAnInterfaceRootRefusesAcrossVerbs pins #134's ruling: an interface-typed
+// root stays refused. Compile[any]'s refusal was already pinned; this is the
+// gap the issue named, Load[any] and Dump[any] asserted alongside it, all
+// three agreeing because they share one compiler (TestOneCompilerBehindEveryVerb's
+// property, at T = any).
+func TestAnInterfaceRootRefusesAcrossVerbs(t *testing.T) {
+	t.Parallel()
+
+	src, sink := answering(), newPlane(map[Path]Value{})
+
+	_, loaded := Load[any](t.Context(), planeSource{p: src})
+	dumped := Dump(t.Context(), any(42), planeSink{p: sink})
+	compiled := Compile[any]()
+
+	for name, err := range map[string]error{"Load": loaded, "Dump": dumped} {
+		if reportOf(err) != reportOf(compiled) {
+			t.Errorf("%s reported\n\t%+v\nand Compile reported\n\t%+v", name, err, compiled)
+		}
+	}
+
+	mustBeClass(t, compiled, ErrSchema)
+	mustContain(t, reportOf(compiled), []string{
+		"interface {} is not a struct ferry walks",
+		"wrapping it in one is the whole remedy",
+	})
+
+	if src.bound != nil || sink.bound != nil {
+		t.Error("a plane was bound behind a schema that does not compile")
+	}
+}
+
 // TestASharedDestinationHidesABrokenWalk is the trap xload's own equivalence
 // test falls into, reproduced here so that this suite's own fresh-destination
 // rule has a reason attached to it.
