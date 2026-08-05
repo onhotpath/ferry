@@ -802,6 +802,31 @@ It is still not recovered: a panic is a bug, not a failure mode, and converting 
 ADR-0004 already required it of `Value`'s accessors, on the ground that ferry's callers are third-party driver authors.
 ADR-0009 measured two live violations, an `interface conversion` on a nil interface and a `reflect.Value.Set` on a zero `Value`, and this is the rule they are fixed against.
 
+> **Amended under [#254](https://github.com/onhotpath/ferry/issues/254): the first rule is reversed for user code, narrowly, and the second is unchanged.**
+>
+> As published the first rule read **ferry never recovers a panic from third-party code**, argued on three grounds: a panic is a bug rather than a failure mode, converting it to an addressed error makes a broken codec look like bad config, and the address is in the stack anyway.
+>
+> **The third ground is the one that stopped being true**, and it is why the rule moves.
+> The address is in the stack only when there is one stack.
+> [ADR-0019](0019-the-concurrency-model.md) lets core fan a walk out across goroutines where a driver consents, and a panic in one of them takes the process down with a stack that does not name the walk that started it, killing an aggregate that had already collected every other address's answer.
+> The same is true of a load that panics in the middle of a deferred release: the handle leaks, which is this issue.
+>
+> > **The fence wraps exactly one call: into user code.**
+> > A codec half, or a caller-supplied callable.
+> > A panic there becomes a **typed, addressed error** in the aggregate, and the walk continues.
+> > A panic anywhere else keeps unwinding.
+>
+> Nothing of ferry's own logic runs inside the fence, so the rule's second half is strengthened rather than weakened: **ferry's own panics stay panics**, and a fence wide enough to swallow ferry's bugs would hide exactly the defects a new scheduler introduces.
+> The reflection `Set` is outside it.
+>
+> **The second published ground still stands and is answered rather than dropped.**
+> A broken codec does not look like bad config, because the error is its own class carrying the address and the recovered value, and it sits in the same report beside ordinary refusals rather than replacing them.
+> `encoding/json`'s narrower rule - recover only its own sentinel - is the shape ferry is now closest to, from the other side: ferry recovers only at the boundary it does not own.
+>
+> This is the third time in this ADR that a rule survived and its reason did not, and the reason is recorded because that is the pattern worth seeing.
+>
+> Evidence: `prototype/concwalk` on [`proto/04-concurrency`](https://github.com/onhotpath/ferry/tree/proto/04-concurrency): `TestCodecPanicBecomesAddressedError` shows one panicking codec producing one addressed error while healthy siblings still load and ordinary refusals aggregate beside it; `TestFerryOwnPanicStaysAPanic` shows a panic outside the fence still unwinding; `TestPanicPathEndToEnd` shows the deferred release closing without `Commit`, so [ADR-0004](0004-source-and-sink.md)'s abort signal survives the recovered path.
+
 **Two nil rules, both testable.**
 ferry never returns a nil `*Error` as a non-nil `error`, which is why `ErrorAt` returns `error`.
 The aggregate never holds a nil element, because the `errors` package doc states it is invalid for `Unwrap() []error` to return one.
@@ -923,6 +948,24 @@ This ADR fixes the semantics, exact-set over `(address, class)` with no message 
 - **The watch API's error convention**: [#13](https://github.com/onhotpath/ferry/issues/13).
   The survey records that there is no stdlib convention for errors in an iterator and that the absence is deliberate and current, so #13 invents one and must document which of the four readings it means.
   What it inherits from here is the element type and the classification, not the streaming shape.
+
+  > **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): it is decided, and ferry's convention is `(iter.Seq[T], func() error)`.**
+  >
+  > As published this bullet said #13 would invent a convention and would have to document which of the survey's four readings it meant.
+  > [ADR-0020](0020-watch-and-reload.md) invented it, and this bullet records the answer rather than the deferral, because the convention is the error model's and not the watcher's: any ferry surface that yields a sequence which can fail uses this shape.
+  >
+  > **The sequence and an error function, read after the range.**
+  > `iter.Seq2[T, error]` reads better and was implemented beside it on the same failure, so this is a preference stated against a working alternative rather than against a sketch.
+  >
+  > **The deciding property is narrower than the first argument for it, and the correction is the instructive half.**
+  > The first argument was that a discarded error is a compiler error.
+  > It is not: `seq, _ := Watch(...)` compiles exactly as `for v, _ := range` does.
+  > What survives is deliberate against accidental discard.
+  > Dropping a second range variable is the ordinary shape of ranging over anything and is one character from correct; writing `seq, _ :=` is a statement about an error the author looked at.
+  >
+  > And the shape answers this bullet's own complaint by construction.
+  > `Seq2` needs four things documented per API - whether the error is final, what the value beside it is, whether ranging may continue past it, and what a `break` leaves pending - and the survey records that the stdlib deliberately supplies no answer.
+  > This shape has one place for the error and it is after the loop.
 - **Whether the vocabulary ever grows.**
   A class is a public name and ADR-0002 keeps ferry at v0, which is the only window in which one can be taken back.
 - **Whether `Elements` is ever spelled as an `iter.Seq[error]`.**
