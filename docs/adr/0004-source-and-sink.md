@@ -66,6 +66,54 @@ type Enumerator interface {                                       // planes that
 **Four required interfaces, one method each, in both directions.**
 Everything beyond that is opt-in.
 
+> **Amended under [#182](https://github.com/onhotpath/ferry/issues/182), [#263](https://github.com/onhotpath/ferry/issues/263) and [#269](https://github.com/onhotpath/ferry/issues/269): this ADR owns the contract a held binding puts on a driver, and as published it stated none of it.**
+>
+> As published this section listed four required interfaces and three optional ones, and said nothing about how many times a bound driver is used, from how many goroutines, or what it may allocate at `Bind`.
+> Under `Load[T]` alone there was nothing to say: a bind lived and died inside one call.
+> [ADR-0012](0012-the-caller-held-binding.md) exported `Bind` and `BindSink`, and its own amendment note recorded that the obligation on the far side of `Source.Bind` had changed while ADR-0004's text had not, and left open whether this ADR should carry the sentence.
+> **It should, because this ADR owns the two types the obligation lands on.**
+> Five rules move here, and none of them changes a signature.
+>
+> **Concurrent calls to `OpenFunc` and `OpenWriterFunc` are obligated, not merely tolerated.**
+> A binding is process-lived and shared, so a driver's open closure is called from many goroutines at once.
+> A driver that writes to what it closed over is wrong where before it was fine.
+> ADR-0012 published the sentence on both function types in `driver.go` and recorded the duplication as open; it is closed here, on this ADR's own two types, and it is a conformance case rather than prose alone.
+>
+> **The caller owns the safety of anything callable they hand a driver.**
+> A driver Option taking a func, a dialer, a hook or a clock is called under the same concurrency, and no shape closes that hole: a func value can reference arbitrary state and the type system cannot say otherwise.
+> The rule is therefore stated per option in the driver's own godoc, and the idiom that keeps it small is that a driver constructor takes data rather than functions.
+> A blanket sentence in core's documentation was considered and refused: the hazard is per lifetime and per option, and a blanket claim is one a driver cannot honour on the caller's behalf.
+>
+> **`Bind` mints no resources**, which is why there is no teardown verb on the binding.
+> `Bind` takes no context and does no I/O, so it opens no connection, no file and no goroutine, and there is nothing for a caller to close.
+> A driver that genuinely holds a process-lived resource - a pooled client, a background refresher - owns its own `Close` on its own `Source` type, guarded by `sync.Once`, called at shutdown beside the client it wraps.
+> That is the escape valve, and it is deliberately the driver's rather than core's: a `Close` on `Binding` would force a closed-state semantics core does not have, and `defer b.Close()` in request scope is a bug template rather than a mistake.
+>
+> **A binding is reusable without limit.**
+> One `Binding` loads any number of times and one `SinkBinding` dumps any number of times, with a different value each time, and neither is spent by a failure.
+> The minted-set rule ADR-0012 amended into the key helper is what makes the second dump legal, and it is already shipped.
+>
+> **`(nil, nil)` from a driver is illegal state and is refused where it happens.**
+> A `Bind` returning a nil `OpenFunc` with a nil error, or an open returning a nil `Reader` with a nil error, is a driver defect, and core reports it as an error naming the driver rather than dereferencing it.
+> That is [ADR-0011](0011-the-error-model.md)'s "ferry itself never panics" applied at the one boundary where a third party can produce the nil.
+>
+> **Three optional capabilities join the three above**, discovered by assertion and never required, in exactly the `Releaser` idiom:
+>
+> ```go
+> type Unsetter   interface { Unset(ctx context.Context, addr CompositeAddr) error }
+> type Ensurer    interface { Ensure(ctx context.Context, addr SectionAddr) error }
+> type Concurrent interface { MaxConcurrent() int }
+> ```
+>
+> `Unsetter` is the plane forgetting an address and its subtree, and it is the only way a dump ever deletes anything: silence never does, which is [ADR-0006](0006-defaults-and-zero-values.md)'s omission rule.
+> `Ensurer` writes a section that is present and empty, which is the one thing a leaf-addressed write cannot spell.
+> Both are refused at open where the driver lacks them, before any write happens, which is where this ADR already puts `ErrReadOnly`.
+> Both are named for their effect on a plane in configuration vocabulary and both are idempotent by name; `Delete` stays the kv **client's** verb, one layer below.
+> `Concurrent` is the driver's own bound on how many of its calls may be in flight at once, and it is described by [ADR-0019](0019-the-concurrency-model.md) rather than here.
+>
+> The sealed address types in those signatures are [ADR-0016](0016-the-sealed-address-model.md)'s, and that ADR is also where `Reader`, `Prober` and `Enumerator` become three interfaces over three address kinds rather than one `Get` over an untyped `Path`.
+> **The sentence above therefore reads four required interfaces and five optional ones**, and every optional one is still opt-in.
+
 ### `Bind` is a separate phase because the two halves have different lifetimes
 
 This is the one seam that survived every round of simplification, because it is the only thing carrying ADR-0003's before-any-I/O rule.
