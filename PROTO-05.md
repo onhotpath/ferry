@@ -33,3 +33,20 @@ Self-contained miniature of core's parse path (`GOWORK=off go test .`), 5 tests 
 3. **A typed declaration reduces to a canonical, comparable `Decl`** - build-time hashability asserted with core's own `map[...]struct{}{}` trick; declaration order does not mint a second cache entry.
 4. **Diagnostics stay first-class**: the near-miss table covers declared words (`mylib.rerty` → `did you mean "mylib.retry"?`) without degrading ferry's own; an UNDECLARED extension word still refuses - `TestTagKeyKeepsTheVocabularyShut`'s rule survives opening.
 5. **Collisions refuse at Declare** - once, before any tag parses: duplicate namespaces, punctuated namespaces, value-shape mismatches.
+
+## Round 2: the owner's multi-key counter-proposal, prototyped
+
+`multikey.go` - extensions live in their OWN struct-tag keys, Go's native mechanism:
+
+```go
+Host string `ferry:"host,required" mylib:"retry=3" docs:"desc=the host"`
+```
+
+5 more tests green (10 total):
+
+- ferry's tag is parsed by ferry's grammar alone; a foreign word inside `ferry:"..."` still refuses - **the namespace never opens, so ADR-0001's sentence stays true**.
+- Declared foreign keys mint the same address-keyed table; an UNDECLARED foreign key (`json:"..."`) is another library's and is never claimed.
+- A typo inside `mylib:"..."` gets mylib's own near-miss; claiming ferry's key or one key twice refuses at DeclareKeys.
+- The Decl stays canonical and comparable - same cache-key property as the namespaced shape.
+
+Precondition worth naming: #261 (tagScan.mine substring-matches foreign keys) must be fixed for any multi-key story.
