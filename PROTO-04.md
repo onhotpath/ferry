@@ -31,3 +31,15 @@ A miniature of core's walk, with the parts #122 and #20 argue about and nothing 
 5. **Release must be deferred (#254).**
    `entryShipped` (the `join(walked, released(r))` straight line) leaks the handle on a codec panic - reproduced.
    `entryDeferred` closes on the panic path with Commit never called, so closed-without-Commit stays the abort signal, and the panic keeps unwinding.
+
+## Round 2 additions (owner's questions)
+
+6. **Where I/O-bound concurrency actually pays: the driver boundary, not the walk.**
+   `ioconc.go`: three strategies over a slow per-key plane (40 leaves, 200µs RTT), identical destinations proven.
+   Round trips counted by the client: serial walk 40, concurrent walk (8 workers) still 40, prefetch-at-open 1.
+   Wall clock: serial 43.1ms, fanout(8) 5.7ms, prefetch 1.1ms.
+   A concurrent walk changes WHEN the round trips happen; only the driver boundary (bind-time AddressSet -> open-time batch) changes HOW MANY.
+7. **A codec panic becomes an addressed error and the walk continues (#254 follow-up, owner's R3 direction).**
+   `recover.go`: the recover fence wraps exactly the user-code call (codec half), never ferry's own logic.
+   One panicking codec -> one typed `errCodecPanic` carrying the address, healthy siblings still load, ordinary refusals aggregate next to it, deferred release still closes-without-Commit.
+   A panic outside the fence (ferry's own bug) still crashes - proven by test.
