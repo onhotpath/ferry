@@ -21,7 +21,29 @@ If your loop needs "current config, refreshed", call `Load`.
 ## The loop
 
 The driver owns the change signal: fsnotify for a file, a watch plan for Consul, a channel in a test.
-The loop turns signals into fresh values:
+The loop turns signals into fresh values.
+
+Three parties, and only one of them is yours to write:
+
+```mermaid
+flowchart LR
+  subgraph driver["DRIVER - owns the signal"]
+    SIG["fsnotify / watch plan / channel<br/>says only: the plane MAY have changed<br/>no payload, may coalesce"]
+  end
+  subgraph caller["CALLER - owns the loop and the policy"]
+    LOOP["the thirty-line loop<br/>debounce, coalesce, where to publish"]
+    PUB["publish by replacement<br/>held values never mutate"]
+  end
+  subgraph core["CORE - unchanged and unaware"]
+    LOAD["b.Load(ctx)<br/>open fresh, walk, release<br/>a brand-new T each call"]
+  end
+  SIG --> LOOP
+  LOOP --> LOAD
+  LOAD --> PUB
+  PUB --> LOOP
+```
+
+Core cannot tell a reload from a first load, and that is the design: bind-once, open-many was built long before watching, and watching is just a caller driving it on a signal.
 
 ```go
 func Watch[T any](ctx context.Context, b *ferry.Binding[T], signal <-chan struct{}) (iter.Seq[T], func() error) {
@@ -64,6 +86,26 @@ if err := errf(); err != nil {
 	alert(err)
 }
 ```
+
+What one turn of the loop actually does, and where the change enters:
+
+```mermaid
+sequenceDiagram
+  participant P as plane
+  participant D as driver signal
+  participant W as watcher loop (caller)
+  participant B as Binding (core, unchanged)
+  P->>D: file written / key changed
+  D->>W: signal - a bare trigger, no data
+  W->>B: b.Load(ctx)
+  B->>B: open(ctx) - fresh Reader over the plane's CURRENT contents
+  B->>B: serial walk - Get per address, decode, compose
+  B->>B: deferred release closes the instance
+  B-->>W: new T - old T untouched, wherever it is held
+  W->>W: publish by replacement
+```
+
+The signal carries nothing because it needs to carry nothing: the open re-reads the plane, so the reload is correct even when signals were coalesced or spurious.
 
 ## The sharp edges
 
