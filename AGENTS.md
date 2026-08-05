@@ -11,7 +11,7 @@ This file is the short form.
 
 ## The API is decided, and the ADRs are where
 
-Fourteen ADRs in `docs/adr/` settle the address model, the source and sink contract, the type set, defaults and absence, the codec chain, the tag grammar, registration, the entry point and schema cache, the error model, the caller-held binding, plane compatibility and the conformance package.
+Fifteen ADRs in `docs/adr/` settle the address model, the source and sink contract, the type set, defaults and absence, the codec chain, the tag grammar, registration, the entry point and schema cache, the error model, the caller-held binding, plane compatibility, the conformance package and the plane that spells one address two ways.
 Every one is Accepted, and all of them are implemented.
 
 **The ADRs are the specification.**
@@ -21,11 +21,14 @@ If `docs/adr/` has no entry on a topic, that decision has not been made yet.
 Do not guess, and do not carry another library's answers over as though they were ferry's.
 
 Where the shipped code and an ADR disagree, that is a defect in one of them.
-File it.
 Do not build around it and do not paper over it.
+Bucket it as under **Issues** below: fix it in the same pull request, ask, or file it if it is a major blocker.
 
 Corrections amend the ADR in place with a note saying what it read as published, what moved and why.
 Only an unmade decision gets a new number.
+
+An amendment the user asks for is folded into the same pull request as one commit.
+A correction large enough to need evidence gets a prototype and its own pull request, and the user decides.
 
 **Three questions are parked deliberately and must get no silent answer**: tag-grammar extension, concurrency, and watch/reload.
 Nothing may ship that anticipates them.
@@ -116,7 +119,17 @@ Issues live in this repo's GitHub Issues.
 Use the `gh` CLI.
 
 Every change belongs to an issue, and the pull request says which.
-A pull request that finds a second problem files it rather than growing to cover it.
+
+**An issue is not a notebook.** Issue bloat is not the goal, and a finding earns its own issue only when it has substance to carry.
+Something found while implementing goes into one of three buckets:
+
+| bucket | what to do |
+| --- | --- |
+| straightforward | fix it in the same pull request |
+| needs input | ask the user, do not guess and do not file to defer the question |
+| blocker | file an issue, and only if it is major |
+
+Evidence, measurements and notes belong on the pull request or on the issue that already owns the area, not in a new one.
 
 ## Standing rules
 
