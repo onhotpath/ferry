@@ -12,11 +12,12 @@ BIN_DIR := $(PROJECT_DIR)/.bin
 # Every module in the workspace, core first.
 #
 # Adding a module is two edits: a `use` line in go.work, and an entry here.
-# CI does not read this list - it globs driver/*/go.mod and derives its matrix
-# from that, so a module added under driver/ is tested whether or not anyone
-# remembers this file. The two are checked against each other by the "go.work
-# uses every discovered module" step, which fails when they disagree.
-MODULES := . driver/env driver/http driver/kv driver/yaml
+# CI does not read this list - it globs driver/*/go.mod and examples/go.mod and
+# derives its matrix from that, so a module added under driver/ is tested
+# whether or not anyone remembers this file. The two are checked against each
+# other by the "go.work uses every discovered module" step, which fails when
+# they disagree.
+MODULES := . driver/env driver/http driver/kv driver/yaml examples
 
 # Pinned, not `latest`: a lint failure should always be this repository's doing
 # and never a tool release nobody asked for. This file is the only place either
