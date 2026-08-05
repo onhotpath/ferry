@@ -50,3 +50,11 @@ Host string `ferry:"host,required" mylib:"retry=3" docs:"desc=the host"`
 - The Decl stays canonical and comparable - same cache-key property as the namespaced shape.
 
 Precondition worth naming: #261 (tagScan.mine substring-matches foreign keys) must be fixed for any multi-key story.
+
+## Round 3: registration site and arrival channel (the owner's two missing pieces)
+
+`regsite.go` - 3 more tests (13 total):
+
+- **Registration**: the declaration lives on the Registry, beside the codecs, under construction-is-the-freeze - the registry is already the outer level of the schema cache, so the declaration joins the cache key with zero new machinery and no mutable phase.
+- **Arrival**: the compiled address-keyed table rides the AddressSet - the bind-time handoff every driver already receives. `AddressSet.Extension(key)` returns one key's view; the #156 driver reads its own view at Bind with zero caller plumbing; docs/validation read the same table out of band; an undeclared key's view is empty, never an error.
+- Same struct under a registry that declared nothing still compiles (foreign keys are other libraries', per Go convention) but mints nothing; a typo inside a DECLARED key refuses at compile with its own near-miss.
