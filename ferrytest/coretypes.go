@@ -238,7 +238,7 @@ func rawBytes() []byte { return []byte("\x00\xffA") }
 func byteRows() []Proof {
 	return []Proof{
 		Type("[]byte", SliceEq(Eq[byte]),
-			At([]byte(nil), ferry.Null()),
+			At([]byte(nil), ferry.Null),
 			At([]byte{}, ferry.Bytes(nil)),
 			At(rawBytes(), ferry.Bytes(rawBytes())),
 		),
@@ -309,7 +309,7 @@ func pinnedInstant() time.Time {
 // can read an element address.
 func compositeRow() Proof {
 	return Type("[]string", SliceEq(Eq[string]),
-		At([]string(nil), ferry.Null()),
-		At([]string{}, ferry.Null()),
+		At([]string(nil), ferry.Null),
+		At([]string{}, ferry.Null),
 	)
 }

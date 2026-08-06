@@ -25,7 +25,7 @@ type kindSample struct {
 func kindSamples() []kindSample {
 	return []kindSample{
 		{KindAbsent, Value{}},
-		{KindNull, Null()},
+		{KindNull, Null},
 		{KindBool, Bool(true)},
 		{KindNumber, Number("8080")},
 		{KindString, String("8080")},
@@ -138,7 +138,7 @@ func TestZeroValueIsAbsent(t *testing.T) {
 
 	// And absence stays distinct from every present observation, empty ones
 	// included: ADR-0004's "absent is not null is not the empty string".
-	for _, present := range []Value{Null(), String(""), Bytes(nil), Number("")} {
+	for _, present := range []Value{Null, String(""), Bytes(nil), Number("")} {
 		if present == (Value{}) {
 			t.Fatalf("%#v compares equal to Absent", present)
 		}
@@ -153,7 +153,7 @@ func TestComparableAsMapKey(t *testing.T) {
 	entries := []kindSample{
 		{KindNumber, Number("8080")},
 		{KindString, String("8080")},
-		{KindNull, Null()},
+		{KindNull, Null},
 		{KindAbsent, Value{}},
 	}
 
@@ -458,9 +458,9 @@ func TestGoString(t *testing.T) {
 		want string
 	}{
 		{Value{}, "absent"},
-		{Null(), "null"},
-		{Bool(true), `bool("true")`},
-		{Bool(false), `bool("false")`},
+		{Null, "null"},
+		{Bool(true), "bool(true)"},
+		{Bool(false), "bool(false)"},
 		{Number("8080"), `number("8080")`},
 		{String(""), `string("")`},
 		{String("8080"), `string("8080")`},

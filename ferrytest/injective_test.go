@@ -99,12 +99,7 @@ func TestInjectiveAsksAboutOneValueOnce(t *testing.T) {
 // method, and it is exactly the moment this check is being run to pre-empt. It
 // is data rather than a panic, because everything this function returns is.
 func TestInjectiveReportsAKeyItCannotResolve(t *testing.T) {
-	reg := ferry.NewRegistry()
-	if err := reg.Register(lowerCodec()); err != nil {
-		t.Fatalf("registering the probe: %v", err)
-	}
-
-	only := onlyString(t, ferrytest.Injective(reg, lower("Ab")))
+	only := onlyString(t, ferrytest.Injective(registryWith(t, lowerCodec()), lower("Ab")))
 	if !strings.Contains(only, "AsMapKey") {
 		t.Errorf("report = %q, want the method that declares the obligation named", only)
 	}
@@ -118,9 +113,9 @@ type lower string
 func (l lower) String() string { return string(l) }
 
 // lowerCodec is the registration, without the map-key declaration.
-func lowerCodec() ferry.Reg {
-	return ferry.StringCodec[lower](
-		func(l lower) string { return strings.ToLower(string(l)) },
+func lowerCodec() ferry.KeyCodec {
+	return ferry.StringKey(
+		func(l lower) (string, error) { return strings.ToLower(string(l)), nil },
 		func(s string) (lower, error) { return lower(s), nil },
 	)
 }
@@ -130,12 +125,7 @@ func lowerCodec() ferry.Reg {
 func foldingRegistry(t *testing.T) *ferry.Registry {
 	t.Helper()
 
-	reg := ferry.NewRegistry()
-	if err := reg.Register(lowerCodec().AsMapKey()); err != nil {
-		t.Fatalf("registering the probe: %v", err)
-	}
-
-	return reg
+	return registryWith(t, lowerCodec().AsMapKey())
 }
 
 // onlyString is the single line a check was expected to report.

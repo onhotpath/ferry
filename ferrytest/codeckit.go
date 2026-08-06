@@ -16,6 +16,7 @@ const (
 	codecKindNo      = 4
 	codecAcceptNo    = 5
 	codecKeyNo       = 6
+	codecNullNo      = 7
 )
 
 // probeAddr is an interface, and it is one because the value cases 2 and 3 are
@@ -50,50 +51,93 @@ var probeAddrPath = ferry.At("value")
 // ifaceCodec is a correct codec for an interface type: a nil is a Null in both
 // directions, which is exactly the shape ADR-0009 measured passing the
 // registration check while the wrapper around it panicked.
-func ifaceCodec() ferry.Reg {
-	return ferry.ValueCodec[probeAddr](ferry.KindString,
-		func(a probeAddr) (ferry.Value, error) {
-			if a == nil {
-				return ferry.Null(), nil
-			}
-
-			return ferry.String(a.Network()), nil
-		},
-		func(v ferry.Value) (probeAddr, error) {
-			if v.Kind() == ferry.KindNull {
-				return nil, nil
-			}
-
-			return probeUDP{}, nil
-		},
+//
+// It is a null policy over a string registration, which is how ADR-0017 spells
+// "this type wants a null of its own": the policy's two halves are closed under
+// isNull(load()), since load returns a nil probeAddr and isNull says a nil is
+// the null.
+func ifaceCodec() ferry.Codec {
+	return ferry.NullValue(
+		ferry.StringValue(
+			func(a probeAddr) (string, error) { return a.Network(), nil },
+			func(string) (probeAddr, error) { return probeUDP{}, nil },
+		),
+		func() (probeAddr, error) { return nil, nil },
+		func(a probeAddr) bool { return a == nil },
 	)
 }
 
-// drifting is the type whose codec declares one kind and emits another at every
-// value but its zero, which is the shape a registration-time check cannot see.
-type drifting string
+// The four types case 4 registers, one per kind a constructor names. Each is a
+// distinct reflect.Type, because one registry holds one codec per type.
+type (
+	kindBool   bool
+	kindNumber string
+	kindString string
+	kindBytes  string
+)
 
-// driftHolder is the struct a drifting value travels in.
-type driftHolder struct {
-	Value drifting `ferry:"value"`
+// kindHolder is the struct case 4 dumps, one field per kind.
+type kindHolder struct {
+	B kindBool   `ferry:"b"`
+	N kindNumber `ferry:"n"`
+	S kindString `ferry:"s"`
+	Y kindBytes  `ferry:"y"`
 }
 
-// driftingCodec declares String, emits String at the zero value so that
-// registration accepts it, and emits Number everywhere else.
-func driftingCodec() ferry.Reg {
-	return ferry.ValueCodec[drifting](ferry.KindString,
-		func(d drifting) (ferry.Value, error) {
-			if d == "" {
-				return ferry.String(""), nil
-			}
+// kindCodecs is one registration per constructor, and kindWanted is the kind
+// each one must land at. They are two halves of one table and are read together.
+func kindCodecs() []ferry.Codec {
+	return []ferry.Codec{
+		ferry.BoolValue(
+			func(k kindBool) (bool, error) { return bool(k), nil },
+			func(b bool) (kindBool, error) { return kindBool(b), nil }),
+		ferry.NumberValue(
+			func(k kindNumber) (string, error) { return string(k), nil },
+			func(s string) (kindNumber, error) { return kindNumber(s), nil }),
+		ferry.StringValue(
+			func(k kindString) (string, error) { return string(k), nil },
+			func(s string) (kindString, error) { return kindString(s), nil }),
+		ferry.BytesValue(
+			func(k kindBytes) ([]byte, error) { return []byte(k), nil },
+			func(b []byte) (kindBytes, error) { return kindBytes(b), nil }),
+	}
+}
 
-			return ferry.Number(probeNumber), nil
-		},
-		func(v ferry.Value) (drifting, error) {
-			s, err := v.AsString()
+// kindWanted is the address each of [kindCodecs]' types lands at, and the kind
+// the constructor that built it names.
+var kindWanted = map[string]ferry.VKind{
+	"b": ferry.KindBool,
+	"n": ferry.KindNumber,
+	"s": ferry.KindString,
+	"y": ferry.KindBytes,
+}
 
-			return drifting(s), err
-		},
+// nullable is the type case 7 registers, and its zero is the value its policy
+// calls the null.
+type nullable string
+
+// nullHolder is the struct a nullable travels in.
+type nullHolder struct {
+	Value nullable `ferry:"value"`
+}
+
+// probeNullPath is where a [nullHolder]'s one field lands.
+var probeNullPath = ferry.At("value")
+
+// probeNullable is a nullable that is not the null, so that case 7 sees both
+// arms of the policy rather than the null one twice.
+const probeNullable nullable = "warn"
+
+// nullCodec is a null policy whose two halves are closed: load returns the empty
+// nullable and isNull says the empty nullable is the null.
+func nullCodec() ferry.Codec {
+	return ferry.NullValue(
+		ferry.StringValue(
+			func(n nullable) (string, error) { return string(n), nil },
+			func(s string) (nullable, error) { return nullable(s), nil },
+		),
+		func() (nullable, error) { return "", nil },
+		func(n nullable) bool { return n == "" },
 	)
 }
 
@@ -122,18 +166,17 @@ var errNotANumber = errors.New("ferrytest: the probe codec takes a number")
 // numberCodec is a codec declaring Number whose decode half reads a Number and
 // nothing else, so that what it accepts is what core donated rather than what it
 // was handed.
-func numberCodec() ferry.Reg {
-	return ferry.ValueCodec[numeric](ferry.KindNumber,
-		func(n numeric) (ferry.Value, error) {
+func numberCodec() ferry.Codec {
+	return ferry.NumberValue(
+		func(n numeric) (string, error) {
 			if n == "" {
-				return ferry.Number("0"), nil
+				return "0", nil
 			}
 
-			return ferry.Number(string(n)), nil
+			return string(n), nil
 		},
-		func(v ferry.Value) (numeric, error) {
-			s, err := v.AsNumber()
-			if err != nil {
+		func(s string) (numeric, error) {
+			if s == "" {
 				return "", errNotANumber
 			}
 
@@ -165,9 +208,9 @@ const (
 
 // foldingCodec is a key codec that lowercases, which makes two keys that are
 // distinct under == render to one plane address.
-func foldingCodec() ferry.Reg {
-	return ferry.StringCodec[folding](
-		func(f folding) string { return strings.ToLower(string(f)) },
+func foldingCodec() ferry.KeyCodec {
+	return ferry.StringKey(
+		func(f folding) (string, error) { return strings.ToLower(string(f)), nil },
 		func(s string) (folding, error) { return folding(s), nil },
 	)
 }

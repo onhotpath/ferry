@@ -270,14 +270,11 @@ func (*lines) Helper() {}
 // held to what they claim.
 //
 // A probe that is wrong makes the case it belongs to say nothing, quietly, which
-// is worse than the case failing: cases 2 to 6 are the only thing standing
+// is worse than the case failing: cases 2 to 7 are the only thing standing
 // between a registrant and a defect in the registration wrapper, so the values
 // they carry have to be the values the case is about.
 func TestTheCodecProbesAreTotalInBothDirections(t *testing.T) {
-	reg := ferry.NewRegistry()
-	if err := reg.Register(ifaceCodec(), numberCodec(), foldingCodec().AsMapKey()); err != nil {
-		t.Fatalf("the suite's own probes were refused: %v", err)
-	}
+	reg := probesIn(t, ifaceCodec(), numberCodec(), foldingCodec().AsMapKey())
 
 	back, err := ferry.Load[ifaceHolder](context.Background(),
 		Static(map[ferry.Path]ferry.Value{probeAddrPath: ferry.String("udp")}),
@@ -305,12 +302,7 @@ func TestTheFoldingKeysOwnStringIsInjective(t *testing.T) {
 			"demonstrates has gone", probeMixed, probeShouted)
 	}
 
-	reg := ferry.NewRegistry()
-	if err := reg.Register(foldingCodec().AsMapKey()); err != nil {
-		t.Fatalf("registering the folding probe: %v", err)
-	}
-
-	got := Injective(reg, probeMixed, probeShouted)
+	got := Injective(probesIn(t, foldingCodec().AsMapKey()), probeMixed, probeShouted)
 	if len(got) != 1 {
 		t.Fatalf("Injective reported %q over a pair ferry writes one text for, want one line", got)
 	}
@@ -457,8 +449,10 @@ func TestTheCodecCasesReportAWalkThatFailed(t *testing.T) {
 	cases := map[string]func(*codecRun){
 		"the nil interface, encoding":        (*codecRun).caseNilInterfaceEncode,
 		"the nil interface, decoding":        (*codecRun).caseNilInterfaceDecode,
+		"a constructor's own kind":           (*codecRun).caseDeclaredKind,
 		"a codec that accepts what it emits": (*codecRun).caseAcceptsWhatItEmits,
 		"a key codec's own text":             (*codecRun).caseKeyText,
+		"a null policy":                      (*codecRun).caseNullPolicy,
 	}
 
 	for name, run := range cases {
@@ -476,6 +470,24 @@ func TestTheCodecCasesReportAWalkThatFailed(t *testing.T) {
 	}
 }
 
+// probesIn is the suite's own fixtures in a registry of their own.
+//
+// [ferry.NewRegistry] refuses by panicking, having no error to return (ADR-0017),
+// and a probe this package can no longer register is a change to core's rules
+// rather than a failure of the test that names it - so it is reported as one
+// line here rather than as a stack trace that aborts the run.
+func probesIn(t *testing.T, codecs ...ferry.Codec) *ferry.Registry {
+	t.Helper()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("the suite's own probes were refused: %v", r)
+		}
+	}()
+
+	return ferry.NewRegistry(codecs...)
+}
+
 // TestProbeRegistryReportsARegistrationCoreRefuses is the arm that fires when
 // the suite's own fixture stops being registrable, which is a change to core's
 // registration rules rather than to any caller's code.
@@ -484,9 +496,9 @@ func TestProbeRegistryReportsARegistrationCoreRefuses(t *testing.T) {
 	run := &codecRun{rep: c}
 
 	// A type core owns by kind admission: an entry core holds is not replaceable.
-	refused := ferry.ValueCodec[string](ferry.KindString,
-		func(string) (ferry.Value, error) { return ferry.String(""), nil },
-		func(ferry.Value) (string, error) { return "", nil },
+	refused := ferry.StringValue(
+		func(string) (string, error) { return "", nil },
+		func(string) (string, error) { return "", nil },
 	)
 
 	if _, ok := run.probeRegistry(codecTextNo, refused); ok {

@@ -97,8 +97,9 @@
 // key, both from the value rather than from the type.
 //
 // A map is keyed by a string or an integer kind, by time.Duration, or by a
-// registered type whose registration declared [Reg.AsMapKey]. Nothing else keys
-// a map, because the key becomes address text and has to parse back out of it.
+// registered type whose registration declared [KeyCodec.AsMapKey]. Nothing else
+// keys a map, because the key becomes address text and has to parse back out of
+// it.
 //
 // chan, func, complex64, complex128, unsafe.Pointer and uintptr are refused. So
 // is a struct that maps no address, and so is a recursive type, whose address
@@ -193,30 +194,31 @@
 // claims a type ferry does not own, in both directions at once, and the
 // guarantee about that type transfers to whoever registered it:
 //
-//	func init() {
-//	    if err := ferry.Register(
-//	        ferry.TextCodec[big.Int](ferry.KindNumber),
-//	        ferry.DurationLike[PollInterval](),
-//	    ); err != nil {
-//	        panic(err)
-//	    }
-//	}
+//	var registry = ferry.NewRegistry(
+//	    ferry.NumberText[big.Int](),
+//	    ferry.DurationLike[PollInterval](),
+//	)
 //
-// There are four constructors. [TextCodec] takes a kind and no functions, for a
-// type that already carries a text pair and wants a different boundary kind.
-// [StringCodec] takes two functions over string. [ValueCodec] takes a kind and
-// two functions over [Value], and its decode half is the only one that sees the
-// whole [Value], which is what lets it accept a null. [DurationLike] closes the
-// named-duration hole at one line per type.
+// A registration is named after the kind it writes, so it takes no kind
+// argument, and its halves are typed by the payload that kind carries, so a
+// registrant never builds a [Value]. [BoolValue], [NumberValue], [StringValue]
+// and [BytesValue] take two functions each; [NumberKey] and [StringKey] are the
+// two whose kind may key a map, and they alone carry [KeyCodec.AsMapKey];
+// [NumberText] and [StringText] take no functions, for a type that already
+// carries a text pair and wants a different boundary kind, and they carry
+// AsMapKey too. [DurationLike] closes the named-duration hole at one line per
+// type, and [NullValue] is the one modifier: it says what a plane's null becomes
+// and which values write one back.
 //
-// [Register] writes to the registry core ships. [NewRegistry] builds another,
-// and [WithRegistry] names it for one call.
+// [NewRegistry] is the whole registry API and [WithRegistry] names a registry
+// for one call. A registry takes its whole codec set at construction and has no
+// mutators, so it is complete when it is born and there is no ordering rule
+// between building it and using it; every refusal is a panic there rather than
+// an error on a line nobody checks. Core's own type set is always underneath,
+// and a codec claiming a type core owns is refused like any duplicate.
 //
-// A registry freezes at the first [Load], [LoadOver], [Dump], [Bind] or
-// [BindSink] run against it, so register from an init. [Compile] retains
-// nothing and does not freeze. A registration claims its type unconditionally:
-// there is no decline, and "fall through to the next step" is spelled by not
-// registering the type.
+// A registration claims its type unconditionally: there is no decline, and "fall
+// through to the next step" is spelled by not registering the type.
 //
 // A registry also holds the compiled-schema cache, and nothing evicts from it,
 // so a registry is a value to keep. Build one per program, or one per test.

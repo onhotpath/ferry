@@ -9,21 +9,16 @@ import (
 )
 
 // TestCodecIsGreenOverARegistryThatIsRight is the suite's own bar, and it is
-// also the assertion that cases 2 to 6 pass on this build of core.
+// also the assertion that cases 2 to 7 pass on this build of core.
 //
 // Cases 2 and 3 are the two wrapper defects ADR-0009 found, and both were
 // panics: a suite that reported them as failures rather than crashing is what
 // this run demonstrates when they are absent, and TestCodecReportsAPanic is
 // where the reporting itself is asserted.
 func TestCodecIsGreenOverARegistryThatIsRight(t *testing.T) {
-	reg := ferry.NewRegistry()
-	if err := reg.Register(ferry.TextCodec[agreeingText](ferry.KindString)); err != nil {
-		t.Fatalf("registering the probe: %v", err)
-	}
-
 	c := &capture{}
 
-	ferrytest.Codec(c, reg)
+	ferrytest.Codec(c, registryWith(t, ferry.StringText[agreeingText]()))
 
 	if len(c.lines) != 0 {
 		t.Errorf("the codec suite reported %q over a registry that is right, want nothing", c.lines)
@@ -59,14 +54,9 @@ func TestCodecIsGreenOverAnEmptyRegistry(t *testing.T) {
 // construction; this type does not, so what the plane holds is the appender's
 // bytes and a reader expecting the marshaller's is reading somebody else's.
 func TestCodecReportsATextPairThatDisagrees(t *testing.T) {
-	reg := ferry.NewRegistry()
-	if err := reg.Register(ferry.TextCodec[disagreeingText](ferry.KindString)); err != nil {
-		t.Fatalf("registering the probe: %v", err)
-	}
-
 	c := &capture{}
 
-	ferrytest.Codec(c, reg)
+	ferrytest.Codec(c, registryWith(t, ferry.StringText[disagreeingText]()))
 
 	only := onlyLine(t, c)
 	if !strings.Contains(only, "codec case 1") {
@@ -80,20 +70,15 @@ func TestCodecReportsATextPairThatDisagrees(t *testing.T) {
 
 // TestCodecIsSilentWhereFerryNeverConsultsTheTextPair is #143.
 //
-// The type's two spellings disagree and the registration is a StringCodec, so
-// registration beats the text pair and ferry calls neither half. Reporting the
+// The type's two spellings disagree and the registration is a [ferry.StringValue],
+// so it beats the text pair and ferry calls neither half. Reporting the
 // disagreement would be a false positive whose explanation is false with it: the
 // plane holds neither of the two strings.
 func TestCodecIsSilentWhereFerryNeverConsultsTheTextPair(t *testing.T) {
-	reg := ferry.NewRegistry()
-
-	err := reg.Register(ferry.StringCodec[disagreeingText](
-		func(d disagreeingText) string { return d.text },
+	reg := registryWith(t, ferry.StringValue(
+		func(d disagreeingText) (string, error) { return d.text, nil },
 		func(s string) (disagreeingText, error) { return disagreeingText{text: s}, nil },
 	))
-	if err != nil {
-		t.Fatalf("registering the probe: %v", err)
-	}
 
 	c := &capture{}
 
@@ -106,26 +91,22 @@ func TestCodecIsSilentWhereFerryNeverConsultsTheTextPair(t *testing.T) {
 
 // TestCodecReportsAZeroThatIsNotAFixedPoint is case 3, per-registrant.
 //
-// The codec is total over the zero value, which is all registration checks, and
+// The codec is total over the zero value, which is all [ferry.NewRegistry]
+// checks, and
 // its two halves still disagree there: the zero encodes to one text and what
 // that text loads as encodes to another. Nothing but a walk over the
 // registrant's own type can see it, and no proof is needed to reach it.
 func TestCodecReportsAZeroThatIsNotAFixedPoint(t *testing.T) {
-	reg := ferry.NewRegistry()
-
-	err := reg.Register(ferry.StringCodec[wandering](
-		func(w wandering) string {
+	reg := registryWith(t, ferry.StringValue(
+		func(w wandering) (string, error) {
 			if w == "" {
-				return "zero"
+				return "zero", nil
 			}
 
-			return "x:" + string(w)
+			return "x:" + string(w), nil
 		},
 		func(s string) (wandering, error) { return wandering(s), nil },
 	))
-	if err != nil {
-		t.Fatalf("registering the probe: %v", err)
-	}
 
 	c := &capture{}
 

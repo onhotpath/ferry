@@ -334,7 +334,7 @@ func TestMemPlaneEnumeratesContainers(t *testing.T) {
 	limits := ferry.At("limits")
 	mustSet(t, w, limits.At("http").Elem(0), ferry.Number("1"))
 	mustSet(t, w, limits.At("http").Elem(1), ferry.Number("2"))
-	mustSet(t, w, limits.At("grpc"), ferry.Null())
+	mustSet(t, w, limits.At("grpc"), ferry.Null)
 	mustSet(t, w, ferry.At("name"), ferry.String("svc"))
 
 	want := []ferry.Path{limits.At("grpc"), limits.At("http")}

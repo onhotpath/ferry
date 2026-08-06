@@ -931,11 +931,11 @@ func (dumpTo) atStatic(_ context.Context, s spot, into descend) (outcome, error)
 //
 // A value the leaf's representation does not cover is reported rather than
 // swallowed, which in core's set is a time.Time outside years 0 to 9999 and
-// nothing else. So is a codec that produced a kind other than the one it
-// declared, which is the one check core can make about a codec it did not
-// write (ADR-0009).
+// nothing else. A codec that produced a kind other than the one it declared
+// used to be checked here too, and is not, because ADR-0017's payload-typed
+// halves leave a registrant nothing to declare and core the one that wraps.
 func (d dumpTo) atLeaf(ctx context.Context, s spot) (outcome, error) {
-	v, err := s.n.codec.emit(s.v)
+	v, err := s.n.codec.encode(s.v)
 	if err != nil {
 		return outcome{}, newError(momentWalk, ErrValue, s.at, err.Error()).withCause(err)
 	}
@@ -973,7 +973,7 @@ func (d dumpTo) atNullable(ctx context.Context, s spot, into descend) (outcome, 
 		return into(s.v.Elem(), s.at)
 	}
 
-	return d.write(ctx, s.at, Null())
+	return d.write(ctx, s.at, Null)
 }
 
 // atArray asks nothing. An index outside the array is something a plane can
@@ -991,7 +991,7 @@ func (dumpTo) atArray(context.Context, spot) error { return nil }
 // vanish entirely, which is a silently dropped entry (ADR-0005).
 func (d dumpTo) atSlice(ctx context.Context, s spot, into descend) (outcome, error) {
 	if s.v.Len() == 0 {
-		return d.write(ctx, s.at, Null())
+		return d.write(ctx, s.at, Null)
 	}
 
 	r := d.realising(s, s.v.Len())
@@ -1013,7 +1013,7 @@ func (d dumpTo) atSlice(ctx context.Context, s spot, into descend) (outcome, err
 // the mapping's own address where it has no entries.
 func (d dumpTo) atMap(ctx context.Context, s spot, into descend) (outcome, error) {
 	if s.v.Len() == 0 {
-		return d.write(ctx, s.at, Null())
+		return d.write(ctx, s.at, Null)
 	}
 
 	keys, err := sortedKeys(s)

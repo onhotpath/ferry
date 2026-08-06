@@ -65,7 +65,12 @@ type leafCodec struct {
 // neither has any number, any bool, any string or either identity leaf.
 //
 // The wrapper closes over the codec as it stands before accept is set, so the
-// fall-through below reaches core's own rule and never itself.
+// fall-through below reaches whatever rule that codec already had and never
+// itself. It falls through to decode rather than to decodeText, because the
+// codec being wrapped may carry an accept half of its own: a *T over a
+// registered T is exactly that shape, and reaching past it would derive the
+// accepted set from the declared kind, which is the derivation ADR-0009 forbids
+// (#229).
 func nullIsZero(cd leafCodec) leafCodec {
 	inner := cd
 
@@ -76,7 +81,7 @@ func nullIsZero(cd leafCodec) leafCodec {
 			return nil
 		}
 
-		return inner.decodeText(v, got)
+		return inner.decode(v, got)
 	}
 
 	return cd
@@ -145,7 +150,7 @@ func (r *Registry) pointerLeaf(t reflect.Type) (leafCodec, bool) {
 		kind: inner.kind,
 		encode: func(v reflect.Value) (Value, error) {
 			if v.IsNil() {
-				return Null(), nil
+				return Null, nil
 			}
 
 			return inner.encode(v.Elem())
@@ -154,17 +159,49 @@ func (r *Registry) pointerLeaf(t reflect.Type) (leafCodec, bool) {
 		// keeps a seed the caller still holds out of the walk's reach: writing
 		// through the seed's own pointer would let a partial load mutate a
 		// value LoadOver promises never to touch.
-		parse: func(v reflect.Value, text string) error {
-			fresh := reflect.New(elem)
-			if err := inner.parse(fresh.Elem(), text); err != nil {
-				return err
-			}
-
-			v.Set(fresh)
-
-			return nil
-		},
+		parse:  intoFresh(elem, inner.parse),
+		accept: pointerAccept(elem, inner),
 	}), true
+}
+
+// intoFresh runs a pointee's text half into a value built for the purpose, and
+// publishes the pointer only once that half succeeded.
+func intoFresh(elem reflect.Type, parse func(reflect.Value, string) error) func(reflect.Value, string) error {
+	return func(v reflect.Value, text string) error {
+		fresh := reflect.New(elem)
+		if err := parse(fresh.Elem(), text); err != nil {
+			return err
+		}
+
+		v.Set(fresh)
+
+		return nil
+	}
+}
+
+// pointerAccept carries a pointee codec's own whole-observation half up to the
+// pointer, and is nil where the pointee has none.
+//
+// Without it a *T over a registered T decodes through core's own rule, gated by
+// a comparison against the declared kind, so the same codec that accepts a bool
+// at a T field refuses one at a *T field with "the plane holds bool and *T
+// cannot take one". The accepted set is the codec's and is never derived from
+// the kind it declared (ADR-0009, #229).
+func pointerAccept(elem reflect.Type, inner leafCodec) func(reflect.Value, Value) error {
+	if inner.accept == nil {
+		return nil
+	}
+
+	return func(v reflect.Value, got Value) error {
+		fresh := reflect.New(elem)
+		if err := inner.accept(fresh.Elem(), got); err != nil {
+			return err
+		}
+
+		v.Set(fresh)
+
+		return nil
+	}
 }
 
 // byIdentity is the table of types ferry owns the representation of, in both
@@ -381,7 +418,7 @@ func byteSliceLeaf() leafCodec {
 		kind: KindBytes,
 		encode: func(v reflect.Value) (Value, error) {
 			if v.IsNil() {
-				return Null(), nil
+				return Null, nil
 			}
 
 			return Bytes(v.Bytes()), nil
@@ -568,6 +605,18 @@ func (r *Registry) mapKeyFor(t reflect.Type) (mapKey, bool) {
 			durationLeaf().parse), true
 	}
 
+	// The chain is consulted before the kind switch for the same reason
+	// [Registry.leafFor] consults it there: a type has one representation at
+	// every position it appears in. Without this a type the chain claims through
+	// its text pair - slog.Level, or any named string type carrying one - is
+	// admitted as a key by its underlying kind and addresses /m/4 while the same
+	// type at a leaf writes string("WARN"), and ADR-0007's refusal of a
+	// chain-claimed key is enforced only for the ones whose kind is struct
+	// (ADR-0005, ADR-0007 as amended under #45, #230).
+	if armOf(t).complete() {
+		return mapKey{}, false
+	}
+
 	switch t.Kind() {
 	case reflect.String:
 		return coreKey(reflect.Value.String, stringLeaf().parse), true
@@ -597,12 +646,12 @@ func registeredKey(reg registration) (mapKey, bool) {
 
 	return mapKey{
 		text: func(v reflect.Value) (string, error) {
-			out, err := reg.codec.emit(v)
+			out, err := reg.codec.encode(v)
 			if err != nil {
 				return "", err
 			}
 
-			return out.text, nil
+			return out.text(), nil
 		},
 		parse: reg.codec.parse,
 	}, true
@@ -664,31 +713,6 @@ func registeredKeyMsg(t reflect.Type) string {
 		"and one entry is lost with no error anywhere - add .AsMapKey() to the registration if it is", t)
 }
 
-// emit is the encode half plus the one thing core can check about a codec it
-// did not write: the kind the codec declared against the kind it produced.
-//
-// It is one comparison per encode, and it admits Null beside the declared kind
-// rather than only the declared kind. The declared kind is a donation target
-// and not a constraint on what a codec emits (ADR-0009): ADR-0005's registered
-// net.Addr codec returns Null for a nil interface and takes Null back, which is
-// the mechanism that makes an interface expressible at all, and core's own
-// []byte and every pointer leaf do the same.
-//
-// What it cannot catch is a codec that declares the right kind and the wrong
-// text, which is what ADR-0005's golden column exists for.
-func (cd leafCodec) emit(v reflect.Value) (Value, error) {
-	out, err := cd.encode(v)
-	if err != nil {
-		return Value{}, err
-	}
-
-	if out.kind != cd.kind && out.kind != KindNull {
-		return Value{}, &kindLie{typ: v.Type(), declared: cd.kind, got: out.kind}
-	}
-
-	return out, nil
-}
-
 // decode applies one plane observation to one field, and is the whole of
 // ADR-0005's donor rule and ADR-0006's null rule in one place.
 //
@@ -717,7 +741,7 @@ func (cd leafCodec) decodeText(v reflect.Value, got Value) error {
 		return &wrongKind{got: got.kind, typ: v.Type()}
 	}
 
-	return cd.parse(v, got.text)
+	return cd.parse(v, got.text())
 }
 
 // wrongKind is a leaf refusing an observation whose kind it does not take.
@@ -766,20 +790,6 @@ type lengthFailure struct {
 
 func (e *lengthFailure) Error() string {
 	return fmt.Sprintf("the plane holds %d bytes and %s holds %d", e.got, e.typ, e.want)
-}
-
-// kindLie is a codec producing a kind other than the one it declared.
-//
-// It names the type rather than the codec, because a codec has no name: the
-// registrant supplied a pair of functions and the type is what identifies them.
-type kindLie struct {
-	typ           reflect.Type
-	declared, got VKind
-}
-
-func (e *kindLie) Error() string {
-	return fmt.Sprintf("the codec for %s declared %s and produced %s: the declared kind is what a plane is "+
-		"promised on the way out and what String is donated to on the way back", e.typ, e.declared, e.got)
 }
 
 // encodeFailure is a Go value the leaf's representation does not cover.

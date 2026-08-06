@@ -41,7 +41,7 @@ func TestObservations(t *testing.T) {
 		addr ferry.Path
 		want ferry.Value
 	}{
-		{"an explicit null is Null", ferry.At("nul"), ferry.Null()},
+		{"an explicit null is Null", ferry.At("nul"), ferry.Null},
 		{"an empty quoted string is an empty String", ferry.At("empty"), ferry.String("")},
 		{"an unquoted number is a Number", ferry.At("value"), ferry.Number("8080")},
 		{"a key that is not there is Absent", ferry.At("missing"), ferry.Value{}},

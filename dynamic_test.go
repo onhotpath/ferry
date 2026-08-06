@@ -356,7 +356,7 @@ func mustWriteOneNull(t *testing.T, dump func(context.Context, Sink) error, at P
 		t.Fatalf("dump: %+v", err)
 	}
 
-	if got := p.values[at]; got != Null() {
+	if got := p.values[at]; got != Null {
 		t.Errorf("%s holds %#v, want a null", at, got)
 	}
 
@@ -643,7 +643,7 @@ func TestLoadingADynamicCompositeNeedsASourceThatCanList(t *testing.T) {
 func TestANullAtTheContainerAddressNeedsNoEnumerator(t *testing.T) {
 	t.Parallel()
 
-	p := newPlane(map[Path]Value{At("tags"): Null()})
+	p := newPlane(map[Path]Value{At("tags"): Null})
 
 	got, err := LoadOver(t.Context(), tagsOnly{Tags: []string{"seed"}}, planeSource{p: p})
 	if err != nil {
@@ -769,7 +769,7 @@ func TestWhatASourceIsAskedAtADynamicContainer(t *testing.T) {
 		want:  []string{"seed"},
 	}, {
 		name:  "and a null at the container's own address, which costs the extra list",
-		src:   &counting{values: map[Path]Value{tags: Null()}},
+		src:   &counting{values: map[Path]Value{tags: Null}},
 		gets:  1,
 		lists: 1,
 		want:  nil,
@@ -800,7 +800,7 @@ func TestASourceThatCannotListIsAskedExactlyAsItAlwaysWas(t *testing.T) {
 func aNullNeedsNoLister(t *testing.T) {
 	t.Parallel()
 
-	src := &flat{values: map[Path]Value{At("tags"): Null()}}
+	src := &flat{values: map[Path]Value{At("tags"): Null}}
 
 	got, err := LoadOver(t.Context(), tagsOnly{Tags: []string{"seed"}}, src)
 	if err != nil {
@@ -851,7 +851,7 @@ func TestAnAnswerAtAContainerAddressWithChildrenUnderItIsNotRead(t *testing.T) {
 		at   Value
 	}{
 		{name: "a value the rule forbids there", at: String("everything")},
-		{name: "and a null, which the rule allows", at: Null()},
+		{name: "and a null, which the rule allows", at: Null},
 	}
 
 	for _, c := range cases {

@@ -182,7 +182,7 @@ func valueOf(n *yamlv3.Node) (ferry.Value, error) {
 
 	switch n.Tag {
 	case nullTag:
-		return ferry.Null(), nil
+		return ferry.Null, nil
 	case boolTag:
 		return boolOf(n.Value)
 	case intTag, floatTag:
