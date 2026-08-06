@@ -19,6 +19,68 @@ var (
 	errCharset    = errors.New("a map key may not hold a hyphen")
 )
 
+// TestDriverSaysWhatItScaledTo is what a driver author has instead of counting
+// which cases ran.
+//
+// Six of the contract's interfaces are optional and are discovered by
+// assertion, so two conformant drivers execute very different numbers of cases,
+// and a case that quietly did nothing reads exactly like a case that passed.
+// The memory plane probes, enumerates and ensures, and holds neither resource
+// nor staging, so the line names three capabilities and not the other two.
+func TestDriverSaysWhatItScaledTo(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, ferrytest.MemPlane())
+
+	line, ok := lineContaining(c.logs, "the suite scaled to:")
+	if !ok {
+		t.Fatalf("the suite logged %q, want one line saying what it scaled to", c.logs)
+	}
+
+	for _, want := range []string{
+		"a source", "a sink", "probes a container's own address", "enumerates",
+		"ensures a container's own address",
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the line %q does not name %q", line, want)
+		}
+	}
+
+	for _, unwanted := range []string{"commits", "releases"} {
+		if strings.Contains(line, unwanted) {
+			t.Errorf("the line %q names %q, which the memory plane does not implement", line, unwanted)
+		}
+	}
+}
+
+// TestDriverSaysWhichHalfIsMissing is the same visibility for the one thing
+// that silences whole cases rather than narrowing one: a plane with no honest
+// Dump, which is ADR-0004's own case and a description rather than a defect.
+func TestDriverSaysWhichHalfIsMissing(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, ferrytest.Plane{
+		Name:  "read-only",
+		Kinds: allKinds(),
+		Open:  func() ferrytest.Instance { return ferrytest.Instance{Source: ferrytest.Static(nil)} },
+	})
+
+	if !anyLineContains(c.logs, "mints no sink, so every case that writes is silent") {
+		t.Errorf("the suite logged %q, want the missing half named once", c.logs)
+	}
+}
+
+// lineContaining is the first captured line holding want.
+func lineContaining(lines []string, want string) (string, bool) {
+	for _, line := range lines {
+		if strings.Contains(line, want) {
+			return line, true
+		}
+	}
+
+	return "", false
+}
+
 // TestDriverCase14ReportsAnOpenThatIsSpentByItsFirstUse is case 14, negative,
 // and it is the defect the case exists for.
 //

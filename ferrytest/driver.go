@@ -91,6 +91,7 @@ type driverRun struct {
 func (d *driverRun) run() {
 	d.rep.Helper()
 
+	d.declared()
 	d.caseKinds()
 	d.caseBind()
 	d.caseProbe()
@@ -402,6 +403,9 @@ func (d *driverRun) probeBlanks() {
 
 	pr, ok := r.(ferry.Prober)
 	if !ok {
+		d.skip(caseContainerNo, "the plane's reader does not probe, which is optional for the same reason "+
+			"enumeration is")
+
 		return
 	}
 
@@ -573,6 +577,8 @@ func childrenAreEmpty[T any](d *driverRun, set *ferry.AddressSet, v T, why strin
 
 	e, ok := r.(ferry.Enumerator)
 	if !ok {
+		d.skip(caseChildrenNo, "the plane's reader does not enumerate, which ADR-0004 makes optional")
+
 		return
 	}
 
@@ -1172,13 +1178,20 @@ func (d *driverRun) fail(n int, msg string) {
 }
 
 // skip says out loud that a case did not run.
+func (d *driverRun) skip(n int, why string) {
+	d.rep.Helper()
+
+	d.logf("plane %s: case %d skipped: %s", d.plane.Name, n, why)
+}
+
+// logf is where everything this suite says that is not a failure goes.
 //
 // [T] is two methods and neither of them is a log, deliberately: it is what
 // *testing.T satisfies for free and what a probe can implement in four lines. So
 // a skip is written where the reporter can carry one and is otherwise the
 // silence it already was - which is why the reason is in each case's own
 // documentation as well, where it cannot be lost.
-func (d *driverRun) skip(n int, why string) {
+func (d *driverRun) logf(format string, args ...any) {
 	d.rep.Helper()
 
 	l, ok := d.rep.(interface {
@@ -1188,5 +1201,5 @@ func (d *driverRun) skip(n int, why string) {
 		return
 	}
 
-	l.Logf("plane %s: case %d skipped: %s", d.plane.Name, n, why)
+	l.Logf(format, args...)
 }

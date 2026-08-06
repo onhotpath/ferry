@@ -9,7 +9,7 @@ import "context"
 // etcd, a Redis hash, a table with two columns or a test double is a few lines
 // and this package never learns which of them it is talking to.
 //
-// Two things an implementer owns.
+// Three things an implementer owns.
 //
 // Absence is a result and not an error. Get reports a key the store does not
 // hold with found false and a nil error, so that a backend's own not-found stays
@@ -19,6 +19,12 @@ import "context"
 // Cancellation is yours. The driver hands its caller's context to every call and
 // adds no deadline of its own, so a client that ignores the context is the only
 // thing standing between a cancelled load and a blocked one.
+//
+// Safety for use from many goroutines at once is yours, and it is ordinary
+// rather than exotic. A source or a sink is constructed once and a binding is
+// held for the life of a process, so one client is reached from wherever a load
+// or a save happens. A real backend's own client is usually safe already, and a
+// test double over a plain map is usually not.
 type Client interface {
 	// Get answers with the bytes stored at key, and with found false where the
 	// store does not hold it.
