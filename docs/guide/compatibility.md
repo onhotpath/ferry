@@ -62,8 +62,8 @@ A registered codec's representation is the registrant's, at the registrant's own
 ferry communicates most obligations through a diagnostic - `.AsMapKey()` works because a map keyed by an unopted type does not compile - and that mechanism is unavailable here, because at the moment of registration the previous release is not in the room:
 
 ```
-Register(a codec)                              -> nil
-Register(a DIFFERENT codec for the same type)  -> ferry: T is already registered
+NewRegistry(a codec)                              -> a registry
+NewRegistry(TWO codecs for the same type)         -> panic: ferry: T is already registered
 ```
 
 Within one process there is one representation per type.

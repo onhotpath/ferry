@@ -157,11 +157,7 @@ The named-duration case is the one with a one-line fix, because a named type is 
 ```go
 type Poll time.Duration
 
-func init() {
-	if err := ferry.Register(ferry.DurationLike[Poll]()); err != nil {
-		panic(err)
-	}
-}
+var registry = ferry.NewRegistry(ferry.DurationLike[Poll]())
 ```
 
 Matching on the underlying type instead would capture every ordinary `type Port int`, which is why the remedy is `DurationLike` rather than a wider rule.
@@ -292,7 +288,7 @@ The obligation is injectivity under Go's `==`, because `==` is what a Go map's k
   `time.UTC` and `FixedZone("GMT", 0)` are two distinct Go keys and one address.
 - Float keys are excluded because two distinct `NaN` payloads both format as `NaN`.
 - A type the text arm claims may **not** key a map, and the reversal is because nobody can be asked rather than because the answer would be no: a registration has a call site at which the obligation is declared and a text pair does not.
-  Register it and say `.AsMapKey()`.
+  Register it with `StringText`, `NumberText`, `StringKey` or `NumberKey` and say `.AsMapKey()`.
 
 A map's members are written in the order of their key text, which is ferry's determinism invariant at the one place a Go map reaches a plane.
 Two members rendering to one address are refused as the address is minted, naming it, because there is no stable answer to give.
@@ -325,37 +321,40 @@ A registered codec claims a type ferry does not own, and the guarantee about tha
 Registering without proving is permitted and forfeits the guarantee.
 
 ```go
-func init() {
-	if err := ferry.Register(
-		ferry.TextCodec[netip.AddrPort](ferry.KindString).AsMapKey(),
-		ferry.DurationLike[PollInterval](),
-		ferry.ValueCodec(ferry.KindNumber, encodeBigInt, decodeBigInt),
-	); err != nil {
-		panic(err)
-	}
-}
+var registry = ferry.NewRegistry(
+	ferry.StringText[netip.AddrPort]().AsMapKey(),
+	ferry.DurationLike[PollInterval](),
+	ferry.NumberValue(encodeBigInt, decodeBigInt),
+)
 ```
 
-There are three constructors and they differ by what the registrant hands over and by nothing else:
+A registration is named after the kind it writes, so there is no kind argument, and its halves are typed by payload, so a registrant never builds a `Value`:
 
-| constructor | you supply | the type must |
+| constructor | you supply | the kind it writes |
 | --- | --- | --- |
-| `TextCodec[T](kind)` | a kind, and no functions | implement both halves of the text pair |
-| `StringCodec(format, parse)` | two functions over `string` | nothing |
-| `ValueCodec(kind, enc, dec)` | a kind and two functions over `Value` | nothing |
+| `BoolValue(enc, dec)` | two functions over `bool` | `Bool` |
+| `NumberValue(enc, dec)` | two functions over `string` | `Number` |
+| `StringValue(enc, dec)` | two functions over `string` | `String` |
+| `BytesValue(enc, dec)` | two functions over `[]byte` | `Bytes` |
+| `NumberKey(enc, dec)`, `StringKey(enc, dec)` | the same, and `.AsMapKey()` | `Number`, `String` |
+| `NumberText[T]()`, `StringText[T]()` | nothing; the type carries a text pair | `Number`, `String` |
 
-`TextCodec` is not for rescuing a type - the chain already claims any type with a text pair - it is for changing its kind, and for saying `.AsMapKey()`.
-`ValueCodec` is the only one whose decode half sees the whole `Value`, which is the only way to accept a `Null` into a Go type whose kind has no null.
+`NumberText` and `StringText` are not for rescuing a type - the chain already claims any type with a text pair - they are for changing its kind, and for saying `.AsMapKey()`.
 `DurationLike[T ~int64]()` closes the named-duration hole at one line per type.
+`NullValue(inner, load, isNull)` is the one modifier, and it is what accepts a `Null` into a Go type whose kind has no null; its law is that `isNull(load())` holds.
 
-Each takes both halves at once, so a half pair, two halves swapped and two halves over different types are build errors rather than run-time refusals.
+Only `NumberKey`, `StringKey`, `NumberText` and `StringText` return the type carrying `.AsMapKey()`, so a bytes-keyed map is a build error rather than a refusal.
 
-`Register` runs the codec against the zero value of its type before accepting it.
-That catches one class of wrong codec out of four, and it is the class that matters: the one-line registration a user is most likely to write is not an inverse at the zero value for `netip.Addr`, `netip.AddrPort` and `netip.Prefix`.
-What it does not catch is a lossy codec, a constant codec, and a codec that declares the wrong kind, and those are what a proof in `ferrytest` is for.
+Each constructor takes both halves at once, so a half pair, two halves swapped and two halves over different types are build errors rather than run-time refusals.
+A nil half panics at the constructor.
 
-A registration goes into a `Registry`, which is a value, and it freezes at its first retained schema compile.
-Nothing can be registered after the first `Load`, `Dump`, `Bind` or `BindSink`; `Compile` retains no resolution and does not freeze.
+`NewRegistry` runs each codec against the zero value of its type before accepting it.
+That catches one class of wrong codec out of three, and it is the class that matters: the one-line registration a user is most likely to write is not an inverse at the zero value for `netip.Addr`, `netip.AddrPort` and `netip.Prefix`.
+What it does not catch is a lossy codec and a constant codec, and those are what a proof in `ferrytest` is for.
+
+A registry is complete when it is built.
+There are no mutators, so there is no window in which one is reachable and incomplete and no ordering rule between building it and using it, and every refusal above is a panic at construction rather than an error on a line nobody checks.
+Core's own type set is always underneath, so registering one type never costs you `string`, `int`, `bool` or `time.Duration`; a codec claiming a type core owns is refused like any duplicate.
 
 ### Proving your codec
 
@@ -363,10 +362,7 @@ Three calls, and a green `Codec` on its own is not enough:
 
 ```go
 func TestMyCodecs(t *testing.T) {
-	reg := ferry.NewRegistry()
-	if err := reg.Register(ferry.TextCodec[netip.Addr](ferry.KindString).AsMapKey()); err != nil {
-		t.Fatal(err)
-	}
+	reg := ferry.NewRegistry(ferry.StringText[netip.Addr]().AsMapKey())
 
 	proofs := append(ferrytest.CoreTypes(), ferrytest.Type("netip.Addr", ferrytest.Eq[netip.Addr],
 		ferrytest.At(netip.MustParseAddr("192.0.2.1"), ferry.String("192.0.2.1")),
@@ -390,7 +386,7 @@ func TestMyCodecs(t *testing.T) {
 
 - `RoundTrip` drives your values through the real engine, dumping, comparing against your golden, loading back and comparing under your own relation.
 - `Codec` checks the registration machinery and each codec at its zero value, and nothing beyond.
-  A lossy codec, a constant codec and a codec that declares one kind and emits another all pass every case in it.
+  A lossy codec and a constant codec pass every case in it, and so does a null policy whose two halves disagree.
 - `Complete` reports every type the registry holds that your proofs do not discharge.
 - `Injective` reports every pair of the values **you** name that ferry writes to one map key, which is the obligation `.AsMapKey()` declares and nothing core can check.
 
