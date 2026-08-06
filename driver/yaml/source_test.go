@@ -169,6 +169,60 @@ func TestAValueWhereTheSchemaWantsAContainerIsRefused(t *testing.T) {
 	}
 }
 
+// The two destinations whose members the type fixes, and which the wrong
+// collection is read into.
+type (
+	optionalSection struct {
+		Opts *sectionMembers `ferry:"opts"`
+	}
+
+	sectionMembers struct {
+		Host string `ferry:"host"`
+	}
+
+	// fixedArray puts the array behind a pointer, because a container question
+	// is asked at a position that can be nil and a value-typed one is walked
+	// without one.
+	fixedArray struct {
+		Pair *[2]int `ferry:"pair"`
+	}
+)
+
+// TestTheWrongCollectionAtASectionIsRefused is [TestAContainerWhereTheSchemaWantsAValueIsRefused]
+// at the container mirror.
+//
+// A struct's members are named and an array's are positions, so a sequence at
+// the one and a mapping at the other are the document and the destination
+// disagreeing about the shape of the data. Answering present for either builds
+// the section out of nothing, fills every member with the Go zero and drops what
+// the document held, with nothing saying so.
+func TestTheWrongCollectionAtASectionIsRefused(t *testing.T) {
+	t.Run("a sequence where the members are named", func(t *testing.T) {
+		_, err := ferry.Load[optionalSection](t.Context(), yaml.NewSource(write(t, "opts: [1, 2]\n")))
+		refusesShape(t, err)
+	})
+
+	t.Run("a mapping where the members are positions", func(t *testing.T) {
+		_, err := ferry.Load[fixedArray](t.Context(), yaml.NewSource(write(t, "pair: {x: 1}\n")))
+		refusesShape(t, err)
+	})
+}
+
+// refusesShape asserts that a load failed with this plane's own class for a
+// document whose shape the destination cannot take.
+func refusesShape(t *testing.T, err error) {
+	t.Helper()
+
+	if err == nil {
+		t.Fatal("Load answered without error, where the document holds the collection the destination's members " +
+			"do not live in")
+	}
+
+	if !errors.Is(err, ferry.ErrValue) {
+		t.Errorf("Load failed with %v, want an error carrying ferry.ErrValue", err)
+	}
+}
+
 // TestChildren asserts that enumeration answers with segments carrying their
 // kind, so that a sequence position and a mapping member stay different
 // answers.

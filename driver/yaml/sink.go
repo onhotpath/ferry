@@ -264,7 +264,9 @@ func (w *writer) claim(addr ferry.Path, at, spelled *yamlv3.Node) error {
 		return nil
 	}
 
-	held, taken := w.claims[at]
+	node := anchored(at)
+
+	held, taken := w.claims[node]
 	if taken && (held.tag != spelled.Tag || held.text != spelled.Value) {
 		return fmt.Errorf("%w: this address and %s are one value in the plane, which shares it through an alias, "+
 			"and the dump gave them different values", ferry.ErrPlane, held.addr)
@@ -275,10 +277,31 @@ func (w *writer) claim(addr ferry.Path, at, spelled *yamlv3.Node) error {
 			w.claims = make(map[*yamlv3.Node]claim, 1)
 		}
 
-		w.claims[at] = claim{addr: addr, tag: spelled.Tag, text: spelled.Value}
+		w.claims[node] = claim{addr: addr, tag: spelled.Tag, text: spelled.Value}
 	}
 
 	return nil
+}
+
+// anchored is the node a write is recorded against: the node an alias names, and
+// the node in hand where it is not one.
+//
+// Recording the node written would make the refusal depend on the order the walk
+// went in. [through] follows an alias only where the node it names is already
+// the kind the address needs, and a container write is the first thing that can
+// change that kind, so whichever of two addresses arrived first decided whether
+// the second one followed - and where it did not follow, the two never met and
+// the collision went unseen. Resolving the alias here makes both arrive at one
+// node whichever order they were written in (#198).
+//
+// A chain too long to resolve is recorded against the node in hand, which is
+// where the write is going anyway.
+func anchored(n *yamlv3.Node) *yamlv3.Node {
+	if named := deref(n); named != nil {
+		return named
+	}
+
+	return n
 }
 
 // Commit emits the document into the staged file and renames it over the plane.

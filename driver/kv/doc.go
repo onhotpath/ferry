@@ -31,11 +31,18 @@
 // with its own parser. Nothing is lost on the way into a Go value; what is lost
 // is the store's own opinion about the value, which it never had.
 //
-// There is also no way to store "nothing", as distinct from an empty value. So a
-// nil pointer, a nil slice and an empty map cannot be saved here, and saving one
+// There is also no way to store "nothing", as distinct from an empty value. So
+// four shapes cannot be saved here: a nil pointer, a nil slice, an empty map,
+// and a non-nil pointer to a struct whose every field was omitted. Saving one
 // fails and names the field rather than writing an empty value that would read
-// back as something else. A struct with all three reports all three, and the
-// store is left untouched.
+// back as something else, a struct with all four reports all four, and the store
+// is left untouched.
+//
+// The failures are two classes and a caller matching on one of them misses the
+// other. A null at a leaf is this package's own refusal and carries
+// [ferry.ErrValue]. The other three are a container speaking at its own address,
+// which this package supplies no way to write, so ferry refuses them for it and
+// they carry [ferry.ErrPlane]. Match both, or match neither and read the error.
 //
 // # One call or one call per key
 //

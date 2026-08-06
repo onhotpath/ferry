@@ -73,10 +73,21 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 		return nil, err
 	}
 
+	sections, err := declaredSections(addrs, keys, s.cfg.sep)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := s.cfg
 
 	return func(context.Context) (ferry.Reader, error) {
-		return &reader{cfg: cfg, keys: keys.Open(), declared: declared, env: environMap(cfg.environ())}, nil
+		return &reader{
+			cfg:      cfg,
+			keys:     keys.Open(),
+			declared: declared,
+			sections: sections,
+			env:      environMap(cfg.environ()),
+		}, nil
 	}, nil
 }
 
@@ -117,6 +128,102 @@ func declaredLeaves(addrs *ferry.AddressSet, keys *ferry.Keys) (map[ferry.LeafAd
 	return out, nil
 }
 
+// sectionScope is what a declared section's presence is decided from: the names
+// of the leaves the type puts under it, and the prefixes of the composites it
+// puts under it, whose own members come from the environment instead.
+//
+// It is the same rule [deeperThanLeaf] states, applied to the other question a
+// container admits. A section's children come from the type (ADR-0016), so the
+// environment can be asked about exactly those names, and a variable that merely
+// shares the section's prefix stays an unrelated variable rather than becoming
+// evidence that the section is there - which is the #219 class one method over.
+type sectionScope struct {
+	// keys is every declared leaf name strictly under the section.
+	keys []string
+	// scans is the prefix of every declared composite strictly under it, since
+	// the members of one of those come from the environment and cannot be listed
+	// before it is read.
+	scans []string
+}
+
+// declaredSections is the presence table Bind builds beside [declaredLeaves],
+// one entry per section the type determined.
+//
+// A section a value minted - one under a composite - is in no address set and is
+// in no entry here, and [reader.Probe] falls back to the prefix scan for it. That
+// is exact too, for the reason it is not exact at a declared section: everything
+// below a composite's own name belongs to that composite by construction,
+// because its members are whatever the environment holds there.
+func declaredSections(addrs *ferry.AddressSet, keys *ferry.Keys, sep string) (map[ferry.SectionAddr]sectionScope,
+	error,
+) {
+	out := make(map[ferry.SectionAddr]sectionScope, addrs.Len())
+	name := keys.Open()
+
+	for m := range addrs.Seq() {
+		section, ok := m.(ferry.SectionAddr)
+		if !ok {
+			continue
+		}
+
+		scope, err := scopeOf(addrs, name, sep, section.Path())
+		if err != nil {
+			return nil, err
+		}
+
+		out[section] = scope
+	}
+
+	return out, nil
+}
+
+// scopeOf collects one section's leaves and composites out of the address set.
+//
+// It ranges the whole set per section rather than exploiting the set's ordering,
+// because this runs once per Bind, before any I/O, and a nested loop over a
+// schema's addresses is not what a load spends its time on.
+func scopeOf(addrs *ferry.AddressSet, name ferry.KeyFunc, sep string, at ferry.Path) (sectionScope, error) {
+	var scope sectionScope
+
+	for m := range addrs.Seq() {
+		if !under(at, m.Path()) {
+			continue
+		}
+
+		key, err := name(m.Path())
+		if err != nil {
+			// Unreachable for the reason [declaredLeaves] gives, and returned
+			// rather than ignored for the same one.
+			return sectionScope{}, err
+		}
+
+		switch m.(type) {
+		case ferry.LeafAddr:
+			scope.keys = append(scope.keys, key)
+		case ferry.CompositeAddr:
+			scope.scans = append(scope.scans, key+sep)
+		default:
+			// A section under a section contributes nothing of its own: its
+			// members are in this set too, and they are what the environment is
+			// asked about.
+		}
+	}
+
+	return scope, nil
+}
+
+// under reports whether p lies strictly below prefix, at a segment boundary.
+//
+// The canonical renderings decide it. ADR-0003's escaping leaves no bare
+// delimiter inside a segment, so a rendering that continues past another one
+// continues at a boundary and never in the middle of a segment, which is why /ab
+// is not under /a while /a/b and /a#0 both are.
+func under(prefix, p ferry.Path) bool {
+	rest, ok := strings.CutPrefix(p.String(), prefix.String())
+
+	return ok && rest != "" && (rest[0] == '/' || rest[0] == '#')
+}
+
 // environMap turns an environ slice into the lookup one open reads from.
 //
 // An entry with no "=" is not a variable and is skipped, and so is one with an
@@ -143,6 +250,7 @@ type reader struct {
 	cfg      config
 	keys     ferry.KeyFunc
 	declared map[ferry.LeafAddr]string
+	sections map[ferry.SectionAddr]sectionScope
 	env      map[string]string
 }
 
@@ -193,11 +301,13 @@ func (r *reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error
 
 // holdsBelow reports whether the environment holds any name strictly below this
 // one, which is what makes a minted leaf a section the schema has no room for.
-func (r *reader) holdsBelow(key string) bool {
-	below := key + r.cfg.sep
+func (r *reader) holdsBelow(key string) bool { return r.holdsUnder(key + r.cfg.sep) }
 
+// holdsUnder reports whether the environment holds any name beginning with this
+// text.
+func (r *reader) holdsUnder(prefix string) bool {
 	for name := range r.env {
-		if strings.HasPrefix(name, below) {
+		if strings.HasPrefix(name, prefix) {
 			return true
 		}
 	}
@@ -237,14 +347,30 @@ func deeperThanLeaf() error {
 // errors.Is answers for it on what [ferry.Load] returned.
 var ErrDeeperThanLeaf = errors.New("env: the environment reaches deeper than this address")
 
-// Probe answers whether the environment holds anything under a container's own
-// name.
+// Probe answers whether the environment holds anything this schema addresses
+// under a container's own name.
 //
-// A section is present when any variable lies below its name and absent
-// otherwise, which is the only distinction a flat plane carries: nothing is ever
-// written at a container's own name, so its presence is the presence of its
-// members. This plane has no null, so a container is never reported null.
+// A container is present when the environment holds one of the names below it
+// and absent otherwise, which is the only distinction a flat plane carries:
+// nothing is ever written at a container's own name, so its presence is the
+// presence of its members. This plane has no null, so a container is never
+// reported null.
+//
+// The members are what the question is scoped to, and that is the sharp edge. A
+// section's members come from the type, so an ambient variable that merely
+// shares the section's name and a separator says nothing about it: HOME_SWEET_HOME
+// does not make a section at HOME present. A composite is the other way round,
+// because its members are whatever the environment holds below its name, so
+// everything there is one of them.
 func (r *reader) Probe(_ context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	if scope, declared := r.scopeOf(addr); declared {
+		if r.holdsAny(scope) {
+			return ferry.SectionPresent, nil
+		}
+
+		return ferry.SectionAbsent, nil
+	}
+
 	key, err := r.keys(addr.Path())
 	if err != nil {
 		return ferry.SectionInfo{}, err
@@ -255,4 +381,36 @@ func (r *reader) Probe(_ context.Context, addr ferry.Container) (ferry.SectionIn
 	}
 
 	return ferry.SectionAbsent, nil
+}
+
+// scopeOf is the members a declared section's presence is decided from, and
+// whether this container has one: a composite and a section a value minted have
+// none, and are answered by the scan instead.
+func (r *reader) scopeOf(addr ferry.Container) (sectionScope, bool) {
+	section, ok := addr.(ferry.SectionAddr)
+	if !ok {
+		return sectionScope{}, false
+	}
+
+	scope, declared := r.sections[section]
+
+	return scope, declared
+}
+
+// holdsAny reports whether the environment holds any of the names a declared
+// section's own members render to.
+func (r *reader) holdsAny(scope sectionScope) bool {
+	for _, key := range scope.keys {
+		if _, ok := r.env[key]; ok {
+			return true
+		}
+	}
+
+	for _, scan := range scope.scans {
+		if r.holdsUnder(scan) {
+			return true
+		}
+	}
+
+	return false
 }
