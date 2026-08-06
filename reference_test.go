@@ -69,6 +69,11 @@ type refPlane struct {
 	// left for core to check.
 	foreign bool
 
+	// lost makes the plane report a link and name nowhere, which is what a
+	// driver helper returning (Container, bool) produces when its second result
+	// is not checked.
+	lost bool
+
 	got  []Path
 	set  []Path
 	kept []Path
@@ -98,6 +103,10 @@ func (p *refPlane) linkFor(at Path) (from, to Path, linked bool) {
 // section finds the target's own address in the set Bind was handed, at the
 // kind it has to be.
 func (p *refPlane) section(at Path) (Container, bool) {
+	if p.lost {
+		return nil, true
+	}
+
 	if p.foreign {
 		return sectionOf(at), true
 	}
@@ -351,6 +360,39 @@ func TestALinkToAnAddressTheSchemaDoesNotNameIsRefused(t *testing.T) {
 
 	if !strings.Contains(refText(err), "resolve or to refuse") {
 		t.Errorf("the refusal reads %q, and it has to name whose job the case is", refText(err))
+	}
+}
+
+// TestALinkThatNamesNowhereIsRefused is the inconsistent answer the design says
+// cannot exist, built by the obvious driver bug.
+//
+// A helper returning (Container, bool) whose second result is not checked hands
+// SectionAt a nil, and the answer that comes out says the container lives
+// elsewhere and names nowhere. Read as a plain answer it means three different
+// things at three shapes - a nil pointer stays nil, an empty composite is
+// zeroed, an unlistable one is refused - so it is refused as what it is.
+func TestALinkThatNamesNowhereIsRefused(t *testing.T) {
+	t.Parallel()
+
+	p := newRefPlane(nil, map[Path]Path{At("a"): At("t")})
+	p.lost = true
+
+	_, err := Load[refPair](t.Context(), refSource{p: p})
+	if err == nil {
+		t.Fatal("a probe answering elsewhere with no target loaded cleanly, so an answer about no address at " +
+			"all was read as an answer about this one")
+	}
+
+	if !strings.Contains(refText(err), "named no target") {
+		t.Errorf("the refusal reads %q, and it has to say the answer named no target", refText(err))
+	}
+
+	if !strings.Contains(refText(err), "refPlane") {
+		t.Errorf("the refusal reads %q, and it has to name the driver that answered", refText(err))
+	}
+
+	if !errors.Is(err, ErrPlane) {
+		t.Error("the refusal is not an ErrPlane, and an answer no plane should have given is the plane's fault")
 	}
 }
 

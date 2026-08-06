@@ -64,7 +64,7 @@ type Ensurer    interface { Ensure(ctx context.Context, addr Container, p Presen
 > Both halves of the walk need one.
 > The read half has to tell an absent mapping from an explicitly null one, which is the only thing that distinguishes a seed kept from a seed cleared; the write half has to say something at the address of a nil pointer, an empty slice and an empty map, which ADR-0005 writes a null at.
 > Under the signatures as published neither is expressible: `Get` and `Set` refuse a container address by construction, which is the point, and `Probe` reached only half the containers.
-> That the ADR itself names `CompositeRedirect{Target CompositeAddr}` as a redirect **state** is the evidence it intended a composite to be answered about.
+> That this ADR as published named `CompositeRedirect{Target CompositeAddr}` as a redirect **state** is the evidence it intended a composite to be answered about.
 >
 > What moved: `Container` is a second sealed sum, over `SectionAddr` and `CompositeAddr` and nothing else, and `Probe` is asked about one.
 > Probing a leaf is still a compile error, so the safety property the split exists for is unchanged, and the driver-side type switch it costs is on the same cold path as `Bind`'s.
@@ -181,10 +181,10 @@ unset HOME_DIR               ->  Probe(/home)    = Absent     (though $HOME rema
 >
 > var SectionPresent, SectionAbsent, SectionNull SectionInfo
 >
-> func SectionAt(target SectionAddr) SectionInfo
+> func SectionAt(target Container) SectionInfo
 >
 > func (i SectionInfo) Presence() Presence
-> func (i SectionInfo) Redirect() (SectionAddr, bool)
+> func (i SectionInfo) Redirect() (Container, bool)
 > ```
 
 The type is named for its work, which is `fs.FileInfo`'s idiom: information about a section, answered by a probe.
@@ -227,9 +227,8 @@ There is nothing for `Compile` to mint.
 What can exist is a redirect **state** in the answer, targeting its own kind:
 
 ```go
-func SectionAt(target SectionAddr) SectionInfo     // sections
-type LeafRedirect struct{ Target LeafAddr }        // leaves, an errors.As control error
-type CompositeRedirect struct{ Target CompositeAddr }
+func SectionAt(target Container) SectionInfo   // sections and composites, one arm
+type LeafRedirect struct{ Target LeafAddr }    // leaves, an errors.As control error
 ```
 
 The leaf arm is a typed control error rather than a `Value` kind, which keeps [ADR-0004](0004-source-and-sink.md)'s six-kind lattice closed.
@@ -240,6 +239,7 @@ It is `fs.SkipDir`'s shape: a sentinel-ish error that means "not a failure, a co
 > As published, this listed three redirect types: `SectionAt` over a `SectionAddr`, `LeafRedirect`, and `CompositeRedirect` over a `CompositeAddr`.
 > `Probe` already takes a `Container` rather than a `SectionAddr`, for the reason recorded further up this ADR, so the section arm and the composite arm are one question asked at one method and they are one answer.
 > `SectionAt` takes a `Container`, and `CompositeRedirect` does not exist.
+> **Both code blocks above are corrected in place**, here and at the `SectionInfo` surface further up, which is the house style this document had applied to the `Prober` block and not to these two.
 > What replaces it is a rule rather than a type: a section may only name a section and a composite only a composite, refused in core, because what is under a section comes from the type and what is under a composite comes from the value, so a link across them names a place its own members could not be.
 >
 > The second half is `Presence`, which gains `PresenceElsewhere`.

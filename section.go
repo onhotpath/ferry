@@ -3,7 +3,8 @@ package ferry
 import "strconv"
 
 // Presence is what a plane holds at a container address, and the set is closed
-// at three: [PresenceAbsent], [PresencePresent] and [PresenceNull].
+// at four: [PresenceAbsent], [PresencePresent], [PresenceNull] and
+// [PresenceElsewhere].
 //
 // It is the container-side counterpart of [VKind]. A container is read one
 // child at a time and has no group value of its own, so the only thing there is
@@ -37,7 +38,7 @@ var presenceName = [...]string{"absent", "present", "null", "elsewhere"}
 
 var _ [len(presenceName)]struct{} = [int(PresenceElsewhere) + 1]struct{}{}
 
-// String names the presence in lower case: absent, present, null.
+// String names the presence in lower case: absent, present, null, elsewhere.
 func (p Presence) String() string {
 	if int(p) < len(presenceName) {
 		return presenceName[p]
@@ -54,20 +55,30 @@ func (p Presence) String() string {
 // address names lives somewhere else. The zero SectionInfo is absence, so a
 // driver with nothing to report returns ferry.SectionInfo{}.
 //
-// It is comparable, so a caller may assert on it with ==, and [SectionInfo.Presence]
-// reads it as a value to switch on.
+// Read it with [SectionInfo.Presence] and [SectionInfo.Redirect] rather than
+// with ==. The three plain answers compare, which is what lets them be
+// sentinels; one carrying a link holds an address, and comparing two of those
+// compares the addresses inside them.
 type SectionInfo struct {
 	presence Presence
 
-	// target is the address a link points at, and it is non-nil exactly where
-	// presence is PresenceElsewhere. It is an interface holding one of two
-	// sealed struct types, both comparable, so SectionInfo stays comparable and
-	// no dynamic type outside this package can reach the field (ADR-0016).
+	// target is the address a link points at, and core builds one non-nil
+	// exactly where presence is PresenceElsewhere. It is an interface holding
+	// one of two sealed struct types, both comparable, so a SectionInfo core
+	// built is comparable (ADR-0016).
+	//
+	// Comparability is not a promise this type can make on its own: Go seals a
+	// type and not an interface, so a Container of somebody else's making can
+	// hold an uncomparable field and == on the SectionInfo carrying it panics.
+	// Core never compares one, and the walk refuses a target it did not mint
+	// before anything could.
 	target Container
 }
 
-// _ asserts SectionInfo stays comparable, which is what lets the three
-// sentinels be compared with == rather than through an accessor.
+// _ asserts SectionInfo is statically comparable, which is what lets the three
+// plain sentinels be compared with == rather than through an accessor. It says
+// nothing about a value carrying a link, for the reason the field comment above
+// gives.
 var _ map[SectionInfo]struct{}
 
 // The three plain answers are values a driver returns rather than functions it

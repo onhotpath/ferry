@@ -250,6 +250,7 @@ func TestPresenceRendersItself(t *testing.T) {
 		{PresenceAbsent, "absent"},
 		{PresencePresent, "present"},
 		{PresenceNull, "null"},
+		{PresenceElsewhere, "elsewhere"},
 	}
 
 	if len(want) != len(presenceName) {
@@ -284,6 +285,7 @@ func TestSectionInfoRendersItself(t *testing.T) {
 		{SectionPresent, "present"},
 		{SectionNull, "null"},
 		{SectionInfo{}, "absent"},
+		{SectionAt(sectionOf(At("t"))), "elsewhere(/t)"},
 	}
 
 	for _, c := range cases {
