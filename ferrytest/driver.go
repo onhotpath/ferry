@@ -230,10 +230,8 @@ func (d *driverRun) caseBind() {
 
 	inst := d.plane.Open()
 
-	set, err := setOf[onlyLeaf](d.opts)
-	if err != nil {
-		d.fail(caseBindNo, "compiling the suite's own fixture: "+err.Error())
-
+	set, ok := fixtureSet[onlyLeaf](d, caseBindNo)
+	if !ok {
 		return
 	}
 
@@ -271,10 +269,8 @@ func (d *driverRun) caseBind() {
 func (d *driverRun) caseProbe() {
 	d.rep.Helper()
 
-	set, err := setOf[filled](d.opts)
-	if err != nil {
-		d.fail(caseContainerNo, "compiling the suite's own fixture: "+err.Error())
-
+	set, ok := fixtureSet[filled](d, caseContainerNo)
+	if !ok {
 		return
 	}
 
@@ -343,10 +339,8 @@ func (d *driverRun) probeFilled(ctx context.Context, r ferry.Reader, set *ferry.
 func (d *driverRun) caseForeign() {
 	d.rep.Helper()
 
-	set, err := setOf[justSection](d.opts)
-	if err != nil {
-		d.fail(caseForeignNo, "compiling the suite's own fixture: "+err.Error())
-
+	set, ok := fixtureSet[justSection](d, caseForeignNo)
+	if !ok {
 		return
 	}
 
@@ -392,10 +386,8 @@ func (d *driverRun) probeForeign(set *ferry.AddressSet, a ferry.SectionAddr) {
 func (d *driverRun) probeBlanks() {
 	d.rep.Helper()
 
-	set, err := setOf[blanks](d.opts)
-	if err != nil {
-		d.fail(caseContainerNo, "compiling the suite's own fixture: "+err.Error())
-
+	set, ok := fixtureSet[blanks](d, caseContainerNo)
+	if !ok {
 		return
 	}
 
@@ -497,10 +489,8 @@ func (d *driverRun) caseGetError() {
 func (d *driverRun) caseChildren() {
 	d.rep.Helper()
 
-	set, err := setOf[filled](d.opts)
-	if err != nil {
-		d.fail(caseChildrenNo, "compiling the suite's own fixture: "+err.Error())
-
+	set, ok := fixtureSet[filled](d, caseChildrenNo)
+	if !ok {
 		return
 	}
 
@@ -571,10 +561,8 @@ func (d *driverRun) caseKeyInjectivity() {
 
 	inst := d.plane.Open()
 
-	set, err := setOf[colliding](d.opts)
-	if err != nil {
-		d.fail(caseInjectiveNo, "compiling the suite's own fixture: "+err.Error())
-
+	set, ok := fixtureSet[colliding](d, caseInjectiveNo)
+	if !ok {
 		return
 	}
 
@@ -587,7 +575,7 @@ func (d *driverRun) caseKeyInjectivity() {
 		return
 	}
 
-	_, err = inst.Sink.Bind(set)
+	_, err := inst.Sink.Bind(set)
 	d.namesBothAddresses(err)
 }
 
@@ -796,10 +784,8 @@ func (d *driverRun) readProbe(src ferry.Source) openProbe {
 		return nil
 	}
 
-	set, err := setOf[onlyLeaf](d.opts)
-	if err != nil {
-		d.fail(casePerRequestNo, "compiling the suite's own fixture: "+err.Error())
-
+	set, ok := fixtureSet[onlyLeaf](d, casePerRequestNo)
+	if !ok {
 		return nil
 	}
 
@@ -830,10 +816,8 @@ func (d *driverRun) writeProbe(sink ferry.Sink) openProbe {
 		return nil
 	}
 
-	set, err := setOf[onlyLeaf](d.opts)
-	if err != nil {
-		d.fail(casePerRequestNo, "compiling the suite's own fixture: "+err.Error())
-
+	set, ok := fixtureSet[onlyLeaf](d, casePerRequestNo)
+	if !ok {
 		return nil
 	}
 
@@ -1044,6 +1028,31 @@ func (d *driverRun) missingContainer(at ferry.Path, kind string) {
 
 	d.fail(caseNullNo, fmt.Sprintf("the address set Bind received does not hold %s as a %s address, which the "+
 		"walk then wrote a null at", at, kind))
+}
+
+// fixtureSet is the address set of one of the suite's own fixtures, and whether
+// there was one.
+//
+// It cannot fail from here. [Driver] resolves the caller's Option list against
+// every fixture before any case runs and returns without running one where that
+// fails, so a case reaching this has already been told the fixture compiles.
+// The error is reported rather than dropped, because a suite that swallowed one
+// would report the case as having passed - and it is reported at one site
+// rather than at eight, because eight copies of an unreachable arm are eight
+// places for the message to drift.
+// It is a function rather than a method because the fixture's type is a
+// parameter, which is [dumpAndOpen]'s reason too.
+func fixtureSet[T any](d *driverRun, n int) (*ferry.AddressSet, bool) {
+	d.rep.Helper()
+
+	set, err := setOf[T](d.opts)
+	if err != nil {
+		d.fail(n, "compiling the suite's own fixture: "+err.Error())
+
+		return nil, false
+	}
+
+	return set, true
 }
 
 // fail is what every case reports through, and it names the plane and the case

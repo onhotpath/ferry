@@ -388,6 +388,72 @@ func TestAVariableSharingASectionsPrefixIsNotTheSection(t *testing.T) {
 	}
 }
 
+// The section holding one of each kind under it, which is what the presence
+// question has to be answered from.
+type (
+	deepHome struct {
+		Root  string            `ferry:"root"`
+		Inner innerHome         `ferry:"inner"`
+		Tags  map[string]string `ferry:"tags"`
+	}
+
+	innerHome struct {
+		Deep string `ferry:"deep"`
+	}
+
+	deepConfig struct {
+		Home *deepHome `ferry:"home"`
+	}
+)
+
+// TestASectionIsPresentFromAnyKindBelowIt is the other half of the scoping: the
+// members a section owns are of every kind, and any of them being set is the
+// section being there.
+//
+// A composite under it is the case a table of names cannot answer, because its
+// own members come from the environment and are not known until it is read, so
+// the environment is scanned under its name and everything found there is one of
+// them.
+func TestASectionIsPresentFromAnyKindBelowIt(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]deepCase{
+		"a leaf under a nested section":    {vars: map[string]string{"HOME_INNER_DEEP": "d"}, there: true},
+		"a member of a composite under it": {vars: map[string]string{"HOME_TAGS_A": "1"}, there: true},
+		"a name below none of them":        {vars: map[string]string{"HOME_SWEET_HOME": "1"}},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			checkDeepHome(t, tc)
+		})
+	}
+}
+
+// deepCase is one environment and whether the section is there in it.
+type deepCase struct {
+	vars  map[string]string
+	there bool
+}
+
+// checkDeepHome loads one environment and reports whether the section came back.
+func checkDeepHome(t *testing.T, tc deepCase) {
+	t.Helper()
+
+	e := newEnviron()
+	maps.Copy(e.vars, tc.vars)
+
+	got, err := ferry.Load[deepConfig](t.Context(), New(Environ(e.environ)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if (got.Home != nil) != tc.there {
+		t.Errorf("Home = %+v, want a section there = %v", got.Home, tc.there)
+	}
+}
+
 // pairConfig is the array whose length the type fixes and the plane cannot
 // change.
 type pairConfig struct {
