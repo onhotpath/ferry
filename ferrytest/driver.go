@@ -10,7 +10,7 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// Driver is the driver conformance suite: thirteen cases over one plane, and the
+// Driver is the driver conformance suite: fifteen cases over one plane, and the
 // whole of what a driver author writes.
 //
 //	func TestConformance(t *testing.T) {
@@ -1169,7 +1169,7 @@ func fixtureSet[T any](d *driverRun, n int) (*ferry.AddressSet, bool) {
 }
 
 // fail is what every case reports through, and it names the plane and the case
-// so that a driver author reading their own CI output knows which of thirteen went
+// so that a driver author reading their own CI output knows which of fifteen went
 // red.
 func (d *driverRun) fail(n int, msg string) {
 	d.rep.Helper()

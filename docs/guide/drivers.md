@@ -832,7 +832,7 @@ func TestConformance(t *testing.T) {
 ```
 
 That is the whole file.
-`Driver` is thirteen cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
+`Driver` is fifteen cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
 
 ### The four fields
 
@@ -880,7 +880,7 @@ See [plane compatibility](compatibility.md).
 `Want` is one string, which puts an obligation on a plane holding more than one storage unit: what it renders for this comparison must be **deterministic and injective over stores**.
 That is the same obligation your key function already carries.
 
-### The thirteen cases
+### The fifteen cases
 
 1. Every proof the plane can express round-trips, and every kind it declared it cannot carry is refused loudly.
 2. `Bind` succeeds against an unreachable plane, and the refusal lands inside the open.
@@ -895,8 +895,15 @@ That is the same obligation your key function already carries.
 11. A golden artefact: a fixed value, dumped, compared against fixed expected plane contents.
 12. A sink writes a null at a container address, and that address was in the set its `Bind` received **at its kind**: a composite for a nil or empty composite, a section for a nil optional section.
 13. A plane key belonging to no address of the schema says nothing about a container whose key space it shares: `Probe` at a section beside it answers absent.
+14. One binding, opened from many goroutines at once, on both halves, and loaded through concurrently: every open succeeds and every load reads what the plane holds.
+15. A second dump through one held sink binding, with a different value at the same addresses: it is taken, and it is what the plane holds afterwards.
+
+Case 14 is where a driver that keeps mutable state in the closure it handed back is found, and the case creates the concurrency rather than judging it: run your own suite under `go test -race`, which is what actually reports the defect.
+It opens the write half concurrently and walks nothing, because what the contract obligates is the open.
+Both halves run once on their own first, so a plane that cannot be opened at all is reported by the cases that own a broken open rather than three more times.
 
 Cases 8 and 9 reach a value-minted address by dumping a one-entry map rather than by calling `Set` directly, because the address kinds are sealed and only the compiler mints one.
+Case 9 mints case 8's first key as well as its own: case 8 stops where a write is refused, correctly, and a store that cannot spell a hyphen would otherwise be asked by nothing.
 For the same reason the suite no longer builds an `AddressSet` by hand: it compiles a fixture type and captures the set core hands your own `Bind`, so it can never hand you an address the compiler would not have minted ([ADR-0014](../adr/0014-what-ferrytest-exports.md), amended).
 
 A case that cannot apply to your plane is skipped and says so:
@@ -909,6 +916,16 @@ case 10 skipped: the plane puts nothing in a context, so it does not take its pl
 case 12 skipped: the plane declares no null; case 1 is where its refusal of one is asserted
 case 13 skipped: the plane's reader does not probe, which is optional for the same reason enumeration is
 ```
+
+And a run says once, before any case, what it scaled itself to, so that a skipped case is never mistaken for a passing one:
+
+```
+plane yaml: the suite scaled to: a source, a sink, readable contents, a pinned spelling,
+    probes a container's own address, enumerates, releases its reader,
+    ensures a container's own address, commits, releases its writer
+```
+
+Which of the optional interfaces you implement is read off your own reader and writer rather than declared, so there is no field to fill in wrongly, and `Plane` describes only what cannot be discovered that way.
 
 ### A new case does not break you, exactly
 

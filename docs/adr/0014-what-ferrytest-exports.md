@@ -32,7 +32,7 @@ Every number below is from that prototype unless it cites the survey.
 
 | The ticket asked | Closed | Where |
 | --- | --- | --- |
-| the package's exported surface, as a list | **yes**, 19 names *(20 since [#101](https://github.com/onhotpath/ferry/issues/101))* | [The surface](#the-surface) |
+| the package's exported surface, as a list | **yes**, 26 names *(19 as published; the reconciliation is [there](#the-surface))* | [The surface](#the-surface) |
 | one entry point or two for the harness and the driver suite | **three**, and two of them are not what the ticket expected | [Three entry points, not five](#three-entry-points-not-five) |
 | how a registry reaches the harness | **as an Option**, and a parameter is refused on ADR-0004's own grounds | [How a registry reaches the harness](#how-a-registry-reaches-the-harness) |
 | whether the completeness check is one function over two tables | **yes, over three**, joined by `reflect.Type` | [One completeness check](#one-completeness-check-joined-by-type) |
@@ -140,11 +140,28 @@ func TestConformance(t *testing.T) {
             }
         },
         Golden: []ferrytest.Artefact{
-            {Value: struct{ B []byte `ferry:"b"` }{[]byte("hi")}, Want: "b: !!binary aGk=\n"},
+            ferrytest.Golden(struct{ B []byte `ferry:"b"` }{[]byte("hi")}, "b: !!binary aGk=\n"),
         },
     })
 }
 ```
+
+> **Amended under [#109](https://github.com/onhotpath/ferry/issues/109): `Artefact` is opaque and `Golden[T]` is the only way to build one.**
+>
+> As published the `Golden` rows above were composite literals of `Artefact{Value any; Want string}`, and that literal cannot be dumped.
+> `Dump[T]` compiles its schema from its type parameter deliberately, so `Value any` hands it `interface{}`, which names no address:
+>
+> ```
+> Dump[any]      err = ferry: interface {} is not a struct ferry walks, so it names no address...
+> Dump[probeCfg] err = <nil>
+> ```
+>
+> A slice of `Artefact` is heterogeneous by design - that is the whole point of a golden table - so the row's type has to be captured where the compiler still has it, which is a constructor: `func Golden[T any](v T, want string) Artefact`, capturing a closure over `Dump[T]`.
+> **The literal becomes a call and nothing else moves**: the expectation is still the driver's own statement, still on the `Plane`, and `Artefact` is still opaque to everything but this package.
+>
+> **Teaching core's `Dump` to unwrap an interface-kinded root was prototyped, measured and not taken.**
+> It works in 63 lines confined to `entry.go`, and it applies to every interface-typed root rather than to `any` specifically, because `reflect` sees a kind: a call site erasing its type stops being coverable by `Compile[T]()`'s pre-flight, and the written key set stops being readable from the source.
+> That is a capability question on its own merits rather than a fix for a test helper, and it is [#134](https://github.com/onhotpath/ferry/issues/134)'s.
 
 > **Amended under [#157](https://github.com/onhotpath/ferry/issues/157): `Plane` gains an `Except` field, and the exported surface stays at twenty-three names.**
 > As published, `Plane` is `Name`, `Kinds`, `Open` and `Golden`, and `Kinds` is the whole of what a driver says about which values its plane can hold.
@@ -219,19 +236,24 @@ func TestMyConfig(t *testing.T) {
 
 ### The surface
 
-Nineteen exported names, in **one package**.
-
-*(Twenty since [#101](https://github.com/onhotpath/ferry/issues/101), which added `Instance`.
-The amendment is at [the driver author's call site](#what-a-consumer-writes), where the shape is visible.)*
+**Twenty-six exported names, in one package.**
 
 | group | names |
 | --- | --- |
-| what a caller describes | `Plane`, `Instance`, `Artefact`, `T` |
+| what a caller describes | `Plane`, `Instance`, `Artefact`, `Golden`, `T` |
 | the proof | `Proof`, `Type`, `Case`, `At`, `Eq`, `BitEq`, `SliceEq`, `MapEq`, `PtrEq` |
 | the suites | `RoundTrip`, `Driver`, `Codec`, `Complete`, `Injective` |
-| the apparatus | `Static`, `Record` |
+| the apparatus | `MemPlane`, `Static`, `Record` |
 | the table | `CoreTypes` |
-| the assertion | `Want`, `DiffErrors`, `CheckErrors` *(added under [#169](https://github.com/onhotpath/ferry/issues/169))* |
+| the assertion | `Want`, `DiffErrors`, `CheckErrors` |
+
+> **Amended under [#175](https://github.com/onhotpath/ferry/issues/175): the count is twenty-six and the table is the whole of it.**
+>
+> As published this read "nineteen exported names", with a parenthetical raising it to twenty, and the table below it named twenty-four.
+> Neither number was the shipped set and the drift was accumulated rather than decided: `Complete` arrived under [#79](https://github.com/onhotpath/ferry/issues/79), `Driver`, `Codec` and `Injective` under [#83](https://github.com/onhotpath/ferry/issues/83), `Instance` under [#101](https://github.com/onhotpath/ferry/issues/101), `Want`, `DiffErrors` and `CheckErrors` under [#169](https://github.com/onhotpath/ferry/issues/169), and `Golden` under [#109](https://github.com/onhotpath/ferry/issues/109), while the sentence above the table never moved.
+> Two names were in no row at all: **`MemPlane`**, which the section's own "what is not on the list" paragraph explains the absence of a memory plane *type* for, correctly, while the constructor ships and is exported; and **`Golden`**, which is #109's.
+> `TestExportedSurface` locks exactly the twenty-six above.
+> **Nothing here is a new decision** - every name arrived with a ticket that argued for it - and what moves is that the count in the prose is the count in the table, and that `ferrytest/surface_test.go` no longer carries a doc comment explaining why the specification is wrong.
 
 > **Amended under [#169](https://github.com/onhotpath/ferry/issues/169): the error assertion is on this list, as apparatus.**
 > As published this table had no row for it, and the omission was not a decision: [ADR-0011](0011-the-error-model.md) publishes `DiffErrors`, `CheckErrors` and `Want`, says "it ships in `ferrytest` only", and hands this ADR the package's surface rather than the semantics.
@@ -282,8 +304,23 @@ A registry is not a property of a plane: it decides how a Go value becomes a `Va
 ```go
 ferrytest.RoundTrip(t, plane, proofs)
 ferrytest.RoundTrip(t, plane, proofs, ferry.WithRegistry(reg))
-ferrytest.RoundTrip(t, plane, proofs, ferry.WithRegistry(reg), ferry.WithTagKey("cfg"))
 ```
+
+> **Amended under [#110](https://github.com/onhotpath/ferry/issues/110): the third line above was published and cannot work, and a tag key is refused rather than honoured.**
+>
+> As published the third call was `RoundTrip(t, plane, proofs, ferry.WithRegistry(reg), ferry.WithTagKey("cfg"))`, and the option is spelled `TagKey`, which [ADR-0010](0010-the-entry-point-and-the-schema-cache.md) settles.
+> What it cannot do is compose.
+> A proof's case carries a **bare value**, and ADR-0010 refuses a root that compiles to a leaf, so the harness supplies the annotated struct the value travels in.
+> `TagKey` names the key ferry reads for **every** type in the call, that wrapper included, so a tag key other than the harness's own leaves it mapping no address and every case in the run fails identically.
+> An `Option` is opaque by construction, so there is no partial application to reach for: the harness cannot apply one to a caller's types and withhold it from its own.
+>
+> **The suite owns the wrapper, so the wrapper's tag key is not the caller's to change.**
+> `RoundTrip` and `Driver` each resolve the Option list once, up front, against the structs they dump, and refuse a list that leaves them unable to compile one - which is one report rather than one identical failure per case.
+> Every other Option still passes straight through, `WithRegistry` among them.
+>
+> Two other shapes were named and are not taken.
+> Building the wrapper with `reflect.StructOf` so its tag follows whatever key the options name would make the published call work, and costs a reflect-built type plus a way to read the key back out of an opaque `Option`.
+> Making a case carry a struct rather than a bare value removes the wrapper entirely, and changes `Case`, `At` and every proof in `CoreTypes`, losing the terse form [ADR-0005](0005-the-supported-type-set.md) sells.
 
 **(c) is taken, and the deciding argument is not ergonomics:**
 
@@ -477,6 +514,39 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 > **Nothing here is a new decision**, which is why this is a note rather than an ADR: every one is a rule already written down, missing its check.
 > They are implementation-phase work and they land with the binding-contract batch, not on their own.
 
+> **Amended when the binding-contract batch shipped: all four landed, and the list is fifteen cases.**
+>
+> 14. **Concurrent opens.** One binding, many goroutines entering the driver's own open at once, and many loads through one `Binding`, every one of them succeeding and reading what the plane holds ([ADR-0004](0004-source-and-sink.md), [ADR-0012](0012-the-caller-held-binding.md)).
+> 15. **A second dump through one held sink binding**, with a different value at the same addresses, taken by the sink and landing on the plane.
+>
+> **Case 14 creates the concurrency and asserts the observable half.** What reports a data race is the driver's own `go test -race`, which no suite can run on its behalf, so the case's job is to enter the open from many goroutines at once and to hold every one of them to succeeding and to reading what the plane holds.
+> Each half runs once sequentially first and the case is skipped where that fails, because a plane that cannot be opened at all says nothing about opening it twice, and cases 4, 6 and 10 already report a broken open.
+> **The write half opens concurrently and walks nothing.** ADR-0004 obligates concurrent calls to `OpenWriterFunc` and says nothing about a plane tolerating two dumps at once; that is [ADR-0019](0019-the-concurrency-model.md)'s, and a case that dumped from two goroutines would be answering it by accident.
+>
+> **Nothing in this suite reports from inside a goroutine.** `T` is two methods and nothing here says they may be called from two at once, so the parallel cases collect what they found and report it afterwards - which is a constraint on the suite rather than a new obligation on every reporter a caller can pass.
+>
+> **Case 15 re-dumps the same addresses with a different value**, because that is what a re-save is, and it reads back only the fixture's leaf so that a plane which cannot enumerate is asked nothing it cannot answer.
+> Whether a sink handles an address the *new* value no longer has is a different question and is not asked here.
+>
+> **`(nil, nil)` is core's refusal and not a case.** A `Bind` handing back a nil open with a nil error, and an open handing back a nil reader or writer with a nil error, are refused inside `ferry` as an error naming the driver, so every caller gets the diagnosis rather than every suite. Core's own tests pin all four.
+>
+> **`MemPlane` now satisfies both cases.** Its duplicate-write refusal was keyed on the store, so a second dump through one binding was refused at every address the first one wrote - the reference implementation failing the rule it exists to demonstrate. ADR-0003's obligation is unchanged and is now scoped to the open, exactly as a key function's minted set is.
+
+> **Amended under [#201](https://github.com/onhotpath/ferry/issues/201): a run says what it scaled to, and the description gains nothing.**
+>
+> #201 records that `Instance` carries capabilities as optional fields, that three of its four members mean a capability by being nil or not, and that a skipped case is indistinguishable from a passing one for any reporter that is not `*testing.T`.
+> It asked for a reconsideration once a real per-request driver existed rather than for a shape, and `driver/http` now exists.
+> **The reconsideration is that the split is already right and the reporting was not.**
+>
+> Which optional interfaces a driver implements is discovered by assertion on its own reader and writer, so no field on `Instance` could describe one and none can be filled in wrongly.
+> What the description declares is exactly what cannot be discovered: what the plane is called, which kinds it carries end to end, what it cannot spell inside them, how to mint a fresh one, whether its plane arrives in a `context.Context`, how to read its contents back, and what its own spelling of a fixed value is.
+> A capability field for `Prober` or `Committer` would be a second way to say something the value already says, which is survey item 5.14's defect in the package whose job is holding ferry to its own rules.
+>
+> **What ships is the line that was missing.** A run reports, once and up front, which halves the plane mints, which of the description's optional members are filled in, and which of the six optional interfaces its reader and writer implement, and every remaining branch that skips a case says so.
+> Two conformant drivers execute very different numbers of cases, and that is the point of an optional interface; what was wrong is that the difference was invisible.
+>
+> **`Instance` does not move**, and that is the same argument #201 makes for waiting: a shape decided with nothing on the other side of it is the mistake ADR-0012 spent its deferral argument avoiding, and no driver in or out of this repository is asking for one.
+
 > **Amended under [#185](https://github.com/onhotpath/ferry/issues/185): case 10 had never run, because nothing in this ADR let a `Plane` describe a driver it applies to.**
 > As published, and after [#101](https://github.com/onhotpath/ferry/issues/101) made `Open` return an `Instance`, the description is a plane minted directly by `Plane.Open` and it mentions no `context.Context` anywhere.
 > A driver whose plane is per request carries no contents in its `Source` at all, so there was no field it could fill in, and the case shipped as an unconditional skip against every plane.
@@ -657,7 +727,10 @@ That is weaker than a compile-time signal and it is the only shape available, be
 - **The `Driver` list is twelve cases**, the twelfth asserting that a container address reached the driver's `Bind`.
   It is the first case that pins what the static set *contains* rather than how a driver behaves once handed one, and it is there because two engines disagreed about that and nothing was red.
   *(Added under [#56](https://github.com/onhotpath/ferry/issues/56).
-  A thirteenth landed with the sealed address model, and the amendment above says why case 3 could not carry it.)*
+  A thirteenth landed with the sealed address model, and the amendment above says why case 3 could not carry it.
+  A fourteenth and a fifteenth landed with the held-binding contract, and the list is fifteen.)*
+- **A run says what it scaled to.**
+  Six of the contract's interfaces are optional, so two conformant drivers execute very different numbers of cases, and the difference used to be invisible: a case that quietly did nothing read exactly like a case that passed.
 
 ## Items from the xload survey
 

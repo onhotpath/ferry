@@ -153,6 +153,20 @@ Three pieces of state, three lifetimes:
 | `OpenFunc` | the precomputed key table | the schema or the driver config changes |
 | `Reader` | the plane's contents | every load |
 
+> **Amended under [#218](https://github.com/onhotpath/ferry/issues/218): a rule drafted for this table was measured and refused, and it is recorded here so that it is not drafted again.**
+>
+> The rule read "a `Source` may carry per-schema configuration only where it is checkable against the `AddressSet` at `Bind`", and it was written from a prototype's findings rather than measured itself.
+> Measured, over six configurations, it fails from both sides.
+> An alias and a fallback are wholly checkable at `Bind` and change a second schema's answer with **no error at all**; a declaration that an address holds a sequence is checkable nowhere and is made safe at `Close`, with no core change, by recording every answer the declaration decided and reporting what the walk never used.
+>
+> No `Bind`-time check could reach the motivating case in any event.
+> `[]string`, `map[string]string` and `string` at one address produce **byte-identical** address sets, because the compiler holds the container bit and withholds it deliberately, so a driver's `Bind` can only ever check the name.
+>
+> The column that does separate the six is **falsifiability**: a prefix, an alias, a fallback and a required-ness say where the plane holds something, and no schema makes one untrue; a declaration about the Go type behind an address can be false of a schema, and the defect is the cell that is falsifiable and silent.
+> **Nothing is decided here**, because there is no consumer: `driver/http`, the driver the whole question came from, needs no per-schema configuration, and a rule the prototype could apply to six configurations and not to a seventh is a prose rule with a driver author's judgement behind it.
+> The right moment is when a driver wants per-schema configuration and can say what for.
+> Evidence: `proto/217-per-schema-config`, which never merges.
+
 ADR-0003 requires the plane keys to be precomputed rather than derived per lookup, and states that as a requirement of the design rather than an optimisation.
 Reproduced on the whole path rather than on the lookup, for a six-address load through the query-parameter driver:
 
