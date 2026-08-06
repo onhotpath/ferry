@@ -68,6 +68,13 @@ type ForeignKeySuffix struct {
 	Host string `xferry:"oops`
 }
 
+// ForeignKeySuffixAtEnd is the suffix case with nothing after the opening
+// quote, so the scan for ferry's own key runs off the end of the tag rather
+// than failing to find a second occurrence of it.
+type ForeignKeySuffixAtEnd struct {
+	Host string `xferry:"`
+}
+
 // ForeignKeyJSON is the same field under json, which is the answer every key
 // ferry does not own has to get.
 type ForeignKeyJSON struct {

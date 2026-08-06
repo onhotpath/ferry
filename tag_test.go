@@ -158,6 +158,11 @@ func TestScannerMatchesTheKeyExactly(t *testing.T) {
 		want:     []string{"field Host carries no ferry tag"},
 		elements: 1,
 	}, {
+		name:     "and one that ends the tag, with no second occurrence to find",
+		run:      Compile[badtags.ForeignKeySuffixAtEnd],
+		want:     []string{"field Host carries no ferry tag"},
+		elements: 1,
+	}, {
 		name:     "and json, which is the same field and the same answer",
 		run:      Compile[badtags.ForeignKeyJSON],
 		want:     []string{"field Host carries no ferry tag"},
