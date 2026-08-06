@@ -19,7 +19,7 @@ func TestQueryDriver(t *testing.T) {
 	ferrytest.Driver(t, queryPlaneFor())
 }
 
-// TestQueryDriverAtWiderSeparator runs the same twelve cases at the separator an
+// TestQueryDriverAtWiderSeparator runs the same fifteen cases at the separator an
 // operator reaches for when the default collides.
 //
 // It is a second run rather than a second plane because the separator changes
