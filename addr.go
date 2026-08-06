@@ -59,9 +59,10 @@ type CompositeAddr struct{ p Path }
 //	    }
 //	}
 //
-// The set is closed: nothing outside core implements it, so the type switch
-// above is total and needs no default arm that could quietly swallow a fourth
-// kind.
+// Every address ferry hands you was minted by the schema compiler and is one of
+// those three, so the type switch above covers every address you will be given.
+// Core refuses anything else: a value of your own satisfying this interface is
+// in no address set, and asking a set whether it holds one answers false.
 type Member interface {
 	// Path is the address with its kind dropped, which is what a key function
 	// walks to build a plane key.
@@ -156,16 +157,31 @@ func memberAt(k addrKind, p Path) Member {
 
 // rank orders the kinds inside an address set, so that a set holding two kinds
 // at one path is still enumerated in one stable order.
+//
+// The unknown arm is explicit and is not decoration. Go seals a type and not an
+// interface: embedding a [SectionAddr] in a struct outside core promotes the
+// unexported method, so a value satisfying [Member] that core never minted can
+// be written. Falling through to the composite arm would have made such a value
+// compare equal to a real composite at the same path, so [AddressSet.Has] would
+// answer true for an address the schema does not hold and the diagnosis that
+// followed would name the wrong kind. Ranking it after all three makes it equal
+// to nothing, which is the true answer: no address core minted is one of these.
 func rank(m Member) int {
 	switch m.(type) {
 	case LeafAddr:
 		return int(kindLeaf)
 	case SectionAddr:
 		return int(kindSection)
-	default:
+	case CompositeAddr:
 		return int(kindComposite)
+	default:
+		return kindForeign
 	}
 }
+
+// kindForeign is where a [Member] core did not mint sorts: after every kind
+// there is, so that it is equal to none of them (ADR-0016).
+const kindForeign = int(kindComposite) + 1
 
 // compareMembers is the set's ordering: segment-wise by address, and by kind
 // where two members share one path.

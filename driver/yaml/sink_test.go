@@ -670,6 +670,64 @@ func TestTwoAddressesUnderOneAnchorAreRefused(t *testing.T) {
 	onlyPlane(t, filepath.Dir(path))
 }
 
+// TestTwoAddressesAtOneAnchorAreRefusedAtAContainerWrite is the same collision
+// where one of the two addresses is a container's own.
+//
+// A container write is the first thing that can change the kind of an anchored
+// node, so it is the one write an alias to that node is not followed through
+// (#198). The two addresses then landed on two different nodes, the collision
+// was never seen, and the dump destroyed the alias in silence and returned nil -
+// with which of the two happened depending on the order of the struct's fields.
+func TestTwoAddressesAtOneAnchorAreRefusedAtAContainerWrite(t *testing.T) {
+	type opts struct {
+		Host string `ferry:"host,omitzero"`
+	}
+
+	type baseFirst struct {
+		Base *opts  `ferry:"base"`
+		Use  string `ferry:"use"`
+	}
+
+	type useFirst struct {
+		Use  string `ferry:"use"`
+		Base *opts  `ferry:"base"`
+	}
+
+	const doc = "base: &b hello\nuse: *b\n"
+
+	t.Run("the container is written first", func(t *testing.T) {
+		refusesAnchor(t, doc, baseFirst{Base: &opts{}, Use: "z"})
+	})
+
+	t.Run("the leaf is written first", func(t *testing.T) {
+		refusesAnchor(t, doc, useFirst{Use: "z", Base: &opts{}})
+	})
+}
+
+// refusesAnchor dumps one value over one document and asserts that the shared
+// anchor was refused and the plane left as it was.
+func refusesAnchor[T any](t *testing.T, doc string, v T) {
+	t.Helper()
+
+	path := write(t, doc)
+
+	err := ferry.Dump(t.Context(), v, yaml.NewSink(path))
+	if err == nil {
+		t.Fatal("two addresses were written to one anchored value with different values, and the file can hold " +
+			"only one of them")
+	}
+
+	if !errors.Is(err, ferry.ErrPlane) {
+		t.Errorf("the refusal was %v, want an error carrying ferry.ErrPlane", err)
+	}
+
+	if got := read(t, path); got != doc {
+		t.Errorf("the plane holds %q, want %q: a dump that failed leaves the plane byte-identical", got, doc)
+	}
+
+	onlyPlane(t, filepath.Dir(path))
+}
+
 // TestTwoAddressesAtOneAnchorAgreeing is the other side of that guard: the
 // document says the two are one value and the destination agrees, so there is
 // nothing to refuse.

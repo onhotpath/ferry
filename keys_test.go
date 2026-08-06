@@ -538,6 +538,77 @@ func TestContainerAddressesAreCheckedBeforeAnyIO(t *testing.T) {
 	mustName(t, err, "/beta-flags", "/feature-flags", `"FEATURE_FLAGS"`, `"BETA_FLAGS"`)
 }
 
+// The two schemas the kind half of ADR-0003's injectivity rule is read through.
+type (
+	// foldedKinds renders a section and a leaf to one plane key. A flat driver
+	// reads the leaf at that key and only ever uses the section's as a prefix,
+	// so nothing is lost and nothing is refused.
+	foldedKinds struct {
+		Section hostOnly `ferry:"a"`
+		Leaf    string   `ferry:"A"`
+	}
+
+	// reservedSpace puts a leaf inside the key space a composite is enumerated
+	// out of, which is the collision the kind half of the rule leaves behind.
+	reservedSpace struct {
+		Home  map[string]string `ferry:"home"`
+		HomeX string            `ferry:"home_x"`
+	}
+
+	hostOnly struct {
+		Host string `ferry:"host"`
+	}
+)
+
+// TestTwoKindsAtOnePlaneKeyAreNotACollision is the kind half of the injectivity
+// rule.
+//
+// A section and a leaf rendering to one plane key are two addresses a flat plane
+// still tells apart: the value is read at the key and the section's members are
+// read under it, so neither is lost and refusing the pair refuses a schema the
+// plane can hold.
+func TestTwoKindsAtOnePlaneKeyAreNotACollision(t *testing.T) {
+	t.Parallel()
+
+	sink := newFlatSink(envUpper)
+
+	v := foldedKinds{Section: hostOnly{Host: "h"}, Leaf: "v"}
+	if err := ferry.Dump(t.Context(), v, sink); err != nil {
+		t.Fatalf("dump: %+v", err)
+	}
+
+	if got, want := sink.written(), []string{"A", "A_HOST"}; !slices.Equal(got, want) {
+		t.Errorf("the plane holds %v, want %v: the leaf is at the key and the section's member is under it",
+			got, want)
+	}
+}
+
+// TestAnAddressInsideACompositesKeySpaceIsRefused is the collision the kind half
+// leaves behind, and the one a check over the keys alone never saw.
+//
+// A composite's members come from the value, so a flat driver lists every plane
+// key beginning with the composite's own and reads what it finds as a member.
+// HOME_X is this schema's own leaf and would be enumerated as a member of the
+// map at HOME, which is one value at two addresses.
+func TestAnAddressInsideACompositesKeySpaceIsRefused(t *testing.T) {
+	t.Parallel()
+
+	sink := newFlatSink(envUpper)
+
+	v := reservedSpace{Home: map[string]string{"a": "1"}, HomeX: "x"}
+
+	err := ferry.Dump(t.Context(), v, sink)
+	if err == nil {
+		t.Fatal("a leaf renders into the key space a composite is enumerated out of and the dump succeeded")
+	}
+
+	if sink.opens != 0 {
+		t.Errorf("the driver refused the address set and the plane was opened %d times", sink.opens)
+	}
+
+	mustName(t, err, "/home", `"HOME"`, `"HOME_X"`)
+}
+
 type labelsConf struct {
 	Name   string            `ferry:"name"`
 	Labels map[string]string `ferry:"labels"`

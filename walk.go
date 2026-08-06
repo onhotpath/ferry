@@ -828,7 +828,19 @@ func atKey(s spot, fresh reflect.Value, seg Segment, into descend) (outcome, err
 		s.v.Type()))
 }
 
+// atName reads one named member out of an enumerated segment and walks the
+// value under it.
+//
+// An empty name is refused rather than read, which is the load side of the
+// refusal [sortedKeys] makes. Both are one rule: an empty segment names no
+// address, so a plane that spells a member with one is offering a member at an
+// address ferry declares illegal, and reading it would load a mapping that could
+// never be written back (#258).
 func atName(s spot, fresh reflect.Value, seg Segment, into descend) (outcome, error) {
+	if seg.Text() == "" {
+		return outcome{}, newError(momentWalk, ErrValue, s.at, emptySegmentMsg)
+	}
+
 	key := reflect.New(s.v.Type().Key()).Elem()
 	at := s.child(seg)
 
@@ -1031,6 +1043,15 @@ func (d dumpTo) atMap(ctx context.Context, s spot, into descend) (outcome, error
 	return r.b.done()
 }
 
+// emptySegmentMsg is what an empty map key is refused with, and it is one
+// message because it is one rule read from two ends: a value that renders one
+// and a plane that spells one both name an address the model does not have
+// (#258). Measured before the dump-side refusal existed, a map key rendering to
+// empty text minted /m/ and the dump returned nil; the load side had no refusal
+// at all, so /m/ loaded clean and could not be written back.
+const emptySegmentMsg = "a key of this mapping renders to empty text, and an empty segment names no address: " +
+	"an entry at it could not be read back, and the address it would mint is not one"
+
 // entry is one map key with the text it addresses by, computed once.
 type entry struct {
 	key  reflect.Value
@@ -1067,9 +1088,7 @@ func sortedKeys(s spot) ([]entry, error) {
 		// /m/ and the dump returned nil, so a plane was written at an address
 		// ferry declares illegal (#258).
 		if text == "" {
-			return nil, newError(momentWalk, ErrValue, s.at,
-				"a key of this mapping renders to empty text, and an empty segment names no address: "+
-					"an entry at it could not be read back, and the address it would mint is not one")
+			return nil, newError(momentWalk, ErrValue, s.at, emptySegmentMsg)
 		}
 
 		out = append(out, entry{key: k, text: text})

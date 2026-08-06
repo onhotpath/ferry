@@ -184,7 +184,9 @@ func (a *ferry.AddressSet) Len() int
 Every address the type determines, each **typed** by what can be asked at it, and never a wildcard shape.
 So you are handed only addresses you can fetch, write, name and check, and you are told which of those each one admits.
 
-`ferry.Member` is the sealed sum of the three kinds and nothing else, so the type switch below is total and needs no default arm that could quietly swallow a fourth kind.
+`ferry.Member` is one of those three kinds, and every address ferry hands you was minted by the schema compiler, so the type switch below covers every address you will be given.
+Go seals a type and not an interface, so a value of your own can be written that satisfies `ferry.Member`; core refuses one, because it is in no address set and `Has` answers false for it.
+Nothing you get from `Seq` is one.
 `ferry.Container` is the sum of `SectionAddr` and `CompositeAddr`, which is what `Probe` and `Ensure` take.
 
 **Classify once, at `Bind`, before any I/O:**
@@ -764,7 +766,7 @@ func TestConformance(t *testing.T) {
 ```
 
 That is the whole file.
-`Driver` is twelve cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
+`Driver` is thirteen cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
 
 ### The four fields
 
@@ -812,7 +814,7 @@ See [plane compatibility](compatibility.md).
 `Want` is one string, which puts an obligation on a plane holding more than one storage unit: what it renders for this comparison must be **deterministic and injective over stores**.
 That is the same obligation your key function already carries.
 
-### The twelve cases
+### The thirteen cases
 
 1. Every proof the plane can express round-trips, and every kind it declared it cannot carry is refused loudly.
 2. `Bind` succeeds against an unreachable plane, and the refusal lands inside the open.
@@ -826,6 +828,7 @@ That is the same obligation your key function already carries.
 10. A driver reading its plane from the context refuses at open when it is absent, with `ErrPlane`.
 11. A golden artefact: a fixed value, dumped, compared against fixed expected plane contents.
 12. A sink writes a null at a container address, and that address was in the set its `Bind` received **at its kind**: a composite for a nil or empty composite, a section for a nil optional section.
+13. A plane key belonging to no address of the schema says nothing about a container whose key space it shares: `Probe` at a section beside it answers absent.
 
 Cases 8 and 9 reach a value-minted address by dumping a one-entry map rather than by calling `Set` directly, because the address kinds are sealed and only the compiler mints one.
 For the same reason the suite no longer builds an `AddressSet` by hand: it compiles a fixture type and captures the set core hands your own `Bind`, so it can never hand you an address the compiler would not have minted ([ADR-0014](../adr/0014-what-ferrytest-exports.md), amended).
@@ -838,6 +841,7 @@ case 5 skipped: the plane's reader does not enumerate, which ADR-0004 makes opti
 case 6 skipped: the plane's writer holds no resource, so it implements no Close
 case 10 skipped: the plane puts nothing in a context, so it does not take its plane per request
 case 12 skipped: the plane declares no null; case 1 is where its refusal of one is asserted
+case 13 skipped: the plane's reader does not probe, which is optional for the same reason enumeration is
 ```
 
 ### A new case does not break you, exactly

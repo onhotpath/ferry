@@ -10,7 +10,7 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// Driver is the driver conformance suite: twelve cases over one plane, and the
+// Driver is the driver conformance suite: thirteen cases over one plane, and the
 // whole of what a driver author writes.
 //
 //	func TestConformance(t *testing.T) {
@@ -87,7 +87,7 @@ type driverRun struct {
 	carry map[ferry.VKind]bool
 }
 
-// run is the twelve cases, in the order ADR-0014 lists them.
+// run is the thirteen cases, in the order ADR-0014 lists them.
 func (d *driverRun) run() {
 	d.rep.Helper()
 
@@ -103,6 +103,7 @@ func (d *driverRun) run() {
 	d.casePerRequestPlane()
 	d.caseGolden()
 	d.caseNullAtContainer()
+	d.caseForeign()
 }
 
 // caseKinds is case 1: every value the plane can express, and a loud refusal for
@@ -277,23 +278,35 @@ func (d *driverRun) caseProbe() {
 		return
 	}
 
-	if ctx, r, ok := dumpAndOpen(d, filledFixture(), set, caseContainerNo); ok {
-		d.probeFilled(ctx, r, set)
-		closeIf(r)
+	ctx, r, ok := dumpAndOpen(d, filledFixture(), set, caseContainerNo)
+	if !ok {
+		return
 	}
+
+	probes := d.probeFilled(ctx, r, set)
+
+	closeIf(r)
 
 	// The blanks write a null at their own address, so on a plane with no null
 	// they are never written at all and there is no stored answer to read back.
 	// Such a plane is asked only the half of this case it can be asked, and
 	// case 1 is where its refusal of the other half is asserted.
-	if d.carry[ferry.KindNull] {
+	//
+	// Whether the plane probes at all is settled here, before the blanks are
+	// dumped, and that ordering is the fix rather than a tidy-up: a plane with
+	// no Prober and no Ensurer failed that dump, and this case reported it as
+	// its own where it is case 12's.
+	if probes && d.carry[ferry.KindNull] {
 		d.probeBlanks()
 	}
 }
 
 // probeFilled is the populated half: a container with members under it is
 // present, which is the answer a plane holding only leaves can still infer.
-func (d *driverRun) probeFilled(ctx context.Context, r ferry.Reader, set *ferry.AddressSet) {
+//
+// It reports whether the plane probes at all, which is what the halves after it
+// are gated on.
+func (d *driverRun) probeFilled(ctx context.Context, r ferry.Reader, set *ferry.AddressSet) bool {
 	d.rep.Helper()
 
 	pr, ok := r.(ferry.Prober)
@@ -301,14 +314,73 @@ func (d *driverRun) probeFilled(ctx context.Context, r ferry.Reader, set *ferry.
 		d.skip(caseContainerNo, "the plane's reader does not probe, which is optional for the same reason "+
 			"enumeration is")
 
-		return
+		return false
 	}
 
 	for _, at := range []ferry.Path{addrList, addrMap} {
 		if a, found := compositeIn(set, at); found {
-			d.probeIs(ctx, pr, a, ferry.PresencePresent)
+			d.probeIs(ctx, caseContainerNo, pr, a, ferry.PresencePresent)
 		}
 	}
+
+	return true
+}
+
+// caseForeign is case 13: a plane key that belongs to no address of this schema
+// says nothing about a container whose key space it shares.
+//
+// A section's members come from the type, so the question a plane is asked at
+// one is exactly whether it holds those members. A flat plane that answered out
+// of every key beginning with the section's own would fabricate the section out
+// of somebody else's variable, which is the defect the typed address exists to
+// retire, moved one method over: a required field under the fabricated section
+// then fails a load that should have left the pointer nil.
+//
+// The neighbour is written through this plane's own sink, so the case makes no
+// assumption about how the plane spells a key. A tree plane writes it beside the
+// section and a flat plane writes it inside the section's prefix, and the
+// required answer is the same for both.
+func (d *driverRun) caseForeign() {
+	d.rep.Helper()
+
+	set, err := setOf[justSection](d.opts)
+	if err != nil {
+		d.fail(caseForeignNo, "compiling the suite's own fixture: "+err.Error())
+
+		return
+	}
+
+	a, found := sectionIn(set, addrSection)
+	if !found {
+		d.fail(caseForeignNo, "the address set Bind received does not hold "+addrSection.String()+
+			" as a section address, so there is no container to ask about")
+
+		return
+	}
+
+	d.probeForeign(set, a)
+}
+
+// probeForeign dumps the neighbour and asks about the section beside it.
+func (d *driverRun) probeForeign(set *ferry.AddressSet, a ferry.SectionAddr) {
+	d.rep.Helper()
+
+	ctx, r, ok := dumpAndOpen(d, neighbour{Beside: "v"}, set, caseForeignNo)
+	if !ok {
+		return
+	}
+
+	defer closeIf(r)
+
+	pr, ok := r.(ferry.Prober)
+	if !ok {
+		d.skip(caseForeignNo, "the plane's reader does not probe, which is optional for the same reason "+
+			"enumeration is")
+
+		return
+	}
+
+	d.probeIs(ctx, caseForeignNo, pr, a, ferry.PresenceAbsent)
 }
 
 // probeBlanks is the empty half: a nil composite, an empty composite and a nil
@@ -341,23 +413,25 @@ func (d *driverRun) probeBlanks() {
 
 	for _, at := range []ferry.Path{addrNilList, addrEmptyMap} {
 		if a, found := compositeIn(set, at); found {
-			d.probeIs(ctx, pr, a, ferry.PresenceNull)
+			d.probeIs(ctx, caseContainerNo, pr, a, ferry.PresenceNull)
 		}
 	}
 
 	if a, found := sectionIn(set, addrSection); found {
-		d.probeIs(ctx, pr, a, ferry.PresenceNull)
+		d.probeIs(ctx, caseContainerNo, pr, a, ferry.PresenceNull)
 	}
 }
 
 // probeIs reads one container address and compares what the plane answered with
 // what was written there.
-func (d *driverRun) probeIs(ctx context.Context, pr ferry.Prober, addr ferry.Container, want ferry.Presence) {
+func (d *driverRun) probeIs(ctx context.Context, n int, pr ferry.Prober, addr ferry.Container,
+	want ferry.Presence,
+) {
 	d.rep.Helper()
 
 	got, err := pr.Probe(ctx, addr)
 	if err != nil {
-		d.fail(caseContainerNo, fmt.Sprintf("Probe at the container address %s failed with %v, where the "+
+		d.fail(n, fmt.Sprintf("Probe at the container address %s failed with %v, where the "+
 			"fixture had just been written through this plane's own sink", addr, err))
 
 		return
@@ -367,7 +441,7 @@ func (d *driverRun) probeIs(ctx context.Context, pr ferry.Prober, addr ferry.Con
 		return
 	}
 
-	d.fail(caseContainerNo, fmt.Sprintf("Probe at the container address %s answered %s, want %s: a driver "+
+	d.fail(n, fmt.Sprintf("Probe at the container address %s answered %s, want %s: a driver "+
 		"reports what the plane holds at a container's own address, and the three answers are three "+
 		"different things to a reload", addr, got.Presence(), want))
 }
@@ -973,7 +1047,7 @@ func (d *driverRun) missingContainer(at ferry.Path, kind string) {
 }
 
 // fail is what every case reports through, and it names the plane and the case
-// so that a driver author reading their own CI output knows which of twelve went
+// so that a driver author reading their own CI output knows which of thirteen went
 // red.
 func (d *driverRun) fail(n int, msg string) {
 	d.rep.Helper()

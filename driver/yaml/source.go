@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"strings"
 
 	yamlv3 "go.yaml.in/yaml/v3"
 
@@ -58,14 +59,19 @@ type Source struct {
 // fails.
 func NewSource(path string) Source { return Source{path: path} }
 
-// Bind takes the address set and reads nothing out of it, because this driver
-// walks a document tree and builds no flat key that two fields could collide
-// on.
+// Bind builds no flat key from the address set, because this driver walks a
+// document tree and two fields cannot collide on a path.
+//
+// What it does take from the set is the shape each section's own members have.
+// A struct's members are named and an array's are positions, so the document has
+// to hold a mapping at the one and a sequence at the other, and a load through
+// this binding refuses the other way round rather than reading an empty section
+// out of it.
 //
 // It does no I/O and cannot fail. A file that does not parse is reported when
 // the load reads it, not here.
-func (s Source) Bind(_ *ferry.AddressSet) (ferry.OpenFunc, error) {
-	path := s.path
+func (s Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
+	path, sections := s.path, sectionShapes(addrs)
 
 	return func(ctx context.Context) (ferry.Reader, error) {
 		doc, err := readDoc(ctx, path)
@@ -73,7 +79,7 @@ func (s Source) Bind(_ *ferry.AddressSet) (ferry.OpenFunc, error) {
 			return nil, err
 		}
 
-		return reader{doc: doc}, nil
+		return reader{doc: doc, sections: sections}, nil
 	}, nil
 }
 
@@ -85,7 +91,90 @@ func (s Source) Bind(_ *ferry.AddressSet) (ferry.OpenFunc, error) {
 // open is what ADR-0004 leaves to the driver.
 type reader struct {
 	doc *yamlv3.Node
+
+	// sections is the node kind each declared section's members live in, built
+	// once at Bind and never written to afterwards.
+	sections map[ferry.SectionAddr]yamlv3.Kind
 }
+
+// sectionShapes reads the container shape of every section the type determined
+// out of the address set (ADR-0016).
+//
+// Only a section is in it. A composite's members come from the value, and
+// whether a slice or a map produced it is deliberately not part of its address,
+// so the document decides that one and [children] reads whichever it holds.
+//
+// A section the type put no member under - an empty struct - is in no entry, so
+// nothing is asserted about the node at it.
+func sectionShapes(addrs *ferry.AddressSet) map[ferry.SectionAddr]yamlv3.Kind {
+	out := make(map[ferry.SectionAddr]yamlv3.Kind, addrs.Len())
+
+	for m := range addrs.Seq() {
+		section, ok := m.(ferry.SectionAddr)
+		if !ok {
+			continue
+		}
+
+		if kind, known := memberKind(addrs, section.Path()); known {
+			out[section] = kind
+		}
+	}
+
+	return out
+}
+
+// memberKind is the node kind one section's own members live in, read off the
+// first address the type put under it: a position needs a sequence and a name
+// needs a mapping.
+//
+// A section's members are all of one segment kind, because core refuses a
+// position under a mapping and a name under a sequence, so the first one settles
+// it.
+func memberKind(addrs *ferry.AddressSet, at ferry.Path) (yamlv3.Kind, bool) {
+	for m := range addrs.Seq() {
+		kind, ok := firstBelow(at, m.Path())
+		if !ok {
+			continue
+		}
+
+		if kind == ferry.Index {
+			return yamlv3.SequenceNode, true
+		}
+
+		return yamlv3.MappingNode, true
+	}
+
+	return 0, false
+}
+
+// firstBelow is the kind of the first segment of p below prefix, and whether p
+// lies below prefix at all.
+//
+// The canonical renderings decide it. ADR-0003's escaping leaves no bare
+// delimiter inside a segment, so the byte that continues past the prefix is the
+// delimiter that introduces the next segment and never part of one.
+func firstBelow(prefix, p ferry.Path) (ferry.SegmentKind, bool) {
+	rest, ok := strings.CutPrefix(p.String(), prefix.String())
+	if !ok || rest == "" {
+		return 0, false
+	}
+
+	switch rest[0] {
+	case indexDelim:
+		return ferry.Index, true
+	case nameDelim:
+		return ferry.Name, true
+	default:
+		return 0, false
+	}
+}
+
+// The two bytes ADR-0003 introduces a segment with, which is how a rendering
+// says which kind comes next.
+const (
+	nameDelim  = '/'
+	indexDelim = '#'
+)
 
 // Get answers with what the document holds at one leaf.
 //
@@ -115,13 +204,62 @@ func (r reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error)
 // section that is there and holds nothing, which is what lets a present-empty
 // section survive a round trip. A single value where a container belongs is a
 // refusal naming the address.
+//
+// So is the wrong collection at a section. A struct's members are named and an
+// array's are positions, so a sequence where the destination takes a struct, and
+// a mapping where it takes an array, are the document and the destination
+// disagreeing about the shape of the data: reading it as a section that is there
+// would fill every field with the Go zero and drop what the document held.
 func (r reader) Probe(_ context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
-	info, err := presenceOf(deref(lookup(r.doc, addr.Path())))
+	at := deref(lookup(r.doc, addr.Path()))
+
+	info, err := presenceOf(at)
+	if err == nil {
+		err = r.holdable(addr, at)
+	}
+
 	if err != nil {
 		return ferry.SectionAbsent, ferry.ErrorAt(addr.Path(), err)
 	}
 
 	return info, nil
+}
+
+// holdable refuses a collection of the kind this container's members do not live
+// in, and passes everything else through.
+//
+// Only a section is checked. A composite's members come from the value, and
+// ADR-0016 withholds slice-versus-map from its address on purpose, so the
+// document decides which one it holds and core's own checks on the segments
+// [children] answers are what catch a document that holds the other.
+func (r reader) holdable(addr ferry.Container, at *yamlv3.Node) error {
+	section, ok := addr.(ferry.SectionAddr)
+	if !ok || at == nil {
+		return nil
+	}
+
+	want, known := r.sections[section]
+	if !known || at.Kind == want || !collection(at.Kind) {
+		return nil
+	}
+
+	return fmt.Errorf("%w: the plane holds %s here and the destination's members are %s: change the document, "+
+		"or model the field as what the plane holds", ferry.ErrValue, shapeOf(at), membersOf(want))
+}
+
+// collection reports whether a node is one of the two kinds that hold members.
+func collection(k yamlv3.Kind) bool {
+	return k == yamlv3.MappingNode || k == yamlv3.SequenceNode
+}
+
+// membersOf names what a section's members are, in the words a reader of the
+// message thinks in rather than the parser's.
+func membersOf(k yamlv3.Kind) string {
+	if k == yamlv3.SequenceNode {
+		return "positions the type fixes"
+	}
+
+	return "names the type fixes"
 }
 
 // Children lists the segments the document holds immediately under a composite.

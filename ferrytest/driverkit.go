@@ -25,6 +25,7 @@ const (
 	casePerRequestNo = 10
 	caseGoldenNo     = 11
 	caseNullNo       = 12
+	caseForeignNo    = 13
 )
 
 // The suite's own fixtures, and their addresses.
@@ -54,6 +55,20 @@ type (
 	// a composite is the shape that can be nil, and a plain struct is not.
 	blankSection struct {
 		Name string `ferry:"name"`
+	}
+
+	// justSection is one optional section and nothing else, which is the
+	// container case 13 asks about.
+	justSection struct {
+		Section *blankSection `ferry:"section"`
+	}
+
+	// neighbour is one leaf of another schema whose name begins with that
+	// section's, which a flat plane spells inside the section's own key space
+	// and a tree plane spells beside it. It is no address of justSection either
+	// way, so it says nothing about the section.
+	neighbour struct {
+		Beside string `ferry:"section_x"`
 	}
 
 	// justMap is the fixture for the two cases about a value-minted address:
@@ -158,6 +173,8 @@ func driverFixturesCompile(opts []ferry.Option) error {
 		ferry.Compile[filled](opts...),
 		ferry.Compile[blanks](opts...),
 		ferry.Compile[onlyLeaf](opts...),
+		ferry.Compile[justSection](opts...),
+		ferry.Compile[neighbour](opts...),
 	)
 }
 

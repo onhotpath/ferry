@@ -282,6 +282,31 @@ func TestAMapKeyThatRendersEmptyIsRefused(t *testing.T) {
 	}
 }
 
+// TestAPlaneMemberSpelledWithAnEmptyNameIsRefused is #258's load side.
+//
+// The dump-side refusal shipped without a mirror, so a plane that enumerated an
+// empty name loaded /m/ clean into a Go map and failed only when the same value
+// was written back. An empty segment names no address at either end.
+func TestAPlaneMemberSpelledWithAnEmptyNameIsRefused(t *testing.T) {
+	t.Parallel()
+
+	src := &listing{
+		values:   map[Path]Value{At("m").At(""): String("v")},
+		children: map[Path][]Segment{At("m"): {NameSegment("")}},
+	}
+
+	_, err := Load[struct {
+		M map[string]string `ferry:"m"`
+	}](t.Context(), src)
+	if err == nil {
+		t.Fatal("a member spelled with an empty name loaded, and the value it produced cannot be dumped back")
+	}
+
+	if !strings.Contains(err.Error(), "empty segment names no address") {
+		t.Errorf("the refusal reads %q, and it has to say that an empty segment names no address", err)
+	}
+}
+
 // kindsSink records what reached the plane, so a refusal that arrives too late
 // is visible as a write that happened.
 type kindsSink struct{ seen *[]Path }

@@ -363,3 +363,56 @@ func checkProbe(t *testing.T, vars map[string]string, want ferry.Presence) {
 		t.Errorf("Probe(/home) = %v, want %v", info.Presence(), want)
 	}
 }
+
+// TestAVariableSharingASectionsPrefixIsNotTheSection is #219 at the container
+// question rather than at the value one.
+//
+// HOME_SWEET_HOME is nothing this schema addresses: a section's members come
+// from the type, and the type puts only HOME_ROOT under /home. A driver that
+// answered the section's presence out of any name sharing its prefix would
+// fabricate the section out of an unrelated variable, and a required field under
+// it would then fail a load that ought to have left the pointer nil.
+func TestAVariableSharingASectionsPrefixIsNotTheSection(t *testing.T) {
+	t.Parallel()
+
+	e := newEnviron()
+	e.vars["HOME_SWEET_HOME"] = "1"
+
+	got, err := ferry.Load[homeConfig](t.Context(), New(Environ(e.environ)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got.Home != nil {
+		t.Errorf("Home = %+v, want nil: no name this schema addresses is set", got.Home)
+	}
+}
+
+// pairConfig is the array whose length the type fixes and the plane cannot
+// change.
+type pairConfig struct {
+	Pair [3]int `ferry:"pair"`
+}
+
+// TestAnIndexPastTheEndOfAnArrayIsIgnored pins what replaced a refusal.
+//
+// An array's members come from the type, so this plane is never enumerated at
+// one and a name past its end is read by nothing. An enumerating source used to
+// refuse the whole load for it; it is now ignored in silence, which is a refusal
+// this plane no longer makes and is pinned here so that it cannot change back
+// without a test saying so.
+func TestAnIndexPastTheEndOfAnArrayIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	e := newEnviron()
+	e.vars["PAIR_9"] = "9"
+
+	got, err := ferry.Load[pairConfig](t.Context(), New(Environ(e.environ)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got.Pair != [3]int{} {
+		t.Errorf("Pair = %v, want the zero array: PAIR_9 is past its end and names no member of it", got.Pair)
+	}
+}

@@ -110,6 +110,27 @@ S3 is rejected on the diagnostic: a generic address type puts `Addr[leafK]` in e
 > func (s *AddressSet) Len() int
 > ```
 
+> **Amended when this shipped: `Member` carries `Path()` and `String()` beside the sealing method.**
+>
+> As published the block above read `type Member interface{ member() }`, and the shipped interface is
+>
+> ```go
+> type Member interface {
+>     Path() Path
+>     String() string
+>
+>     member()
+> }
+> ```
+>
+> Both are load-bearing rather than convenience.
+> `NewKeys` ranges the set and needs the path of every member without knowing its kind, which is the whole of what makes one injectivity pass over a mixed set writable; `String` is what a refusal naming an address prints.
+> Without them every caller that does not care about the kind has to type-switch anyway, which is the cost the sum was chosen to avoid.
+>
+> **The sealing is a Go seal and not a proof.**
+> Go seals a type and not an interface: embedding a `SectionAddr` in a struct outside core promotes the unexported method, so a value satisfying `Member` that core never minted can be written.
+> Core refuses one - it is in no address set, `Has` answers false, and the kind ordering ranks it after all three so it equals none of them - and the godoc says that rather than claiming a closure Go cannot make.
+
 Three methods, not three per kind.
 The alternative drawn was `Leaves()`, `Sections()` and `Composites()`, and it was proven bind-equivalent - the env driver builds the identical key table either way - so the choice is made on surface count under the rule that every export is a contact point maintained forever.
 
@@ -279,6 +300,13 @@ Classify(map[string][0]int{}) -> refused, same rule
 > A plane holding `A_5` for a `[3]int` is now read as three elements and the fourth and sixth are ignored, where before an enumerating source refused the load.
 > The refusal was only ever available over a source that enumerates, so it was never the property it looked like, and getting it back means asking a plane to list a place whose membership the type already fixes.
 > The trade is deliberate: `#264`'s defect and this check are the same call, and the call is the thing the model removes.
+>
+> **The worst combination, named rather than left to be discovered.**
+> "Ignored" understates it where the array is behind a pointer and the plane is flat.
+> A section's presence is the presence of its members, so `P_9=9` alone against a `*[3]int` at `/p` made the section present and the load handed back `&[0 0 0]` - a whole array conjured out of a name no address of the schema renders to.
+> That half is closed: this plane's presence question is scoped to the members the type determined, so a name past the end says nothing about the section, and `driver/env`'s `TestAVariableSharingASectionsPrefixIsNotTheSection` pins it.
+> What remains is the loss as stated: a value-typed `[3]int` with `PAIR_9` set loads `[0 0 0]` and the name is read by nothing, pinned by `TestAnIndexPastTheEndOfAnArrayIsIgnored` so that it cannot change back in silence.
+> It is consistent with how these planes treat every unmapped plane key: neither `driver/env` nor `driver/kv` has any notion of one, and a plane key no address of the schema names is not this schema's business.
 
 ### A repeated plane key mints an index, and a repeated key at a leaf refuses
 
