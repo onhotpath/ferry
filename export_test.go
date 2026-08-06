@@ -17,7 +17,7 @@ package ferry
 func LeafSet(addrs ...Path) *AddressSet {
 	members := make([]Member, 0, len(addrs))
 	for _, addr := range addrs {
-		members = append(members, leafAt(addr))
+		members = append(members, leafOf(addr))
 	}
 
 	return newAddressSet(members...)
@@ -25,10 +25,10 @@ func LeafSet(addrs ...Path) *AddressSet {
 
 // Leaf is the leaf address at one path, for a test outside this package that
 // has to hand one to a Reader or a Writer directly.
-func Leaf(addr Path) LeafAddr { return leafAt(addr) }
+func Leaf(addr Path) LeafAddr { return leafOf(addr) }
 
 // Section is the section address at one path.
-func Section(addr Path) SectionAddr { return sectionAt(addr) }
+func Section(addr Path) SectionAddr { return sectionOf(addr) }
 
 // Composite is the composite address at one path.
-func Composite(addr Path) CompositeAddr { return compositeAt(addr) }
+func Composite(addr Path) CompositeAddr { return compositeOf(addr) }

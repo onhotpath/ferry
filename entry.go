@@ -143,7 +143,7 @@ func (b *bound) load(ctx context.Context, dst reflect.Value) (err error) {
 
 	defer func() { err = join(err, released(r)) }()
 
-	_, err = newWalker(loadFrom{r: r}).walk(ctx, spot{n: b.sch.root, v: loadRoot(dst)})
+	_, err = newWalker(loadFrom{r: r, addrs: b.sch.addrs}).walk(ctx, spot{n: b.sch.root, v: loadRoot(dst)})
 
 	return err
 }

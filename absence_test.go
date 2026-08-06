@@ -560,16 +560,18 @@ func mustObserve(t *testing.T, values map[Path]Value, want int, saw Value) {
 // export whose name says presence fails this test until it is either withdrawn
 // or added here on purpose.
 var containerPresence = map[string]bool{
-	"Presence":        true,
-	"PresenceAbsent":  true,
-	"PresenceNull":    true,
-	"PresencePresent": true,
-	"SectionAbsent":   true,
-	"SectionInfo":     true,
-	"SectionNull":     true,
-	"SectionPresent":  true,
-	"Prober":          true,
-	"Ensurer":         true,
+	"Presence":          true,
+	"PresenceAbsent":    true,
+	"PresenceNull":      true,
+	"PresencePresent":   true,
+	"PresenceElsewhere": true,
+	"SectionAbsent":     true,
+	"SectionInfo":       true,
+	"SectionNull":       true,
+	"SectionPresent":    true,
+	"SectionAt":         true,
+	"Prober":            true,
+	"Ensurer":           true,
 }
 
 // TestCoreExportsNothingForPresenceAtAField is the other half of the mechanism:

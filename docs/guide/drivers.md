@@ -300,6 +300,8 @@ The three plain answers are **values you return rather than functions you call**
 A caller reads one back with `info.Presence()`, giving `ferry.PresenceAbsent`, `ferry.PresencePresent` or `ferry.PresenceNull`.
 The zero `ferry.SectionInfo` is absence, so a driver with nothing to report returns `ferry.SectionInfo{}`.
 
+There is a fourth answer, `ferry.SectionAt`, for a plane with links, and it is the subject of [Links](#links) below.
+
 The three sentinels are package-level vars and are therefore reassignable, exactly as `io.EOF` is.
 Core does not stand in that hazard, because what the walk compares against is an unexported copy, so assigning to one breaks the assigning program's own comparisons and nothing else.
 Do not.
@@ -400,6 +402,64 @@ A plane with no spelling for a container implements no `Ensurer`, and core refus
 The alternatives were weighed and both lose ([ADR-0016](../adr/0016-the-sealed-address-model.md)).
 Accepting the degradation makes present-empty become absent on reload, which is the silent divergence the whole address model exists to remove; refusing everywhere makes a legal Go value undumpable on planes that could carry it perfectly.
 The rule taken is the loud refusal scoped to exactly the planes that cannot spell the value.
+
+## Links
+
+A plane whose grammar has aliases, a YAML anchor or a filesystem symlink, has two ways to serve one, and both are legitimate.
+
+**Resolve it yourself and report nothing.**
+That is what `driver/yaml` does: it follows an anchor on the read side and writes through it on the write side, and core never learns that a link was there.
+Everything about the alias, including the cycle discipline and the write rule, is yours.
+
+**Or report one hop and let core follow the chain.**
+`Prober` answers `ferry.SectionAt(target)` and `Get` returns a `*ferry.LeafRedirect`, and core keeps the set of addresses already asked, follows the chain, and refuses a cycle naming the address it closed through.
+
+```go
+func (r reader) Probe(_ context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	if to, linked := r.linkAt(addr); linked {
+		return ferry.SectionAt(to), nil
+	}
+	...
+}
+
+func (r reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
+	if to, linked := r.linkAt(addr); linked {
+		return ferry.Value{}, &ferry.LeafRedirect{Target: to}
+	}
+	...
+}
+```
+
+The leaf arm is an **error that is not a failure**, in the shape `fs.SkipDir` has, and it is an error rather than a seventh `VKind` on purpose: a value stays the six kinds it always was, and no codec has to handle one meaning "look over there".
+Match it with `errors.As`.
+
+Four rules bind you, and three of them are enforced.
+
+**Report one hop and stop.**
+Following the chain yourself is the thing this exists to save you from, and doing both is not wrong so much as pointless.
+
+**A section may only name a section, and a composite only a composite.**
+What is under a section comes from the type and what is under a composite comes from the value, so a link across them names a place its own members could not be. Core refuses it.
+
+**The target is an address you were handed.**
+Nothing outside ferry mints one, so a link whose target this schema does not name cannot be reported at all, and that case stays yours: resolve it internally, or refuse it in your own words. Reporting a target from some other schema's set is refused, naming whose job the case is.
+
+**A section link resolves presence, and nothing else.**
+The values beneath a linked section are still read at their own addresses, so if your alias moves the children too, report a `LeafRedirect` per leaf or resolve them yourself.
+
+### The write side of a link is divergence
+
+Two aliases of one target, and the caller mutates one of them.
+The dump has to decide, and this is the one rule core cannot enforce for you, because it turns on knowing that a section was *reached* through a link, and core keeps nothing between a load and a dump.
+
+> An unchanged section keeps its link.
+> A diverged one materialises at its own address, and the target and every other alias are untouched.
+
+Writing through the link instead propagates a change to every alias, which is what a YAML anchor means and is dangerous precisely because it is silent; refusing a diverged dump outright makes a legal Go mutation undumpable.
+The rule taken is the generalisation of the memo rule the spelling seam already uses: what the plane said is preserved until the value says otherwise ([ADR-0016](../adr/0016-the-sealed-address-model.md)).
+
+No first-party driver reports a link today, so nothing here resolves one in production, and `ferrytest` asserts nothing about it.
+`driver/yaml`'s anchors are the first option above and are unaffected: its write-through behaviour is its own, settled separately, and this rule governs a section core resolved rather than one a driver never reported.
 
 ## What `Get` and `Set` must and must not do
 
