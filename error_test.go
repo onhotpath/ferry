@@ -17,6 +17,70 @@ import (
 // value failure at an address.
 func valueErr(loc Path, msg string) *Error { return newError(momentWalk, ErrValue, loc, msg) }
 
+// collidingKeys is a source that hands core's key helper a folding key function
+// and wraps whatever it refuses with, which is ordinary Go and the shape a
+// driver reaches for when it wants its own host in the sentence.
+type collidingKeys struct{}
+
+// bindSentence is the wrapper's own text, which is what used to be discarded.
+const bindSentence = `binding the flat plane at host "example"`
+
+func (collidingKeys) Bind(addrs *AddressSet) (OpenFunc, error) {
+	_, err := NewKeys(addrs, "flat", func(addr Path) (string, error) {
+		return strings.ToUpper(strings.ReplaceAll(addr.String(), "/", "_")), nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", bindSentence, err)
+	}
+
+	return func(context.Context) (Reader, error) { return emptyReader{}, nil }, nil
+}
+
+// folding is a schema an uppercase flat key function merges two separate pairs
+// of, so NewKeys refuses with an aggregate rather than with one element. The
+// aggregate is the point: one element is not a tree, and the defect this
+// fixture exists for is the tree being spliced out of the wrapper around it.
+type folding struct {
+	Flat  string       `ferry:"db_host"`
+	DB    foldingUnder `ferry:"db"`
+	Upper string       `ferry:"Host"`
+	Lower string       `ferry:"host"`
+}
+
+type foldingUnder struct {
+	Host string `ferry:"host"`
+}
+
+// TestAWrappedAggregateKeepsItsWrapper is ADR-0011's flatness rule read the
+// other way round: ferry splices its own aggregate and never one it merely
+// found somewhere in a driver's chain.
+//
+// A driver that wraps a NewKeys refusal added a sentence, a class and a
+// provenance of its own, and splicing the elements out of the middle of that
+// chain deletes all three while looking like tidying.
+func TestAWrappedAggregateKeepsItsWrapper(t *testing.T) {
+	_, err := Load[folding](t.Context(), collidingKeys{})
+	if err == nil {
+		t.Fatal("a key function folding two addresses together was accepted")
+	}
+
+	report := fmt.Sprintf("%+v", err)
+	if !strings.Contains(report, bindSentence) {
+		t.Errorf("the driver's own sentence is gone from the report:\n%s", report)
+	}
+
+	if !errors.Is(err, ErrDriver) {
+		t.Errorf("%v is not marked as a driver's own failure", err)
+	}
+
+	// The moment is the driver's too. Splicing replaced the whole wrapper with
+	// the elements NewKeys built, and those carry core's own bind refusal
+	// without the driver's sentence around it.
+	if !strings.Contains(report, "the driver refused the address set") {
+		t.Errorf("the report does not name the moment as the driver's:\n%s", report)
+	}
+}
+
 // sole is the one leaf a driver failure naming at most one address becomes.
 // fromDriver reports one failure per address the driver named, so a case that
 // wants the leaf asserts that there is exactly one of them first.

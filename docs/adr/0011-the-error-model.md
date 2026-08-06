@@ -254,9 +254,25 @@ Everywhere else it is the plane address.
 ADR-0008's own measured diagnostic is `ferry: /Debug: field Debug carries no ferry tag`, where `/Debug` is a Go name, and two lines later `two fields address /name` is a genuine address.
 This ADR states the rule rather than carrying two fields or pretending the space is always the same.
 
+> **Corrected under [#113](https://github.com/onhotpath/ferry/issues/113): the space is decided by whether the position has an address, and never by the moment.**
+>
+> As published the sentence above reads "at schema compile it is the Go field path", which is true of the diagnostic it quotes and false of most schema-compile refusals.
+> Measured over one struct shape and one tagged field, three of four refusals already located at the plane address and one at the Go name:
+>
+> ```
+> T = bool      ferry: /value: bool is not a type ferry maps to an address
+> T = struct{}  ferry: /Value: struct {} maps no address
+> T = []string  ferry: /value: []string is not a type ferry maps to an address
+> T = any       ferry: /value: interface {} is not a type ferry maps to an address
+> ```
+>
+> The field is tagged in every one of them, so it has an address in every one of them, and a caller grouping diagnostics by `Address` got a key whose space depended on which refusal fired.
+> **The rule is the address wherever the position has one, and the Go field path only where it has none**, which is this section's own stated reason rather than a new one: a field with no tag never named an address, and that is the whole of what the Go path is for.
+> Nothing else moves, and the one refusal that moved is `struct{}`'s, from `/Value` to `/value`.
+
 **No field name.**
 Under ADR-0008 every mapped field names its segment explicitly, so at runtime the address is what the user wrote.
-At schema compile the location already is the Go name.
+Where a field named no segment at all, the location is the Go name.
 
 **No direction.**
 A caller who got the error from `Load` knows.

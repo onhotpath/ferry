@@ -51,15 +51,35 @@ const defaultTagKey = "ferry"
 
 // newConfig resolves an Option list, reporting every Option that was wrong
 // rather than the first one.
+//
+// A nil member is one of the ones that were wrong, and not a panic. Core
+// already refuses a nil Source, a nil Sink and a nil registry with a sentence
+// apiece, and an Option list built by appending whatever a helper returned is
+// the ordinary way a nil arrives in one.
 func newConfig(opts []Option) (config, error) {
 	c := config{tagKey: defaultTagKey, registry: builtins}
 
 	errs := make([]error, 0, len(opts))
-	for _, o := range opts {
+
+	for i, o := range opts {
+		if o == nil {
+			errs = append(errs, optionError(nilOptionMsg(i)))
+
+			continue
+		}
+
 		errs = append(errs, o.apply(&c))
 	}
 
 	return c, join(errs...)
+}
+
+// nilOptionMsg names the position, because an Option is opaque and a list of
+// three has nothing else to tell one member from another.
+func nilOptionMsg(i int) string {
+	return fmt.Sprintf("the Option at position %d is nil: an Option is built by ferry.TagKey or "+
+		"ferry.WithRegistry, so a nil one is a helper that returned nothing rather than a setting - "+
+		"drop it, or return the Option it was meant to build", i)
 }
 
 // TagKey names the struct tag key ferry reads, which defaults to "ferry".

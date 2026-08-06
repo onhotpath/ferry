@@ -121,6 +121,10 @@ func newBound(t reflect.Type, src Source, opts []Option) (*bound, error) {
 		return nil, fromBind(err)
 	}
 
+	if open == nil {
+		return nil, driverNil(momentBind, nilOpenMsg)
+	}
+
 	return &bound{sch: sch, open: open}, nil
 }
 
@@ -139,6 +143,10 @@ func (b *bound) load(ctx context.Context, dst reflect.Value) (err error) {
 	r, err := b.open(ctx)
 	if err != nil {
 		return fromDriver(momentOpen, Path{}, err)
+	}
+
+	if r == nil {
+		return driverNil(momentOpen, nilReaderMsg)
 	}
 
 	defer func() { err = join(err, released(r)) }()
@@ -174,6 +182,10 @@ func newBoundSink(t reflect.Type, sink Sink, opts []Option) (*boundSink, error) 
 		return nil, fromBind(err)
 	}
 
+	if open == nil {
+		return nil, driverNil(momentBind, nilOpenWriterMsg)
+	}
+
 	return &boundSink{sch: sch, open: open}, nil
 }
 
@@ -193,6 +205,10 @@ func (b *boundSink) dump(ctx context.Context, v reflect.Value) (err error) {
 	w, err := b.open(ctx)
 	if err != nil {
 		return fromDriver(momentOpen, Path{}, err)
+	}
+
+	if w == nil {
+		return driverNil(momentOpen, nilWriterMsg)
 	}
 
 	defer func() { err = join(err, released(w)) }()

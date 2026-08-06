@@ -777,7 +777,28 @@ func (e *parseFailure) Error() string {
 		return "the plane's value is out of range for " + e.typ.String()
 	}
 
-	return "the plane's value is not a valid " + e.typ.String()
+	return "the plane's value is not a valid " + e.typ.String() + parseHint(e.typ)
+}
+
+// parseHint is the two types whose stdlib error carried a reason ferry's
+// redaction rule drops, and it is why the rule costs nothing rather than
+// costing a diagnostic (ADR-0011).
+//
+// Every other refusal loses only the value, which the address already locates.
+// These two lose "missing unit" and "not RFC 3339", so ferry states the rule
+// instead of echoing the input, and the hint is better than the message it
+// replaces. Both types are in core's identity table, so the obligation lands
+// where the representation was already pinned; a registered codec adds no
+// entry, because its own representation is proved by its own proof.
+func parseHint(t reflect.Type) string {
+	switch t {
+	case reflect.TypeFor[time.Duration]():
+		return ": a duration needs a unit, as in 30s or 1h30m"
+	case reflect.TypeFor[time.Time]():
+		return ": a time is RFC 3339, as in 2026-08-02T12:00:00Z"
+	default:
+		return ""
+	}
 }
 
 func (e *parseFailure) Unwrap() error { return e.err }

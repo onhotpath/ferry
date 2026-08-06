@@ -473,6 +473,41 @@ const (
 		"constructor that was meant to return it"
 )
 
+// driverNil is what a driver handing back nothing and no error becomes.
+//
+// ADR-0004 makes (nil, nil) illegal state at the two moments a third party can
+// produce it, and ADR-0011's "ferry itself never panics" is why it is refused
+// where it happens rather than dereferenced one line later: the nil came out of
+// somebody else's code, and a stack trace inside core names the wrong author.
+//
+// It carries the driver marker for that reason, and no cause, because the
+// driver returned none. The class is ErrPlane, the same as every other refusal
+// that reaches core from a plane, and the location is the zero Path, because
+// nothing was ever opened for an address to be read at.
+func driverNil(m moment, msg string) *Error {
+	e := newError(m, ErrPlane, Path{}, msg)
+	e.driver = true
+
+	return e
+}
+
+// The four illegal states, one sentence each, because the four are four
+// different lines of a driver and a shared sentence would make an author read
+// all of them.
+const (
+	nilOpenMsg = "the source returned no error and no open from Bind: a Bind that accepted the address set " +
+		"hands back the function a load opens the plane through, and returning neither is a refusal core " +
+		"cannot report and a plane core cannot reach"
+	nilOpenWriterMsg = "the sink returned no error and no open from Bind: a Bind that accepted the address set " +
+		"hands back the function a dump opens the plane through, and returning neither is a refusal core " +
+		"cannot report and a plane core cannot reach"
+	nilReaderMsg = "the source's open returned no error and no reader: an open that succeeded hands back the " +
+		"reader the walk asks for every address, and returning neither is a load with nothing to read from"
+	nilWriterMsg = "the sink's open returned no error and no writer: an open that succeeded hands back the " +
+		"writer the walk writes every address through, and returning neither is a dump with nothing to " +
+		"write to"
+)
+
 // mine reports whether err is core's own error and not a driver's.
 //
 // It is about the outermost error only, which is why it compares identity
@@ -735,12 +770,19 @@ func join(errs ...error) error {
 // A driver's own joined error is left alone and enters as one element with its
 // internal shape intact: ferry cannot attribute addresses to a third party's
 // children, and rewriting somebody else's error tree is not ferry's business.
+//
+// The identity guard is what makes that true of a wrapper as well as of a tree,
+// and it is [mine]'s guard for [mine]'s reason. errors.AsType descends the whole
+// chain, so a driver's own sentence around an aggregate core wrote - which is
+// what fmt.Errorf("%w") around a NewKeys refusal is - was being replaced by that
+// aggregate's elements, and the driver's sentence, its class and its provenance
+// went with it.
 func appendElement(out []error, err error) []error {
 	if err == nil {
 		return out
 	}
 
-	if l, ok := errors.AsType[*errorList](err); ok {
+	if l, ok := errors.AsType[*errorList](err); ok && identical(l, err) {
 		return append(out, l.errs...)
 	}
 
