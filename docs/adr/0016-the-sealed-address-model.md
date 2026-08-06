@@ -330,6 +330,29 @@ The driver knows `/limit` is a leaf because classification arrived at `Bind`, so
 
 This is [ADR-0015](0015-two-spellings-of-one-address.md)'s rule in the other direction: that ADR refuses two keys reaching one address, and this one refuses one key arriving twice at an address that holds one value.
 
+> **Amended when this shipped: the leaf refusal is made in `Get`, and what the driver classifies on is the kind of the address it was handed.**
+>
+> As published, this section said the driver "knows `/limit` is a leaf because classification arrived at `Bind`", and a driver could have read that as an instruction to build a table of leaf names at `Bind` and consult it in `Get`.
+> It does not need one.
+> `Get` takes a `LeafAddr` and takes nothing else, so every address that reaches it holds one value by construction, and the classification is the parameter rather than a lookup.
+> A driver that built the table would be keeping a second copy of a fact the signature already carries.
+>
+> The same reading settles which container a repeated name belongs to, and it settles it per address rather than per name.
+> `?limits.rps=1&limits.rps=2` into a `map[string]string` is refused, because the map's element is a leaf and `Get` is what asks for it; into a `map[string][]string` it is two elements, because the element is a composite and `Children` is what asks.
+> One request, two readings, and the driver writes no rule for either.
+>
+> **What moved in `driver/http` is a deletion.**
+> The refusal was made at `Close`, wrapped in `ferry.ErrorAt` because core has no address there, and it needed a per-load map of names answered `Absent` plus a delete from that map inside `Children` to decide, at the end, which of them had turned out to be sequences.
+> All of that existed to defer a decision the signature now makes, and it is gone, along with the reader's `Releaser`: every refusal it makes is made during the walk at the address it is about, and a `Close` returning nil is indistinguishable from a release somebody forgot.
+>
+> Measured, and this is the part worth keeping: a `required` field pointed at a repeated name reported **two** failures for one mistake under the old placement, because the driver had to manufacture the absence that `required` then refused.
+> It reports one now.
+>
+> ADR-0015 is not amended, and it should not be.
+> It placed the two-spellings refusal in `Children` and gave three reasons, two of which this ADR removed: that `Get` carried no kind, and that conformance case 3 forbade failing at a container `Get`.
+> It also said it would place the refusal in `Children` even if [#208](https://github.com/onhotpath/ferry/issues/208) opened `Get`, because `Children` is where those addresses are minted, and that reason is untouched.
+> A reader of ADR-0015 should read its second and third arguments as history.
+
 ### A present-but-empty section is writable, and refused where it is unspellable
 
 Go can express empty-but-present: a non-nil `*Options` whose every field is omitted.

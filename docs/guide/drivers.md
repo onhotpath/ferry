@@ -418,6 +418,12 @@ That deletes a whole class of driver bug rather than documenting it, and the pro
 Answering absence there is how a YAML mapping at a `string` field becomes the Go zero value with a nil error, which is silent loss.
 Refuse it, naming the address and what your plane actually holds.
 
+**On a multimap plane, a key the plane holds more than one value at is that same refusal.**
+`?tags=a&tags=b` is a sequence, and a `ferry.LeafAddr` holds one value, so reading it into the field would have to discard one.
+Refuse it here, with the count and without any of the values, and let core attach the address ([ADR-0016](../adr/0016-the-sealed-address-model.md)).
+You need no table to know this: the parameter type is the classification, so the same request is two elements at a `[]string` and a refusal at a `string`, and neither reading is a rule you wrote.
+`driver/http` used to defer that refusal to `Close`, because an address arrived at `Get` carrying no kind and the driver had to answer `Absent` and wait to see whether anything enumerated the name; making the refusal here removed the deferral, the bookkeeping it needed, and the double report a `required` field got for one mistake.
+
 ### `Set`
 
 **`Set` is never called with an `Absent`.**

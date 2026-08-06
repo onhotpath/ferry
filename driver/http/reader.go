@@ -2,8 +2,6 @@ package ferryhttp
 
 import (
 	"context"
-	"errors"
-	"maps"
 	"slices"
 	"strings"
 
@@ -22,16 +20,10 @@ type reader struct {
 	keys   ferry.KeyFunc
 	static map[string]ferry.Path
 	vals   values
-
-	// hid is every name this load answered Absent at because it occurs more
-	// than once, and which nothing has enumerated since. A name that is later
-	// enumerated is deleted from it, so what is left when the load closes is
-	// exactly the names that were sequences and were read as single values.
-	hid map[string]ferry.Path
 }
 
 func newReader(p plane, sep string, keys ferry.KeyFunc, static map[string]ferry.Path, vals values) *reader {
-	return &reader{p: p, sep: sep, keys: keys, static: static, vals: vals, hid: map[string]ferry.Path{}}
+	return &reader{p: p, sep: sep, keys: keys, static: static, vals: vals}
 }
 
 // The optional interfaces this reader carries. Enumeration is one of them
@@ -40,14 +32,18 @@ func newReader(p plane, sep string, keys ferry.KeyFunc, static map[string]ferry.
 // [ferry.Prober] is the second, and on this plane it exists for its refusal
 // rather than for its answers: a request has no spelling for a container at the
 // container's own name, so what it can say there is that the name holds a value
-// the destination has nowhere to put (ADR-0016). [ferry.Releaser] is the third,
-// because this plane's one refusal that cannot be made during the walk is made
-// at Close (#193, #208).
+// the destination has nowhere to put (ADR-0016).
+//
+// [ferry.Releaser] is not among them any more, and its absence is the shape of
+// what the sealed address model bought. This reader implemented Close for one
+// reason: to report, too late, a name it could not refuse at the moment it was
+// read (#193, #208). Every refusal it makes now is made during the walk at the
+// address it is about, so there is nothing left to say at Close and a Close
+// that returns nil is indistinguishable from a release somebody forgot.
 var (
 	_ ferry.Reader     = (*reader)(nil)
 	_ ferry.Prober     = (*reader)(nil)
 	_ ferry.Enumerator = (*reader)(nil)
-	_ ferry.Releaser   = (*reader)(nil)
 )
 
 // Get answers with what the request holds at an address.
@@ -58,12 +54,8 @@ var (
 // distinction they do carry - present against absent - is the one a required
 // field tests.
 //
-// At a name occurring more than once the answer is Absent, because that name is
-// a sequence and its values live at the positions under it rather than at the
-// name itself. Whether that was the right answer is not knowable here: one
-// occurrence and two are the same name asked for once. So the name is recorded,
-// enumerating it clears the record, and a record still standing when the load
-// closes is a sequence nothing read as one (ADR-0011's aggregation carries it).
+// A name the request holds more than one value at is refused here, and
+// [reader.atName] is where the reason is written down.
 func (r *reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
 	at := addr.Path()
 
@@ -73,7 +65,7 @@ func (r *reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error
 	}
 
 	if vs := r.vals[key]; len(vs) > 0 {
-		return r.atName(at, key, vs), nil
+		return atName(vs)
 	}
 
 	if v, ok := r.atPosition(at); ok {
@@ -130,15 +122,29 @@ func (r *reader) anyUnder(key string) bool {
 	return false
 }
 
-// atName is the answer at a name the request holds values at.
-func (r *reader) atName(addr ferry.Path, key string, vs []string) ferry.Value {
+// atName is the answer at a name the request holds values at: one value is the
+// value, and more than one is refused.
+//
+// The address is a leaf, because core asks Get about a [ferry.LeafAddr] and
+// about nothing else, so it is an address that holds one value by construction.
+// A name occurring twice at it is a sequence arriving where the destination
+// takes a scalar, and taking the first would discard the rest in silence
+// (ADR-0016).
+//
+// That refusal used to be deferred to Close, and the deferral is what the
+// sealed address model removed rather than improved. An address arrived at Get
+// carrying no kind and no arity, so /tags for a []string and /q for a string
+// were the same call and one occurrence was indistinguishable from two; the
+// driver had to answer Absent, record the name, and wait to see whether
+// anything enumerated it (ADR-0015, #193, #208). The kind arrives with the
+// address now, so the refusal is made where it is about, during the walk, and
+// core attaches the address to it.
+func atName(vs []string) (ferry.Value, error) {
 	if len(vs) == 1 {
-		return ferry.String(vs[0])
+		return ferry.String(vs[0]), nil
 	}
 
-	r.hid[key] = addr
-
-	return ferry.Value{}
+	return ferry.Value{}, repeated(len(vs))
 }
 
 // atPosition answers an element address out of the second dimension: ?tags=a&tags=b
@@ -164,34 +170,6 @@ func (r *reader) atPosition(addr ferry.Path) (ferry.Value, bool) {
 	}
 
 	return ferry.String(vs[i]), true
-}
-
-// Close reports every name that was a sequence and was read as a single value,
-// one failure per name, each located at the field it is about.
-//
-// It is the earliest moment the report can be made, and that is a property of
-// the plane rather than a choice. At the moment such a name is read there is one
-// call at one address and nothing to distinguish a name occurring twice from a
-// name occurring once, so only the walk finishing without having enumerated it
-// settles the question (#193, #208).
-//
-// [ferry.ErrorAt] is the outermost wrapper on each element, which is what lets
-// core keep the address; the driver's own sentence is inside it. A request with
-// two such names reports both (#211).
-func (r *reader) Close() error {
-	if len(r.hid) == 0 {
-		return nil
-	}
-
-	errs := make([]error, 0, len(r.hid))
-
-	// Sorted by name so that a report over more than one name is not a report
-	// over Go's randomised map iteration order.
-	for _, key := range slices.Sorted(maps.Keys(r.hid)) {
-		errs = append(errs, ferry.ErrorAt(r.hid[key], repeated(len(r.vals[key]))))
-	}
-
-	return errors.Join(errs...)
 }
 
 // splitIndex is an address ending in a position, split into what it is under and
