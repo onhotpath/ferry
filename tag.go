@@ -135,18 +135,49 @@ func (s *tagScan) failure(state scanState, key, rest string, at int) error {
 //
 // Two cases, and the second is the one that keeps another library's mistake out
 // of ferry's report. Before the key has been read, a tag that does not parse is
-// ferry's exactly when the key occurs in it at all: the failure is why ferry
-// cannot see its own tag. After the key has been read, a failure is ferry's
-// only where it begins at the byte its own entry stopped at - which is a value
-// truncated at a bare double quote, with the residue scanning as garbage - and
-// a failure past a separating space belongs to whoever wrote the entry it is
-// in.
+// ferry's exactly when the key opens an entry in it at all: the failure is why
+// ferry cannot see its own tag. After the key has been read, a failure is
+// ferry's only where it begins at the byte its own entry stopped at - which is
+// a value truncated at a bare double quote, with the residue scanning as
+// garbage - and a failure past a separating space belongs to whoever wrote the
+// entry it is in.
 func (s *tagScan) mine(at int) bool {
 	if s.out.found {
 		return at == s.end
 	}
 
-	return strings.Contains(s.raw, s.key+`:"`)
+	return opensEntry(s.raw, s.key)
+}
+
+// opensEntry reports whether key opens a key:"..." entry anywhere in raw, at a
+// real struct-tag key boundary.
+//
+// The boundary is the whole of it. strings.Contains matched ferry inside
+// xferry, and env inside myenv, so another library's malformed tag was refused
+// as ferry's own and failed the compile (#261). ADR-0021 has ferry reading
+// declared foreign keys beside its own, which needs the two kept apart exactly.
+//
+// A key is bounded on the left by the start of the tag or by a byte no key may
+// contain, which is scanKeyEnd's rule read backwards, and on the right by the
+// colon and quote that introduce its value.
+func opensEntry(raw, key string) bool {
+	want := key + `:"`
+
+	for i := 0; i+len(want) <= len(raw); {
+		j := strings.Index(raw[i:], want)
+		if j < 0 {
+			return false
+		}
+
+		at := i + j
+		if at == 0 || isKeyStop(raw[at-1]) {
+			return true
+		}
+
+		i = at + 1
+	}
+
+	return false
 }
 
 // scanState says how one entry ended, which is the whole of what this scanner
@@ -196,12 +227,18 @@ func scanEntry(s string) (tagEntry, scanState) {
 // at a byte no key may contain.
 func scanKeyEnd(s string) int {
 	for i := range len(s) {
-		if c := s[i]; c <= ' ' || c == ':' || c == '"' || c == del {
+		if isKeyStop(s[i]) {
 			return i
 		}
 	}
 
 	return len(s)
+}
+
+// isKeyStop is the byte set no struct tag key may contain, which is what bounds
+// one key against another.
+func isKeyStop(c byte) bool {
+	return c <= ' ' || c == ':' || c == '"' || c == del
 }
 
 // scanQuotedEnd is one past the closing quote of the Go quoted string s opens

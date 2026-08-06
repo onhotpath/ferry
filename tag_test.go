@@ -145,6 +145,74 @@ func TestScannerRefusalIsScoped(t *testing.T) {
 	}
 }
 
+// TestScannerMatchesTheKeyExactly holds the key boundary. A key that merely
+// ends in the one ferry was told to read is another library's, so its malformed
+// tag is ignored and the field is left to the field rule - which is what the
+// same field tagged json has always got (#261).
+func TestScannerMatchesTheKeyExactly(t *testing.T) {
+	t.Parallel()
+
+	run(t, []compileCase{{
+		name:     "a key ending in ferry's own is not ferry's",
+		run:      Compile[badtags.ForeignKeySuffix],
+		want:     []string{"field Host carries no ferry tag"},
+		elements: 1,
+	}, {
+		name:     "and one that ends the tag, with no second occurrence to find",
+		run:      Compile[badtags.ForeignKeySuffixAtEnd],
+		want:     []string{"field Host carries no ferry tag"},
+		elements: 1,
+	}, {
+		name:     "and json, which is the same field and the same answer",
+		run:      Compile[badtags.ForeignKeyJSON],
+		want:     []string{"field Host carries no ferry tag"},
+		elements: 1,
+	}, {
+		name:     "a key ending in the one TagKey named",
+		run:      Compile[badtags.ForeignEnvSuffix],
+		opts:     []Option{TagKey("env")},
+		want:     []string{"field Host carries no env tag"},
+		elements: 1,
+	}, {
+		name:     "and a shorter one, where the collision is commoner still",
+		run:      Compile[badtags.ForeignDBSuffix],
+		opts:     []Option{TagKey("db")},
+		want:     []string{"field Host carries no db tag"},
+		elements: 1,
+	}, {
+		name:     "ferry's own key, malformed, still refuses loudly",
+		run:      Compile[badtags.Unterminated],
+		want:     []string{`/Host: struct tag key "ferry" has an unterminated quoted value`},
+		elements: 1,
+	}})
+}
+
+// TestScannerLeavesAForeignMalformedTagAlone is the same rule where nothing is
+// left to refuse: a malformed tag under a key ferry does not own, and a
+// malformed tag on a field reflect can never set, both compile clean.
+func TestScannerLeavesAForeignMalformedTagAlone(t *testing.T) {
+	t.Parallel()
+
+	clean := []struct {
+		name string
+		run  func(...Option) error
+	}{
+		{"an embedded field under a key ending in ferry's own", Compile[badtags.ForeignKeyPromoted]},
+		{"an unexported field under another library's key", Compile[badtags.UnexportedForeign]},
+		{"an unexported field under ferry's own key", Compile[badtags.UnexportedMalformed]},
+	}
+
+	for _, c := range clean {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := c.run(); err != nil {
+				t.Fatalf("refused a tag that is not ferry's: %+v", err)
+			}
+		})
+	}
+}
+
 // TestScannerDistinguishesNoTagFromAnUnreadableOne is the distinction
 // reflect.StructTag.Lookup cannot make, and it is what the found bit is for. A
 // field carrying no ferry tag gets the field rule, and a field whose tag could
