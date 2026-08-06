@@ -462,40 +462,87 @@ func (l loadFrom) atLeaf(ctx context.Context, s spot) (outcome, error) {
 // addresses already asked, refuses a cycle, and checks that the target is one
 // this schema names (ADR-0016). A driver that resolves its own aliases reports
 // none and never enters the loop.
+// The chain is walked in a second function that a load with no link in it never
+// enters, and that split is what keeps the feature off the hot path: the visited
+// set, and the pointer errors.As fills, are both allocated where there is a hop
+// and nowhere else.
 func (l loadFrom) read(ctx context.Context, s spot) (Value, error) {
 	at := s.leaf()
-	seen := map[Path]bool{at.Path(): true}
+
+	got, next, err := l.getOnce(ctx, at)
+	if err != nil || next == nil {
+		return got, err
+	}
+
+	return l.chase(ctx, s.at, at, *next)
+}
+
+// chase walks the rest of a leaf chain, and is entered only where the plane
+// reported a link.
+func (l loadFrom) chase(ctx context.Context, from Path, at, next LeafAddr) (Value, error) {
+	var seen map[Path]bool
 
 	for {
-		got, next, err := l.getOnce(ctx, s.at, at, seen)
-		if err != nil || next == nil {
+		seen = mark(seen, at.Path())
+
+		if err := l.followed(from, next, seen); err != nil {
+			return Value{}, err
+		}
+
+		at = next
+
+		got, hop, err := l.getOnce(ctx, at)
+		if err != nil || hop == nil {
 			return got, err
 		}
 
-		seen[next.Path()] = true
-		at = *next
+		next = *hop
 	}
+}
+
+// mark records one address in the visited set, building the set where there is
+// a hop to record and leaving it nil where there is not.
+func mark(seen map[Path]bool, at Path) map[Path]bool {
+	if seen == nil {
+		seen = make(map[Path]bool, 2)
+	}
+
+	seen[at] = true
+
+	return seen
 }
 
 // getOnce asks one address, and separates the two things a Get answers with:
 // the value, or the link that says where the value is.
 //
-// A nil next is the answer itself, so the loop above is three lines and reads
-// as the chain it walks.
-func (l loadFrom) getOnce(ctx context.Context, from Path, at LeafAddr, seen map[Path]bool,
-) (Value, *LeafAddr, error) {
+// A nil next is the answer itself. What a hop is held to is the caller's,
+// because the visited set is.
+func (l loadFrom) getOnce(ctx context.Context, at LeafAddr) (Value, *LeafAddr, error) {
 	got, err := l.r.Get(ctx, at)
+	if err == nil {
+		return got, nil, nil
+	}
 
+	if next := leafHop(err); next != nil {
+		return Value{}, next, nil
+	}
+
+	return Value{}, nil, fromDriver(momentWalk, at.Path(), err)
+}
+
+// leafHop is the link a Get reported, or nil where the error is an ordinary
+// failure.
+//
+// It is a function of its own so that the pointer errors.As fills, which escapes
+// into that call's interface parameter, is allocated on the path that has an
+// error to examine and never on the path that read a value.
+func leafHop(err error) *LeafAddr {
 	var hop *LeafRedirect
 	if errors.As(err, &hop) {
-		return Value{}, &hop.Target, l.followed(from, hop.Target, seen)
+		return &hop.Target
 	}
 
-	if err != nil {
-		return Value{}, nil, fromDriver(momentWalk, at.Path(), err)
-	}
-
-	return got, nil, nil
+	return nil
 }
 
 // followed is the one check both arms of the resolution make about a hop: the
@@ -510,17 +557,32 @@ func (l loadFrom) getOnce(ctx context.Context, from Path, at LeafAddr, seen map[
 func (l loadFrom) followed(from Path, target Member, seen map[Path]bool) error {
 	if seen[target.Path()] {
 		return newError(momentWalk, ErrPlane, from,
-			"reference cycle through "+target.String())
+			"reference cycle through "+readable(target))
 	}
 
 	if !l.addrs.Has(target) {
 		return newError(momentWalk, ErrPlane, from, fmt.Sprintf(
 			"this address refers to %s, which the schema does not address as the same kind of place: a "+
 				"driver reports a link only to an address it was handed, and one the schema does not name "+
-				"is the driver's own to resolve or to refuse", target))
+				"is the driver's own to resolve or to refuse", readable(target)))
 	}
 
 	return nil
+}
+
+// readable is how an address reads inside a refusal.
+//
+// The zero address renders as the empty string, because it has no segments and
+// the canonical rendering of no segments is nothing (ADR-0003). It is in no
+// address set, so it reaches these messages exactly when a driver reported a
+// link to one it never minted, which is the case the message has to be readable
+// for.
+func readable(m Member) string {
+	if s := m.String(); s != "" {
+		return s
+	}
+
+	return "the empty address, which is no address"
 }
 
 // absent is what an address the plane does not have means to a leaf, and it is
@@ -654,35 +716,66 @@ func (l loadFrom) probe(ctx context.Context, s spot) (SectionInfo, error) {
 	}
 
 	at := s.container()
-	seen := map[Path]bool{at.Path(): true}
+
+	info, next, err := l.probeOnce(ctx, pr, at)
+	if err != nil || next == nil {
+		return info, err
+	}
+
+	return l.chaseContainer(ctx, pr, s.at, at, next)
+}
+
+// chaseContainer walks the rest of a container chain, and is entered only where
+// the plane reported a link, for the reason [loadFrom.chase] gives.
+func (l loadFrom) chaseContainer(ctx context.Context, pr Prober, from Path, at, next Container,
+) (SectionInfo, error) {
+	var seen map[Path]bool
 
 	for {
-		info, next, err := l.probeOnce(ctx, pr, s.at, at, seen)
-		if err != nil || next == nil {
+		seen = mark(seen, at.Path())
+
+		if err := l.hop(from, at, next, seen); err != nil {
+			return sectionAbsent, err
+		}
+
+		at = next
+
+		info, target, err := l.probeOnce(ctx, pr, at)
+		if err != nil || target == nil {
 			return info, err
 		}
 
-		seen[next.Path()] = true
-		at = next
+		next = target
 	}
 }
 
 // probeOnce asks one container address, and separates the two things a probe
 // answers with: what the plane holds there, or the link that says where the
 // container is.
-func (l loadFrom) probeOnce(ctx context.Context, pr Prober, from Path, at Container, seen map[Path]bool,
-) (SectionInfo, Container, error) {
+//
+// An answer that says elsewhere and names nowhere is neither, and it is refused
+// rather than read as one of them: a nil target reads as absence at a pointer,
+// as an empty container at a composite and as a refusal at an unlistable one, so
+// the same inconsistent answer would mean three different things (ADR-0016).
+func (l loadFrom) probeOnce(ctx context.Context, pr Prober, at Container) (SectionInfo, Container, error) {
 	info, err := pr.Probe(ctx, at)
 	if err != nil {
 		return sectionAbsent, nil, fromDriver(momentWalk, at.Path(), err)
 	}
 
 	target, linked := info.Redirect()
-	if !linked {
-		return info, nil, nil
+	if linked {
+		return sectionAbsent, target, nil
 	}
 
-	return sectionAbsent, target, l.hop(from, at, target, seen)
+	if info.Presence() == PresenceElsewhere {
+		return sectionAbsent, nil, newError(momentWalk, ErrPlane, at.Path(), fmt.Sprintf(
+			"%T reported that what this address names lives elsewhere and named no target: a link is "+
+				"reported with the address it points at, and an answer carrying none is neither a place "+
+				"to go nor a report about this one", l.r))
+	}
+
+	return info, nil, nil
 }
 
 // hop holds one reported container link to the rule the kinds put on it, and
@@ -698,7 +791,7 @@ func (l loadFrom) hop(from Path, at, target Container, seen map[Path]bool) error
 		return newError(momentWalk, ErrPlane, from, fmt.Sprintf(
 			"this address refers to %s, which is not the same kind of place: what is under a section comes "+
 				"from the type and what is under a composite comes from the value, so a link between them "+
-				"names somewhere its own members could not be", target))
+				"names somewhere its own members could not be", readable(target)))
 	}
 
 	return l.followed(from, target, seen)
