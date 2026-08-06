@@ -127,8 +127,9 @@ A binding is safe to use from many goroutines.
 `ferry.TagKey("env")` changes which struct tag key is read.
 It applies to every struct in that call, so pass it everywhere you load that type.
 
-`ferry.WithRegistry(reg)` names a registry other than the default one.
-A registry holds the codecs you registered and caches the compiled schema, so it is a value to keep: one per program, or one per test.
+`ferry.WithRegistry(reg)` names a registry other than the one core ships.
+`ferry.NewRegistry(codecs...)` builds one: it takes its whole codec set at once, holds core's own type set underneath, and has no mutators, so it is complete on the line it is born.
+A registry also caches the compiled schema, so it is a value to keep: one per program, or one per test.
 
 ## Documentation
 

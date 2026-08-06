@@ -172,6 +172,18 @@ That is a programming error at a program's birth, in the same family as `regexp.
 > The third is the duplicate rule already stated above, applied to the base with no special case: overriding a built-in codec would make user code a second authority over the standard types, and if a real need for that ever appears it is its own decision with its own name, not a silent capability of this constructor.
 > How a caller adds one codec without a mutator is therefore the constructor itself: `NewRegistry(ferry.NumberText[big.Int]())` is the built-ins plus `big.Int`, complete on the line it is born.
 
+> **Amended on the merge of the surface this ADR describes, and the amendment is what shipped where this text was elliptical.**
+>
+> Three things this ADR wrote in shorthand had to be spelled to be implemented, and each is recorded here rather than decided quietly.
+>
+> **`var Null Value` is `var Null = Value{kind: KindNull}`.** As published the snippet above reads `var Null Value`, which is the zero value and is `Absent`, and the paragraph under it says so in the same breath. The declaration carries the null kind.
+>
+> **`NewRegistry` has one result, so every refusal it makes is a panic.** The signature quoted above returns `*Registry` and nothing else, and the nil-half paragraph argues the case for `regexp.MustCompile`'s family against "an error return on a line nobody checks". That argument is not special to a nil half: a duplicate, a pointer type, a type core owns and a codec that is not total over its own zero value are all mistakes in the source of a program that has not started. What it panics with is a `*ferry.Error` of `ErrSchema`'s class at the register moment, so a caller who recovers one reads the report ferry gives every other refusal. The cost, stated: a caller cannot build a registry from a codec set it does not already trust, and no caller has ever wanted to.
+>
+> **`NumberText` and `StringText` return `KeyCodec` rather than `Codec`.** The export arithmetic above counts eight constructors and this changes none of it, because a `KeyCodec` is a `Codec` and is handed to `NewRegistry` the same way. Returning the narrower type would have deleted a shipped capability: [ADR-0007](0007-the-codec-chain-and-its-precedence.md)'s refusal of a chain-claimed map key names a registration with `.AsMapKey()` as the remedy, and a type that carries a text pair reaches that remedy through these two constructors and no other. The asymmetry with `StringValue` and `StringKey` is real and is explicable: where the caller supplies the encode half there are two constructors and the caller picks, and where the type supplies it there is only one, so it must carry both possibilities.
+>
+> Two resolution defects were found while making this real, and both are fixed in the same change because each is a place the shipped code already disagreed with a decision recorded elsewhere. [#229](https://github.com/onhotpath/ferry/issues/229): a pointer leaf dropped the pointee codec's whole-observation half, so a `*T` over a registered `T` decoded through a gate derived from the declared kind, which [ADR-0009](0009-typed-codec-registration.md) forbids in as many words. [#230](https://github.com/onhotpath/ferry/issues/230): map key resolution never consulted the text-pair arm, so a chain-claimed type whose underlying kind is a string or an integer was admitted as a key by kind and had one representation at the leaf position and another at the key position.
+
 ### `NullValue` is one modifier over any registration
 
 A registration says how a `T` crosses the boundary.
