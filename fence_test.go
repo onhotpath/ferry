@@ -163,6 +163,55 @@ func TestACodecPanicOnDumpLeavesTheSinkClosedWithoutCommit(t *testing.T) {
 	}
 }
 
+// detonator is a text pair whose encode half panics rather than refusing, so
+// it reaches the fence through core's own text arm rather than through a
+// registered codec.
+type detonator string
+
+func (d detonator) MarshalText() ([]byte, error) {
+	if d == theFuse {
+		panic("nil map write in MarshalText")
+	}
+
+	return []byte(d), nil
+}
+
+func (d *detonator) UnmarshalText(text []byte) error {
+	*d = detonator(text)
+
+	return nil
+}
+
+// TestAPanickingTextPairIsAddressedWithoutFerrysSentence is the encode half's
+// passthrough. "no representation for this type" is a claim about a text form
+// that returned, and a MarshalText that panicked returned nothing to make it
+// about, so the report carries the recovered value alone.
+func TestAPanickingTextPairIsAddressedWithoutFerrysSentence(t *testing.T) {
+	t.Parallel()
+
+	type conf struct {
+		D detonator `ferry:"d"`
+	}
+
+	err := Dump(t.Context(), conf{D: theFuse}, planeSink{p: newPlane(map[Path]Value{})})
+	if err == nil {
+		t.Fatal("a panicking text pair dumped cleanly")
+	}
+
+	panicked := elementAt(t, err, At("d"))
+	if !errors.Is(panicked, ErrPanic) {
+		t.Errorf("%v does not match ErrPanic", panicked)
+	}
+
+	if !strings.Contains(panicked.Error(), "nil map write in MarshalText") {
+		t.Errorf("the report lost the recovered value:\n%+v", err)
+	}
+
+	if strings.Contains(panicked.Error(), "no representation") {
+		t.Errorf("ferry wrapped a panic in its own sentence:\n%+v", err)
+	}
+}
+
 // TestAPanicOutsideTheFenceUnwindsAndStillReleases is the fence's boundary
 // asserted from the other side, and the release fix asserted where nothing
 // converts the panic for it: a plane that panics is not a codec, so the panic
