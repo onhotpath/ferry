@@ -9,7 +9,7 @@ import (
 )
 
 // Injective reports every pair of the supplied values that ferry writes to one
-// map key, which is the obligation [ferry.Reg.AsMapKey] declares and nothing
+// map key, which is the obligation [ferry.KeyCodec.AsMapKey] declares and nothing
 // ferry can check for you.
 //
 // Two values that become one key are one entry in the loaded map, so one of them

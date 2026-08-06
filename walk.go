@@ -973,7 +973,7 @@ func (d dumpTo) atNullable(ctx context.Context, s spot, into descend) (outcome, 
 		return into(s.v.Elem(), s.at)
 	}
 
-	return d.write(ctx, s.at, Null)
+	return d.write(ctx, s.at, nullValue)
 }
 
 // atArray asks nothing. An index outside the array is something a plane can
@@ -991,7 +991,7 @@ func (dumpTo) atArray(context.Context, spot) error { return nil }
 // vanish entirely, which is a silently dropped entry (ADR-0005).
 func (d dumpTo) atSlice(ctx context.Context, s spot, into descend) (outcome, error) {
 	if s.v.Len() == 0 {
-		return d.write(ctx, s.at, Null)
+		return d.write(ctx, s.at, nullValue)
 	}
 
 	r := d.realising(s, s.v.Len())
@@ -1013,7 +1013,7 @@ func (d dumpTo) atSlice(ctx context.Context, s spot, into descend) (outcome, err
 // the mapping's own address where it has no entries.
 func (d dumpTo) atMap(ctx context.Context, s spot, into descend) (outcome, error) {
 	if s.v.Len() == 0 {
-		return d.write(ctx, s.at, Null)
+		return d.write(ctx, s.at, nullValue)
 	}
 
 	keys, err := sortedKeys(s)

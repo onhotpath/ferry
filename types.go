@@ -150,7 +150,7 @@ func (r *Registry) pointerLeaf(t reflect.Type) (leafCodec, bool) {
 		kind: inner.kind,
 		encode: func(v reflect.Value) (Value, error) {
 			if v.IsNil() {
-				return Null, nil
+				return nullValue, nil
 			}
 
 			return inner.encode(v.Elem())
@@ -418,7 +418,7 @@ func byteSliceLeaf() leafCodec {
 		kind: KindBytes,
 		encode: func(v reflect.Value) (Value, error) {
 			if v.IsNil() {
-				return Null, nil
+				return nullValue, nil
 			}
 
 			return Bytes(v.Bytes()), nil

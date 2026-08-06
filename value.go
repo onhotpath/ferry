@@ -122,7 +122,22 @@ var _ map[Value]struct{}
 //
 // There is one null and it carries nothing, so it is a value rather than a
 // call, in io.EOF's idiom. Compare with == or with [Value.Kind].
-var Null = Value{kind: KindNull}
+//
+// Being a var, it can be assigned to, and doing so changes only what this name
+// reads as: ferry's own paths do not go through it, so a program that reassigns
+// it breaks its own comparisons and nothing else. Do not.
+var Null = nullValue
+
+// nullValue is the null every path inside ferry writes, and it exists because
+// [Null] is a var a caller can assign to.
+//
+// A sentinel that ferry both publishes and reads is one assignment away from
+// making ferry.Null = ferry.Bool(true) rewrite every null the walk emits, in a
+// process the assigning package does not own. So the exported name is a copy
+// handed out once, and the copy core keeps is this. It is the same disclosure
+// ADR-0016 makes for SectionPresent, with the read path moved off the exported
+// name as well (ADR-0017).
+var nullValue = Value{kind: KindNull}
 
 // Bool returns a boolean value carrying b itself, which is what lets
 // [Value.AsBool] answer without a parse that could fail.
@@ -228,8 +243,8 @@ func (e *numError) Unwrap() error { return e.err }
 //
 // The refusal worth knowing about is a number: accepting one would override the
 // plane's own type information and destroy the quoting distinction the boundary
-// preserves. It refuses a null too, so a codec that has to accept one is a
-// [ValueCodec] rather than a [StringCodec].
+// preserves. It refuses a null too, so a registration that has to accept one
+// wraps its codec in [NullValue].
 func (v Value) AsString() (string, error) {
 	if err := v.require(KindString); err != nil {
 		return "", err
