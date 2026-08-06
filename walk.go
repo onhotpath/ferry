@@ -579,9 +579,20 @@ func (l loadFrom) container(ctx context.Context, s spot) (out outcome, more bool
 // The early return is [loadFrom.atStatic]'s suppression bit at the other
 // composite shape, and it is one rule rather than two: a pointer's required is
 // the same summary of the same children.
+//
+// A section the caller seeded is published whatever the plane said, and that is
+// ADR-0006's rule rather than a second one: a section that exists gets its
+// defaults, and a non-nil pointer exists. Publishing it changes nothing the
+// caller can see except that the value is the walk's own copy, because the walk
+// wrote nothing the seed did not already carry - a default it declared, and
+// nothing else (#253). What stays exactly as it was is the nil seed: a declared
+// default beneath an absent section is not presence, so the pointer is still
+// nil, or no *T with a default anywhere beneath it could ever be nil.
 func (l loadFrom) materialise(s spot, into descend) (outcome, error) {
+	seeded := !s.v.IsNil()
+
 	fresh := reflect.New(s.v.Type().Elem())
-	if !s.v.IsNil() {
+	if seeded {
 		fresh.Elem().Set(s.v.Elem())
 	}
 
@@ -590,7 +601,7 @@ func (l loadFrom) materialise(s spot, into descend) (outcome, error) {
 		return out, err
 	}
 
-	if out.wrote {
+	if out.wrote || seeded {
 		s.v.Set(fresh)
 	}
 
