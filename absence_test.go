@@ -641,11 +641,10 @@ func TestALengthComesFromEnumerationAndNeverFromProbing(t *testing.T) {
 // TestTheWalkTakesNoLockAndStartsNoGoroutine keeps the concurrency question
 // parked from the other side.
 //
-// ADR-0006's presence bit is shared mutable state across the scheduler seam, and
-// ADR-0010 records that hazard rather than fixing it. A lock added here would be
-// an answer to #20, and so would a goroutine: the serial scheduler needs neither,
-// and a walk that quietly acquired one would make the seam look like a drop-in
-// that it is not.
+// Every per-subtree fact the walk carries is now returned rather than shared, so
+// there is nothing here for a lock to protect; a lock or a goroutine added here
+// would be an answer to #20 all the same, and the serial scheduler core ships
+// needs neither.
 func TestTheWalkTakesNoLockAndStartsNoGoroutine(t *testing.T) {
 	t.Parallel()
 
