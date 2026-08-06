@@ -618,13 +618,25 @@ Two errors and one remediation: setting `AUTH_USER` clears both.
 The parent's check is the child's summary, so it is ADR-0008's tier rule at the walk, and a composite's `required` failure is suppressed when a child under it already reported.
 
 **The neighbouring case needs nothing**, which is why this is one bit and not a redesign.
-A child that is **present** and fails to decode already sets ADR-0006's presence bit, so the parent's `required` does not fire:
+A child that is **present** and fails to decode is reported at the child's address, and the parent's `required` never gets asked:
 
 ```
 a required subtree whose only present child fails to decode
 
   ferry: /auth/User: the plane holds null and string cannot take one     1 error
 ```
+
+> **Amended under [#128](https://github.com/onhotpath/ferry/issues/128): as published the sentence above read that a present child which fails to decode "already sets [ADR-0006](0006-defaults-and-zero-values.md)'s presence bit, so the parent's `required` does not fire".**
+>
+> The report is right and the reason was not, and the reason is what the sentence exists to carry: it is this section's justification for the size of the fix.
+> ADR-0006's bit is set by a **successful** write and not by a present observation, so a child that is present and fails to decode sets no bit at all.
+> What keeps the parent silent is the suppression bit itself: the composite returns the subtree's error before it consults `required`, so the parent is never asked whether anything was supplied.
+>
+> **Both cases are therefore covered by the one bit**, which makes the "one bit and not a redesign" claim stronger rather than weaker: the neighbouring case needs no second mechanism because it needs the same one.
+> The alternative was to move the increment so that a present observation set the bit whether or not it decoded, which would have made the sentence true as published and changed what a failing load publishes for the sake of a sentence.
+>
+> Nothing here changes under [#122](https://github.com/onhotpath/ferry/issues/122), which replaced the shared counter with an outcome value each subtree returns.
+> The bit is still set by a successful write, it is now returned rather than counted, and the composite still reports its subtree's failure before reading it.
 
 So the answer to #16 is: the scheduler owns aggregation, and the walk owns one suppression bit it already computes.
 
