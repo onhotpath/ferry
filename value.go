@@ -32,9 +32,9 @@ const (
 	// reports absence or a string and never a null.
 	KindNull
 
-	// KindBool is a plane-side boolean. Its text is always "true" or "false",
-	// because [Bool] is the only way to build one, which is why [Value.AsBool]
-	// has no parse failure to report.
+	// KindBool is a plane-side boolean, carrying a Go bool and no text at all.
+	// [Bool] is the only way to build one, so [Value.AsBool] answers from the
+	// bool it was given and has no parse failure to report.
 	KindBool
 
 	// KindNumber is a plane-side number, carried as the text the plane spelled
@@ -75,26 +75,36 @@ func (k VKind) String() string {
 }
 
 // Value is what crosses the boundary between ferry and a plane, in both
-// directions: a [VKind], the text that kind was spelled with, and nothing else.
+// directions: a [VKind] and the payload that kind carries, and nothing else.
 //
-// Build one with [Null], [Bool], [Number], [String] or [Bytes], read it with
-// [Value.Kind] and the As accessors. The zero Value is [KindAbsent], so a driver
-// with nothing to report returns ferry.Value{}.
+// Build one with [Bool], [Number], [String] or [Bytes], or use [Null], read it
+// with [Value.Kind] and the As accessors. The zero Value is [KindAbsent], so a
+// driver with nothing to report returns ferry.Value{}.
+//
+// A number carries the plane's own spelling rather than a machine number, so no
+// width is chosen before a target type is in hand. A bool carries a Go bool. No
+// accessor guesses: each answers for its own kind and refuses every other one,
+// so unparsed text never reaches a caller wearing a kind that would make it look
+// decided.
 //
 // A Value is comparable, so it is usable as a map key and assertable with ==,
 // and it boxes nothing.
 type Value struct {
+	// The field order is deliberate: b rides padding the kind byte already
+	// carried, so a Value that gained a payload did not grow (ADR-0017, L1).
 	kind VKind
-	text string
+	b    bool
+	s    string
 }
 
 // _ asserts Value stays comparable. A map key type must be comparable, so this
 // declaration stops compiling the day Value grows a slice or a map field.
 var _ map[Value]struct{}
 
-// The constructors are one per kind, and they take the plain kind names.
+// The constructors are one per payload-carrying kind, and they take the plain
+// kind names.
 //
-// Go has one package namespace, so the six kind constants and the five
+// Go has one package namespace, so the six kind constants and the four
 // constructors compete for the same six words, and only one side of that can
 // keep them. The constants took the Kind prefix, because a constructor is
 // written far more often than a kind constant is named and the shorter
@@ -102,17 +112,21 @@ var _ map[Value]struct{}
 // slog.KindString beside slog.StringValue, and so pays for the collision twice
 // where moving one side settles it.
 //
-// Absent gets no constructor. It is kind zero, the zero Value is it, and a
-// function that builds one would suggest absence is a thing to construct rather
-// than the thing that is already there.
+// Absent and Null get no constructor. Absent is kind zero and the zero Value is
+// it; Null carries nothing, so a function returning a value that is always the
+// same value is surface spent on nothing, and both are the io.EOF idiom
+// ADR-0017 unified the package on.
 
-// Null returns a null value: the plane has this address and holds its own null
-// there. A driver over a plane whose grammar has no null never calls it.
-func Null() Value { return Value{kind: KindNull} }
+// Null is the null value: the plane has this address and holds its own null
+// there. A driver over a plane whose grammar has no null never writes it.
+//
+// There is one null and it carries nothing, so it is a value rather than a
+// call, in io.EOF's idiom. Compare with == or with [Value.Kind].
+var Null = Value{kind: KindNull}
 
-// Bool returns a boolean value. Its text is the canonical "true" or "false",
-// which is what lets [Value.AsBool] answer without a parse that could fail.
-func Bool(b bool) Value { return Value{kind: KindBool, text: strconv.FormatBool(b)} }
+// Bool returns a boolean value carrying b itself, which is what lets
+// [Value.AsBool] answer without a parse that could fail.
+func Bool(b bool) Value { return Value{kind: KindBool, b: b} }
 
 // Number returns a numeric value carrying the plane's own spelling of it.
 //
@@ -121,21 +135,38 @@ func Bool(b bool) Value { return Value{kind: KindBool, text: strconv.FormatBool(
 // finds out, so "007", "1e400" and "18446744073709551615" all survive the
 // boundary intact and fail, if they fail at all, where the failure can be
 // described.
-func Number(text string) Value { return Value{kind: KindNumber, text: text} }
+func Number(text string) Value { return Value{kind: KindNumber, s: text} }
 
 // String returns a string value. It stays distinct from a [Number] over the
 // same text, which is how quoting survives a round trip.
-func String(s string) Value { return Value{kind: KindString, text: s} }
+func String(s string) Value { return Value{kind: KindString, s: s} }
 
 // Bytes returns a byte-sequence value holding b exactly, valid UTF-8 or not.
 //
 // The bytes are copied, so the caller may reuse its buffer afterwards and no
 // later mutation can reach a Value already handed out.
-func Bytes(b []byte) Value { return Value{kind: KindBytes, text: string(b)} }
+func Bytes(b []byte) Value { return Value{kind: KindBytes, s: string(b)} }
 
 // Kind reports what the plane observed. It is the one accessor that cannot
 // fail, and the one a driver or a codec switches on before choosing another.
 func (v Value) Kind() VKind { return v.kind }
+
+// text is the observation's payload spelled as text, which is what core's own
+// leaf parsers take: one parser per leaf, whichever kind carried the text.
+//
+// A bool is the one kind whose payload is not text at all, so it renders
+// canonically here. That is the only place the spelling ADR-0017 took off the
+// Value survives, and it survives inside core rather than on the accessor,
+// which is exactly the point: [Value.AsBool] answers from the bool and nobody
+// outside this package can read "true" back off a Value that was never given
+// one (#223).
+func (v Value) text() string {
+	if v.kind == KindBool {
+		return strconv.FormatBool(v.b)
+	}
+
+	return v.s
+}
 
 // ErrWrongKind reports an accessor asked to answer for a kind that has no
 // answer: an absent value holds no string, and a number is not a bool. Every
@@ -204,7 +235,7 @@ func (v Value) AsString() (string, error) {
 		return "", err
 	}
 
-	return v.text, nil
+	return v.s, nil
 }
 
 // AsNumber returns the plane's own spelling of a numeric value, unparsed, and
@@ -218,18 +249,22 @@ func (v Value) AsNumber() (string, error) {
 		return "", err
 	}
 
-	return v.text, nil
+	return v.s, nil
 }
 
 // AsBool returns the boolean a [KindBool] value carries, and [ErrWrongKind] for
-// every other kind. It has no parse failure, because [Bool] is the only way to
-// build one and it writes the canonical spelling.
+// every other kind.
+//
+// It has no parse failure and it never guesses. A bool carries a Go bool rather
+// than text, so there is no unparsed "TRUE", "yes" or "1" for this accessor to
+// read as anything: text a plane spelled arrives as a [KindString] and is
+// refused here, which is where the refusal belongs.
 func (v Value) AsBool() (bool, error) {
 	if err := v.require(KindBool); err != nil {
 		return false, err
 	}
 
-	return v.text == "true", nil
+	return v.b, nil
 }
 
 // AsBytes returns the bytes a [KindBytes] value carries, exactly, valid UTF-8
@@ -242,7 +277,7 @@ func (v Value) AsBytes() ([]byte, error) {
 		return nil, err
 	}
 
-	return []byte(v.text), nil
+	return []byte(v.s), nil
 }
 
 // AsInt parses the text of a numeric value as a signed 64-bit integer.
@@ -257,7 +292,7 @@ func (v Value) AsInt() (int64, error) {
 		return 0, err
 	}
 
-	n, err := strconv.ParseInt(v.text, numBase, numBits)
+	n, err := strconv.ParseInt(v.s, numBase, numBits)
 	if err != nil {
 		return 0, &numError{want: "int64", err: err}
 	}
@@ -273,7 +308,7 @@ func (v Value) AsUint() (uint64, error) {
 		return 0, err
 	}
 
-	n, err := strconv.ParseUint(v.text, numBase, numBits)
+	n, err := strconv.ParseUint(v.s, numBase, numBits)
 	if err != nil {
 		return 0, &numError{want: "uint64", err: err}
 	}
@@ -291,7 +326,7 @@ func (v Value) AsFloat() (float64, error) {
 		return 0, err
 	}
 
-	f, err := strconv.ParseFloat(v.text, numBits)
+	f, err := strconv.ParseFloat(v.s, numBits)
 	if err != nil {
 		return 0, &numError{want: "float64", err: err}
 	}
@@ -300,15 +335,18 @@ func (v Value) AsFloat() (float64, error) {
 }
 
 // GoString renders a Value for a diff or a test failure: absent, null,
-// bool("true"), number("8080"), string(""), bytes("\xff").
+// bool(true), number("8080"), string(""), bytes("\xff").
 //
-// It prints the plane's own text, so it must never be interpolated into an
-// error message: ferry cannot know which addresses hold secrets, and neither
-// can a caller writing a log line.
+// It prints the payload, so it must never be interpolated into an error
+// message: ferry cannot know which addresses hold secrets, and neither can a
+// caller writing a log line.
 func (v Value) GoString() string {
-	if v.kind == KindAbsent || v.kind == KindNull {
+	switch v.kind {
+	case KindAbsent, KindNull:
 		return v.kind.String()
+	case KindBool:
+		return "bool(" + strconv.FormatBool(v.b) + ")"
+	default:
+		return v.kind.String() + "(" + strconv.Quote(v.s) + ")"
 	}
-
-	return v.kind.String() + "(" + strconv.Quote(v.text) + ")"
 }

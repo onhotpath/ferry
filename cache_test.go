@@ -34,9 +34,9 @@ type cacheKeyed struct {
 // cacheInterval is a named type over int64 that compiles both ways with
 // different representations: unregistered its kind admits it as a number, and
 // DurationLike gives it time.Duration's own text. That is what makes it the
-// fixture for both the registry half of the key and for Compile's freeze - a
-// type that only compiles with the codec makes the failure loud and measures
-// nothing.
+// fixture for both the registry half of the cache key and for Compile retaining
+// nothing - a type that only compiles with the codec makes the failure loud and
+// measures nothing.
 type cacheInterval time.Duration
 
 type cacheIntervalConf struct {
@@ -167,7 +167,7 @@ type cachedCount int
 
 var cachedDecodes atomic.Int64
 
-func cachedText(c cachedCount) string { return strconv.Itoa(int(c)) }
+func cachedText(c cachedCount) (string, error) { return strconv.Itoa(int(c)), nil }
 
 // compileWindow is how long one compile is made to take.
 //
@@ -202,7 +202,7 @@ type countedConf struct {
 func countingRegistry(t *testing.T) *Registry {
 	t.Helper()
 
-	return registryWith(t, StringCodec(cachedText, parseCached))
+	return registryWith(t, StringValue(cachedText, parseCached))
 }
 
 const (
@@ -524,49 +524,38 @@ func TestAWarmLookupBuildsNothing(t *testing.T) {
 // all of them to show up as a fraction.
 const warmRuns = 100
 
-// TestCompileTakesNeitherTheCacheNorTheFreeze is one omission rather than two,
-// and the fixture is what makes it a measurement.
+// TestCompileTakesNoCacheEntry is what is left of ADR-0010's retention rule
+// after ADR-0017 moved the freeze into the registry's own construction: a
+// Compile discards its schema, so it caches nothing, and there is no second
+// omission to measure any more.
 //
 // The type compiles both ways with different representations, which is what an
-// earlier draft of ADR-0010 got wrong: its fixture only compiled with the
-// codec, so the failure was loud and the probe measured nothing. Here a
-// Compile that retained its schema would be invisible at the Register - which
-// would succeed, because nothing froze - and would surface at the Dump, as the
-// representation the caller replaced.
-func TestCompileTakesNeitherTheCacheNorTheFreeze(t *testing.T) {
+// earlier draft of ADR-0010 got wrong: its fixture only compiled with the codec,
+// so the failure was loud and the probe measured nothing. Here a Compile that
+// retained its schema would surface at the Dump, as an entry it did not put
+// there.
+func TestCompileTakesNoCacheEntry(t *testing.T) {
 	t.Parallel()
 
-	reg := NewRegistry()
+	reg := registryWith(t, DurationLike[cacheInterval]())
 	value := cacheIntervalConf{Poll: cacheInterval(90 * time.Second)}
 
 	if err := Compile[cacheIntervalConf](WithRegistry(reg)); err != nil {
-		t.Fatalf("the compile before the registration: %+v", err)
+		t.Fatalf("the compile: %+v", err)
 	}
 
-	// The freeze half: a registration after a discarded compile is accepted.
-	if err := reg.Register(DurationLike[cacheInterval]()); err != nil {
-		t.Fatalf("a registration after a discarded compile was refused: %+v", err)
-	}
-
-	// The cache half: the dump resolves against the registration rather than
-	// against the schema the Compile built before it existed.
 	if got, want := dumpedValue(t, value, At("poll"), WithRegistry(reg)), String("1m30s"); got != want {
-		t.Errorf("after Compile, Register and Dump, the plane holds %#v, want %#v: the compile retained a "+
-			"schema resolved against a registry that had no codec for the type", got, want)
+		t.Errorf("after Compile and Dump, the plane holds %#v, want %#v", got, want)
 	}
 
 	if got := cachedSchemas(reg); got != 1 {
 		t.Errorf("a Compile and a Dump left %d cache entries, want 1: Compile does not cache", got)
 	}
-
-	// And the Dump did retain its schema, so the registry is closed now.
-	mustRefuse(t, reg.Register(DurationLike[lateInterval]()), "the registry is frozen")
 }
 
-// TestALoadRetainsItsSchemaAndCloses is the other end of the same rule, on the
-// same fixture: caching and freezing are one decision, so the verb that keeps
-// its resolution is the verb that shuts the registry.
-func TestALoadRetainsItsSchemaAndCloses(t *testing.T) {
+// TestALoadRetainsItsSchema is the other end of the same rule, on the same
+// fixture: the verb that keeps its resolution is the verb that caches it.
+func TestALoadRetainsItsSchema(t *testing.T) {
 	t.Parallel()
 
 	reg := registryWith(t, DurationLike[cacheInterval]())
@@ -580,8 +569,6 @@ func TestALoadRetainsItsSchemaAndCloses(t *testing.T) {
 	if want := (cacheIntervalConf{Poll: cacheInterval(90 * time.Second)}); got != want {
 		t.Errorf("the load gave %v, want %v", time.Duration(got.Poll), time.Duration(want.Poll))
 	}
-
-	mustRefuse(t, reg.Register(DurationLike[lateInterval]()), "the registry is frozen")
 
 	if n := cachedSchemas(reg); n != 1 {
 		t.Errorf("a Load left %d cache entries, want the one it retained", n)

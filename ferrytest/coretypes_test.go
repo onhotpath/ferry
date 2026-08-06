@@ -176,8 +176,8 @@ func TestNilAndEmptyBytesCarryDifferentGoldens(t *testing.T) {
 	t.Parallel()
 
 	goldens := goldensOf[[]byte](t)
-	if goldens[0] != ferry.Null() {
-		t.Errorf("[]byte(nil) pins %#v, want %#v", goldens[0], ferry.Null())
+	if goldens[0] != ferry.Null {
+		t.Errorf("[]byte(nil) pins %#v, want %#v", goldens[0], ferry.Null)
 	}
 
 	if goldens[1] != ferry.Bytes(nil) {

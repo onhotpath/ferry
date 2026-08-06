@@ -470,7 +470,7 @@ func BenchmarkLoadOverAWideContainer(b *testing.B) {
 func TestLoadRefusesAKindAStringCannotTake(t *testing.T) {
 	t.Parallel()
 
-	p := newPlane(map[Path]Value{At("name"): Null(), At("env"): Number("8080")})
+	p := newPlane(map[Path]Value{At("name"): Null, At("env"): Number("8080")})
 
 	got, err := Load[walkConf](t.Context(), planeSource{p: p})
 	if got != (walkConf{}) {

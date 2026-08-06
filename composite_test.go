@@ -494,7 +494,7 @@ func aNilPointerDumpsANull(t *testing.T) {
 		t.Fatalf("dump: %+v", err)
 	}
 
-	if got := p.values[At("opt")]; got != Null() {
+	if got := p.values[At("opt")]; got != Null {
 		t.Errorf("/opt holds %v, want a null", got)
 	}
 
@@ -541,7 +541,7 @@ func TestAPointerIsMaterialisedWhereThePlaneSpokeUnderIt(t *testing.T) {
 		want:  &cred{Pass: "p"},
 	}, {
 		name:  "and an explicit null at it is a nil pointer",
-		plane: map[Path]Value{At("opt"): Null(), At("opt", "user"): String("u")},
+		plane: map[Path]Value{At("opt"): Null, At("opt", "user"): String("u")},
 		want:  nil,
 	}}
 
@@ -688,7 +688,7 @@ func TestAPointerToALeafIsALeafWithANull(t *testing.T) {
 		v    *int
 		want Value
 	}{
-		{name: "nil is a null", v: nil, want: Null()},
+		{name: "nil is a null", v: nil, want: Null},
 		{name: "and an explicit zero is a number", v: &zero, want: Number("0")},
 	}
 
@@ -853,7 +853,7 @@ func TestTheRootCheckStandsBecauseTheEmptyPathIsSilent(t *testing.T) {
 		t.Fatalf("the sink wrote %v, and it is meant to work for an ordinary schema", sink.wrote)
 	}
 
-	for _, v := range []Value{String("the whole configuration"), Null()} {
+	for _, v := range []Value{String("the whole configuration"), Null} {
 		mustWriteNothingAtTheEmptyPath(t, sink, v)
 	}
 }

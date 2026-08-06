@@ -52,7 +52,7 @@ const defaultTagKey = "ferry"
 // newConfig resolves an Option list, reporting every Option that was wrong
 // rather than the first one.
 func newConfig(opts []Option) (config, error) {
-	c := config{tagKey: defaultTagKey, registry: defaultRegistry}
+	c := config{tagKey: defaultTagKey, registry: builtins}
 
 	errs := make([]error, 0, len(opts))
 	for _, o := range opts {

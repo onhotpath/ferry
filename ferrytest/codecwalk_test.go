@@ -29,11 +29,11 @@ var (
 // here are right, so the suite reads the text out of what ferry wrote, hands it
 // back spelled String, and has nothing to say.
 func TestCodecIsGreenOverACodecDeclaringAKindOtherThanString(t *testing.T) {
-	for name, g := range map[string]ferry.Reg{"number": carriedAsNumber(), "bytes": carriedAsBytes()} {
+	for name, g := range map[string]ferry.Codec{"number": carriedAsNumber(), "bytes": carriedAsBytes()} {
 		t.Run(name, func(t *testing.T) {
 			c := &capture{}
 
-			ferrytest.Codec(c, registryHolding(t, g))
+			ferrytest.Codec(c, registryWith(t, g))
 
 			if len(c.lines) != 0 {
 				t.Errorf("the codec suite reported %q over a codec that loads back what it wrote", c.lines)
@@ -55,7 +55,7 @@ func TestCodecIsGreenOverACodecDeclaringAKindOtherThanString(t *testing.T) {
 func TestCodecIsSilentWhereFerryWroteNoTextAtAll(t *testing.T) {
 	c := &capture{}
 
-	ferrytest.Codec(c, registryHolding(t, nullableCodec()))
+	ferrytest.Codec(c, registryWith(t, nullableCodec()))
 
 	if len(c.lines) != 0 {
 		t.Errorf("the codec suite reported %q about a zero value that encodes to a Null", c.lines)
@@ -71,13 +71,13 @@ func TestCodecIsSilentWhereFerryWroteNoTextAtAll(t *testing.T) {
 // the second type has no working text half at all. A report either way would
 // name two byte strings the plane does not hold.
 func TestCodecIsSilentAboutATextPairFerryNeverWrote(t *testing.T) {
-	cases := map[string]ferry.Reg{
-		"the appender refuses the zero value": ferry.StringCodec[appendRefusing](
-			func(a appendRefusing) string { return a.text },
+	cases := map[string]ferry.Codec{
+		"the appender refuses the zero value": ferry.StringValue(
+			func(a appendRefusing) (string, error) { return a.text, nil },
 			func(s string) (appendRefusing, error) { return appendRefusing{text: s}, nil },
 		),
-		"neither half works": ferry.StringCodec[bothRefusing](
-			func(b bothRefusing) string { return b.text },
+		"neither half works": ferry.StringValue(
+			func(b bothRefusing) (string, error) { return b.text, nil },
 			func(s string) (bothRefusing, error) { return bothRefusing{text: s}, nil },
 		),
 	}
@@ -86,7 +86,7 @@ func TestCodecIsSilentAboutATextPairFerryNeverWrote(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := &capture{}
 
-			ferrytest.Codec(c, registryHolding(t, g))
+			ferrytest.Codec(c, registryWith(t, g))
 
 			if len(c.lines) != 0 {
 				t.Errorf("the codec suite reported %q about a text pair ferry never calls for this type", c.lines)
@@ -96,7 +96,7 @@ func TestCodecIsSilentAboutATextPairFerryNeverWrote(t *testing.T) {
 }
 
 // TestCodecReportsOneHalfOfTheTextPairFailing is case 1's other report, and the
-// registration is a [ferry.TextCodec] so that the pair really is what ferry
+// registration is a [ferry.StringText] so that the pair really is what ferry
 // writes.
 //
 // ferry calls whichever spelling is present and prefers the appender, so a type
@@ -106,7 +106,7 @@ func TestCodecIsSilentAboutATextPairFerryNeverWrote(t *testing.T) {
 func TestCodecReportsOneHalfOfTheTextPairFailing(t *testing.T) {
 	c := &capture{}
 
-	ferrytest.Codec(c, registryHolding(t, ferry.TextCodec[marshalRefusing](ferry.KindString)))
+	ferrytest.Codec(c, registryWith(t, ferry.StringText[marshalRefusing]()))
 
 	only := onlyLine(t, c)
 	if !strings.Contains(only, "codec case 1") {
@@ -122,10 +122,11 @@ func TestCodecReportsOneHalfOfTheTextPairFailing(t *testing.T) {
 // second assertion is that case 1 declines to guess when it cannot see what
 // ferry wrote.
 //
-// [ferry.Registry.Register] runs the codec against the zero value once, at the
-// call, so a codec whose halves are not functions of their argument alone - one
-// reading a global, a layout installed later, a feature flag - is total at that
-// moment and not afterwards. This one is switched off after it is registered,
+// [ferry.NewRegistry] runs the codec against the zero value once, as the
+// registry is built, so a codec whose halves are not functions of their argument
+// alone - one reading a global, a layout installed later, a feature flag - is
+// total at that moment and not afterwards. This one is switched off after it is
+// registered,
 // which is the only way a registered codec reaches the walk unable to write its
 // own zero.
 //
@@ -135,7 +136,7 @@ func TestCodecReportsOneHalfOfTheTextPairFailing(t *testing.T) {
 func TestCodecReportsAZeroThatStopsEncoding(t *testing.T) {
 	live := true
 
-	reg := registryHolding(t, brittleCodec(&live))
+	reg := registryWith(t, brittleCodec(&live))
 	live = false
 
 	c := &capture{}
@@ -161,7 +162,7 @@ func TestCodecReportsAZeroThatStopsEncoding(t *testing.T) {
 func TestCodecReportsAZeroThatStopsDecoding(t *testing.T) {
 	live := true
 
-	reg := registryHolding(t, fickleCodec(&live))
+	reg := registryWith(t, fickleCodec(&live))
 	live = false
 
 	c := &capture{}
@@ -181,8 +182,8 @@ func TestCodecReportsAZeroThatStopsDecoding(t *testing.T) {
 // TestCodecReportsAValueItsOwnDecodeProducedAndItsEncodeRefuses is the codec
 // that is total over its zero value and not over the value that zero loads as.
 //
-// Registration encodes the zero and decodes the result, and stops there. This
-// codec passes that and still cannot make a second lap: what its own decode half
+// [ferry.NewRegistry] encodes the zero and decodes the result, and stops there.
+// This codec passes that and still cannot make a second lap: what its own decode half
 // produced is a value its encode half refuses, so the value ferry wrote can be
 // read and never written again.
 //
@@ -196,13 +197,13 @@ func TestCodecReportsAZeroThatStopsDecoding(t *testing.T) {
 // rather than out of a kind the suite assumed. A suite that could only read a
 // String would be silent here for both.
 func TestCodecReportsAValueItsOwnDecodeProducedAndItsEncodeRefuses(t *testing.T) {
-	cases := map[string]ferry.Reg{"number": waywardAsNumber(), "bytes": waywardAsBytes()}
+	cases := map[string]ferry.Codec{"number": waywardAsNumber(), "bytes": waywardAsBytes()}
 
 	for name, g := range cases {
 		t.Run(name, func(t *testing.T) {
 			c := &capture{}
 
-			ferrytest.Codec(c, registryHolding(t, g))
+			ferrytest.Codec(c, registryWith(t, g))
 
 			reportsExactly(t, c,
 				"codec case 3: ferrytest_test.wayward: re-encoding what",
@@ -213,20 +214,6 @@ func TestCodecReportsAValueItsOwnDecodeProducedAndItsEncodeRefuses(t *testing.T)
 	}
 }
 
-// registryHolding is one registration in a registry of its own, which is what
-// every case here needs: [ferrytest.Codec] freezes the registry it is handed, so
-// no two of these may share one.
-func registryHolding(t *testing.T, g ferry.Reg) *ferry.Registry {
-	t.Helper()
-
-	reg := ferry.NewRegistry()
-	if err := reg.Register(g); err != nil {
-		t.Fatalf("registering the probe: %v", err)
-	}
-
-	return reg
-}
-
 // carried is the type the two kinds that carry a text and are not String are
 // registered over: Number, which is what a run of digits has to be written at
 // if it is to load from a structured plane as well as a flat one, and Bytes.
@@ -235,31 +222,23 @@ func registryHolding(t *testing.T, g ferry.Reg) *ferry.Registry {
 // and a registration claims its type only within one registry.
 type carried string
 
-func carriedAsNumber() ferry.Reg {
-	return ferry.ValueCodec[carried](ferry.KindNumber,
-		func(c carried) (ferry.Value, error) {
+func carriedAsNumber() ferry.Codec {
+	return ferry.NumberValue(
+		func(c carried) (string, error) {
 			if c == "" {
-				return ferry.Number("0"), nil
+				return "0", nil
 			}
 
-			return ferry.Number(string(c)), nil
+			return string(c), nil
 		},
-		func(v ferry.Value) (carried, error) {
-			s, err := v.AsNumber()
-
-			return carried(s), err
-		},
+		func(s string) (carried, error) { return carried(s), nil },
 	)
 }
 
-func carriedAsBytes() ferry.Reg {
-	return ferry.ValueCodec[carried](ferry.KindBytes,
-		func(c carried) (ferry.Value, error) { return ferry.Bytes([]byte(c)), nil },
-		func(v ferry.Value) (carried, error) {
-			b, err := v.AsBytes()
-
-			return carried(b), err
-		},
+func carriedAsBytes() ferry.Codec {
+	return ferry.BytesValue(
+		func(c carried) ([]byte, error) { return []byte(c), nil },
+		func(b []byte) (carried, error) { return carried(b), nil },
 	)
 }
 
@@ -278,22 +257,14 @@ type zoned struct{}
 
 func (zoned) Zone() string { return "utc" }
 
-func nullableCodec() ferry.Reg {
-	return ferry.ValueCodec[nullable](ferry.KindString,
-		func(n nullable) (ferry.Value, error) {
-			if n == nil {
-				return ferry.Null(), nil
-			}
-
-			return ferry.String(n.Zone()), nil
-		},
-		func(v ferry.Value) (nullable, error) {
-			if v.Kind() == ferry.KindNull {
-				return nil, nil
-			}
-
-			return zoned{}, nil
-		},
+func nullableCodec() ferry.Codec {
+	return ferry.NullValue(
+		ferry.StringValue(
+			func(n nullable) (string, error) { return n.Zone(), nil },
+			func(string) (nullable, error) { return zoned{}, nil },
+		),
+		func() (nullable, error) { return nil, nil },
+		func(n nullable) bool { return n == nil },
 	)
 }
 
@@ -338,37 +309,31 @@ func (brittle) AppendText(p []byte) ([]byte, error) { return append(p, "appended
 
 func (brittle) MarshalText() ([]byte, error) { return []byte("marshalled"), nil }
 
-func brittleCodec(live *bool) ferry.Reg {
-	return ferry.ValueCodec[brittle](ferry.KindString,
-		func(b brittle) (ferry.Value, error) {
+func brittleCodec(live *bool) ferry.Codec {
+	return ferry.StringValue(
+		func(b brittle) (string, error) {
 			if !*live {
-				return ferry.Value{}, errWentAway
+				return "", errWentAway
 			}
 
-			return ferry.String(b.text), nil
+			return b.text, nil
 		},
-		func(v ferry.Value) (brittle, error) {
-			s, err := v.AsString()
-
-			return brittle{text: s}, err
-		},
+		func(s string) (brittle, error) { return brittle{text: s}, nil },
 	)
 }
 
 // fickle is brittle's mirror: the decode half is the one that stops working.
 type fickle string
 
-func fickleCodec(live *bool) ferry.Reg {
-	return ferry.ValueCodec[fickle](ferry.KindString,
-		func(f fickle) (ferry.Value, error) { return ferry.String(string(f)), nil },
-		func(v ferry.Value) (fickle, error) {
+func fickleCodec(live *bool) ferry.Codec {
+	return ferry.StringValue(
+		func(f fickle) (string, error) { return string(f), nil },
+		func(s string) (fickle, error) {
 			if !*live {
 				return "", errWentAway
 			}
 
-			s, err := v.AsString()
-
-			return fickle(s), err
+			return fickle(s), nil
 		},
 	)
 }
@@ -377,42 +342,35 @@ func fickleCodec(live *bool) ferry.Reg {
 // answers that zero encoding with one of the values its encode half refuses.
 //
 // waywardText is what the zero encodes to, and it is not the zero, which is the
-// whole of the defect: registration encodes the zero and decodes the result and
-// stops there, so it never asks the codec to write what its own decode produced.
+// whole of the defect: [ferry.NewRegistry] encodes the zero and decodes the
+// result and stops there, so it never asks the codec to write what its own
+// decode produced.
 type wayward string
 
 const waywardText = "1"
 
-func waywardAsNumber() ferry.Reg {
-	return ferry.ValueCodec[wayward](ferry.KindNumber,
-		func(w wayward) (ferry.Value, error) {
+func waywardAsNumber() ferry.Codec {
+	return ferry.NumberValue(
+		func(w wayward) (string, error) {
 			if w == "" {
-				return ferry.Number(waywardText), nil
+				return waywardText, nil
 			}
 
-			return ferry.Value{}, errOnlyTheZero
+			return "", errOnlyTheZero
 		},
-		func(v ferry.Value) (wayward, error) {
-			s, err := v.AsNumber()
-
-			return wayward(s), err
-		},
+		func(s string) (wayward, error) { return wayward(s), nil },
 	)
 }
 
-func waywardAsBytes() ferry.Reg {
-	return ferry.ValueCodec[wayward](ferry.KindBytes,
-		func(w wayward) (ferry.Value, error) {
+func waywardAsBytes() ferry.Codec {
+	return ferry.BytesValue(
+		func(w wayward) ([]byte, error) {
 			if w == "" {
-				return ferry.Bytes([]byte(waywardText)), nil
+				return []byte(waywardText), nil
 			}
 
-			return ferry.Value{}, errOnlyTheZero
+			return nil, errOnlyTheZero
 		},
-		func(v ferry.Value) (wayward, error) {
-			b, err := v.AsBytes()
-
-			return wayward(b), err
-		},
+		func(b []byte) (wayward, error) { return wayward(b), nil },
 	)
 }

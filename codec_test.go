@@ -15,7 +15,6 @@ import (
 	"math/big"
 	"net"
 	"net/netip"
-	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -24,9 +23,7 @@ import (
 
 // Every assertion in this file goes through Compile[T], Load, LoadOver and
 // Dump: a chain rule is a rule about what a plane was handed and what a field
-// was given back, and about what the compiler refused. The one exception is
-// [TestACodecThatDeclaresOneKindAndEmitsAnotherIsCaught], which builds a
-// leafCodec directly, and the reason it has to is written there.
+// was given back, and about what the compiler refused.
 
 // tick is the smallest complete text pair, over a kind ferry admits on its own.
 //
@@ -483,12 +480,12 @@ func TestAValueReceiverIsNotTheDecodeHalf(t *testing.T) {
 func TestThePointerShapeIsResolvedBeforeTheChain(t *testing.T) {
 	t.Parallel()
 
-	if got := dumped(t, leafHolder[*big.Int]{}); got != Null() {
+	if got := dumped(t, leafHolder[*big.Int]{}); got != Null {
 		t.Errorf("a nil *big.Int writes %#v, want a null at its own address", got)
 	}
 
 	back, err := Load[leafHolder[*big.Int]](t.Context(),
-		planeSource{p: newPlane(map[Path]Value{leafAddr: Null()})})
+		planeSource{p: newPlane(map[Path]Value{leafAddr: Null})})
 	if err != nil {
 		t.Fatalf("loading a null back: %+v", err)
 	}
@@ -545,42 +542,64 @@ func TestADeclaredNumberLoadsFromBothItsOwnKindAndString(t *testing.T) {
 	}
 }
 
-// TestACodecThatDeclaresOneKindAndEmitsAnotherIsCaught is the one check core
-// can make about a codec it did not write.
+// TestARegistrationsKindIsItsConstructorsAndNothingElse is #231, and what it
+// asserts is that the defect stopped being writable.
 //
-// It builds a leafCodec directly, which every other test in this package
-// refuses to do, and the reason is that no exported surface can produce a
-// lying codec yet: the text arm declares String and produces String by
-// construction, and the registration that lets a caller declare a kind is #79's.
-// The alternative is an unasserted branch on the Dump path of every leaf, which
-// is worse than one white-box unit here.
-func TestACodecThatDeclaresOneKindAndEmitsAnotherIsCaught(t *testing.T) {
+// The old shape took the kind as an argument and the codec produced a whole
+// Value, so a registration could declare one kind and emit another, and core ran
+// a comparison on every encode to catch it; the same argument accepted
+// KindAbsent and VKind(200), and an absent Value reached a Writer. There is no
+// argument now. An encode half returns a bool, a string or a []byte, core wraps
+// it, and the kind is a property of which constructor was called - so this
+// dumps one value per constructor and reads the kind off the plane.
+//
+// The forms that produced the defect are gone from the language, not from the
+// checks: ferry.ValueCodec(ferry.KindAbsent, ...) names nothing that exists.
+func TestARegistrationsKindIsItsConstructorsAndNothingElse(t *testing.T) {
 	t.Parallel()
 
-	liar := leafCodec{
-		kind:   KindNumber,
-		encode: func(reflect.Value) (Value, error) { return String("8080"), nil },
+	type conf struct {
+		B kindedBool   `ferry:"b"`
+		N kindedNumber `ferry:"n"`
+		S kindedString `ferry:"s"`
+		Y kindedBytes  `ferry:"y"`
 	}
 
-	_, err := liar.emit(reflect.ValueOf(0))
-	if err == nil {
-		t.Fatal("a codec declaring number and producing string was accepted")
+	reg := registryWith(t,
+		BoolValue(func(k kindedBool) (bool, error) { return bool(k), nil },
+			func(b bool) (kindedBool, error) { return kindedBool(b), nil }),
+		NumberValue(func(k kindedNumber) (string, error) { return string(k), nil },
+			func(s string) (kindedNumber, error) { return kindedNumber(s), nil }),
+		StringValue(func(k kindedString) (string, error) { return string(k), nil },
+			func(s string) (kindedString, error) { return kindedString(s), nil }),
+		BytesValue(func(k kindedBytes) ([]byte, error) { return []byte(k), nil },
+			func(b []byte) (kindedBytes, error) { return kindedBytes(b), nil }),
+	)
+
+	want := map[Path]Value{
+		At("b"): Bool(true),
+		At("n"): Number("8080"),
+		At("s"): String("8080"),
+		At("y"): Bytes([]byte("8080")),
 	}
 
-	mustContain(t, err.Error(), []string{"declared number and produced string"})
+	in := conf{B: true, N: "8080", S: "8080", Y: "8080"}
 
-	// Null is emittable by any codec whatever it declared, because ADR-0005's
-	// registered net.Addr codec returns Null for a nil interface and takes Null
-	// back, and that is the mechanism that makes an interface expressible.
-	nuller := leafCodec{
-		kind:   KindNumber,
-		encode: func(reflect.Value) (Value, error) { return Null(), nil },
-	}
-
-	if _, err := nuller.emit(reflect.ValueOf(0)); err != nil {
-		t.Errorf("a Null emitted by a Number-declaring codec was refused: %v", err)
+	for at, w := range want {
+		if got := dumpedValue(t, in, at, WithRegistry(reg)); got != w {
+			t.Errorf("%s holds %#v, want %#v: a registration's kind is the one its constructor names", at, got, w)
+		}
 	}
 }
+
+// The four types the constructors above register, one per kind, each a distinct
+// reflect.Type because one registry holds one codec per type.
+type (
+	kindedBool   bool
+	kindedNumber string
+	kindedString string
+	kindedBytes  string
+)
 
 // TestTheChainIsNeverInvokedForAbsentAndAlwaysForTheRest is ADR-0007's
 // invocation rule, and it repairs survey item 5.9's last bullet from the
@@ -623,7 +642,7 @@ func theEmptyStringReachesTheChain(t *testing.T) {
 func nullReachesTheChain(t *testing.T) {
 	t.Parallel()
 
-	_, err := readLeaf[tick](Null())
+	_, err := readLeaf[tick](Null)
 	if !errors.Is(err, ErrWrongKind) {
 		t.Errorf("Null at a text-arm leaf gave %v, want the ordinary wrong-kind refusal", err)
 	}

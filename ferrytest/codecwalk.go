@@ -103,9 +103,10 @@ func (c *codecRun) loadInto(t reflect.Type, v ferry.Value) (reflect.Value, error
 // textOf is the text a [ferry.Value] carries, for the three kinds that carry
 // one, and false for the three that do not.
 //
-// Comparing across kinds is deliberate. A registration through
-// [ferry.TextCodec] may declare any kind it likes, so "did ferry write the
-// appender's bytes" is a question about the text and not about the kind.
+// Comparing across kinds is deliberate. A registration over a type's own text
+// pair may name either [ferry.KindString] or [ferry.KindNumber], so "did ferry
+// write the appender's bytes" is a question about the text and not about the
+// kind.
 func textOf(v ferry.Value) (string, bool) {
 	switch v.Kind() {
 	case ferry.KindString:

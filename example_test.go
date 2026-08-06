@@ -216,16 +216,11 @@ type Peers struct {
 //
 // netip.Addr carries a text pair, so ferry already knows how to store one. What
 // it cannot know is that the text is injective, which is what a map key needs,
-// so keying a map by it takes a registration declaring [ferry.Reg.AsMapKey].
+// so keying a map by it takes a registration declaring [ferry.KeyCodec.AsMapKey].
 func ExampleWithRegistry() {
 	fmt.Println(errors.Is(ferry.Compile[Peers](), ferry.ErrSchema))
 
-	reg := ferry.NewRegistry()
-	if err := reg.Register(ferry.TextCodec[netip.Addr](ferry.KindString).AsMapKey()); err != nil {
-		fmt.Println(err)
-
-		return
-	}
+	reg := ferry.NewRegistry(ferry.StringText[netip.Addr]().AsMapKey())
 
 	fmt.Println(ferry.Compile[Peers](ferry.WithRegistry(reg)))
 	// Output:
@@ -300,3 +295,13 @@ func ExampleValue() {
 	// 8080 <nil>
 	// true
 }
+
+// namesTextPointer is #164's assertion, and it is that this file compiles.
+//
+// The constraint appears in the compiler error a caller reads when their type
+// does not qualify for ferry.StringText or ferry.NumberText, so it has to be a
+// name that caller can look up and write down. This is a package outside ferry
+// writing it down.
+func namesTextPointer[T any, PT ferry.TextPointer[T]]() {}
+
+var _ = namesTextPointer[netip.Addr, *netip.Addr]
