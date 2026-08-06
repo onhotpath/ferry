@@ -760,7 +760,7 @@ func TestAChainClaimedTypeMayNotKeyAMap(t *testing.T) {
 		want: []string{
 			"/m: netip.Addr may not key a map",
 			"through its text pair rather than through a registration",
-			"ferry.TextCodec[netip.Addr](ferry.KindString).AsMapKey()",
+			"ferry.StringText[netip.Addr]().AsMapKey()",
 		},
 		elements: 1,
 	}, {

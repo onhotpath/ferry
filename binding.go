@@ -61,9 +61,8 @@ type SinkBinding[T any] struct{ b *boundSink }
 // addresses to one key.
 //
 // It takes the same [Option] values every other verb takes, and it retains the
-// schema it compiled, so it freezes the [Registry] it resolved against. Range a
-// failure with [Elements], and match a member against [ErrSchema] or
-// [ErrPlane].
+// schema it compiled for the binding's whole life. Range a failure with
+// [Elements], and match a member against [ErrSchema] or [ErrPlane].
 func Bind[T any](src Source, opts ...Option) (*Binding[T], error) {
 	b, err := newBound(reflect.TypeFor[T](), src, opts)
 	if err != nil {
@@ -85,8 +84,8 @@ func Bind[T any](src Source, opts ...Option) (*Binding[T], error) {
 //
 // It reaches no plane, so a sink that is writable in principle and not right
 // now binds cleanly here and refuses inside the dump. It takes the same
-// [Option] values every other verb takes, and it retains the schema it
-// compiled, so it freezes the [Registry] it resolved against.
+// [Option] values every other verb takes, and it retains the schema it compiled
+// for the binding's whole life.
 //
 // It has no value in hand, so a nil sink is refused here and a nil root pointer
 // is refused at the dump.

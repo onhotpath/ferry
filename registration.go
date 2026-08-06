@@ -81,6 +81,10 @@ func (k KeyCodec) entry() registration { return k.reg }
 // order. Using a registered type as a map key without it is a schema compile
 // error naming this method.
 //
+// The registration it returns is the one that carries the claim, and the
+// receiver is unchanged. Hand the result to [NewRegistry]; calling this and
+// discarding what it gives back registers a codec that keys nothing.
+//
 // ferrytest.Injective discharges the claim over the values a registrant cares
 // about.
 func (k KeyCodec) AsMapKey() Codec {
@@ -471,8 +475,16 @@ func DurationLike[T ~int64]() KeyCodec {
 // ferry's own rules and no codec, and that is what keeps null and the zero
 // distinct; this merges them by design, which is exactly its contract.
 //
-// It panics where inner is nil, where either policy is nil, or where inner is
-// not a registration for T.
+// So pick one or the other, because a policy under a pointer is neither. At a
+// *T field the pointer's own null wins in both directions: a nil pointer writes
+// a null whatever isNull says, and a null loads as a nil pointer without running
+// load. A policied T dumped through a *T field therefore comes back nil.
+//
+// It panics where inner is nil, where either policy is nil, where inner is not a
+// registration for T, and where inner declared itself usable as a map key: a key
+// becomes the segment text of an address and never crosses the boundary as a
+// value, so it has no null to carry and two null-ish keys would render to one
+// empty segment.
 func NullValue[T any](inner Codec, load func() (T, error), isNull func(T) bool) Codec {
 	mustHalves(load, isNull)
 
@@ -500,7 +512,7 @@ func nullOrEncode[T any](
 		}
 
 		if yes {
-			return Null, nil
+			return nullValue, nil
 		}
 
 		return encode(v)
@@ -528,12 +540,23 @@ func loadOrDecode[T any](
 	}
 }
 
-// mustInner holds [NullValue]'s inner registration to the type its policies are
-// written over, at the composition site.
+// mustInner holds [NullValue]'s inner registration to what a null policy can be
+// grafted onto at all, at the composition site.
 //
-// The mismatch is reachable because T is inferred from load and isNull rather
-// than from inner, so ferry.NullValue(stringCodecForA, loadB, isNullB) compiles
-// and would otherwise fail as a type assertion at the first load.
+// The type mismatch is reachable because T is inferred from load and isNull
+// rather than from inner, so ferry.NullValue(stringCodecForA, loadB, isNullB)
+// compiles and would otherwise fail as a type assertion at the first load.
+//
+// The key refusal is the one that would corrupt a plane rather than fail. A key
+// never crosses the boundary as a Value: it becomes the segment text of an
+// address, which [registeredKey] reads off whatever the encode half produced.
+// Under a policy that half returns Null for a null-ish key, and a Null's text is
+// empty, so every null-ish key in a map addresses the container's own empty
+// segment. Two of them are one address, one entry is lost, and nothing reports
+// it - which is exactly the silent failure .AsMapKey() exists to make a
+// registrant think about. A null is about a kind and a key has no kind, so the
+// two are structurally incompatible and this is a refusal rather than a rule
+// (ADR-0017, ADR-0009).
 func mustInner[T any](inner Codec) registration {
 	if inner == nil {
 		panic(regError("ferry.NullValue was given no registration to wrap: it is a modifier over one of the " +
@@ -541,10 +564,19 @@ func mustInner[T any](inner Codec) registration {
 	}
 
 	g := inner.entry()
+
 	if want := reflect.TypeFor[T](); g.typ != want {
 		panic(regError("ferry.NullValue was given a registration for " + g.typ.String() + " and a null policy " +
 			"over " + want.String() + ": one registration covers one type, and a policy for another type would " +
 			"be read against values it was never written for"))
+	}
+
+	if g.key {
+		panic(regError(g.typ.String() + ": a null policy may not be grafted onto a registration declared usable " +
+			"as a map key, because a key becomes the segment text of an address and never crosses the boundary " +
+			"as a value, so it has no null to carry - two null-ish keys would render to one empty segment and " +
+			"one entry would be lost with no error anywhere. Declare the key without the policy, or wrap a " +
+			"registration that is not a key"))
 	}
 
 	return g

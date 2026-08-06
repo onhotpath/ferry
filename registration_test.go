@@ -168,6 +168,74 @@ func TestAChainClaimedTypeMayNotKeyAMapWhateverItsKindIs(t *testing.T) {
 	}
 }
 
+// TestANullPolicyOverAKeyRegistrationIsRefused is the one composition that
+// compiles, is meaningless, and corrupts a plane rather than failing.
+//
+// A key never crosses the boundary as a Value: it becomes the segment text of an
+// address, read off whatever the encode half produced. Under a policy that half
+// answers Null for a null-ish key, and a Null carries no text, so every null-ish
+// key in a map addresses the container's own empty segment - two of them are one
+// address, one entry is lost, and nothing reports it. That is precisely the
+// silent failure .AsMapKey() exists to make a registrant think about, so the
+// combination is refused at the composition site rather than left to be
+// discovered on a written plane.
+func TestANullPolicyOverAKeyRegistrationIsRefused(t *testing.T) {
+	t.Parallel()
+
+	mustRefuseAtConstruction(t, func() {
+		NullValue(
+			StringKey(countText, parseCount).AsMapKey(),
+			func() (plainCount, error) { return 0, nil },
+			func(c plainCount) bool { return c == 0 })
+	}, "may not be grafted onto a registration declared usable as a map key")
+
+	// The same policy over the same codec without the claim is legal, which is
+	// what makes the refusal about the combination rather than about either half.
+	if err := refusalFrom(func() {
+		NewRegistry(NullValue(
+			StringValue(countText, parseCount),
+			func() (plainCount, error) { return 0, nil },
+			func(c plainCount) bool { return c == 0 }))
+	}); err != nil {
+		t.Errorf("the same policy over a registration that is not a key was refused: %+v", err)
+	}
+}
+
+// TestANullPolicyUnderAPointerIsThePointersNull is the precedence a caller has
+// to pick around, asserted so that it cannot drift silently.
+//
+// A nil pointer writes a null at its own address and a null loads back as a nil
+// pointer, both structurally and before any codec is consulted. So at a *T field
+// the pointer's null wins in both directions: a non-nil pointer to a value the
+// policy calls null still dumps a null, and loading that back gives a nil
+// pointer rather than the value load would have produced.
+func TestANullPolicyUnderAPointerIsThePointersNull(t *testing.T) {
+	t.Parallel()
+
+	type conf struct {
+		N *retryCount `ferry:"n"`
+	}
+
+	reg := registryWith(t, retryCodec())
+	zero := retryCount(0)
+
+	if got := dumpedValue(t, conf{N: &zero}, At("n"), WithRegistry(reg)); got != Null {
+		t.Errorf("a non-nil pointer to a null-ish value dumped as %#v, want %#v", got, Null)
+	}
+
+	back, err := Load[conf](t.Context(), planeSource{
+		p: newPlane(map[Path]Value{At("n"): Null}),
+	}, WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if back.N != nil {
+		t.Errorf("a null loaded as %v, want a nil pointer: under a *T the pointer's own null wins and the "+
+			"load policy does not run", back.N)
+	}
+}
+
 // TestANullPolicyRoundTripsTheNullAndTheValue is ADR-0017's null modifier at
 // both arms, and its closure law seen from the outside: what the policy loads
 // for a null is a value the policy still calls null, so the null path round

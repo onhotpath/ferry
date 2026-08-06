@@ -46,7 +46,9 @@ import (
 // a codec wrong lives there. A lossy codec and a constant codec pass every case
 // here, because both are correct at the zero value. So do two map keys that fold
 // to one address, which need two values to see at all, and so does a null policy
-// whose two halves disagree, which needs a value the suite was never handed.
+// that disagrees with itself away from the zero value: where the disagreement is
+// at the zero value the per-registrant round trip catches it, and where it is
+// anywhere else nothing here has a value to find it with.
 //
 // What closes that gap is [RoundTrip], which drives your own values through the
 // real engine, [Injective] over the values you will use as map keys, and

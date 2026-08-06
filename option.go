@@ -107,22 +107,20 @@ func TagKey(key string) Option {
 // WithRegistry names the codec registry this call resolves types against,
 // instead of the one core ships.
 //
-//	reg := ferry.NewRegistry()
-//	if err := reg.Register(ferry.TextCodec[netip.Addr](ferry.KindString)); err != nil { ... }
+//	reg := ferry.NewRegistry(ferry.StringText[netip.Addr]())
 //
 //	cfg, err := ferry.Load[Config](ctx, src, ferry.WithRegistry(reg))
 //
 // It is what lets two tests in one process want different codecs for one type,
-// and what a library uses to keep its own codecs out of its consumer's default
-// registry.
+// and what a library uses to keep its own codecs out of its consumer's calls.
 //
-// The registry it names freezes at this call if the call retains its schema,
-// which [Load], [LoadOver], [Dump], [Bind] and [BindSink] do and [Compile] does
-// not.
+// The registry it names is complete before this call sees it, because
+// [NewRegistry] takes the whole codec set and there are no mutators, so naming
+// one here changes nothing about it and there is no ordering rule to keep.
 //
 // It is refused when supplied twice, and a nil registry is refused rather than
-// read as the default: an empty registry is spelled [NewRegistry], and omitting
-// the Option is how the default one is asked for.
+// read as the default: core's own type set with no codec over it is spelled
+// ferry.NewRegistry(), and omitting the Option is how it is asked for.
 func WithRegistry(reg *Registry) Option {
 	return optionFunc(func(c *config) error {
 		switch {

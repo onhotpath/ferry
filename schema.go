@@ -18,8 +18,8 @@ import (
 //
 // It runs exactly the compiler [Load] and [Dump] run, and takes the same
 // [Option] values, so a type it accepts is a type they accept. It compiles the
-// schema and discards it, so it retains no resolution, does not freeze a
-// [Registry], and is safe anywhere, including during init.
+// schema and discards it, so it retains no resolution and is safe anywhere,
+// including during init.
 //
 // What it checks is the whole annotation: every exported field names the
 // segment it addresses or is marked "-", every named type is in the supported
