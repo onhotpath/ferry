@@ -235,6 +235,25 @@ type CompositeRedirect struct{ Target CompositeAddr }
 The leaf arm is a typed control error rather than a `Value` kind, which keeps [ADR-0004](0004-source-and-sink.md)'s six-kind lattice closed.
 It is `fs.SkipDir`'s shape: a sentinel-ish error that means "not a failure, a control answer".
 
+> **Amended when this shipped: one redirect arm over a `Container`, and a fourth `Presence` so that the accessor cannot lie.**
+>
+> As published, this listed three redirect types: `SectionAt` over a `SectionAddr`, `LeafRedirect`, and `CompositeRedirect` over a `CompositeAddr`.
+> `Probe` already takes a `Container` rather than a `SectionAddr`, for the reason recorded further up this ADR, so the section arm and the composite arm are one question asked at one method and they are one answer.
+> `SectionAt` takes a `Container`, and `CompositeRedirect` does not exist.
+> What replaces it is a rule rather than a type: a section may only name a section and a composite only a composite, refused in core, because what is under a section comes from the type and what is under a composite comes from the value, so a link across them names a place its own members could not be.
+>
+> The second half is `Presence`, which gains `PresenceElsewhere`.
+> As published, `SectionInfo` carried three presences and this ADR did not say which one a redirect answers before it is resolved.
+> Every available answer lies.
+> Absence would make a populated section read as an empty one, which is the silent divergence this whole address model exists to remove; present would claim the target is there without having asked.
+> So the fourth presence exists to make `SectionInfo.Presence` total and honest, and `SectionInfo.Redirect` hands back the target beside it.
+> Nothing inside the walk ever sees it: resolution happens inside the probe, so the three arms that switch on a presence still switch on three.
+>
+> **A section link resolves presence, and nothing else, which this ADR states by omission rather than by rule.**
+> Its own measurement is "`/secondary -> /primary -> /defaults` resolves `Present` in two hops", and presence is the whole of what it resolves.
+> The values beneath a linked section are still read at their own addresses, so a plane whose alias moves the children too reports a `LeafRedirect` per leaf, or resolves them internally.
+> That is not a gap: a section's presence and a leaf's value are two questions asked at two methods, and one answer could not have covered both.
+
 > **Core owns the resolution loop.**
 > A driver reports one hop; core follows the chain, keeps the seen set, and refuses a cycle.
 
@@ -253,6 +272,16 @@ Measured on the prototype: `/secondary -> /primary -> /defaults` resolves `Prese
 the driver must resolve or refuse
 ```
 
+> **Amended when this shipped: the sealing discharges most of the boundary case, and core's check is the residue.**
+>
+> As published, this reads as a refusal core makes when a driver reports a target outside the schema.
+> Under the sealed types a driver cannot report one at all: an address is minted only by the compiler, so the only targets a driver has to hand are the ones its `Bind` was given, and a YAML anchor pointing at an unmapped node has nothing to name it with.
+> The boundary case is therefore not reached by the honest driver, and the sentence above is what that driver says in its own words rather than what core says to it.
+>
+> What is left for core is a target that is an address, and the wrong one: a member of another schema's set, kept across binds.
+> That is checked, against the set the walk is running over, and the refusal names whose job the case is in the same words.
+> The load direction carries the address set for this and for nothing else.
+
 #### The write side of a reference is divergence, and exploring the read side found it
 
 Two aliases, one target, and the caller mutates one of them.
@@ -267,6 +296,21 @@ The two alternatives are recorded because both are defensible:
 - **W3, refuse a diverged dump pre-write.** Loud and conservative, and it makes a legal Go mutation undumpable.
 
 W1 is the generalisation of the memo rule the spelling seam already uses: what the plane said is preserved until the value says otherwise.
+
+> **Amended when this shipped: W1 is a driver's obligation, because core has nothing to keep it in, and no shipped driver reports a link yet.**
+>
+> As published, W1 reads as a rule the dump applies.
+> It cannot be one.
+> W1 turns on knowing that a section was *reached through a link*, which is a fact from the load, and core keeps nothing between a load and a dump: a `Binding` holds a compiled schema and whatever the driver precomputed, and a `Dump` sees a value and an address set.
+> The prototype put it on the driver for exactly this reason, keyed off the memo the driver filled during its own read, and that is where it ships.
+>
+> So the shipped shape of W1 is a rule stated for driver authors, asserted here against a plane that reports links and keeps that memo, and it is the rule unchanged: an unchanged section keeps its link, a diverged one materialises at its own address, and the target and every other alias are untouched.
+>
+> **No first-party driver reports a link, so nothing in this repository resolves one in production.**
+> `driver/yaml` has anchors and resolves them itself, which this ADR calls posture A and says stays driver-internal, and its write side follows the alias to the anchor - which is W2, and is the published, argued behaviour that [#196](https://github.com/onhotpath/ferry/issues/196) and [#198](https://github.com/onhotpath/ferry/issues/198) settled with a refusal for the case where two mapped addresses meet at one node.
+> That is not in conflict with W1 and is not overturned here.
+> W1 governs a section **core** resolved through a reported link; a YAML anchor is a link the driver never reports and core never sees, and this ADR's own sentence that B does not replace A is what says so.
+> Nothing in `ferrytest` asserts a redirect either, for the same reason: a conformance case every shipped driver skips is surface spent on nothing, and whether a driver may report a link it invented rather than read is listed below as a question this ADR does not decide.
 
 ### Arrays are sections, and three issues are consequences rather than fixes
 

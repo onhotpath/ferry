@@ -3,6 +3,7 @@ package ferry
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -201,7 +202,7 @@ type spot struct {
 // rather than carried on the node, because a node under a dynamic composite
 // holds an address shape and the address is the one the walk realised
 // (ADR-0016).
-func (s spot) leaf() LeafAddr { return leafAt(s.at) }
+func (s spot) leaf() LeafAddr { return leafOf(s.at) }
 
 // container is the typed address of the container this position occupies, at
 // the kind the compiler decided for it. Its callers are the three arms that
@@ -209,15 +210,15 @@ func (s spot) leaf() LeafAddr { return leafAt(s.at) }
 // it.
 func (s spot) container() Container {
 	if k, ok := containerKind(s.n); ok && k == kindSection {
-		return sectionAt(s.at)
+		return sectionOf(s.at)
 	}
 
-	return compositeAt(s.at)
+	return compositeOf(s.at)
 }
 
 // composite is the typed address of a dynamic container, which is what a driver
 // is asked to enumerate.
-func (s spot) composite() CompositeAddr { return compositeAt(s.at) }
+func (s spot) composite() CompositeAddr { return compositeOf(s.at) }
 
 // child is the address of one member a driver enumerated: the driver minted the
 // segment and the schema types what is at it (ADR-0016).
@@ -415,6 +416,14 @@ func memberOf(n *node, v reflect.Value, i int, f *node) reflect.Value {
 // read across (ADR-0019).
 type loadFrom struct {
 	r Reader
+
+	// addrs is the address set the type determined, and it is here for one
+	// question: whether a link a driver reported points at an address this
+	// schema names, at the kind it was reported at. A driver cannot mint an
+	// address, so it can only report one it was handed, and this catches the
+	// one it could still get wrong - a member of some other schema's set, kept
+	// across binds (ADR-0016).
+	addrs *AddressSet
 }
 
 var _ direction = loadFrom{}
@@ -426,13 +435,13 @@ func (loadFrom) omitted(spot) bool { return false }
 
 // atLeaf reads one address and decides what the observation means to the field.
 func (l loadFrom) atLeaf(ctx context.Context, s spot) (outcome, error) {
-	got, err := l.r.Get(ctx, s.leaf())
+	got, err := l.read(ctx, s)
 	if err != nil {
 		// A non-nil error reaches the caller as an error and is never
 		// substituted with Absent (ADR-0004). Reading it as absence is how a
 		// total backend outage loads as an all-zero struct with a nil error,
 		// which a prototype committed and nothing saw for four rounds.
-		return outcome{}, fromDriver(momentWalk, s.at, err)
+		return outcome{}, err
 	}
 
 	if got.Kind() == KindAbsent {
@@ -444,6 +453,74 @@ func (l loadFrom) atLeaf(ctx context.Context, s spot) (outcome, error) {
 	}
 
 	return outcome{wrote: true}, nil
+}
+
+// read asks the plane for one value, following a link where it reports one.
+//
+// The loop is core's rather than every driver's, which is the whole of what the
+// reported redirect buys: a driver reports one hop and this keeps the set of
+// addresses already asked, refuses a cycle, and checks that the target is one
+// this schema names (ADR-0016). A driver that resolves its own aliases reports
+// none and never enters the loop.
+func (l loadFrom) read(ctx context.Context, s spot) (Value, error) {
+	at := s.leaf()
+	seen := map[Path]bool{at.Path(): true}
+
+	for {
+		got, next, err := l.getOnce(ctx, s.at, at, seen)
+		if err != nil || next == nil {
+			return got, err
+		}
+
+		seen[next.Path()] = true
+		at = *next
+	}
+}
+
+// getOnce asks one address, and separates the two things a Get answers with:
+// the value, or the link that says where the value is.
+//
+// A nil next is the answer itself, so the loop above is three lines and reads
+// as the chain it walks.
+func (l loadFrom) getOnce(ctx context.Context, from Path, at LeafAddr, seen map[Path]bool,
+) (Value, *LeafAddr, error) {
+	got, err := l.r.Get(ctx, at)
+
+	var hop *LeafRedirect
+	if errors.As(err, &hop) {
+		return Value{}, &hop.Target, l.followed(from, hop.Target, seen)
+	}
+
+	if err != nil {
+		return Value{}, nil, fromDriver(momentWalk, at.Path(), err)
+	}
+
+	return got, nil, nil
+}
+
+// followed is the one check both arms of the resolution make about a hop: the
+// target is not an address this chain has already been to, and it is one this
+// schema names.
+//
+// A driver cannot mint an address, so a link whose target the schema does not
+// name has nothing to report it with and stays the driver's own to resolve or
+// to refuse. What is left for core is a target from some other schema's set,
+// which is what this catches, and it names whose job the boundary case is
+// (ADR-0016).
+func (l loadFrom) followed(from Path, target Member, seen map[Path]bool) error {
+	if seen[target.Path()] {
+		return newError(momentWalk, ErrPlane, from,
+			"reference cycle through "+target.String())
+	}
+
+	if !l.addrs.Has(target) {
+		return newError(momentWalk, ErrPlane, from, fmt.Sprintf(
+			"this address refers to %s, which the schema does not address as the same kind of place: a "+
+				"driver reports a link only to an address it was handed, and one the schema does not name "+
+				"is the driver's own to resolve or to refuse", target))
+	}
+
+	return nil
 }
 
 // absent is what an address the plane does not have means to a leaf, and it is
@@ -567,18 +644,64 @@ func (l loadFrom) atNullable(ctx context.Context, s spot, into descend) (outcome
 // whether a container is there either (ADR-0016). Such a plane answers absence,
 // which is the plane saying nothing about the container itself and leaves what
 // is under it to decide.
+// It also follows a link where the plane reports one, so what comes back is
+// never a redirect and every caller of this may switch on three answers rather
+// than four (ADR-0016).
 func (l loadFrom) probe(ctx context.Context, s spot) (SectionInfo, error) {
 	pr, ok := l.r.(Prober)
 	if !ok {
 		return sectionAbsent, nil
 	}
 
-	info, err := pr.Probe(ctx, s.container())
+	at := s.container()
+	seen := map[Path]bool{at.Path(): true}
+
+	for {
+		info, next, err := l.probeOnce(ctx, pr, s.at, at, seen)
+		if err != nil || next == nil {
+			return info, err
+		}
+
+		seen[next.Path()] = true
+		at = next
+	}
+}
+
+// probeOnce asks one container address, and separates the two things a probe
+// answers with: what the plane holds there, or the link that says where the
+// container is.
+func (l loadFrom) probeOnce(ctx context.Context, pr Prober, from Path, at Container, seen map[Path]bool,
+) (SectionInfo, Container, error) {
+	info, err := pr.Probe(ctx, at)
 	if err != nil {
-		return sectionAbsent, fromDriver(momentWalk, s.at, err)
+		return sectionAbsent, nil, fromDriver(momentWalk, at.Path(), err)
 	}
 
-	return info, nil
+	target, linked := info.Redirect()
+	if !linked {
+		return info, nil, nil
+	}
+
+	return sectionAbsent, target, l.hop(from, at, target, seen)
+}
+
+// hop holds one reported container link to the rule the kinds put on it, and
+// then to the two every link obeys: a section may only name a section and a
+// composite only a composite.
+//
+// The kinds are not interchangeable, so a link across them would name a place
+// whose members are decided by the other rule - a section's from the type and a
+// composite's from the value - and there would be nothing consistent to walk
+// there (ADR-0016).
+func (l loadFrom) hop(from Path, at, target Container, seen map[Path]bool) error {
+	if rank(at) != rank(target) {
+		return newError(momentWalk, ErrPlane, from, fmt.Sprintf(
+			"this address refers to %s, which is not the same kind of place: what is under a section comes "+
+				"from the type and what is under a composite comes from the value, so a link between them "+
+				"names somewhere its own members could not be", target))
+	}
+
+	return l.followed(from, target, seen)
 }
 
 // materialise builds the pointee fresh, walks into it, and publishes it only

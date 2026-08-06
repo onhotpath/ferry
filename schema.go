@@ -1106,15 +1106,15 @@ func (c *compiler) addressSet() *AddressSet {
 	members := make([]Member, 0, len(c.leaves)+len(c.sections)+len(c.composites))
 
 	for _, l := range c.leaves {
-		members = append(members, leafAt(l.addr))
+		members = append(members, leafOf(l.addr))
 	}
 
 	for _, k := range c.sections {
-		members = append(members, sectionAt(k.addr))
+		members = append(members, sectionOf(k.addr))
 	}
 
 	for _, k := range c.composites {
-		members = append(members, compositeAt(k.addr))
+		members = append(members, compositeOf(k.addr))
 	}
 
 	return newAddressSet(members...)

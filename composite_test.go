@@ -624,7 +624,7 @@ func TestAContainerAddressIsNeverAskedForAValue(t *testing.T) {
 		t.Errorf("the walk probed %v, want the section's own address among them", p.probed)
 	}
 
-	if !p.bound.Has(sectionAt(At("opt"))) || p.bound.Has(leafAt(At("opt"))) {
+	if !p.bound.Has(sectionOf(At("opt"))) || p.bound.Has(leafOf(At("opt"))) {
 		t.Errorf("the driver was bound to %v, want /opt as a section and not as a leaf", kinded(p.bound))
 	}
 }
@@ -909,7 +909,7 @@ func mustWriteNothingAtTheEmptyPath(t *testing.T, sink *treeSink, v Value) {
 	t.Helper()
 
 	before := len(sink.wrote)
-	if err := sink.Set(t.Context(), leafAt(At()), v); err != nil {
+	if err := sink.Set(t.Context(), leafOf(At()), v); err != nil {
 		t.Fatalf("the sink refused the empty path with %v, which is not the failure mode", err)
 	}
 

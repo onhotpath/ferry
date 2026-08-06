@@ -126,9 +126,9 @@ var (
 // compiler reaches these, and it reaches them from the node kind it decided
 // (ADR-0016).
 
-func leafAt(p Path) LeafAddr           { return LeafAddr{p: p} }
-func sectionAt(p Path) SectionAddr     { return SectionAddr{p: p} }
-func compositeAt(p Path) CompositeAddr { return CompositeAddr{p: p} }
+func leafOf(p Path) LeafAddr           { return LeafAddr{p: p} }
+func sectionOf(p Path) SectionAddr     { return SectionAddr{p: p} }
+func compositeOf(p Path) CompositeAddr { return CompositeAddr{p: p} }
 
 // addrKind is how the compiler's own answer for a position travels to the
 // places that need a typed address for it: the walk realises an address per
@@ -147,11 +147,11 @@ const (
 func memberAt(k addrKind, p Path) Member {
 	switch k {
 	case kindLeaf:
-		return leafAt(p)
+		return leafOf(p)
 	case kindSection:
-		return sectionAt(p)
+		return sectionOf(p)
 	default:
-		return compositeAt(p)
+		return compositeOf(p)
 	}
 }
 
