@@ -67,10 +67,11 @@ That is the reason to use this rather than marshalling a struct to YAML: a confi
 
 **What does not survive**, all of them limits of the YAML writer rather than choices: a blank line between entries, an explicit `---` marker, a file whose entire content is comments, the original indentation, and the column a trailing comment sat in.
 
-There is one more today and it is bigger: a scalar's tag, at a key your struct maps.
-So `when: !!timestamp 2026-08-04` is saved back as `when: "2026-08-04"`.
-A key no field maps keeps its tag, because it is never touched.
-That is [#155](https://github.com/onhotpath/ferry/issues/155).
+A scalar's tag is not on that list.
+A tag this package has no reading of its own for survives a save at a key your struct maps, so `when: !!timestamp 2026-08-04` is saved back with its tag still on it.
+Two cases replace it: a tag this package writes itself, and a tag whose value is no longer the kind it was, which is stale in the way the old quoting would be.
+
+Such a tag is carried and not interpreted: `!!timestamp 2026-08-04` and `!mycompany:duration 30s` both load as the string after the tag, whatever the tag says, and reach whichever codec your field declared.
 
 ## An anchor is kept, so an alias to it moves
 
