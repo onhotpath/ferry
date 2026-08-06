@@ -82,44 +82,63 @@ func (s treeSource) Bind(addrs *AddressSet) (OpenFunc, error) {
 	return func(context.Context) (Reader, error) { return treeReader{p: s.p}, nil }, nil
 }
 
-// treeReader answers one address and lists what is under one.
+// treeReader answers one leaf, says whether a container is there, and lists
+// what is under a composite.
 type treeReader struct{ p *plane }
 
-func (r treeReader) Get(ctx context.Context, addr Path) (Value, error) { return r.p.Get(ctx, addr) }
+func (r treeReader) Get(ctx context.Context, addr LeafAddr) (Value, error) { return r.p.Get(ctx, addr) }
 
-// Children lists the immediate children of prefix, segment-wise and with each
-// child's segment kind intact, which is the whole of why the interface hands
-// back addresses rather than names.
-func (r treeReader) Children(_ context.Context, prefix Path) ([]Path, error) {
-	seen := map[Path]bool{}
-	out := []Path{}
+func (r treeReader) Probe(ctx context.Context, addr Container) (SectionInfo, error) {
+	return r.p.Probe(ctx, addr)
+}
 
-	for addr := range r.p.values {
-		if addr == prefix || !prefix.isPrefixOf(addr) {
-			continue
+// Children lists the segments the plane holds immediately under a composite,
+// each carrying the kind the stored address gave it, which is the whole of why
+// the interface hands back segments rather than names.
+// A container's own answer counts as something the plane holds there: a map key
+// whose value is an empty composite mints no leaf at all, so enumerating only
+// the leaves would drop the key (ADR-0005).
+func (r treeReader) Children(_ context.Context, addr CompositeAddr) ([]Segment, error) {
+	prefix := addr.Path()
+	seen := map[Segment]bool{}
+	out := []Segment{}
+
+	collect := func(stored Path) {
+		if stored == prefix || !prefix.isPrefixOf(stored) {
+			return
 		}
 
-		if kid := firstStep(prefix, addr); !seen[kid] {
+		if kid := firstStep(prefix, stored); !seen[kid] {
 			seen[kid] = true
 			out = append(out, kid)
 		}
 	}
 
-	slices.SortFunc(out, Path.Compare)
+	for stored := range r.p.values {
+		collect(stored)
+	}
+
+	for stored := range r.p.presence {
+		collect(stored)
+	}
+
+	slices.SortFunc(out, compareSegments)
 
 	return out, nil
 }
 
-// firstStep is the immediate child of prefix that addr lies under, built by
-// cutting the rendering at the next delimiter rather than by parsing it, so the
-// child carries the stored address's own segment kind.
-func firstStep(prefix, addr Path) Path {
+// firstStep is the segment naming the immediate child of prefix that addr lies
+// under, cut off the rendering rather than parsed out of it, so the child
+// carries the stored address's own segment kind.
+func firstStep(prefix, addr Path) Segment {
 	rest := addr.below(prefix).rendered
 	if i := strings.IndexAny(rest[1:], delims); i >= 0 {
 		rest = rest[:i+1]
 	}
 
-	return Path{rendered: prefix.rendered + rest}
+	seg, _, _ := cutSegment(rest)
+
+	return seg
 }
 
 // roundTrip dumps a value into a fresh plane and loads it back, which is the
@@ -159,27 +178,27 @@ func TestTheStaticAddressSetOfADynamicComposite(t *testing.T) {
 	}{{
 		name: "a slice mints its own address and no element address",
 		dump: func(ctx context.Context, s Sink) error { return Dump(ctx, sliceConf{}, s) },
-		want: []string{"/name", "/tags"},
+		want: []string{"leaf /name", "composite /tags"},
 	}, {
 		name: "and a map the same",
 		dump: func(ctx context.Context, s Sink) error { return Dump(ctx, mapConf{}, s) },
-		want: []string{"/limits", "/name"},
+		want: []string{"composite /limits", "leaf /name"},
 	}, {
 		name: "a pointer to either adds no second address",
 		dump: func(ctx context.Context, s Sink) error { return Dump(ctx, boxedDynamic{}, s) },
-		want: []string{"/lim", "/tags"},
+		want: []string{"composite /lim", "composite /tags"},
 	}, {
 		name: "and one nested inside another adds none either",
 		dump: func(ctx context.Context, s Sink) error { return Dump(ctx, nestedDynamic{}, s) },
-		want: []string{"/groups", "/matrix"},
+		want: []string{"composite /groups", "composite /matrix"},
 	}, {
 		name: "a slice of structs contributes its own address alone",
 		dump: func(ctx context.Context, s Sink) error { return Dump(ctx, sliceOfStruct{}, s) },
-		want: []string{"/pool"},
+		want: []string{"composite /pool"},
 	}, {
 		name: "and so does a map of them",
 		dump: func(ctx context.Context, s Sink) error { return Dump(ctx, mapOfStruct{}, s) },
-		want: []string{"/users"},
+		want: []string{"composite /users"},
 	}}
 
 	for _, c := range cases {
@@ -187,7 +206,7 @@ func TestTheStaticAddressSetOfADynamicComposite(t *testing.T) {
 			t.Parallel()
 
 			bound := boundBy(t, c.dump)
-			mustBeAddresses(t, bound, c.want)
+			mustBeMembers(t, bound, c.want)
 			mustHoldNoShape(t, bound)
 		})
 	}
@@ -200,12 +219,12 @@ func TestTheStaticAddressSetOfADynamicComposite(t *testing.T) {
 // text under ferry's escaping model rather than a marker, so a schema whose map
 // genuinely holds the key "*" would render one plane key for two members of the
 // set (ADR-0003).
-func mustHoldNoShape(t *testing.T, got []Path) {
+func mustHoldNoShape(t *testing.T, got []string) {
 	t.Helper()
 
-	for _, p := range got {
-		if strings.Contains(p.String(), "/"+wildcard) {
-			t.Errorf("the address set holds %s, which is a shape and not an address", p)
+	for _, m := range got {
+		if strings.Contains(m, "/"+wildcard) {
+			t.Errorf("the address set holds %s, which is a shape and not an address", m)
 		}
 	}
 }
@@ -356,12 +375,16 @@ func mustWriteOneNull(t *testing.T, dump func(context.Context, Sink) error, at P
 		t.Fatalf("dump: %+v", err)
 	}
 
-	if got := p.values[at]; got != Null {
-		t.Errorf("%s holds %#v, want a null", at, got)
+	if got := p.presence[at]; got != PresenceNull {
+		t.Errorf("%s is %v, want a null", at, got)
 	}
 
-	if n := countWrites(t, p.set, at); n != 1 {
-		t.Errorf("the walk wrote %s %d times, want one address carrying one value", at, n)
+	if n := countWrites(t, p.ensured, at); n != 1 {
+		t.Errorf("the walk answered at %s %d times, want one address carrying one answer", at, n)
+	}
+
+	if n := countWrites(t, p.set, at); n != 0 {
+		t.Errorf("the walk handed a Value to %s, and a container is answered at its own address", at)
 	}
 }
 
@@ -497,7 +520,11 @@ func aMapOfPointersRoundTrips(t *testing.T) {
 	}
 
 	mustBeCred(t, got.Users["root"], v.Users["root"])
-	mustBeAddresses(t, sorted(p.set), []string{"/users/nobody", "/users/root/pass", "/users/root/user"})
+
+	// The realised key holding nil is a section, so its null is the answer at
+	// its own address rather than a Value handed to it (ADR-0016).
+	mustBeAddresses(t, sorted(p.set), []string{"/users/root/pass", "/users/root/user"})
+	mustBeAddresses(t, sorted(p.ensured), []string{"/users/nobody"})
 }
 
 func aMapOfStructsRoundTrips(t *testing.T) {
@@ -660,25 +687,33 @@ func TestANullAtTheContainerAddressNeedsNoEnumerator(t *testing.T) {
 // dynamic container in.
 type counting struct {
 	values   map[Path]Value
-	children map[Path][]Path
+	children map[Path][]Segment
 
-	gets, lists int
+	gets, lists, probes int
 }
 
 func (c *counting) Bind(*AddressSet) (OpenFunc, error) {
 	return func(context.Context) (Reader, error) { return c, nil }, nil
 }
 
-func (c *counting) Get(_ context.Context, addr Path) (Value, error) {
+func (c *counting) Get(_ context.Context, addr LeafAddr) (Value, error) {
 	c.gets++
 
-	return c.values[addr], nil
+	return c.values[addr.Path()], nil
 }
 
-func (c *counting) Children(_ context.Context, prefix Path) ([]Path, error) {
+func (c *counting) Children(_ context.Context, addr CompositeAddr) ([]Segment, error) {
 	c.lists++
 
-	return c.children[prefix], nil
+	return c.children[addr.Path()], nil
+}
+
+// Probe is the container half, counted apart from Get because the two are
+// different questions at different addresses (ADR-0016).
+func (c *counting) Probe(_ context.Context, addr Container) (SectionInfo, error) {
+	c.probes++
+
+	return infoFor(presenceOf(c.values[addr.Path()])), nil
 }
 
 // flat is the same plane without the optional interface, written out rather than
@@ -687,25 +722,34 @@ func (c *counting) Children(_ context.Context, prefix Path) ([]Path, error) {
 type flat struct {
 	values map[Path]Value
 	gets   int
+	probes int
 }
 
 func (f *flat) Bind(*AddressSet) (OpenFunc, error) {
 	return func(context.Context) (Reader, error) { return f, nil }, nil
 }
 
-func (f *flat) Get(_ context.Context, addr Path) (Value, error) {
+func (f *flat) Get(_ context.Context, addr LeafAddr) (Value, error) {
 	f.gets++
 
-	return f.values[addr], nil
+	return f.values[addr.Path()], nil
+}
+
+// Probe is the one question a plane that cannot list can still answer at a
+// container address, and it is what makes a null there a complete answer.
+func (f *flat) Probe(_ context.Context, addr Container) (SectionInfo, error) {
+	f.probes++
+
+	return infoFor(presenceOf(f.values[addr.Path()])), nil
 }
 
 // asked is one row of what a source that can list is asked at a dynamic
 // container: the plane, the two call counts, and what the field ends up holding.
 type asked struct {
-	name        string
-	src         *counting
-	gets, lists int
-	want        []string
+	name                string
+	src                 *counting
+	gets, lists, probes int
+	want                []string
 }
 
 // check loads one row over a seeded destination and prices it.
@@ -726,25 +770,26 @@ func (c asked) check(t *testing.T) {
 		t.Errorf("loaded %v, want %v", got.Tags, c.want)
 	}
 
-	mustAsk(t, c.src, c.gets, c.lists)
+	mustAsk(t, c.src, c.gets, c.lists, c.probes)
 }
 
-func mustAsk(t *testing.T, src *counting, gets, lists int) {
+func mustAsk(t *testing.T, src *counting, gets, lists, probes int) {
 	t.Helper()
 
-	if src.gets != gets || src.lists != lists {
-		t.Errorf("the plane was asked Get=%d Children=%d, want Get=%d Children=%d",
-			src.gets, src.lists, gets, lists)
+	if src.gets != gets || src.lists != lists || src.probes != probes {
+		t.Errorf("the plane was asked Get=%d Children=%d Probe=%d, want Get=%d Children=%d Probe=%d",
+			src.gets, src.lists, src.probes, gets, lists, probes)
 	}
 }
 
 // TestWhatASourceIsAskedAtADynamicContainer prices the order, at the boundary,
 // through the one seam.
 //
-// A source that can list is asked for children first and asked the container's
-// own address only where nothing came back, so a populated container costs one
-// Get fewer and a container answering Null costs one Children more. Only a plane
-// that can report Null at a container address reaches that row at all.
+// A source that can list is asked for children first and probed at the
+// container's own address only where nothing came back, so a populated
+// container is never probed at all. The container's own address is a Probe and
+// never a Get: it is a section or a composite address, and a Get takes a leaf
+// (ADR-0016).
 func TestWhatASourceIsAskedAtADynamicContainer(t *testing.T) {
 	t.Parallel()
 
@@ -756,23 +801,23 @@ func TestWhatASourceIsAskedAtADynamicContainer(t *testing.T) {
 		name: "a populated sequence, whose own address is never asked",
 		src: &counting{
 			values:   map[Path]Value{tags.Elem(0): String("a"), tags.Elem(1): String("b")},
-			children: map[Path][]Path{tags: {tags.Elem(0), tags.Elem(1)}},
+			children: map[Path][]Segment{tags: {IndexSegment(0), IndexSegment(1)}},
 		},
 		gets:  2,
 		lists: 1,
 		want:  []string{"a", "b"},
 	}, {
-		name:  "an absent one, which is the same observation as an empty one",
-		src:   &counting{},
-		gets:  1,
-		lists: 1,
-		want:  []string{"seed"},
+		name:   "an absent one, which is the same observation as an empty one",
+		src:    &counting{},
+		lists:  1,
+		probes: 1,
+		want:   []string{"seed"},
 	}, {
-		name:  "and a null at the container's own address, which costs the extra list",
-		src:   &counting{values: map[Path]Value{tags: Null}},
-		gets:  1,
-		lists: 1,
-		want:  nil,
+		name:   "and a null at the container's own address, which costs the probe",
+		src:    &counting{values: map[Path]Value{tags: Null}},
+		lists:  1,
+		probes: 1,
+		want:   nil,
 	}}
 
 	for _, c := range cases {
@@ -787,13 +832,14 @@ func TestWhatASourceIsAskedAtADynamicContainer(t *testing.T) {
 // TestASourceThatCannotListIsAskedExactlyAsItAlwaysWas is the other half of the
 // order, and it is a byte-for-byte assertion on purpose.
 //
-// The reordering is for sources that enumerate. A source that cannot list is
-// asked its container address first, as it always was, and gets the same refusal
-// in the same words at the same address.
+// The reordering is for sources that enumerate. A source that cannot list has
+// only its container address to be asked about, and it is asked by a probe, so
+// a null there is still a complete answer and anything less is the same refusal
+// at the same address.
 func TestASourceThatCannotListIsAskedExactlyAsItAlwaysWas(t *testing.T) {
 	t.Parallel()
 
-	t.Run("a null there is still a complete answer, at one Get", aNullNeedsNoLister)
+	t.Run("a null there is still a complete answer, at one probe", aNullNeedsNoLister)
 	t.Run("and anything less is the same refusal it always was", theSameRefusalAsAlways)
 }
 
@@ -807,8 +853,8 @@ func aNullNeedsNoLister(t *testing.T) {
 		t.Fatalf("load: %+v", err)
 	}
 
-	if got.Tags != nil || src.gets != 1 {
-		t.Errorf("loaded %v after Get=%d, want nil after Get=1", got.Tags, src.gets)
+	if got.Tags != nil || src.probes != 1 || src.gets != 0 {
+		t.Errorf("loaded %v after Get=%d Probe=%d, want nil after Get=0 Probe=1", got.Tags, src.gets, src.probes)
 	}
 }
 
@@ -827,8 +873,8 @@ func theSameRefusalAsAlways(t *testing.T) {
 		t.Errorf("report\n\t%s\nwants to be\n\t%s", report, want)
 	}
 
-	if src.gets != 1 {
-		t.Errorf("the plane was asked Get=%d, want Get=1", src.gets)
+	if src.probes != 1 {
+		t.Errorf("the plane was asked Probe=%d, want Probe=1", src.probes)
 	}
 
 	mustBeClass(t, err, ErrPlane)
@@ -837,12 +883,10 @@ func theSameRefusalAsAlways(t *testing.T) {
 // TestAnAnswerAtAContainerAddressWithChildrenUnderItIsNotRead is what the order
 // takes away, asserted rather than left to be discovered.
 //
-// Over a source that can list, the container's own address is not asked where
-// the plane holds children under it, so a driver can no longer refuse there and
-// a Null there no longer wins. ADR-0003 states both as the cost of the order,
-// and neither was a place a driver was entitled to answer from: ADR-0014's third
-// conformance case already forbids failing at a container Get, and a plane
-// reporting Null over children is contradicting itself.
+// Over a source that can list, the container's own address is not probed where
+// the plane holds children under it, so a null there no longer wins. ADR-0003
+// states that as the cost of the order, and a plane reporting Null over children
+// is contradicting itself.
 func TestAnAnswerAtAContainerAddressWithChildrenUnderItIsNotRead(t *testing.T) {
 	t.Parallel()
 
@@ -872,7 +916,7 @@ func mustReadTheChildren(t *testing.T, at Value) {
 	tags := At("tags")
 	src := &counting{
 		values:   map[Path]Value{tags: at, tags.Elem(0): String("z")},
-		children: map[Path][]Path{tags: {tags.Elem(0)}},
+		children: map[Path][]Segment{tags: {IndexSegment(0)}},
 	}
 
 	got, err := Load[tagsOnly](t.Context(), src)
@@ -884,17 +928,17 @@ func mustReadTheChildren(t *testing.T, at Value) {
 		t.Errorf("loaded %v, want [z]: the children are what the plane holds", got.Tags)
 	}
 
-	mustAsk(t, src, 1, 1)
+	mustAsk(t, src, 1, 1, 0)
 }
 
-// TestChildrenReturnsKindedAddresses is why the interface hands back addresses
+// TestChildrenReturnsKindedSegments is why the interface hands back segments
 // rather than names.
 //
 // Given only text an emitter has one signal for "is this container a sequence",
 // which is whether the segment looks like a base-10 integer, and that signal
 // turns a map holding the key "0" into a list and destroys the key. So the plane
 // says which composite it is, and the walk does not guess.
-func TestChildrenReturnsKindedAddresses(t *testing.T) {
+func TestChildrenReturnsKindedSegments(t *testing.T) {
 	t.Parallel()
 
 	p := newPlane(map[Path]Value{})
@@ -906,21 +950,21 @@ func TestChildrenReturnsKindedAddresses(t *testing.T) {
 
 	r := treeReader{p: p}
 
-	kids, err := r.Children(t.Context(), At("tags"))
+	kids, err := r.Children(t.Context(), compositeAt(At("tags")))
 	if err != nil {
 		t.Fatalf("children: %v", err)
 	}
 
-	mustBeKind(t, kids, Index, []string{"/tags#0", "/tags#1"})
+	mustBeKind(t, kids, Index, []string{"0", "1"})
 
-	kids, err = r.Children(t.Context(), At("limits"))
+	kids, err = r.Children(t.Context(), compositeAt(At("limits")))
 	if err != nil {
 		t.Fatalf("children: %v", err)
 	}
 
 	// The map's key "0" is the case the kind exists for: it renders as a Name
 	// segment and nothing about the text says so.
-	mustBeKind(t, kids, Name, []string{"/limits/0", "/limits/rps"})
+	mustBeKind(t, kids, Name, []string{"0", "rps"})
 
 	got, err := Load[mixedDynamic](t.Context(), treeSource{p: p})
 	if err != nil {
@@ -932,14 +976,21 @@ func TestChildrenReturnsKindedAddresses(t *testing.T) {
 	}
 }
 
-func mustBeKind(t *testing.T, got []Path, want SegmentKind, rendered []string) {
+func mustBeKind(t *testing.T, got []Segment, want SegmentKind, texts []string) {
 	t.Helper()
 
-	mustBeAddresses(t, got, rendered)
+	rendered := make([]string, len(got))
+	for i, seg := range got {
+		rendered[i] = seg.Text()
+	}
+
+	if !slices.Equal(rendered, texts) {
+		t.Errorf("the children are\n\t%v\nand the golden list is\n\t%v", rendered, texts)
+	}
 
 	for _, kid := range got {
-		if k := lastSegment(kid).Kind(); k != want {
-			t.Errorf("%s arrives as a %s segment, want %s", kid, k, want)
+		if k := kid.Kind(); k != want {
+			t.Errorf("%q arrives as a %s segment, want %s", kid.Text(), k, want)
 		}
 	}
 }
@@ -958,34 +1009,29 @@ func TestAPlaneThatContradictsTheContainerIsLoud(t *testing.T) {
 	}{{
 		name: "a name under a sequence",
 		load: loadInto[tagsOnly],
-		src:  &listing{children: map[Path][]Path{At("tags"): {At("tags", "0")}}},
-		want: "the plane holds /tags/0 under a sequence of 1",
+		src:  &listing{children: map[Path][]Segment{At("tags"): {NameSegment("0")}}},
+		want: "the plane holds a member named under a sequence",
 	}, {
 		name: "a gap in a sequence",
 		load: loadInto[tagsOnly],
-		src: &listing{children: map[Path][]Path{
-			At("tags"): {At("tags").Elem(0), At("tags").Elem(2)},
+		src: &listing{children: map[Path][]Segment{
+			At("tags"): {IndexSegment(0), IndexSegment(2)},
 		}},
-		want: "the plane holds /tags#2 under a sequence of 2",
+		want: "the plane holds position 2 under a sequence of 2",
 	}, {
 		name: "a position under a mapping",
 		load: loadInto[limitsOnly],
-		src:  &listing{children: map[Path][]Path{At("limits"): {At("limits").Elem(0)}}},
-		want: "the plane holds /limits#0 under this mapping",
-	}, {
-		name: "an address that is not an immediate child",
-		load: loadInto[limitsOnly],
-		src:  &listing{children: map[Path][]Path{At("limits"): {At("limits", "a", "b")}}},
-		want: "the plane holds /limits/a/b under this mapping",
+		src:  &listing{children: map[Path][]Segment{At("limits"): {IndexSegment(0)}}},
+		want: "the plane holds a member by position under this mapping",
 	}, {
 		name: "a key the type cannot parse",
 		load: loadInto[intKeyed],
-		src:  &listing{children: map[Path][]Path{At("m"): {At("m", "abc")}}},
+		src:  &listing{children: map[Path][]Segment{At("m"): {NameSegment("abc")}}},
 		want: "/m/abc: the plane's value is not a valid int",
 	}, {
 		name: "and two keys that read back as one",
 		load: loadInto[intKeyed],
-		src:  &listing{children: map[Path][]Path{At("m"): {At("m", "1"), At("m", "01")}}},
+		src:  &listing{children: map[Path][]Segment{At("m"): {NameSegment("1"), NameSegment("01")}}},
 		want: "two plane keys read back as one Go key",
 	}}
 
@@ -1015,8 +1061,8 @@ func TestAPlaneThatContradictsTheContainerIsLoud(t *testing.T) {
 func TestTheGapRefusalNamesARemedy(t *testing.T) {
 	t.Parallel()
 
-	err := loadInto[tagsOnly](t.Context(), &listing{children: map[Path][]Path{
-		At("tags"): {At("tags").Elem(0), At("tags").Elem(2)},
+	err := loadInto[tagsOnly](t.Context(), &listing{children: map[Path][]Segment{
+		At("tags"): {IndexSegment(0), IndexSegment(2)},
 	}})
 
 	report := reportOf(err)
@@ -1060,20 +1106,11 @@ func TestARefusalAtADynamicCompositeReachesTheCaller(t *testing.T) {
 		mustBeClass(t, err, ErrPlane, ErrDriver)
 	})
 
-	t.Run("a plane holding a value at a container address", func(t *testing.T) {
-		t.Parallel()
-
-		p := newPlane(map[Path]Value{At("tags"): String("everything")})
-
-		_, err := Load[tagsOnly](t.Context(), treeSource{p: p})
-
-		want := "the plane holds string at a container address"
-		if report := reportOf(err); !strings.Contains(report, want) {
-			t.Errorf("report\n\t%s\ndoes not contain\n\t%s", report, want)
-		}
-
-		mustBeClass(t, err, ErrValue)
-	})
+	// A plane holding a value under a composite's own name has no refusal here
+	// any more, and it needs none: /tags is a CompositeAddr, so the only
+	// questions asked at it are Children and Probe and neither can be answered
+	// with a Value. TestAContainerAddressIsNeverAskedForAValue holds the
+	// structural half of that (ADR-0016, #219).
 
 	t.Run("a sequence element the type cannot take", func(t *testing.T) {
 		t.Parallel()
@@ -1219,9 +1256,58 @@ type (
 	}
 )
 
+// TestTwoContainersAtOneAddressAreRefusedAtCompile is where twoMaps and
+// sliceOverArray land now, and it is the better location for both.
+//
+// A container address carries its kind into the set, so the compiler can see
+// from the type alone that two things determine one address: two composites at
+// /x, and a static element address beneath a composite whose members come from
+// the value. Both used to compile clean and fail part way through a dump, which
+// is a refusal after the plane had already been written to (#225, #232).
+func TestTwoContainersAtOneAddressAreRefusedAtCompile(t *testing.T) {
+	t.Parallel()
+
+	run(t, []compileCase{{
+		name:     "two composites at one address",
+		run:      Compile[twoMaps],
+		want:     []string{"/x:", "addressed by two containers", "/A and /B"},
+		elements: 1,
+	}, {
+		// An array is a section, so a slice and an array at one address are two
+		// containers at one address and the rule above is the one that sees it.
+		// The array's element addresses beneath the composite are the same
+		// mistake said again, which is why there is one refusal and not three.
+		name:     "an array and a slice at one address",
+		run:      Compile[sliceOverArray],
+		want:     []string{"/x:", "addressed by two containers", "come from the value"},
+		elements: 1,
+	}})
+}
+
+// foldedKey is a map key type whose text is not injective under Go's ==: two
+// distinct keys render to one segment, which is the obligation ADR-0005 puts on
+// a registrant and which no compile-time rule can discharge.
+type foldedKey string
+
+func foldedKeyed(t *testing.T) *Registry {
+	t.Helper()
+
+	return registryWith(t, StringKey(
+		func(k foldedKey) (string, error) { return strings.ToLower(string(k)), nil },
+		func(s string) (foldedKey, error) { return foldedKey(s), nil }).AsMapKey())
+}
+
+type foldedMap struct {
+	M map[foldedKey]string `ferry:"x"`
+}
+
 // TestACollidingAddressIsRefusedAsItIsMinted is the dynamic tier, and the point
 // is where the refusal lands: as the address is minted, before the write it
 // belongs to, and never after it.
+//
+// What reaches it is a key type whose text is not injective, which is the one
+// collision no compile-time rule can catch: the keys are distinct under Go's ==
+// and the schema knows nothing about the values a map will hold.
 //
 // The determinism argument is the stronger of the two and does not depend on
 // anybody agreeing that a lost entry matters. There is no stable answer to give,
@@ -1231,33 +1317,11 @@ type (
 func TestACollidingAddressIsRefusedAsItIsMinted(t *testing.T) {
 	t.Parallel()
 
-	cases := []struct {
-		name string
-		dump func(context.Context, Sink) error
-		want []string
-	}{{
-		name: "two map keys rendering to one address",
-		dump: func(ctx context.Context, s Sink) error {
-			return Dump(ctx, twoMaps{
-				A: map[string]string{"a": "1", "k": "2"},
-				B: map[string]string{"k": "3", "z": "4"},
-			}, s)
-		},
-		want: []string{"/x:", "/x/k is addressed more than once", "map[string]string"},
-	}, {
-		name: "and an element address the type already determined",
-		dump: func(ctx context.Context, s Sink) error {
-			return Dump(ctx, sliceOverArray{S: []string{"a"}}, s)
-		},
-		want: []string{"/x:", "/x#0 is addressed more than once", "[]string"},
-	}}
+	reg := foldedKeyed(t)
 
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			mustBeOneOutcome(t, c.dump, c.want)
-		})
-	}
+	mustBeOneOutcome(t, func(ctx context.Context, s Sink) error {
+		return Dump(ctx, foldedMap{M: map[foldedKey]string{"K": "1", "k": "2"}}, s, WithRegistry(reg))
+	}, []string{"/x:", "/x/k is addressed more than once", "map[ferry.foldedKey]string"})
 }
 
 // dumpRuns is how many dumps of one value the determinism invariant is asserted

@@ -2,6 +2,8 @@ package env
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/onhotpath/ferry"
@@ -66,7 +68,7 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 		return nil, err
 	}
 
-	static, err := staticNames(addrs, keys)
+	declared, err := declaredLeaves(addrs, keys)
 	if err != nil {
 		return nil, err
 	}
@@ -74,42 +76,42 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 	cfg := s.cfg
 
 	return func(context.Context) (ferry.Reader, error) {
-		return &reader{cfg: cfg, keys: keys.Open(), static: static, env: environMap(cfg.environ())}, nil
+		return &reader{cfg: cfg, keys: keys.Open(), declared: declared, env: environMap(cfg.environ())}, nil
 	}, nil
 }
 
-// staticNames is the precomputed table read backwards: every name the type
-// determined, mapped to the address that determined it.
+// declaredLeaves is the classification ADR-0016 puts at Bind: one range over the
+// typed address set, one type switch, and the answer held before any I/O.
 //
-// It is what makes the static tier of enumeration exact. This driver's key
-// function is many-to-one over segment text, so a name cannot be parsed back
-// into an address in general - but an address the schema determined is in the
-// set, so matching a name against this table recovers the segment's own
-// spelling rather than a fold of it. Only what the value mints has to fall back
-// on [Canonical].
+// Only the leaves are kept, because they are the only kind whose bit this driver
+// branches on later. A leaf the type determined is an address the schema
+// declared, and one that is not in this table was minted from the value by
+// [reader.Children]; the two get different answers when the environment holds
+// nothing at the name, and [reader.Get] says why.
 //
 // It is built once per Bind and never written to afterwards, which is what lets
 // one binding be read from many goroutines with no synchronisation.
-func staticNames(addrs *ferry.AddressSet, keys *ferry.Keys) (map[string]ferry.Path, error) {
-	if addrs == nil {
-		return map[string]ferry.Path{}, nil
-	}
-
-	out := make(map[string]ferry.Path, addrs.Len())
+func declaredLeaves(addrs *ferry.AddressSet, keys *ferry.Keys) (map[ferry.LeafAddr]string, error) {
+	out := make(map[ferry.LeafAddr]string, addrs.Len())
 	name := keys.Open()
 
-	for addr := range addrs.All() {
-		key, err := name(addr)
+	for m := range addrs.Seq() {
+		leaf, ok := m.(ferry.LeafAddr)
+		if !ok {
+			continue
+		}
+
+		key, err := name(leaf.Path())
 		if err != nil {
 			// Unreachable: NewKeys computed a name for every address in this
-			// set already, and the table answers a static address without
+			// set already, and the table answers a declared address without
 			// consulting the key function again. It is returned rather than
 			// ignored because a driver that swallows an error here would be
 			// deciding that core was wrong.
 			return nil, err
 		}
 
-		out[key] = addr
+		out[leaf] = key
 	}
 
 	return out, nil
@@ -138,42 +140,119 @@ func environMap(environ []string) map[string]string {
 // consistent environment: a variable that changes half way through a walk would
 // otherwise land in some fields and not others, with nothing saying so.
 type reader struct {
-	cfg    config
-	keys   ferry.KeyFunc
-	static map[string]ferry.Path
-	env    map[string]string
+	cfg      config
+	keys     ferry.KeyFunc
+	declared map[ferry.LeafAddr]string
+	env      map[string]string
 }
 
 // The optional interfaces this reader carries. Enumeration is one of them
 // because listing the environment is trivial, and it is what makes a map-typed
-// or slice-typed field loadable from this plane at all (ADR-0004). There is no
-// [ferry.Releaser], because a map holds no resource and a Close that returns nil
-// is indistinguishable in the source from a release somebody forgot.
+// or slice-typed field loadable from this plane at all (ADR-0004). Probing is
+// the other, and it is what lets a section be reported present without a value
+// ever being read at its own name (ADR-0016). There is no [ferry.Releaser],
+// because a map holds no resource and a Close that returns nil is
+// indistinguishable in the source from a release somebody forgot.
 var (
 	_ ferry.Reader     = (*reader)(nil)
+	_ ferry.Prober     = (*reader)(nil)
 	_ ferry.Enumerator = (*reader)(nil)
 )
 
-// Get answers with what the environment holds at an address.
+// Get answers with what the environment holds at one leaf.
 //
 // The answer is a String or an Absent and never a Null, because FOO= is a
-// zero-length string and not a null (ADR-0004): the plane has no type
-// information of its own, so every value it holds is text, and the one
-// distinction it does carry - set against unset - is the one a required field
-// tests.
+// zero-length string and not a null: the plane has no type information of its
+// own, so every value it holds is text, and the one distinction it does carry -
+// set against unset - is the one a required field tests.
 //
-// At a container address that is ordinarily Absent, since a composite is stored
-// one element at a time and nothing is written at the container's own name.
-func (r *reader) Get(_ context.Context, addr ferry.Path) (ferry.Value, error) {
-	key, err := r.keys(addr)
+// It refuses one shape rather than answering it. A leaf this driver minted from
+// the environment, whose own name holds nothing while names below it do, is the
+// plane holding a section where the schema wants a value. Answering Absent there
+// would fill the field with the Go zero and drop what the environment actually
+// held, so the address is refused instead.
+func (r *reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
+	key, declared := r.declared[addr]
+	if !declared {
+		var err error
+		if key, err = r.keys(addr.Path()); err != nil {
+			return ferry.Value{}, err
+		}
+	}
+
+	if text, ok := r.env[key]; ok {
+		return ferry.String(text), nil
+	}
+
+	if !declared && r.holdsBelow(key) {
+		return ferry.Value{}, deeperThanLeaf()
+	}
+
+	return ferry.Value{}, nil
+}
+
+// holdsBelow reports whether the environment holds any name strictly below this
+// one, which is what makes a minted leaf a section the schema has no room for.
+func (r *reader) holdsBelow(key string) bool {
+	below := key + r.cfg.sep
+
+	for name := range r.env {
+		if strings.HasPrefix(name, below) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// deeperThanLeaf is the refusal #235 needed and could not have while a container
+// address and a leaf address were the same question.
+//
+// It fires only at a minted address, and that scoping is the rule rather than a
+// convenience. At an address the schema declared, a variable that merely shares
+// a prefix is an unrelated variable and not this schema's business, and refusing
+// there would fail a legal load over the ambient environment - which is the #219
+// class in a new place. At a minted one the driver chose the address by reading
+// the environment, so a name below it and nothing at it is the driver having
+// invented a child over a value it was about to drop.
+//
+// It names no name. ADR-0011 keeps a value the plane supplied out of ferry's
+// message text, and the tail of the offending variable is a dynamic segment,
+// which is the caller's value; core attaches the address, which is structure.
+func deeperThanLeaf() error {
+	return fmt.Errorf("%w: %w: the environment holds nothing at this name and holds names below it, "+
+		"so the plane carries a section where the schema carries a value: the addresses under a container "+
+		"come from the environment, and one that reaches deeper than an element is not an element",
+		ferry.ErrPlane, ErrDeeperThanLeaf)
+}
+
+// ErrDeeperThanLeaf reports a value the environment holds below an address the
+// schema maps to a single value.
+//
+// LIMITS_HTTP_PORT under a map[string]string at limits is the case: there is no
+// LIMITS_HTTP to read, so the only honest answers are this refusal or a map
+// entry holding the Go zero with the real value dropped.
+//
+// It wraps [ferry.ErrPlane], and it stays reachable under ferry's wrapper, so
+// errors.Is answers for it on what [ferry.Load] returned.
+var ErrDeeperThanLeaf = errors.New("env: the environment reaches deeper than this address")
+
+// Probe answers whether the environment holds anything under a container's own
+// name.
+//
+// A section is present when any variable lies below its name and absent
+// otherwise, which is the only distinction a flat plane carries: nothing is ever
+// written at a container's own name, so its presence is the presence of its
+// members. This plane has no null, so a container is never reported null.
+func (r *reader) Probe(_ context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	key, err := r.keys(addr.Path())
 	if err != nil {
-		return ferry.Value{}, err
+		return ferry.SectionInfo{}, err
 	}
 
-	text, ok := r.env[key]
-	if !ok {
-		return ferry.Value{}, nil
+	if r.holdsBelow(key) {
+		return ferry.SectionPresent, nil
 	}
 
-	return ferry.String(text), nil
+	return ferry.SectionAbsent, nil
 }

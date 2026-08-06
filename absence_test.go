@@ -232,12 +232,19 @@ func TestNothingFerryDumpsWritesANullAtATypeThatRefusesOne(t *testing.T) {
 		t.Fatalf("dump: %+v", err)
 	}
 
-	// The four addresses whose Go type has a null. Every other address in the
-	// set belongs to a type that refuses one.
-	nullable := []Path{At("by"), At("p"), At("sl"), At("m")}
+	// The four addresses whose Go type has a null, split by where the null is
+	// said. A nil []byte and a nil *int are leaves, so their null is a Value;
+	// a nil slice and a nil map are composites, so theirs is the answer at the
+	// container's own address (ADR-0016).
+	leaves := []Path{At("by"), At("p")}
+	containers := []Path{At("m"), At("sl")}
 
-	if nulls := nullsWritten(t, p, nullable); nulls != len(nullable) {
-		t.Errorf("the dump wrote %d nulls, want one per nullable address: %v", nulls, nullable)
+	if nulls := nullsWritten(t, p, leaves); nulls != len(leaves) {
+		t.Errorf("the dump wrote %d nulls, want one per nullable leaf: %v", nulls, leaves)
+	}
+
+	if got := sortedPaths(p.ensured); !slices.Equal(got, containers) {
+		t.Errorf("the dump answered at %v, want one per nullable container: %v", got, containers)
 	}
 
 	if _, err := Load[everyLeaf](t.Context(), planeSource{p: p}); err != nil {
@@ -245,8 +252,8 @@ func TestNothingFerryDumpsWritesANullAtATypeThatRefusesOne(t *testing.T) {
 	}
 }
 
-// nullsWritten counts the nulls one dump wrote, and reports every one of them at
-// an address whose Go type would refuse it on the way back.
+// nullsWritten counts the nulls one dump handed a leaf, and reports every one of
+// them at an address whose Go type would refuse it on the way back.
 func nullsWritten(t *testing.T, p *plane, nullable []Path) int {
 	t.Helper()
 
@@ -429,14 +436,26 @@ func TestNoSetCallCarriesAnAbsent(t *testing.T) {
 		}
 	}
 
-	// The schema names five addresses and the walk wrote three: the two under
-	// the nil section got no call at all.
-	mustBeAddresses(t, slices.Collect(p.bound.All()), []string{"/name", "/opt", "/opt/pass", "/opt/user", "/tags"})
+	// The schema names five addresses, one leaf per value plus the two
+	// containers, and the walk handed a Value to exactly one of them: the two
+	// under the nil section got no call at all, and the nil section and the
+	// empty sequence are answered at their own addresses instead (ADR-0016).
+	wantBound := []string{"leaf /name", "section /opt", "leaf /opt/pass", "leaf /opt/user", "composite /tags"}
+	if got := kinded(p.bound); !slices.Equal(got, wantBound) {
+		t.Errorf("the driver was bound to\n\t%v\nand the golden set is\n\t%v", got, wantBound)
+	}
 
-	got := slices.Clone(p.set)
-	slices.SortFunc(got, Path.Compare)
+	mustBeAddresses(t, sortedPaths(p.set), []string{"/name"})
+	mustBeAddresses(t, sortedPaths(p.ensured), []string{"/opt", "/tags"})
+}
 
-	mustBeAddresses(t, got, []string{"/name", "/opt", "/tags"})
+// sortedPaths is a copy of what a plane was asked, in address order, because
+// the assertion is about the set and not about the walk's own ordering.
+func sortedPaths(got []Path) []Path {
+	out := slices.Clone(got)
+	slices.SortFunc(out, Path.Compare)
+
+	return out
 }
 
 // observed is a caller-side Source decorator that keeps every Value the plane
@@ -473,10 +492,10 @@ type observingReader struct {
 	seen map[Path]Value
 }
 
-func (o observingReader) Get(ctx context.Context, addr Path) (Value, error) {
+func (o observingReader) Get(ctx context.Context, addr LeafAddr) (Value, error) {
 	got, err := o.r.Get(ctx, addr)
 	if err == nil {
-		o.seen[addr] = got
+		o.seen[addr.Path()] = got
 	}
 
 	return got, err
@@ -533,16 +552,40 @@ func mustObserve(t *testing.T, values map[Path]Value, want int, saw Value) {
 	}
 }
 
-// TestCoreExportsNothingForPresence is the other half of the mechanism: it is an
-// observation of a Load and not a property of a field, so no type is added to
-// the set, nothing is stored on the field, and core exports no Option, callback
-// or report for it.
+// containerPresence is the presence vocabulary core does publish, and it is all
+// of it: what a plane holds at a container's own address, which is a fact about
+// the plane that a driver reports and core resolves (ADR-0016).
+//
+// It is an allow-list rather than a skip, so the ratchet still holds: a new
+// export whose name says presence fails this test until it is either withdrawn
+// or added here on purpose.
+var containerPresence = map[string]bool{
+	"Presence":        true,
+	"PresenceAbsent":  true,
+	"PresenceNull":    true,
+	"PresencePresent": true,
+	"SectionAbsent":   true,
+	"SectionInfo":     true,
+	"SectionNull":     true,
+	"SectionPresent":  true,
+	"Prober":          true,
+	"Ensurer":         true,
+}
+
+// TestCoreExportsNothingForPresenceAtAField is the other half of the mechanism:
+// presence at a leaf is an observation of a Load and not a property of a field,
+// so no type is added to the set, nothing is stored on the field, and core
+// exports no Option, callback or report for it.
 //
 // It is read out of the source because there is no value that could be asked. An
 // Optional[T] in the type set would need a proof in the harness, a row in the
 // golden column and a representation on every plane, and ADR-0005 closed the set
 // against exactly that.
-func TestCoreExportsNothingForPresence(t *testing.T) {
+//
+// What core does spell is presence at a container's own address, which is a
+// different fact about a different place: [containerPresence] is that list, and
+// nothing on it is per field.
+func TestCoreExportsNothingForPresenceAtAField(t *testing.T) {
 	t.Parallel()
 
 	names := coreExportedNames(t)
@@ -551,13 +594,22 @@ func TestCoreExportsNothingForPresence(t *testing.T) {
 	}
 
 	for _, name := range names {
-		for _, word := range []string{"Presence", "Present", "Observ"} {
-			if strings.Contains(name, word) {
-				t.Errorf("core exports %s: presence is an observation of one Load, which a caller's own "+
-					"Reader already sees, and core spells nothing for it", name)
-			}
+		if !containerPresence[name] && namesPresence(name) {
+			t.Errorf("core exports %s: presence at a field is an observation of one Load, which a "+
+				"caller's own Reader already sees, and core spells nothing for it", name)
 		}
 	}
+}
+
+// namesPresence reports whether an exported name reads as a presence fact.
+func namesPresence(name string) bool {
+	for _, word := range []string{"Presence", "Present", "Observ", "Optional"} {
+		if strings.Contains(name, word) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // coreExportedNames is every exported top-level name and method in the package,
@@ -621,7 +673,7 @@ func TestALengthComesFromEnumerationAndNeverFromProbing(t *testing.T) {
 			At("tags").Elem(0): String("a"),
 			At("tags").Elem(1): String("b"),
 		},
-		children: map[Path][]Path{At("tags"): {At("tags").Elem(0)}},
+		children: map[Path][]Segment{At("tags"): {IndexSegment(0)}},
 	}
 
 	got, err := Load[tagsOnly](t.Context(), src)

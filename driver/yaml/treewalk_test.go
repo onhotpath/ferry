@@ -55,11 +55,7 @@ func namesNoHelper(t *testing.T, name string, helpers []string) {
 // document, and both halves of this driver take them without a word.
 func TestBindTakesCollidingAddresses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plane.yaml")
-	addrs := ferry.NewAddressSet(
-		ferry.At("db_host"), ferry.At("db", "host"),
-		ferry.At("feature-flags"), ferry.At("feature_flags"),
-		ferry.At("Host"), ferry.At("host"),
-	)
+	addrs := addressesOf[colliding](t).set
 
 	if _, err := yaml.NewSource(path).Bind(addrs); err != nil {
 		t.Errorf("Source.Bind refused %d addresses that collide only under a flattening key function: %v",
@@ -79,7 +75,11 @@ func TestCaseVariantAddressesAreDistinctPlaces(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plane.yaml")
 	w := openWriter(t, path)
 
-	for i, addr := range []ferry.Path{ferry.At("Host"), ferry.At("host"), ferry.At("db", "host")} {
+	a := addressesOf[colliding](t)
+
+	for i, at := range []ferry.Path{ferry.At("Host"), ferry.At("host"), ferry.At("db", "host")} {
+		addr := a.leaf(t, at)
+
 		if err := w.Set(t.Context(), addr, ferry.Number(strings.Repeat("1", i+1))); err != nil {
 			t.Fatalf("Set(%s): %v", addr, err)
 		}

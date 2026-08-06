@@ -85,7 +85,7 @@ func assertCase7(t *testing.T, c *capture, want string) {
 // The count is asserted before the suite is run, because a fold that refused
 // nothing would make the rest of this test pass by having nothing to report.
 func TestDriverCase7TakesAnAggregateRefusal(t *testing.T) {
-	err := foldedRefusal()
+	err := foldedRefusal(t)
 
 	if n := len(ferry.Elements(err)); n < 2 {
 		t.Fatalf("the fold refused %d of case 7's pairs, want more than one, or this test asserts nothing", n)
@@ -102,14 +102,33 @@ func TestDriverCase7TakesAnAggregateRefusal(t *testing.T) {
 
 // foldedRefusal is what case 7's own address set does to a real environment key
 // function, produced through core's helper rather than written out.
-func foldedRefusal() error {
-	_, err := ferry.NewKeys(ferry.NewAddressSet(
-		ferry.At("db_host"), ferry.At("db", "host"),
-		ferry.At("feature-flags"), ferry.At("feature_flags"),
-		ferry.At("Host"), ferry.At("host"),
-	), "probe", foldedKey)
+func foldedRefusal(t *testing.T) error {
+	t.Helper()
+
+	_, err := ferry.NewKeys(capturedSet[collidingCfg](t), "probe", foldedKey)
 
 	return err
+}
+
+// collidingCfg is the type case 7's address set is compiled from: three pairs a
+// flattening key function folds together.
+//
+// It is a struct rather than a literal set because the three address kinds are
+// sealed and the compiler is the only thing that mints one (ADR-0016), so an
+// address set can only be had by asking for a schema's own.
+type collidingCfg struct {
+	Flat   string          `ferry:"db_host"`
+	DB     collidingNested `ferry:"db"`
+	Dashed string          `ferry:"feature-flags"`
+	Scored string          `ferry:"feature_flags"`
+	Upper  string          `ferry:"Host"`
+	Lower  string          `ferry:"host"`
+}
+
+// collidingNested is the structured half of the first pair: /db/host, which a
+// separator join renders to the same key as /db_host.
+type collidingNested struct {
+	Host string `ferry:"host"`
 }
 
 // foldedKey uppercases each segment, maps every other byte to _, and joins with
@@ -217,7 +236,7 @@ type pickySource struct {
 }
 
 func (s pickySource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
-	if addrs.Has(collidingProbe) {
+	if hasPath(addrs, collidingProbe) {
 		return nil, s.err
 	}
 
@@ -230,7 +249,7 @@ type pickySink struct {
 }
 
 func (s pickySink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
-	if addrs.Has(collidingProbe) {
+	if hasPath(addrs, collidingProbe) {
 		return nil, s.err
 	}
 
@@ -274,22 +293,21 @@ func (s invitingSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 
 type invitingReader struct{ inner ferry.Reader }
 
-func (r invitingReader) Get(ctx context.Context, addr ferry.Path) (ferry.Value, error) {
+func (r invitingReader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
 	return r.inner.Get(ctx, addr)
 }
 
-func (r invitingReader) Children(ctx context.Context, prefix ferry.Path) ([]ferry.Path, error) {
-	e, ok := r.inner.(ferry.Enumerator)
-	if !ok {
-		return nil, errors.New("the plane underneath does not enumerate")
-	}
+func (r invitingReader) Probe(ctx context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	return probeThrough(ctx, r.inner, addr)
+}
 
-	got, err := e.Children(ctx, prefix)
-	if err != nil || prefix != ferry.At("list") {
+func (r invitingReader) Children(ctx context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error) {
+	got, err := childrenThrough(ctx, r.inner, addr)
+	if err != nil || addr.Path() != ferry.At("list") {
 		return got, err
 	}
 
-	return append(got, prefix.Elem(99)), nil
+	return append(got, ferry.IndexSegment(99)), nil
 }
 
 // TestDriverAgainstAPlaneWithNoSink is ADR-0004's read-only plane, which is a
@@ -319,23 +337,16 @@ func TestDriverAgainstAPlaneWithNoSink(t *testing.T) {
 	}
 }
 
-// TestDriverCase3ReportsAValueAtAContainerAddress is case 3, negative.
+// The negative fixture for "a value at a container address" is gone, and the
+// reason is that its defect no longer compiles.
 //
-// A composite is read one element at a time under ADR-0003's structured
-// addresses, so there is no group value for the container itself to hold, and a
-// driver answering one is answering something core cannot interpret. The
-// misbehaviour is scoped to the one container address the fixture puts a map at.
-func TestDriverCase3ReportsAValueAtAContainerAddress(t *testing.T) {
-	c := &capture{}
-
-	ferrytest.Driver(c, groupingPlane())
-
-	only := onlyLine(t, c)
-	if !strings.Contains(only, "case 3") {
-		t.Errorf("report = %q, want case 3 and only case 3", only)
-	}
-}
-
+// It used to wrap the plane in a reader answering a String at the address the
+// fixture puts a map at, and the suite caught it. Under the sealed address model
+// ferry.Reader.Get takes a ferry.LeafAddr, so a container's own address cannot
+// be handed to it at all and no driver can answer a value there (ADR-0016). A
+// fixture for a defect that cannot be written is a fixture that proves the
+// compiler, not the suite.
+//
 // TestDriverCase3ReportsAnAbsentWhereANullWasStored is the other half of case 3,
 // negative, and it is the row #136 tightened.
 //
@@ -398,21 +409,25 @@ func (s forgettingSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) 
 
 type forgettingReader struct{ inner ferry.Reader }
 
-func (r forgettingReader) Get(ctx context.Context, addr ferry.Path) (ferry.Value, error) {
-	if addr == ferry.At("nillist") || addr == ferry.At("emptymap") {
-		return ferry.Value{}, nil
-	}
-
+func (r forgettingReader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
 	return r.inner.Get(ctx, addr)
 }
 
-func (r forgettingReader) Children(ctx context.Context, prefix ferry.Path) ([]ferry.Path, error) {
-	e, ok := r.inner.(ferry.Enumerator)
-	if !ok {
-		return nil, errors.New("the plane underneath does not enumerate")
+// Probe forgets the null at the two addresses the blanks fixture wrote one to.
+//
+// The container question moved off Get and onto Probe with the sealed address
+// model (ADR-0016), so this is the same defect asked through the method that
+// now owns it.
+func (r forgettingReader) Probe(ctx context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	if addr.Path() == ferry.At("nillist") || addr.Path() == ferry.At("emptymap") {
+		return ferry.SectionAbsent, nil
 	}
 
-	return e.Children(ctx, prefix)
+	return probeThrough(ctx, r.inner, addr)
+}
+
+func (r forgettingReader) Children(ctx context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error) {
+	return childrenThrough(ctx, r.inner, addr)
 }
 
 // allKinds is every kind a plane can declare, which is what a plane that carries
@@ -424,56 +439,30 @@ func allKinds() []ferry.VKind {
 	}
 }
 
-// groupingPlane is the memory plane whose reader answers a value at the one
-// container address the read-side fixture puts a map at.
-func groupingPlane() ferrytest.Plane {
-	mem := ferrytest.MemPlane()
-	p := mem
+// capturedSet compiles T and hands back the address set core built for it.
+//
+// It is how a package outside ferry holds one at all: the three address kinds
+// are sealed, so a set cannot be written and has to be asked for (ADR-0016).
+func capturedSet[T any](t *testing.T) *ferry.AddressSet {
+	t.Helper()
 
-	p.Name = "grouping"
-	p.Open = func() ferrytest.Instance {
-		inst := mem.Open()
-		inst.Source = groupingSource{inner: inst.Source}
-
-		return inst
+	spy := &setCapture{}
+	if _, err := ferry.Bind[T](spy); err != nil {
+		t.Fatalf("compiling the fixture: %v", err)
 	}
 
-	return p
+	return spy.set
 }
 
-type groupingSource struct{ inner ferry.Source }
+// setCapture is a source that exists to be bound and never read.
+type setCapture struct{ set *ferry.AddressSet }
 
-func (s groupingSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
-	open, err := s.inner.Bind(addrs)
-	if err != nil {
-		return nil, err
-	}
+func (s *setCapture) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
+	s.set = addrs
 
-	return func(ctx context.Context) (ferry.Reader, error) {
-		r, err := open(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		return groupingReader{inner: r}, nil
-	}, nil
+	return func(context.Context) (ferry.Reader, error) { return setCapture{}, nil }, nil
 }
 
-type groupingReader struct{ inner ferry.Reader }
-
-func (r groupingReader) Get(ctx context.Context, addr ferry.Path) (ferry.Value, error) {
-	if addr == ferry.At("map") {
-		return ferry.String("the whole mapping"), nil
-	}
-
-	return r.inner.Get(ctx, addr)
-}
-
-func (r groupingReader) Children(ctx context.Context, prefix ferry.Path) ([]ferry.Path, error) {
-	e, ok := r.inner.(ferry.Enumerator)
-	if !ok {
-		return nil, errors.New("the plane underneath does not enumerate")
-	}
-
-	return e.Children(ctx, prefix)
+func (setCapture) Get(context.Context, ferry.LeafAddr) (ferry.Value, error) {
+	return ferry.Value{}, nil
 }

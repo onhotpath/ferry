@@ -11,7 +11,10 @@ import (
 // hyphen join that spells an HTTP header name.
 //
 // A driver supplies one to [NewKeys] and gets one back from [Keys.Open], so the
-// shape is the same at both ends: an address in, a checked plane key out.
+// shape is the same at both ends: an address in, a checked plane key out. It
+// takes the address with its kind dropped, because a plane key is a function of
+// the segments and never of the kind: read one off a typed address with
+// [Member.Path].
 //
 // A KeyFunc answers legality and never injectivity. Legality is what it returns
 // an error for: whether the plane can name this address at all. An empty
@@ -91,10 +94,6 @@ func NewKeys(a *AddressSet, name string, f KeyFunc) (*Keys, error) {
 		return nil, newError(momentBind, ErrPlane, Path{}, "the driver supplied no key function")
 	}
 
-	if a == nil {
-		a = &AddressSet{}
-	}
-
 	k := &Keys{
 		name:   cmp.Or(name, "the driver"),
 		f:      f,
@@ -103,8 +102,8 @@ func NewKeys(a *AddressSet, name string, f KeyFunc) (*Keys, error) {
 	}
 
 	errs := make([]error, 0, a.Len())
-	for addr := range a.All() {
-		errs = append(errs, k.record(addr))
+	for m := range a.Seq() {
+		errs = append(errs, k.record(m.Path()))
 	}
 
 	if err := join(errs...); err != nil {

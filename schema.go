@@ -164,12 +164,20 @@ type compiler struct {
 	errs   []error
 	leaves []leaf
 
-	// containers is every address a composite that can be nil occupies. It is
-	// kept apart from leaves because the two obey different halves of ADR-0003's
-	// collision rule: prefix-freeness is over the leaves alone, and a container
-	// address is exempt from it while still having to be distinct from every
-	// leaf address.
-	containers []leaf
+	// sections and composites are every container address the type determines,
+	// kept apart from the leaves and from each other because the three obey
+	// different halves of ADR-0003's collision rule and mint different address
+	// kinds (ADR-0016). Prefix-freeness is over the leaves alone; a section
+	// address is a proper prefix of what is under it by construction; and a
+	// composite's members come from the value, so nothing static may sit
+	// beneath one.
+	sections   []leaf
+	composites []leaf
+
+	// clashed is every leaf address prefix-freeness already refused, which is
+	// what keeps one mistake to one diagnosis where both collision rules can
+	// see it.
+	clashed []Path
 
 	// stack is the struct types this compile is currently inside, which is what
 	// makes a recursive type detectable from reflect.TypeFor[T]() alone
@@ -217,6 +225,7 @@ func compileSchema(t reflect.Type, cfg config) (*schema, error) {
 	root := c.compileRoot(t)
 	c.checkPrefixFree()
 	c.checkContainersDistinct()
+	c.checkContainersUnique()
 
 	if err := join(c.errs...); err != nil {
 		return nil, err
@@ -510,7 +519,7 @@ func (c *compiler) compilePointer(t reflect.Type, parent *node, s site, tg tag) 
 	}
 
 	parent.fields = append(parent.fields, n)
-	c.recordContainer(s)
+	c.recordUnder(n, s)
 
 	return count
 }
@@ -539,7 +548,7 @@ func (c *compiler) compileSlice(t reflect.Type, parent *node, s site, tg tag) in
 	}
 
 	parent.fields = append(parent.fields, n)
-	c.recordContainer(s)
+	c.recordComposite(s)
 
 	return count
 }
@@ -568,7 +577,7 @@ func (c *compiler) compileMap(t reflect.Type, parent *node, s site, tg tag) int 
 	}
 
 	parent.fields = append(parent.fields, n)
-	c.recordContainer(s)
+	c.recordComposite(s)
 
 	return count
 }
@@ -616,18 +625,70 @@ func (c *compiler) recordLeaf(s site) {
 	c.leaves = append(c.leaves, leaf{addr: s.addr, field: s.field})
 }
 
-// recordContainer adds a composite's own address, which is where the Null an
-// empty one writes sits.
+// recordSection adds a place whose children are known from the type: a struct,
+// an array, or either behind a pointer. Its address is where the plane is asked
+// whether the section is there at all.
 //
 // It adds nothing where a pointer above already owns the address, because a
-// pointer adds no second bit: *[]string at nil and a pointer to an empty slice
-// are one address carrying one value (ADR-0005).
-func (c *compiler) recordContainer(s site) {
+// pointer adds no second bit: a nil *Cred and a pointer to an empty Cred are
+// one address carrying one answer (ADR-0005).
+func (c *compiler) recordSection(s site) {
 	if s.dynamic || s.nullable {
 		return
 	}
 
-	c.containers = append(c.containers, leaf{addr: s.addr, field: s.field})
+	c.sections = append(c.sections, leaf{addr: s.addr, field: s.field})
+}
+
+// recordComposite adds a place whose children come from the value, which is
+// where the Null an empty one writes sits and the address a driver is asked to
+// enumerate (ADR-0016).
+func (c *compiler) recordComposite(s site) {
+	if s.dynamic || s.nullable {
+		return
+	}
+
+	c.composites = append(c.composites, leaf{addr: s.addr, field: s.field})
+}
+
+// recordUnder adds the container address a pointer occupies, at the kind of
+// whatever it points at.
+//
+// A pointer mints no segment of its own, so the address is the pointer's and
+// the kind is the pointee's: *Cred is a section and *[]string is a composite,
+// and *int never reaches here because a pointer to a leaf is a leaf.
+func (c *compiler) recordUnder(n *node, s site) {
+	switch k, ok := containerKind(n); {
+	case !ok:
+		return
+	case k == kindSection:
+		c.recordSection(s)
+	default:
+		c.recordComposite(s)
+	}
+}
+
+// containerKind is the address kind a compiled position occupies, and whether
+// it occupies a container address at all.
+//
+// A pointer defers to what it points at, because it mints no segment and takes
+// the address of its pointee (ADR-0003). A leaf occupies no container address,
+// which is what makes *int one address and not two.
+func containerKind(n *node) (addrKind, bool) {
+	switch n.kind {
+	case nodeStruct, nodeArray:
+		return kindSection, true
+	case nodeSlice, nodeMap:
+		return kindComposite, true
+	case nodePointer:
+		if len(n.fields) == 0 {
+			return 0, false
+		}
+
+		return containerKind(n.fields[elemShape])
+	default:
+		return 0, false
+	}
 }
 
 // compileArray is [N]T, whose length is part of the type, so it mints exactly N
@@ -636,13 +697,21 @@ func (c *compiler) recordContainer(s site) {
 // That is the capability difference between an array and a slice, and it is not
 // cosmetic: an array's element addresses are known from reflect.TypeFor[T]()
 // with no value in hand, so an array is loadable from a source that cannot
-// enumerate and a slice is not. An array also has no nil, so it takes no
-// container address of its own.
+// enumerate and a slice is not. An array is therefore a section and never a
+// composite: its children are compiled from the type and no driver is ever
+// asked to list them, which is why a Name child can no longer appear under one
+// (ADR-0016, #264).
 func (c *compiler) compileArray(t reflect.Type, parent *node, s site, tg tag) int {
 	// An array's N element addresses come from the type, which is the tier
 	// required is admissible in (ADR-0006), and it is not a leaf, so a default
 	// has no single address to sit at.
 	c.checkNoDefault(t, s.addr, tg)
+
+	if t.Len() == 0 {
+		c.errAt(s.addr, emptyArrayMsg(t))
+
+		return 0
+	}
 
 	n := &node{kind: nodeArray, addr: s.addr, index: s.index}
 	n.required, n.omitzero = heldAt(s, tg)
@@ -675,8 +744,18 @@ func (c *compiler) compileArray(t reflect.Type, parent *node, s site, tg tag) in
 	}
 
 	parent.fields = append(parent.fields, n)
+	c.recordSection(s)
 
 	return count
+}
+
+// emptyArrayMsg refuses [0]T, which maps no address for the reason struct{}
+// does and was silently dropped where struct{} was refused (#260). The element
+// type is never compiled either, so a [0]chan int used to reach a shipped
+// schema.
+func emptyArrayMsg(t reflect.Type) string {
+	return fmt.Sprintf("%s maps no address: a zero-length array has no elements, so nothing under it is "+
+		"addressable and its element type is never checked - drop the field, or mark it %q", t, skipTag)
 }
 
 // elemSite is where one array element sits. Its Go field path carries the index
@@ -778,8 +857,13 @@ func (c *compiler) compileNested(t reflect.Type, parent *node, s site, tg tag) i
 	c.checkNoDefault(t, s.addr, tg)
 
 	n, count := c.compileStruct(t, s, nil)
+	if count == 0 {
+		return 0
+	}
+
 	n.required, n.omitzero = heldAt(s, tg)
 	parent.fields = append(parent.fields, n)
+	c.recordSection(s)
 
 	return count
 }
@@ -935,6 +1019,7 @@ func (c *compiler) checkPrefixFree() {
 			}
 
 			c.errAt(l.addr, collisionMsg(l, m))
+			c.clashed = append(c.clashed, l.addr)
 		}
 	}
 }
@@ -952,46 +1037,87 @@ func collisionMsg(l, m leaf) string {
 //
 // A container address is exempt from prefix-freeness, because it is a proper
 // prefix of what is under it by construction and that is what makes it a
-// container. It must still be distinct from every leaf address: a container
-// carries Absent or Null and nothing else, so a leaf sharing its address is a
-// value with nowhere to be.
+// container. It must still be distinct from every leaf address: a container is
+// asked whether it is there and never for a value, so a leaf sharing its
+// address is a value with nowhere to be.
 func (c *compiler) checkContainersDistinct() {
 	at := make(map[Path]Path, len(c.leaves))
 	for _, l := range c.leaves {
 		at[l.addr] = l.field
 	}
 
-	for _, k := range c.containers {
+	for _, k := range c.containers() {
 		field, ok := at[k.addr]
-		if !ok {
+
+		// A leaf whose address is a proper prefix of another leaf's has already
+		// been reported, and it is the same mistake: the subtree beneath the
+		// container is what made it a prefix. Saying it twice is the duplicate
+		// diagnosis ADR-0008's tiers exist to stop, and the case that needs
+		// this rule at all is a leaf on a container with nothing static under
+		// it, which prefix-freeness cannot see (ADR-0016).
+		if !ok || slices.Contains(c.clashed, k.addr) {
 			continue
 		}
 
 		c.errAt(k.addr, fmt.Sprintf(
-			"a container address and a leaf address at once, %s and %s: a container carries only absence "+
-				"or a null, so a value at it has nowhere to be", k.field, field))
+			"a container address and a leaf address at once, %s and %s: a container is asked whether it is "+
+				"there and never for a value, so a value at it has nowhere to be", k.field, field))
 	}
 }
 
-// addressSet is what a driver's Bind is handed: every leaf address the type
-// determines plus every container address, and never a wildcard shape, so every
-// member is one a driver can fetch, write, name and check (ADR-0003).
+// checkContainersUnique refuses two container addresses that are one address.
 //
-// Which of them are containers is one bit per address the compiler holds here
-// and [AddressSet] does not expose, because a driver names, fetches, writes and
-// checks every member uniformly and a bit it cannot see is a bit it cannot
-// branch on wrongly.
+// Nothing checked a container against another container, so two fields tagged
+// at one address compiled clean and the dump then realised the container and
+// something beneath it at once, which ADR-0003 rules out: measured, a nil
+// second pointer wrote a null over the first one's child and the round trip
+// lost it in silence (#225).
+func (c *compiler) checkContainersUnique() {
+	at := make(map[Path]Path, len(c.sections)+len(c.composites))
+
+	for _, k := range c.containers() {
+		field, taken := at[k.addr]
+		if taken {
+			c.errAt(k.addr, fmt.Sprintf(
+				"addressed by two containers, %s and %s: a container address is never realised at the same "+
+					"time as anything beneath it, and where one of them is a composite the addresses under "+
+					"it come from the value, so one of the two would write over the other's children",
+				field, k.field))
+
+			continue
+		}
+
+		at[k.addr] = k.field
+	}
+}
+
+// containers is every container address the type determines, sections first, in
+// the order they were compiled.
+func (c *compiler) containers() []leaf { return slices.Concat(c.sections, c.composites) }
+
+// addressSet is what a driver's Bind is handed: every address the type
+// determines, each typed by what can be asked at it, and never a wildcard
+// shape (ADR-0003, ADR-0016).
+//
+// The kind is the whole of what used to be missing. Three types that compiled
+// to one address set now compile to three, so a driver classifies once at Bind
+// rather than inferring per call which question an address admits (#239).
 func (c *compiler) addressSet() *AddressSet {
-	addrs := make([]Path, 0, len(c.leaves)+len(c.containers))
+	members := make([]Member, 0, len(c.leaves)+len(c.sections)+len(c.composites))
+
 	for _, l := range c.leaves {
-		addrs = append(addrs, l.addr)
+		members = append(members, leafAt(l.addr))
 	}
 
-	for _, k := range c.containers {
-		addrs = append(addrs, k.addr)
+	for _, k := range c.sections {
+		members = append(members, sectionAt(k.addr))
 	}
 
-	return NewAddressSet(addrs...)
+	for _, k := range c.composites {
+		members = append(members, compositeAt(k.addr))
+	}
+
+	return newAddressSet(members...)
 }
 
 // errAt records one refusal. Every refusal a compile produces is one of these:

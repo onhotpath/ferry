@@ -1,24 +1,60 @@
 # Writing a driver
 
-A ferry driver is two methods and, if your plane needs them, up to three more.
+A ferry driver is two methods and, if your plane needs them, up to five more.
 This is the whole contract, plus the one call that proves you got it right.
 
-The decision records are [ADR-0004](../adr/0004-source-and-sink.md) for the contract, [ADR-0003](../adr/0003-how-a-leaf-addresses-a-plane.md) for addressing, and [ADR-0014](../adr/0014-what-ferrytest-exports.md) for the conformance suite.
+The decision records are [ADR-0004](../adr/0004-source-and-sink.md) for the contract, [ADR-0003](../adr/0003-how-a-leaf-addresses-a-plane.md) for addressing, [ADR-0016](../adr/0016-the-sealed-address-model.md) for the address kinds the contract is signed over, and [ADR-0014](../adr/0014-what-ferrytest-exports.md) for the conformance suite.
 
-Three drivers ship in this repository and are worth reading beside this page: [`driver/env`](../../driver/env/), a read-only flat plane; [`driver/kv`](../../driver/kv/), a flat plane in both directions with a caller-supplied client; and [`driver/yaml`](../../driver/yaml/), a tree plane that edits a file in place.
+Four drivers ship in this repository and are worth reading beside this page: [`driver/env`](../../driver/env/), a read-only flat plane; [`driver/kv`](../../driver/kv/), a flat plane in both directions with a caller-supplied client; [`driver/yaml`](../../driver/yaml/), a tree plane that edits a file in place; and [`driver/http`](../../driver/http/), a read-only plane over a query string or a header block, which is the one that has to spell one address two ways.
 `ferrytest.MemPlane` in [`ferrytest/memplane.go`](../../ferrytest/memplane.go) is a complete, working driver of about the size yours will be, and is the shortest thing to read first.
 
 ## The vocabulary
 
 - A **plane** is whatever holds your data: a file, a KV store, a process environment, an HTTP query string.
-- An **address** is a `ferry.Path`: an ordered sequence of segments, each carrying a kind (`Name` or `Index`) and a text.
-  `/db/host` and `/tags#0` are addresses.
+- A **path** is a `ferry.Path`: an ordered sequence of segments, each carrying a kind (`Name` or `Index`) and a text.
+  `/db/host` and `/tags#0` are paths.
+- An **address** is a path plus what kind of place it names, and the three kinds are three types.
 - A **plane key** is what your plane calls that address: `DB_HOST`, `db/host`, or nothing at all if your plane is a tree and you walk the segments.
 - A **`ferry.Value`** is what crosses the boundary: a kind and a text, in a comparable 24-byte struct.
   The six kinds are `Absent`, `Null`, `Bool`, `Number`, `String` and `Bytes`.
 
 **Core never produces a plane key**, because a separator is plane knowledge.
 Flattening is the driver's, always.
+
+## The three address kinds
+
+```go
+type LeafAddr      struct{ /* sealed */ }  // a place a Value can be
+type SectionAddr   struct{ /* sealed */ }  // children known from the type
+type CompositeAddr struct{ /* sealed */ }  // children minted by the value
+```
+
+A **leaf** is a place a `ferry.Value` can be: a `string`, an `int`, a `time.Duration`, anything a codec carries.
+A **section** is a struct, an array, or either of those behind a pointer: its children come from the type, so they are all in the address set you were handed and no driver is ever asked to list them.
+A **composite** is a slice or a map: its children do not exist until there is a value, so they are in no address set and only enumeration reveals them.
+
+The three **partition** the address space and they are not interchangeable.
+`/db` as a section and `/db` as a composite are different addresses, and asking a set whether it holds one answers nothing about the other.
+
+**Each carries one unexported field, so nothing outside core can build one.**
+There is no conversion into the struct type and no constructor, and the schema compiler is the only thing that mints an address at all.
+That is what puts the wrong question out of reach rather than under a runtime guard: `Get` takes a leaf, `Probe` takes a container and `Children` takes a composite, so asking a plane for the *value* of a section is a compile error in your driver.
+
+That matters because it was a live class of defect and not a hypothetical.
+[ADR-0016](../adr/0016-the-sealed-address-model.md) records four issues that were the same mistake at four addresses, the sharpest being a struct field named `home` that made the env driver read the ambient `$HOME`, because `Get` was asked for a value at an address no value can be at and the process environment happened to have one.
+
+Read an address with the two methods every kind has:
+
+```go
+addr.Path()    // the path, kind dropped: what a key function walks
+addr.String()  // the canonical rendering, for a diagnostic
+```
+
+`Path()` is the seam to everything path-shaped, including `ferry.KeyFunc`, which still takes a `ferry.Path` because a plane key is a function of the segments and never of the kind.
+
+**Which Go type produced a composite is withheld**, deliberately.
+A `[]string` and a `map[string]string` are both a `CompositeAddr`.
+You mint `Name` or `Index` segments from what your plane holds, and the schema types the child; which of the two Go types is behind it is core's business and refusing a mismatch is core's job.
 
 ## The two required methods
 
@@ -35,15 +71,18 @@ type OpenFunc       func(ctx context.Context) (Reader, error)
 type OpenWriterFunc func(ctx context.Context) (Writer, error)
 
 type Reader interface {
-	Get(ctx context.Context, addr ferry.Path) (ferry.Value, error)
+	Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error)
 }
 
 type Writer interface {
-	Set(ctx context.Context, addr ferry.Path, v ferry.Value) error
+	Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) error
 }
 ```
 
 A read-only driver implements **two methods in total**: one `Bind` and one `Get`.
+
+Both required methods take a **leaf**, so neither is ever asked about a container's own address.
+What a plane holds at a container address is `Prober`'s answer, and what a dump has to say there is `Ensurer`'s, both below.
 
 `Source` and `Sink` are separate interfaces rather than two halves of one, and the deciding case is environment variables, which have no honest dump.
 With two interfaces the refusal is free: `driver/env` does not implement `Sink`, so `ferry.Dump` with it is a compile error at the call site rather than a runtime error or an `ErrUnsupported` nobody reads.
@@ -91,6 +130,9 @@ func NewKeys(a *ferry.AddressSet, name string, f ferry.KeyFunc) (*ferry.Keys, er
 type KeyFunc func(addr ferry.Path) (string, error)
 ```
 
+A `KeyFunc` takes a `ferry.Path` and not a typed address, because a plane key is a function of the segments and never of the kind: `DB_HOST` is the same join whether `/db/host` is a leaf or a section.
+Read one off a typed address with `addr.Path()`.
+
 Hand it the address set, your driver's short name for diagnostics, and your key function.
 It computes every static key once, checks both properties over the whole set, and returns an error naming every offending address:
 
@@ -131,19 +173,58 @@ That is conformance case 8, and the retention is unbounded: measured at 20,000 a
 The returned function is the open's and is not safe for concurrent use.
 The binding it came from is, because the static table never changes after `NewKeys` returns.
 
-### What the address set contains
+### What the address set contains, and classifying it once
 
-Every leaf address the type determines, **plus every container address**, and never a wildcard shape.
+```go
+func (a *ferry.AddressSet) Seq() iter.Seq[ferry.Member]
+func (a *ferry.AddressSet) Has(m ferry.Member) bool
+func (a *ferry.AddressSet) Len() int
+```
 
-So you are handed only addresses you can fetch, write, name and check.
-A container address is in the set so that a batch fetch, a legality check and an injectivity check reach it before any I/O rather than at the first `Get`.
+Every address the type determines, each **typed** by what can be asked at it, and never a wildcard shape.
+So you are handed only addresses you can fetch, write, name and check, and you are told which of those each one admits.
 
-A driver that treats its precomputed table as a **closed** set refuses a legal write.
+`ferry.Member` is the sealed sum of the three kinds and nothing else, so the type switch below is total and needs no default arm that could quietly swallow a fourth kind.
+`ferry.Container` is the sum of `SectionAddr` and `CompositeAddr`, which is what `Probe` and `Ensure` take.
+
+**Classify once, at `Bind`, before any I/O:**
+
+```go
+func (s Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
+	keys, err := ferry.NewKeys(addrs, "flat", key)
+	if err != nil {
+		return nil, err
+	}
+
+	leaves := make(map[ferry.LeafAddr]string, addrs.Len())
+
+	for m := range addrs.Seq() {
+		if leaf, ok := m.(ferry.LeafAddr); ok {
+			leaves[leaf] = mustKey(keys, leaf)
+		}
+	}
+	...
+}
+```
+
+One range and one type switch, on the cold path, and the typed addresses are comparable and go straight into a map as keys.
+
+**That loop is the payoff, and it was previously unwritable.**
+[ADR-0016](../adr/0016-the-sealed-address-model.md) records the measurement: a `string`, a `[]string` and a `map[string]string` at one tag compiled to three **byte-identical** address sets, so a driver's Bind-time "is this a container?" check compiled and could never fire.
+They now compile to `{Leaf /x}`, `{Composite /x}` and `{Composite /x}`, and the third row is deliberately incomplete: the slice and the map are the same address because no driver needs the difference.
+
+**The set is bigger than it used to be.**
+Every nested struct and every array now contributes a `SectionAddr`, where before only a composite that could be nil contributed anything at all ([ADR-0003](../adr/0003-how-a-leaf-addresses-a-plane.md), amended).
+A section with no address of its own is a section nothing can be asked about, and `Probe` is exactly that question.
+
+The set is sorted segment-wise and the order is stable across builds of one schema, so you may key a table by position.
+
+A driver that treats its precomputed table as a **closed** set refuses a legal write, because the addresses a value mints are in no address set.
 That is why core hands out a key function rather than a map.
 
-## The three optional interfaces
+## The five optional interfaces
 
-All three are discovered by type assertion on your `Reader` or `Writer`, and none is required.
+All five are discovered by type assertion on your `Reader` or `Writer`, and none is required.
 
 ```go
 type Releaser interface {
@@ -154,8 +235,16 @@ type Committer interface {
 	Commit(ctx context.Context) error
 }
 
+type Prober interface {
+	Probe(ctx context.Context, addr ferry.Container) (ferry.SectionInfo, error)
+}
+
 type Enumerator interface {
-	Children(ctx context.Context, prefix ferry.Path) ([]ferry.Path, error)
+	Children(ctx context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error)
+}
+
+type Ensurer interface {
+	Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error
 }
 ```
 
@@ -163,12 +252,14 @@ type Enumerator interface {
 | --- | --- |
 | `Releaser` | your reader or writer holds a resource |
 | `Committer` | your writes are not durable until the end of a successful walk |
-| `Enumerator` | your plane can list what is under an address |
+| `Prober` | your plane can say whether a container is there |
+| `Enumerator` | your plane can list what is under a composite |
+| `Ensurer` | your plane can spell a container at the container's own address |
 
-Of the three drivers here, `driver/env` implements one, `driver/kv` two, and `driver/yaml` all three.
-The memory plane in `ferrytest` implements one.
+Of the four drivers here, `driver/yaml` implements all five and the flat planes implement fewer: `driver/kv` reads with `Prober` and `Enumerator` and writes with `Committer` alone, and its refusal to implement `Ensurer` is a declaration rather than an omission, because a store that holds bytes at keys has no way to say that a container is there and holds nothing.
 
 That spread is the case for making them optional rather than methods on `Reader` and `Writer`: a required `Close` would be `return nil` boilerplate in four of ADR-0004's six sinks, and in the source that is indistinguishable from a driver that should have rolled back and did not.
+The same argument holds for `Ensurer`: a stub that stored a zero-length value would make "the section is present and empty" and "the field is empty text" one observation, which is precisely the collision the kinds exist to keep apart.
 
 ### `Releaser` and `Committer`
 
@@ -189,6 +280,51 @@ A `Close` failure appears in the error set ferry reports.
 A sink that needs `Commit` and omits it writes nothing at all, silently.
 That is caught by the first case in the suite, which dumps a value and loads it back.
 
+### `Prober`
+
+This is what a plane is asked at a container's own address, and it is the only thing asked there.
+
+```go
+func (r reader) Probe(_ context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	switch node := r.at(addr.Path()); {
+	case node == nil:      return ferry.SectionAbsent, nil
+	case node.isNull():    return ferry.SectionNull, nil
+	default:               return ferry.SectionPresent, nil
+	}
+}
+```
+
+The three plain answers are **values you return rather than functions you call**, which is `io.EOF`'s idiom, and the type is named for its work the way `fs.FileInfo` is: information about a section, reported by a probe.
+A caller reads one back with `info.Presence()`, giving `ferry.PresenceAbsent`, `ferry.PresencePresent` or `ferry.PresenceNull`.
+The zero `ferry.SectionInfo` is absence, so a driver with nothing to report returns `ferry.SectionInfo{}`.
+
+The three sentinels are package-level vars and are therefore reassignable, exactly as `io.EOF` is.
+Core does not stand in that hazard, because what the walk compares against is an unexported copy, so assigning to one breaks the assigning program's own comparisons and nothing else.
+Do not.
+
+**What each answer means to the walk:**
+
+| you answer | a nil-able section | a slice or a map that listed nothing |
+| --- | --- | --- |
+| `SectionAbsent` | the plane said nothing, so what is under it decides | the plane said nothing, so the field keeps its seed |
+| `SectionPresent` | the pointer is materialised even where nothing was written beneath it | the field is zeroed, and the plane counts as having spoken |
+| `SectionNull` | the pointer is nil | the field is zeroed, and the plane counts as having spoken |
+
+A slice and a map collapse the last two rows, because nil and empty are one Go value there.
+What separates them from `SectionAbsent` is not the value they leave but what they say to the section above: a null and a present-and-empty container are the plane speaking, and absence is not, so a `LoadOver` clears the field for the first two and keeps the seed for the third.
+
+The `SectionPresent` row on the left is the whole reason a present-but-empty section survives a reload.
+Go can express empty-but-present, a non-nil `*Options` whose every field is omitted, and without a driver that can both write and report that state the round trip turns present-empty into absence.
+
+A composite is probed only where `Children` came back empty, so a populated container never reaches this table at all.
+A source with no `Enumerator` is a special case: a `SectionNull` there is a complete answer it can still give, and anything else is the refusal naming the field and the source.
+
+`Prober` is optional for the same reason `Enumerator` is: a plane that cannot list often cannot answer this either.
+A source implementing neither loads the leaves the type determines and nothing else, which is a documented property of your plane rather than a surprise.
+
+**A flat plane can usually still answer**, by inference rather than by storage.
+`driver/env` and `driver/kv` both answer `SectionPresent` when anything is held under the container's prefix and `SectionAbsent` otherwise, and neither ever answers `SectionNull`, because neither plane has a null.
+
 ### `Enumerator`
 
 This is how `Load` discovers the addresses that come from the **value** rather than from the type: a map's keys, a sequence's length.
@@ -204,24 +340,64 @@ So the two directions cover different address sets, and that is a documented pro
 Loading a map-typed field from a non-enumerating source is an error naming the field and the source, never a silently empty map.
 An array loads either way, because an array's element addresses are known from the type.
 
-**`Children` returns addresses and not names**, deliberately.
-An address carries its segment kind, so the plane says whether the container is a mapping or a sequence rather than the caller guessing it from base-10 text.
-Sort them segment-wise: sorting the rendering gives `0 1 10 11 2` for twelve indices, and that is a conformance case.
+**`Children` is asked only about a `CompositeAddr`.**
+An array is a **section** and is never enumerated: its children are compiled from the type, so there is no call that could mint one, and a `Name` child appearing under an array is not a bug to fix but a shape that no longer exists ([ADR-0016](../adr/0016-the-sealed-address-model.md)).
+The same signature makes it impossible to be asked to list a leaf.
 
-**At a slice or a map, core asks you for children before it asks the container's own address**, and asks the container's own address only where you returned nothing.
+**`Children` returns segments and not addresses.**
 
-So being asked for children is core telling you that the address is a dynamic container, and it is the only such signal you get: an address arrives at `Get` carrying no kind and no arity, so a container address and a leaf address are the same call.
-A plane whose element values live under the container's own name, an HTTP query string or a header block, needs exactly that signal to answer at all.
-The other side of it is that an answer at a container address which has children under it is never read (ADR-0003).
+```go
+func (r reader) Children(_ context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error) {
+	// ferry.NameSegment("k") for a mapping member, ferry.IndexSegment(0) for a position
+}
+```
 
-A source that does **not** implement `Enumerator` is asked the other way round, container address first, and a `Null` there is a complete answer it can still give.
+You say how the plane spells its members and **the schema types the child**, so you never construct an address at all and you cannot answer about one you were not asked about.
+The kind is still yours: a `NameSegment` says the plane holds a mapping member and an `IndexSegment` says it holds a position, and core refuses a name under a sequence and a position under a mapping, naming the segment.
+Order is the plane's own, and a plane with no defined order documents the order it mints in.
+If you sort, sort segment-wise: sorting the rendering gives `0 1 10 11 2` for twelve indices, and that is a conformance case.
 
-**If your plane can spell one address two ways, `Children` is where you refuse an overlap.**
+**At a slice or a map, core asks you for children before it probes the container's own address**, and probes only where you returned nothing.
+A member list is the whole answer wherever there is one, and the probe is only there to tell an absent container from an explicitly null one.
+
+> **Retracted, and worth saying why.**
+> This guide used to say that being asked for children was the only signal core gave you that an address was a dynamic container, because "an address arrives at `Get` carrying no kind and no arity, so a container address and a leaf address are the same call".
+> That was true and it is exactly what ADR-0016 removed.
+> The signal now arrives at `Bind`, in the address set, before any I/O and for every container rather than only the dynamic ones, and the calls are different methods over different types.
+> It also used to say that `Children` was the only place you could refuse an overlap during the walk, "because case 3 forbids failing at a container `Get`".
+> There is no container `Get`, and a driver refusing a repeated plane key at a **leaf** now has a home for that refusal.
+
+**If your plane can spell one address two ways, refuse the overlap where the two spellings meet.**
 A multimap plane such as a query string can reach `/tags#0` by a repeated name and by an index-suffixed one, and a request carrying both reaches it twice.
-Report each child address at most once, and where two plane keys reach one child address, fail rather than pick a winner: `ErrPlane`, at the container's address, with a sentinel of your own beside it (ADR-0015).
+Report each child segment at most once, and where two plane keys reach one child, fail rather than pick a winner: `ErrPlane`, at the composite's address, with a sentinel of your own beside it ([ADR-0015](../adr/0015-two-spellings-of-one-address.md)).
 Only an overlap is a clash, so `?tags=a&tags=b&tags.2=z` extends the sequence and loads as three elements.
-`Children` is the only place you can refuse this during the walk, because the addresses are minted here and case 3 forbids failing at a container `Get`.
 The conformance suite does not check it: all five candidate policies scored zero failures (ADR-0015), so this one is on you.
+
+### `Ensurer`
+
+This is what a dump says at a container's own address, and the mirror of `Prober`.
+
+```go
+type Ensurer interface {
+	Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error
+}
+```
+
+Core calls it where the value has nothing to say **beneath** a container:
+
+- a nil pointer, an empty slice and an empty map write `ferry.PresenceNull`;
+- a non-nil pointer whose subtree emitted no write at all writes `ferry.PresencePresent`, which is how present-and-empty gets stored.
+
+`ferry.PresenceAbsent` never arrives, because an address ferry omits gets no call at all rather than a call saying nothing.
+That is the same rule that keeps `KindAbsent` off the write side entirely.
+
+**Implementing nothing is a legitimate answer and it is the loud one.**
+A plane with no spelling for a container implements no `Ensurer`, and core refuses such a dump with `ErrPlane`, naming the address and your plane.
+`driver/kv` takes exactly that position and says so in its own source: storing a zero-length value instead would collapse two observations into one, which is worse than a refusal a caller can read.
+
+The alternatives were weighed and both lose ([ADR-0016](../adr/0016-the-sealed-address-model.md)).
+Accepting the degradation makes present-empty become absent on reload, which is the silent divergence the whole address model exists to remove; refusing everywhere makes a legal Go value undumpable on planes that could carry it perfectly.
+The rule taken is the loud refusal scoped to exactly the planes that cannot spell the value.
 
 ## What `Get` and `Set` must and must not do
 
@@ -232,13 +408,13 @@ That is conformance case 4, and it exists because a real YAML provider was found
 
 Absence is a **kind of the value** and not a second return value: report it as the zero `ferry.Value`, whose kind is `KindAbsent`.
 
-At a **container** address, answer `Absent` or `Null` and nothing else.
-A composite is read one element at a time, so there is no group value for the container itself to hold.
-Which of the two is the plane's own business, and the rule is that **a driver reports what the plane holds**: an address the plane does not hold is `Absent`, and a present address carrying the plane's own null is `Null`.
-At an explicit `tags: []` node in a hand-authored document a tree driver answers `Null`, the same as at `tags: null` (ADR-0014, amended).
+**There is no container arm.**
+`Get` takes a `ferry.LeafAddr`, so the question "what do you hold at this container's own address" cannot be asked here at all and is `Prober`'s.
+That deletes a whole class of driver bug rather than documenting it, and the process environment is the worked case: a struct field named `home` is a section, so `$HOME` can no longer be read as its value.
 
-If you implement `Enumerator`, the walk reaches a slice or a map's own address only after `Children` came back empty, so it is the answer for a container the plane holds nothing under and nothing else.
-The conformance suite still calls `Get` there itself, outside the walk, and still requires it not to fail.
+**A plane holding a container where the schema says leaf is a refusal, not an `Absent`.**
+Answering absence there is how a YAML mapping at a `string` field becomes the Go zero value with a nil error, which is silent loss.
+Refuse it, naming the address and what your plane actually holds.
 
 ### `Set`
 
@@ -246,7 +422,8 @@ The conformance suite still calls `Get` there itself, outside the walk, and stil
 `Absent` is a reader-side kind, and an omitted address is one that gets no `Set` call at all rather than one that gets a `Set` of nothing.
 So an omission is not a deletion: a replacing sink and a patching sink read one dump differently and both are correct.
 
-A composite with no elements is written as `Null` at its own address, which is a value the plane holds and a different observation entirely.
+**`Set` takes a `ferry.LeafAddr` too**, so a `Null` at a container's own address never arrives here.
+A composite with no elements still writes a null at its own address, exactly as it did; it is spelled `Ensure(addr, ferry.PresenceNull)` because a plane that cannot spell one should refuse rather than receive a write it will mis-store.
 
 **A plane that is writable in principle but not right now refuses inside the `OpenWriterFunc`**, with an error wrapping `ferry.ErrReadOnly`.
 Not at `Bind`, which does no I/O and so cannot know, and not at the first `Set`, which has already half-written the plane.
@@ -374,6 +551,10 @@ func (s Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 	}, nil
 }
 
+// prefix is the text every key under a container's own key begins with. This
+// plane joins with an underscore, so a container at "db" holds "db_host".
+func prefix(k string) string { return k + "_" }
+
 // key renders one address as a plane key: segments joined with an underscore,
 // with the bytes a segment may carry and a key may not folded into one.
 //
@@ -406,8 +587,11 @@ type reader struct {
 }
 
 // Get answers with what the store holds, as a String, or with Absent.
-func (r reader) Get(_ context.Context, addr ferry.Path) (ferry.Value, error) {
-	k, err := r.key(addr)
+//
+// It is asked only about a leaf, so a container's own key is never read as a
+// value: what is asked there is Probe.
+func (r reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
+	k, err := r.key(addr.Path())
 	if err != nil {
 		return ferry.Value{}, err
 	}
@@ -418,6 +602,26 @@ func (r reader) Get(_ context.Context, addr ferry.Path) (ferry.Value, error) {
 	}
 
 	return ferry.String(text), nil
+}
+
+// Probe answers whether the store holds anything under a container's own key.
+//
+// A flat store has no null, so a container here is present or absent and never
+// null: there is nothing it could store that would mean "there and empty" and
+// not also mean "empty text".
+func (r reader) Probe(_ context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	k, err := r.key(addr.Path())
+	if err != nil {
+		return ferry.SectionInfo{}, err
+	}
+
+	for held := range r.store {
+		if strings.HasPrefix(held, prefix(k)) {
+			return ferry.SectionPresent, nil
+		}
+	}
+
+	return ferry.SectionAbsent, nil
 }
 
 // Sink is the write half, a second type over the same store.
@@ -446,9 +650,9 @@ type writer struct {
 	key    ferry.KeyFunc
 }
 
-// Set stages one address.
-func (w *writer) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
-	k, err := w.key(addr)
+// Set stages one leaf.
+func (w *writer) Set(_ context.Context, addr ferry.LeafAddr, v ferry.Value) error {
+	k, err := w.key(addr.Path())
 	if err != nil {
 		return err
 	}
@@ -473,6 +677,10 @@ func (w *writer) Commit(context.Context) error {
 }
 
 // text is what this plane can hold. Everything is a string, and there is no null.
+//
+// A null at a container's own address does not arrive here at all: core asks
+// ferry.Ensurer for that, this writer implements none, and core refuses the
+// dump at the address and names this plane.
 func text(v ferry.Value) (string, error) {
 	switch v.Kind() {
 	case ferry.KindString:
@@ -493,7 +701,15 @@ func text(v ferry.Value) (string, error) {
 }
 ```
 
-It implements `Committer` and not `Releaser` - a Go map holds no resource - and not `Enumerator`, which is a real cost stated rather than hidden: a map-typed or slice-typed field cannot be loaded from it, and an array can.
+The reader implements `Prober` and not `Enumerator`, and the writer implements `Committer` and neither `Releaser` nor `Ensurer`.
+
+Each of those absences is a real cost stated rather than hidden.
+No `Enumerator` means a map-typed or slice-typed field cannot be loaded from this plane, though an array can, because an array's element addresses come from the type.
+No `Releaser` because a Go map holds no resource, and a `Close` returning nil is indistinguishable in the source from a rollback somebody forgot.
+No `Ensurer` because this store has no way to say that a container is there and holds nothing, so dumping a nil optional section through it is a refusal naming the address rather than a value quietly stored as empty text.
+
+`Prober` is worth having even here.
+Without it a nil `*Options` seeded by the caller could not be told apart from one the plane never mentioned, and with it the prefix scan answers from the same store the reader already holds.
 
 Using it:
 
@@ -600,20 +816,24 @@ That is the same obligation your key function already carries.
 
 1. Every proof the plane can express round-trips, and every kind it declared it cannot carry is refused loudly.
 2. `Bind` succeeds against an unreachable plane, and the refusal lands inside the open.
-3. `Get` at a container address answers `Absent` or `Null`, per what the plane holds, with a nil error.
+3. `Probe` at a container address answers what the plane holds there, with a nil error: a populated composite is present, and a nil composite, an empty composite and a nil optional section are null.
 4. `Get` returning a non-nil error reaches the caller as an error and never as `Absent`.
-5. `Children` at those addresses returns the element addresses, kinded.
+5. `Children` at a composite address returns the element segments, kinded.
 6. `Commit` runs only on success, `Close` always runs, and a `Close` failure appears in the reported error set.
 7. A driver producing a plane key refuses a non-injective key function over the address set, before any I/O, naming both addresses.
 8. A key function retains nothing across opens, asserted on the **write** side.
 9. A sink accepts a dynamic address its static table never held.
 10. A driver reading its plane from the context refuses at open when it is absent, with `ErrPlane`.
 11. A golden artefact: a fixed value, dumped, compared against fixed expected plane contents.
-12. A sink accepts `Set` of a `Null` at a container address, and that address was in the set its `Bind` received.
+12. A sink writes a null at a container address, and that address was in the set its `Bind` received **at its kind**: a composite for a nil or empty composite, a section for a nil optional section.
+
+Cases 8 and 9 reach a value-minted address by dumping a one-entry map rather than by calling `Set` directly, because the address kinds are sealed and only the compiler mints one.
+For the same reason the suite no longer builds an `AddressSet` by hand: it compiles a fixture type and captures the set core hands your own `Bind`, so it can never hand you an address the compiler would not have minted ([ADR-0014](../adr/0014-what-ferrytest-exports.md), amended).
 
 A case that cannot apply to your plane is skipped and says so:
 
 ```
+case 3 skipped: the plane's reader does not probe, which is optional for the same reason enumeration is
 case 5 skipped: the plane's reader does not enumerate, which ADR-0004 makes optional
 case 6 skipped: the plane's writer holds no resource, so it implements no Close
 case 10 skipped: the plane puts nothing in a context, so it does not take its plane per request

@@ -434,68 +434,102 @@ func TestAddressSet(t *testing.T) {
 	t.Parallel()
 
 	// A compiled schema's set: leaf addresses plus the container addresses
-	// ADR-0003 puts in it, handed over out of order and with one repeat.
-	set := NewAddressSet(
-		At("tags").Elem(10),
-		At("db", "host"),
-		At("tags"),
-		At("tags").Elem(2),
-		At("db", "auth", "user"),
-		At("db", "host"),
-		At("name"),
+	// ADR-0003 puts in it, each typed by what can be asked at it, handed over
+	// out of order and with one repeat.
+	set := newAddressSet(
+		leafAt(At("tags").Elem(10)),
+		leafAt(At("db", "host")),
+		compositeAt(At("tags")),
+		leafAt(At("tags").Elem(2)),
+		leafAt(At("db", "auth", "user")),
+		leafAt(At("db", "host")),
+		leafAt(At("name")),
+		sectionAt(At("db")),
 	)
 
-	want := []string{"/db/auth/user", "/db/host", "/name", "/tags", "/tags#2", "/tags#10"}
-	if got := renderings(slices.Collect(set.All())); !slices.Equal(got, want) {
-		t.Errorf("All() = %v, want %v", got, want)
+	want := []string{
+		"section /db", "leaf /db/auth/user", "leaf /db/host",
+		"leaf /name", "composite /tags", "leaf /tags#2", "leaf /tags#10",
+	}
+	if got := kinded(set); !slices.Equal(got, want) {
+		t.Errorf("Seq() = %v, want %v", got, want)
 	}
 
 	if got := set.Len(); got != len(want) {
 		t.Errorf("Len() = %d, want %d", got, len(want))
 	}
 
-	if !set.Has(At("tags").Elem(2)) {
-		t.Error("Has(/tags#2) = false")
+	if !set.Has(leafAt(At("tags").Elem(2))) {
+		t.Error("Has(leaf /tags#2) = false")
 	}
 
-	if set.Has(At("tags", "2")) {
-		t.Error("Has(/tags/2) = true, and it was never in the set")
+	if set.Has(leafAt(At("tags", "2"))) {
+		t.Error("Has(leaf /tags/2) = true, and it was never in the set")
+	}
+}
+
+// TestAddressSetPartitionsByKind is what makes the set answer the question a
+// driver actually has. The kinds partition the address space, so one path under
+// two kinds is two addresses and a set holding one answers nothing about the
+// other (ADR-0016).
+func TestAddressSetPartitionsByKind(t *testing.T) {
+	t.Parallel()
+
+	set := newAddressSet(sectionAt(At("db")), leafAt(At("db", "host")))
+
+	if !set.Has(sectionAt(At("db"))) {
+		t.Error("Has(section /db) = false, and the set was built with it")
 	}
 
-	if set.Has(At("db")) {
-		t.Error("Has(/db) = true, and a prefix of a member is not a member")
+	if set.Has(compositeAt(At("db"))) {
+		t.Error("Has(composite /db) = true, and a section is not a composite")
+	}
+
+	if set.Has(leafAt(At("db"))) {
+		t.Error("Has(leaf /db) = true, and a container address holds no value")
 	}
 }
 
 func TestAddressSetIsCopiedFromItsInput(t *testing.T) {
 	t.Parallel()
 
-	addrs := []Path{At("b"), At("a")}
+	addrs := []Member{leafAt(At("b")), leafAt(At("a"))}
 
-	set := NewAddressSet(addrs...)
-	addrs[0] = At("z")
+	set := newAddressSet(addrs...)
+	addrs[0] = leafAt(At("z"))
 
-	if got := renderings(slices.Collect(set.All())); !slices.Equal(got, []string{"/a", "/b"}) {
-		t.Errorf("All() = %v after the caller reused its slice", got)
+	if got := kinded(set); !slices.Equal(got, []string{"leaf /a", "leaf /b"}) {
+		t.Errorf("Seq() = %v after the caller reused its slice", got)
 	}
 }
 
 func TestEmptyAddressSet(t *testing.T) {
 	t.Parallel()
 
-	set := NewAddressSet()
+	set := newAddressSet()
 
 	if got := set.Len(); got != 0 {
 		t.Errorf("Len() = %d, want 0", got)
 	}
 
-	if set.Has(At("a")) {
-		t.Error("Has(/a) = true on an empty set")
+	if set.Has(leafAt(At("a"))) {
+		t.Error("Has(leaf /a) = true on an empty set")
 	}
 
-	if got := slices.Collect(set.All()); len(got) != 0 {
-		t.Errorf("All() yielded %v", got)
+	if got := slices.Collect(set.Seq()); len(got) != 0 {
+		t.Errorf("Seq() yielded %v", got)
 	}
+}
+
+// kinded renders a set as its members' kinds and addresses, because two members
+// at one path render alike and are not one address.
+func kinded(a *AddressSet) []string {
+	out := make([]string, 0, a.Len())
+	for m := range a.Seq() {
+		out = append(out, describe(m))
+	}
+
+	return out
 }
 
 // FuzzPath checks the two properties the canonical form is for: a rendering

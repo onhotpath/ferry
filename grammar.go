@@ -167,8 +167,23 @@ func parseName(raw string, hasOptions bool, key string) (tag, error) {
 	}
 
 	name, err := parseToken(raw, "name")
+	if err != nil {
+		return tag{}, err
+	}
 
-	return tag{name: name}, err
+	// The emptiness check is asked again here, after the token is decoded,
+	// because the quoted empty name is not empty raw text: '' reached this
+	// point, produced "", and minted the empty Name segment ADR-0008 says twice
+	// the grammar cannot write. Measured before the check existed, the schema
+	// compiled clean and the yaml sink wrote a document whose first key was the
+	// empty string, while the env source refused the same schema at Bind (#233).
+	if name == "" {
+		return tag{}, fmt.Errorf(
+			"the name is empty: an empty segment names no address, so every field must name the segment it "+
+				"addresses, or be marked %s:%q", key, skipTag)
+	}
+
+	return tag{name: name}, nil
 }
 
 // bareEqIndex is where a bare name contains "=", or -1. A quoted name may

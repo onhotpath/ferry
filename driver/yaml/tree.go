@@ -139,7 +139,11 @@ func indexOf(text string) (int, error) {
 // kind it needs, so the node this answers with may sit somewhere else in the
 // document entirely (#198). [through] is where that is decided, and
 // [writer.claim] is what catches two addresses arriving at one node.
-func place(doc *yamlv3.Node, addr ferry.Path) (*yamlv3.Node, error) {
+// last is what the node at the address itself has to be: a scalar for every
+// leaf write, and a container for [writer.Ensure] (ADR-0016). It decides
+// nothing but how far an alias at the last step is followed, for the reason
+// [through] gives.
+func place(doc *yamlv3.Node, addr ferry.Path, last yamlv3.Kind) (*yamlv3.Node, error) {
 	// The segments are collected rather than ranged over, because the write
 	// side needs to look one segment ahead: what a container has to be is
 	// decided by the kind of the segment under it.
@@ -156,7 +160,7 @@ func place(doc *yamlv3.Node, addr ferry.Path) (*yamlv3.Node, error) {
 			return nil, err
 		}
 
-		n = through(child, wanted(segs, i))
+		n = through(child, wanted(segs, i, last))
 
 		if i+1 < len(segs) {
 			shape(n, segs[i+1].Kind())
@@ -167,11 +171,10 @@ func place(doc *yamlv3.Node, addr ferry.Path) (*yamlv3.Node, error) {
 }
 
 // wanted is the node kind the address needs at step i: the container the next
-// segment is looked up in, or a scalar at the last step, which is the only
-// thing [writer.Set] ever writes.
-func wanted(segs []ferry.Segment, i int) yamlv3.Kind {
+// segment is looked up in, or what the caller asked for at the last step.
+func wanted(segs []ferry.Segment, i int, last yamlv3.Kind) yamlv3.Kind {
 	if i+1 == len(segs) {
-		return yamlv3.ScalarNode
+		return last
 	}
 
 	if segs[i+1].Kind() == ferry.Index {
@@ -327,29 +330,30 @@ func hasAlias(n *yamlv3.Node) bool {
 	return false
 }
 
-// children is the immediate children of one address, as addresses.
+// children is the segments the document holds immediately under one address.
 //
-// Addresses and not names, because an address carries its segment kind: a
-// sequence position and a mapping member are different answers, and text alone
-// cannot say which (ADR-0004).
-func children(doc *yamlv3.Node, prefix ferry.Path) []ferry.Path {
+// Segments and not addresses, because the driver says how the plane spells its
+// members and the schema types the child they name (ADR-0016). A sequence
+// position and a mapping member are still different answers, and the segment's
+// kind is what says which.
+func children(doc *yamlv3.Node, prefix ferry.Path) []ferry.Segment {
 	n := deref(lookup(doc, prefix))
 	if n == nil {
 		return nil
 	}
 
 	if n.Kind == yamlv3.SequenceNode {
-		return positions(prefix, len(n.Content))
+		return positions(len(n.Content))
 	}
 
-	return keys(n, prefix)
+	return keys(n)
 }
 
 // positions is a sequence's children, in order.
-func positions(prefix ferry.Path, n int) []ferry.Path {
-	out := make([]ferry.Path, 0, n)
+func positions(n int) []ferry.Segment {
+	out := make([]ferry.Segment, 0, n)
 	for i := range n {
-		out = append(out, prefix.Elem(uint(i)))
+		out = append(out, ferry.IndexSegment(uint(i)))
 	}
 
 	return out
@@ -361,19 +365,19 @@ func positions(prefix ferry.Path, n int) []ferry.Path {
 // answers once for, because two entries under one key are one address and
 // [member] reads the first of them: enumerating it twice would hand core an
 // address it then reads a single value from, twice.
-func keys(n *yamlv3.Node, prefix ferry.Path) []ferry.Path {
+func keys(n *yamlv3.Node) []ferry.Segment {
 	if n.Kind != yamlv3.MappingNode {
 		return nil
 	}
 
 	seen := make(map[string]bool, len(n.Content)/2)
-	out := make([]ferry.Path, 0, len(n.Content)/2)
+	out := make([]ferry.Segment, 0, len(n.Content)/2)
 
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if k := n.Content[i]; k.Kind == yamlv3.ScalarNode && !seen[k.Value] {
 			seen[k.Value] = true
 
-			out = append(out, prefix.At(k.Value))
+			out = append(out, ferry.NameSegment(k.Value))
 		}
 	}
 

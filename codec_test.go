@@ -210,9 +210,9 @@ func (h *hostPort) UnmarshalText(text []byte) error {
 func TestATextPairContributesOneAddress(t *testing.T) {
 	t.Parallel()
 
-	mustBeAddresses(t, boundBy(t, func(ctx context.Context, s Sink) error {
+	mustBeMembers(t, boundBy(t, func(ctx context.Context, s Sink) error {
 		return Dump(ctx, leafHolder[hostPort]{V: hostPort{Host: "db1", Port: 5432}}, s)
-	}), []string{"/v"})
+	}), []string{"leaf /v"})
 
 	if got := dumped(t, leafHolder[hostPort]{V: hostPort{Host: "db1", Port: 5432}}); got != String("db1:5432") {
 		t.Errorf("the struct lands as %#v, want one string", got)
@@ -296,7 +296,7 @@ func TestOnlyTheTextPairIsAnArm(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			mustBeAddresses(t, boundBy(t, c.dump), []string{"/v/n"})
+			mustBeMembers(t, boundBy(t, c.dump), []string{"section /v", "leaf /v/n"})
 		})
 	}
 

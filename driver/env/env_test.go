@@ -77,9 +77,7 @@ func TestGetAnswersStringOrAbsent(t *testing.T) {
 	e.vars["EMPTY"] = ""
 	e.vars["SET"] = "v"
 
-	addrs := []ferry.Path{ferry.At("empty"), ferry.At("set"), ferry.At("missing")}
-
-	r, err := bound(e, addrs)
+	g, err := boundTo[threeLeaves](e)
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
@@ -90,16 +88,25 @@ func TestGetAnswersStringOrAbsent(t *testing.T) {
 		ferry.At("missing"): {},
 	}
 
-	for addr, expected := range want {
-		got, getErr := r.Get(t.Context(), addr)
+	for at, expected := range want {
+		got, getErr := g.r.Get(t.Context(), g.leaf(t, at))
 		if getErr != nil {
-			t.Fatalf("Get(%s): %v", addr, getErr)
+			t.Fatalf("Get(%s): %v", at, getErr)
 		}
 
 		if got != expected {
-			t.Errorf("Get(%s) = %#v, want %#v", addr, got, expected)
+			t.Errorf("Get(%s) = %#v, want %#v", at, got, expected)
 		}
 	}
+}
+
+// threeLeaves is one variable set to empty, one set to a value and one never
+// set, which is the whole of what this plane's set-against-unset distinction has
+// to say at three addresses.
+type threeLeaves struct {
+	Empty   string `ferry:"empty"`
+	Set     string `ferry:"set"`
+	Missing string `ferry:"missing"`
 }
 
 // TestOneOpenSeesOneEnvironment pins the snapshot, which is a decision rather
@@ -111,23 +118,28 @@ func TestOneOpenSeesOneEnvironment(t *testing.T) {
 	e := newEnviron()
 	e.vars["HOST"] = "first"
 
-	addr := ferry.At("host")
-
-	r, err := bound(e, []ferry.Path{addr})
+	g, err := boundTo[oneHost](e)
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 
 	e.vars["HOST"] = "second"
 
-	got, err := r.Get(t.Context(), addr)
+	at := ferry.At("host")
+
+	got, err := g.r.Get(t.Context(), g.leaf(t, at))
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 
 	if got != ferry.String("first") {
-		t.Errorf("Get(%s) = %#v after the environment changed, want the value the open snapshotted", addr, got)
+		t.Errorf("Get(%s) = %#v after the environment changed, want the value the open snapshotted", at, got)
 	}
+}
+
+// oneHost is the smallest schema with a leaf to read.
+type oneHost struct {
+	Host string `ferry:"host"`
 }
 
 // TestEnvironEntriesThatNameNothingAreSkipped covers the two shapes an environ
@@ -154,29 +166,13 @@ func TestZeroSourceRefusesAtBind(t *testing.T) {
 
 	var s Source
 
-	_, err := s.Bind(ferry.NewAddressSet(ferry.At("leaf")))
-	if !errors.Is(err, ErrOption) {
-		t.Errorf("the zero Source bound with %v, want a refusal about its options", err)
-	}
-}
-
-// TestGetRefusesAnAddressThePlaneCannotName holds a read to the same legality
-// rule Bind applies to the static set.
-//
-// The address below is one only a value can mint - a map holding the empty key -
-// so it is in no compiled set and reaches the driver for the first time here. A
-// driver that answered Absent for it would report that the plane does not hold
-// an address it cannot even name.
-func TestGetRefusesAnAddressThePlaneCannotName(t *testing.T) {
-	t.Parallel()
-
-	r, err := bound(newEnviron(), []ferry.Path{ferry.At("labels")})
+	set, err := addrsOf[oneHost]()
 	if err != nil {
-		t.Fatalf("Bind: %v", err)
+		t.Fatalf("compiling the fixture: %v", err)
 	}
 
-	if _, err = r.Get(t.Context(), ferry.At("labels", "")); !errors.Is(err, ErrIllegalName) {
-		t.Errorf("Get at an unnameable address failed with %v, want the legality refusal", err)
+	if _, err = s.Bind(set); !errors.Is(err, ErrOption) {
+		t.Errorf("the zero Source bound with %v, want a refusal about its options", err)
 	}
 }
 
@@ -196,7 +192,20 @@ func TestBindTakesNoAddressSetAtAll(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 
-	got, err := r.Get(t.Context(), ferry.At("anything"))
+	// The address comes from a compiled schema this binding was never handed,
+	// which is exactly the case: a driver bound to nothing is still asked, and
+	// what it answers is an absence rather than a panic.
+	set, err := addrsOf[oneHost]()
+	if err != nil {
+		t.Fatalf("compiling the fixture: %v", err)
+	}
+
+	addr, ok := leafIn(set, ferry.At("host"))
+	if !ok {
+		t.Fatal("the fixture names no leaf at /host")
+	}
+
+	got, err := r.Get(t.Context(), addr)
 	if err != nil || got.Kind() != ferry.KindAbsent {
 		t.Errorf("Get = %#v, %v, want an absence: nothing is bound and nothing is set", got, err)
 	}
@@ -255,5 +264,102 @@ func TestLoadFillsAStruct(t *testing.T) {
 
 	if !maps.Equal(got.Limits, want.Limits) {
 		t.Errorf("Limits = %v, want %v", got.Limits, want.Limits)
+	}
+}
+
+// The schemas the presence rule is read through.
+//
+// A section's address is a place a plane is asked whether the section is there,
+// and never a place a value can be, which is the whole of #219: a struct field
+// named home makes /home a section, and a process environment holding HOME has
+// nothing to say about it.
+type (
+	homePaths struct {
+		Root string `ferry:"root"`
+	}
+
+	homeConfig struct {
+		Home *homePaths `ferry:"home"`
+	}
+)
+
+// TestAnAmbientVariableAtASectionIsNotAValue is #219, retired by construction.
+//
+// HOME is set to something this schema never asked for, and HOME_ROOT holds the
+// value it did. Before the address kinds, the driver was asked for a value at
+// /home, answered with the ambient HOME, and core refused the whole load; now
+// the question is unaskable and the load reads what is actually there.
+func TestAnAmbientVariableAtASectionIsNotAValue(t *testing.T) {
+	t.Parallel()
+
+	e := newEnviron()
+	e.vars["HOME"] = "/Users/me"
+	e.vars["HOME_ROOT"] = "/srv"
+
+	got, err := ferry.Load[homeConfig](t.Context(), New(Environ(e.environ)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got.Home == nil || got.Home.Root != "/srv" {
+		t.Errorf("Home = %+v, want the section HOME_ROOT filled", got.Home)
+	}
+}
+
+// TestProbeAnswersFromWhatIsUnderTheName is the same rule at the driver's own
+// boundary, where a flat plane's one distinction is visible.
+//
+// A container's own name holds nothing on this plane ever, so its presence is
+// the presence of its members: HOME_ROOT makes /home present, and unsetting it
+// makes /home absent however much the ambient HOME is set.
+func TestProbeAnswersFromWhatIsUnderTheName(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		vars map[string]string
+		want ferry.Presence
+	}{
+		"a member below it is present": {
+			vars: map[string]string{"HOME": "/Users/me", "HOME_ROOT": "/srv"},
+			want: ferry.PresencePresent,
+		},
+		"the ambient name alone is absent": {
+			vars: map[string]string{"HOME": "/Users/me"},
+			want: ferry.PresenceAbsent,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			checkProbe(t, tc.vars, tc.want)
+		})
+	}
+}
+
+// checkProbe binds one environment and asks about the one section in it.
+func checkProbe(t *testing.T, vars map[string]string, want ferry.Presence) {
+	t.Helper()
+
+	e := newEnviron()
+	maps.Copy(e.vars, vars)
+
+	g, err := boundTo[homeConfig](e)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	prober, ok := g.r.(ferry.Prober)
+	if !ok {
+		t.Fatal("the reader does not probe, and a section's presence would have nowhere to come from")
+	}
+
+	info, err := prober.Probe(t.Context(), g.section(t, ferry.At("home")))
+	if err != nil {
+		t.Fatalf("Probe(/home): %v", err)
+	}
+
+	if info.Presence() != want {
+		t.Errorf("Probe(/home) = %v, want %v", info.Presence(), want)
 	}
 }

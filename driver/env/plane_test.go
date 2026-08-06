@@ -124,13 +124,17 @@ type standInWriter struct {
 // an environment variable is text, so a Null has no representation here, and
 // writing one as an empty string would make an empty composite and a composite
 // of one empty element the same bytes.
-func (w standInWriter) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
+// It implements no ferry.Ensurer, and that absence is the declaration: a
+// container that is present and holds nothing, and a container that is null,
+// have no spelling in an environment, so core refuses those writes naming this
+// plane rather than this plane storing something misleading (ADR-0016).
+func (w standInWriter) Set(_ context.Context, addr ferry.LeafAddr, v ferry.Value) error {
 	text, err := carried(v)
 	if err != nil {
-		return ferry.ErrorAt(addr, err)
+		return ferry.ErrorAt(addr.Path(), err)
 	}
 
-	key, err := w.keys(addr)
+	key, err := w.keys(addr.Path())
 	if err != nil {
 		return err
 	}
@@ -169,16 +173,141 @@ func carried(v ferry.Value) (string, error) {
 	}
 }
 
-// bound is one source bound to one address set and opened, which is what the
-// tests that assert on Get and Children need and what neither ferry.Load nor
-// ferrytest reaches directly.
-func bound(e *fakeEnviron, addrs []ferry.Path, opts ...Option) (ferry.Reader, error) {
-	src := New(append([]Option{Environ(e.environ)}, opts...)...)
+// The apparatus for asking this driver a question directly.
+//
+// The three address kinds are sealed and only the schema compiler mints them
+// (ADR-0016), so a test that wants to hand this driver an address asks the
+// compiler for one rather than writing it. That is the same door core comes in
+// through, which is what keeps these tests asserting about the driver rather
+// than about a set a test invented.
 
-	open, err := src.Bind(ferry.NewAddressSet(addrs...))
-	if err != nil {
+// captureSource records the address set core hands a Bind and reads nothing.
+type captureSource struct{ set *ferry.AddressSet }
+
+func (c *captureSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
+	c.set = addrs
+
+	return func(context.Context) (ferry.Reader, error) { return captureReader{}, nil }, nil
+}
+
+type captureReader struct{}
+
+func (captureReader) Get(context.Context, ferry.LeafAddr) (ferry.Value, error) {
+	return ferry.Value{}, nil
+}
+
+// addrsOf is every address T names, typed, straight from the compiler.
+func addrsOf[T any](opts ...ferry.Option) (*ferry.AddressSet, error) {
+	c := &captureSource{}
+	if _, err := ferry.Bind[T](c, opts...); err != nil {
 		return nil, err
 	}
 
-	return open(context.Background())
+	return c.set, nil
+}
+
+// leafIn, sectionIn and compositeIn find one address of one kind in a compiled
+// set. A miss is a test naming an address its own fixture does not have, so the
+// caller fails on it rather than reading a zero address.
+func leafIn(set *ferry.AddressSet, at ferry.Path) (ferry.LeafAddr, bool) {
+	for m := range set.Seq() {
+		if a, ok := m.(ferry.LeafAddr); ok && a.Path() == at {
+			return a, true
+		}
+	}
+
+	return ferry.LeafAddr{}, false
+}
+
+func sectionIn(set *ferry.AddressSet, at ferry.Path) (ferry.SectionAddr, bool) {
+	for m := range set.Seq() {
+		if a, ok := m.(ferry.SectionAddr); ok && a.Path() == at {
+			return a, true
+		}
+	}
+
+	return ferry.SectionAddr{}, false
+}
+
+func compositeIn(set *ferry.AddressSet, at ferry.Path) (ferry.CompositeAddr, bool) {
+	for m := range set.Seq() {
+		if a, ok := m.(ferry.CompositeAddr); ok && a.Path() == at {
+			return a, true
+		}
+	}
+
+	return ferry.CompositeAddr{}, false
+}
+
+// rig is one source bound to the addresses a fixture type names and opened over
+// one environment, which is what the tests that assert on Get, Probe and
+// Children need and what neither ferry.Load nor ferrytest reaches directly.
+type rig struct {
+	set *ferry.AddressSet
+	r   ferry.Reader
+}
+
+// boundTo compiles T, binds this driver to the addresses T names, and opens a
+// reader over e.
+func boundTo[T any](e *fakeEnviron, opts ...Option) (rig, error) {
+	set, err := addrsOf[T]()
+	if err != nil {
+		return rig{}, err
+	}
+
+	src := New(append([]Option{Environ(e.environ)}, opts...)...)
+
+	open, err := src.Bind(set)
+	if err != nil {
+		return rig{}, err
+	}
+
+	r, err := open(context.Background())
+	if err != nil {
+		return rig{}, err
+	}
+
+	return rig{set: set, r: r}, nil
+}
+
+// leaf, section and composite are the typed addresses a case asks about, looked
+// up in the set the fixture compiled to.
+func (g rig) leaf(t testingT, at ferry.Path) ferry.LeafAddr {
+	t.Helper()
+
+	a, ok := leafIn(g.set, at)
+	if !ok {
+		t.Fatalf("the fixture names no leaf at %s", at)
+	}
+
+	return a
+}
+
+func (g rig) section(t testingT, at ferry.Path) ferry.SectionAddr {
+	t.Helper()
+
+	a, ok := sectionIn(g.set, at)
+	if !ok {
+		t.Fatalf("the fixture names no section at %s", at)
+	}
+
+	return a
+}
+
+func (g rig) composite(t testingT, at ferry.Path) ferry.CompositeAddr {
+	t.Helper()
+
+	a, ok := compositeIn(g.set, at)
+	if !ok {
+		t.Fatalf("the fixture names no composite at %s", at)
+	}
+
+	return a
+}
+
+// testingT is the half of *testing.T these helpers need, named so that they take
+// a *testing.T without the package importing anything a driver would not.
+type testingT interface {
+	Helper()
+	Fatalf(format string, args ...any)
 }

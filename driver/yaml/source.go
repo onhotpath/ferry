@@ -14,20 +14,24 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// The read half implements two of the three optional interfaces and not the
-// third, and the omission is the decision.
+// The read half implements three of the four optional interfaces and not the
+// fourth, and the omission is the decision.
 //
 // [ferry.Enumerator] is here because a YAML mapping and a YAML sequence can
 // both say what is under them, and a plane that cannot list is a plane no
-// map-typed field can be loaded from. [ferry.Releaser] is not, because the open
-// reads the whole document and closes the file before it returns, so a Close
-// here would be the `return nil` boilerplate ADR-0004 refuses by name: in the
-// source it is indistinguishable from a driver that should have released
-// something and did not. The write half holds a staging file and implements
-// both Committer and Releaser, which is where the lifecycle lives.
+// map-typed field can be loaded from. [ferry.Prober] is here because a document
+// tree distinguishes all three answers a container address carries: a missing
+// key, an explicit null, and a mapping that is there and empty (ADR-0016).
+// [ferry.Releaser] is not, because the open reads the whole document and closes
+// the file before it returns, so a Close here would be the `return nil`
+// boilerplate ADR-0004 refuses by name: in the source it is indistinguishable
+// from a driver that should have released something and did not. The write half
+// holds a staging file and implements both Committer and Releaser, which is
+// where the lifecycle lives.
 var (
 	_ ferry.Source     = Source{}
 	_ ferry.Reader     = reader{}
+	_ ferry.Prober     = reader{}
 	_ ferry.Enumerator = reader{}
 )
 
@@ -83,27 +87,51 @@ type reader struct {
 	doc *yamlv3.Node
 }
 
-// Get answers with what the document holds at one address.
+// Get answers with what the document holds at one leaf.
 //
 // The four observations this plane can make are four different answers, and
 // keeping them apart is what the typed boundary is for: `nul: null` is Null,
 // `empty: ""` is String(""), `value: 8080` is Number("8080"), and a key that is
 // not there is Absent.
-func (r reader) Get(_ context.Context, addr ferry.Path) (ferry.Value, error) {
-	v, err := valueOf(deref(lookup(r.doc, addr)))
+//
+// A mapping or a sequence at a leaf's address is none of those four, and it is
+// a refusal naming the address and what the document holds there. The
+// destination takes one value and the file holds a container: the two disagree,
+// and answering absence would leave the field at its zero value with nothing
+// saying why.
+func (r reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
+	v, err := valueOf(deref(lookup(r.doc, addr.Path())))
 	if err != nil {
-		return ferry.Value{}, ferry.ErrorAt(addr, err)
+		return ferry.Value{}, ferry.ErrorAt(addr.Path(), err)
 	}
 
 	return v, nil
 }
 
-// Children lists the addresses immediately under a container.
+// Probe answers whether the document holds a container at one address.
+//
+// A key that is not there is absent, an explicit `null` is null, and a mapping
+// or a sequence is present, including an empty one: `opts: {}` reads back as a
+// section that is there and holds nothing, which is what lets a present-empty
+// section survive a round trip. A single value where a container belongs is a
+// refusal naming the address.
+func (r reader) Probe(_ context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	info, err := presenceOf(deref(lookup(r.doc, addr.Path())))
+	if err != nil {
+		return ferry.SectionAbsent, ferry.ErrorAt(addr.Path(), err)
+	}
+
+	return info, nil
+}
+
+// Children lists the segments the document holds immediately under a composite.
 //
 // It is how a map's keys and a sequence's length reach core at all, since
-// neither exists until there is a document to read them from.
-func (r reader) Children(_ context.Context, prefix ferry.Path) ([]ferry.Path, error) {
-	return children(r.doc, prefix), nil
+// neither exists until there is a document to read them from. A sequence
+// answers with positions and a mapping with names, and the schema types the
+// child each one addresses.
+func (r reader) Children(_ context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error) {
+	return children(r.doc, addr.Path()), nil
 }
 
 // readDoc parses the plane, and is shared by both halves: a dump merges into

@@ -8,7 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 
+	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/driver/kv"
 )
 
@@ -248,3 +250,96 @@ var (
 	_ kv.Client = (*guarded)(nil)
 	_ kv.ACL    = (*guarded)(nil)
 )
+
+// The schemas these tests hand the driver, and the door they come through.
+//
+// The three address kinds are sealed and the schema compiler is the only thing
+// that mints one (ADR-0016), so a test that wants to ask this driver about an
+// address asks the compiler for it. Compiling a real struct is the same door
+// core comes in through, which keeps these tests asserting about the driver
+// rather than about a set a test invented.
+type (
+	// hostOnly is the smallest schema with a leaf, and dbSection nests it.
+	hostOnly struct {
+		Host string `ferry:"host"`
+	}
+	dbSection struct {
+		DB hostOnly `ferry:"db"`
+	}
+
+	// emptyMissing is one key held with no bytes and one never held.
+	emptyMissing struct {
+		Empty   string `ferry:"empty"`
+		Missing string `ferry:"missing"`
+	}
+
+	// tagsLabels is the two container shapes whose members come from the value.
+	tagsLabels struct {
+		Tags   []string          `ferry:"tags"`
+		Labels map[string]string `ferry:"labels"`
+	}
+
+	// threeKinds is one value of every kind this plane stores as text.
+	threeKinds struct {
+		Flag bool   `ferry:"flag"`
+		Raw  []byte `ferry:"raw"`
+		Port int    `ferry:"port"`
+	}
+)
+
+// captureSource records the address set core hands a Bind and reads nothing.
+type captureSource struct{ set *ferry.AddressSet }
+
+func (c *captureSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
+	c.set = addrs
+
+	return func(context.Context) (ferry.Reader, error) { return captureReader{}, nil }, nil
+}
+
+type captureReader struct{}
+
+func (captureReader) Get(context.Context, ferry.LeafAddr) (ferry.Value, error) {
+	return ferry.Value{}, nil
+}
+
+// addrsOf is every address T names, typed, straight from the compiler.
+func addrsOf[T any](t *testing.T) *ferry.AddressSet {
+	t.Helper()
+
+	c := &captureSource{}
+	if _, err := ferry.Bind[T](c); err != nil {
+		t.Fatalf("compiling the fixture: %v", err)
+	}
+
+	return c.set
+}
+
+// leafAt and compositeAt find one address of one kind in a compiled set. A miss
+// is a test naming an address its own fixture does not have.
+func leafAt(t *testing.T, set *ferry.AddressSet, at ferry.Path) ferry.LeafAddr {
+	t.Helper()
+
+	for m := range set.Seq() {
+		if a, ok := m.(ferry.LeafAddr); ok && a.Path() == at {
+			return a
+		}
+	}
+
+	t.Fatalf("the fixture names no leaf at %s", at)
+
+	return ferry.LeafAddr{}
+}
+
+func compositeAt(t *testing.T, set *ferry.AddressSet, at ferry.Path) ferry.CompositeAddr {
+	t.Helper()
+
+	for m := range set.Seq() {
+		if a, ok := m.(ferry.CompositeAddr); ok && a.Path() == at {
+			return a
+		}
+	}
+
+	t.Fatalf("the fixture names no composite at %s", at)
+
+	return ferry.CompositeAddr{}
+}

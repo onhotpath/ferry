@@ -186,12 +186,23 @@ type lifecycleWriter struct {
 }
 
 // Set writes, or fails the walk where this run staged a failure.
-func (w lifecycleWriter) Set(ctx context.Context, addr ferry.Path, v ferry.Value) error {
+func (w lifecycleWriter) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) error {
 	if w.sink.probe.setErr != nil {
 		return w.sink.probe.setErr
 	}
 
 	return w.inner.Set(ctx, addr, v)
+}
+
+// Ensure writes at a container's own address, or fails the walk where this run
+// staged a failure, on the same terms as Set: a dump that has to say something
+// at a container address is a dump the staged failure must be able to stop.
+func (w lifecycleWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error {
+	if w.sink.probe.setErr != nil {
+		return w.sink.probe.setErr
+	}
+
+	return ensureThrough(ctx, w.inner, addr, p)
 }
 
 // Commit counts and forwards.

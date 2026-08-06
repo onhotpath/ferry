@@ -51,8 +51,12 @@ func checkOption(t *testing.T, tc optionCase) {
 
 	src := New(Environ(newEnviron().environ), tc.opt)
 
-	_, err := src.Bind(ferry.NewAddressSet(ferry.At("leaf")))
-	if !errors.Is(err, tc.err) {
+	set, err := addrsOf[oneHost]()
+	if err != nil {
+		t.Fatalf("compiling the fixture: %v", err)
+	}
+
+	if _, err = src.Bind(set); !errors.Is(err, tc.err) {
 		t.Fatalf("Bind = %v, want %v", err, tc.err)
 	}
 
@@ -94,9 +98,12 @@ func TestDefaultReadsTheProcessEnvironment(t *testing.T) {
 
 	t.Setenv(name, "v")
 
-	addr := ferry.At(name)
+	set, err := addrsOf[processProbe]()
+	if err != nil {
+		t.Fatalf("compiling the fixture: %v", err)
+	}
 
-	open, err := New().Bind(ferry.NewAddressSet(addr))
+	open, err := New().Bind(set)
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
@@ -106,12 +113,25 @@ func TestDefaultReadsTheProcessEnvironment(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 
+	at := ferry.At(name)
+
+	addr, ok := leafIn(set, at)
+	if !ok {
+		t.Fatalf("the fixture names no leaf at %s", at)
+	}
+
 	got, err := r.Get(t.Context(), addr)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 
 	if got != ferry.String("v") {
-		t.Errorf("Get(%s) = %#v, want the value the process environment holds", addr, got)
+		t.Errorf("Get(%s) = %#v, want the value the process environment holds", at, got)
 	}
+}
+
+// processProbe names the one variable the test above sets in the process
+// environment.
+type processProbe struct {
+	Probe string `ferry:"FERRY_ENV_DRIVER_PROBE"`
 }
