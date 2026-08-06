@@ -538,6 +538,35 @@ func TestContainerAddressesAreCheckedBeforeAnyIO(t *testing.T) {
 	mustName(t, err, "/beta-flags", "/feature-flags", `"FEATURE_FLAGS"`, `"BETA_FLAGS"`)
 }
 
+// forgedMember is a [ferry.Member] core never minted.
+//
+// Go seals a type and not an interface, so embedding one of the three address
+// types promotes the unexported method and the interface is satisfied from
+// outside. There is no way to stop that; what core owes is to treat the result
+// as what it is.
+type forgedMember struct{ ferry.SectionAddr }
+
+// TestAnAddressCoreDidNotMintIsInNoSet is what that promotion is worth.
+//
+// A forged member equals no address the compiler made, so a set answers false
+// for it rather than mistaking it for the kind whose arm it would otherwise fall
+// through to. The path it carries is one the set does hold, because a forgery at
+// a path nothing names is refused by the address alone and says nothing about
+// the kind.
+func TestAnAddressCoreDidNotMintIsInNoSet(t *testing.T) {
+	t.Parallel()
+
+	set := ferry.LeafSet(ferry.At("a"), ferry.At("b"))
+
+	if set.Has(forgedMember{SectionAddr: ferry.Section(ferry.At("a"))}) {
+		t.Error("a set holds an address core never minted, so a forged member compares equal to a real one")
+	}
+
+	if !set.Has(ferry.Leaf(ferry.At("a"))) {
+		t.Error("the set does not hold the address the forgery copied, so the case above proves nothing")
+	}
+}
+
 // The two schemas the kind half of ADR-0003's injectivity rule is read through.
 type (
 	// foldedKinds renders a section and a leaf to one plane key. A flat driver

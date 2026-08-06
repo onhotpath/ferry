@@ -172,8 +172,13 @@ func TestAValueWhereTheSchemaWantsAContainerIsRefused(t *testing.T) {
 // The two destinations whose members the type fixes, and which the wrong
 // collection is read into.
 type (
+	// optionalSection carries a sibling whose name begins with the section's,
+	// which is a key beside the section and no member of it: the renderings say
+	// so, because a segment ends at a delimiter and /optsx continues past /opts
+	// in the middle of one.
 	optionalSection struct {
-		Opts *sectionMembers `ferry:"opts"`
+		Opts  *sectionMembers `ferry:"opts"`
+		OptsX string          `ferry:"optsx"`
 	}
 
 	sectionMembers struct {
@@ -205,6 +210,17 @@ func TestTheWrongCollectionAtASectionIsRefused(t *testing.T) {
 	t.Run("a mapping where the members are positions", func(t *testing.T) {
 		_, err := ferry.Load[fixedArray](t.Context(), yaml.NewSource(write(t, "pair: {x: 1}\n")))
 		refusesShape(t, err)
+	})
+
+	t.Run("a sibling sharing the section's name is not the section", func(t *testing.T) {
+		got, err := ferry.Load[optionalSection](t.Context(), yaml.NewSource(write(t, "optsx: v\n")))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+
+		if got.Opts != nil || got.OptsX != "v" {
+			t.Errorf("loaded %+v, want the sibling filled and the section left nil", got)
+		}
 	})
 }
 

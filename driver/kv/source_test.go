@@ -67,6 +67,73 @@ func seeded() *fake {
 	return store
 }
 
+// The section holding one of each kind under it, which is what a section's
+// presence has to be answered from.
+type (
+	deepOpts struct {
+		Root  string            `ferry:"root"`
+		Inner innerOpts         `ferry:"inner"`
+		Tags  map[string]string `ferry:"tags"`
+	}
+
+	innerOpts struct {
+		Deep string `ferry:"deep"`
+	}
+
+	deepConfig struct {
+		Opts *deepOpts `ferry:"opts"`
+	}
+)
+
+// TestASectionIsPresentFromItsOwnMembers is the scoping this driver shares with
+// every flat plane.
+//
+// A section's members come from the type, so a key in the same folder that
+// belongs to no address of this schema is somebody else's key and says nothing.
+// A composite under the section is the case a table of keys cannot answer,
+// because its own members come from the store, so its folder is listed and
+// everything in it is one of them.
+func TestASectionIsPresentFromItsOwnMembers(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]deepCase{
+		"a leaf under a nested section":    {key: "app/opts/inner/deep", there: true},
+		"a member of a composite under it": {key: "app/opts/tags/a", there: true},
+		"a key this schema does not name":  {key: "app/opts_extra"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			checkDeepOpts(t, tc)
+		})
+	}
+}
+
+// deepCase is one key the store holds and whether the section is there with it.
+type deepCase struct {
+	key   string
+	there bool
+}
+
+// checkDeepOpts loads one store holding one key and reports whether the section
+// came back.
+func checkDeepOpts(t *testing.T, tc deepCase) {
+	t.Helper()
+
+	store := newFake()
+	store.data[tc.key] = []byte("v")
+
+	got, err := ferry.Load[deepConfig](t.Context(), mustSource(t, store))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if (got.Opts != nil) != tc.there {
+		t.Errorf("Opts = %+v, want a section there = %v", got.Opts, tc.there)
+	}
+}
+
 // TestGetFailureIsNeverAbsent is ADR-0014's conformance case 4 asserted against
 // this driver directly rather than only through the suite, because the failure
 // it rules out is one a driver can commit on its own: a survey found a real
