@@ -36,6 +36,15 @@ type plane struct {
 	got   []Path
 	set   []Path
 
+	// probed and ensured are the container side of the contract: what Probe was
+	// asked about and what Ensure was told, kept apart from got and set because
+	// a container address is never handed a Value (ADR-0016).
+	probed  []Path
+	ensured []Path
+	// presence is what Ensure wrote at a container address, which is what a
+	// later Probe of the same plane reads back.
+	presence map[Path]Presence
+
 	bindErr, openErr, closeErr, commitErr error
 
 	// lifecycle decides whether the reader and the writer implement Committer
@@ -54,11 +63,17 @@ type plane struct {
 }
 
 func newPlane(values map[Path]Value) *plane {
-	return &plane{values: values, fail: map[Path]error{}, lifecycle: true}
+	return &plane{
+		values:    values,
+		fail:      map[Path]error{},
+		presence:  map[Path]Presence{},
+		lifecycle: true,
+	}
 }
 
-func (p *plane) Get(_ context.Context, addr Path) (Value, error) {
-	p.got = append(p.got, addr)
+func (p *plane) Get(_ context.Context, addr LeafAddr) (Value, error) {
+	at := addr.Path()
+	p.got = append(p.got, at)
 
 	if p.onGet != nil {
 		p.onGet()
@@ -67,27 +82,93 @@ func (p *plane) Get(_ context.Context, addr Path) (Value, error) {
 	// Absent beside a non-nil error is the shape that makes ADR-0004's fourth
 	// conformance case possible to fail: a core that reads the value and drops
 	// the error loads a total outage as an all-zero struct with a nil error.
-	if err := p.fail[addr]; err != nil {
+	if err := p.fail[at]; err != nil {
 		return Value{}, err
 	}
 
-	return p.values[addr], nil
+	return p.values[at], nil
 }
 
-func (p *plane) Set(_ context.Context, addr Path, v Value) error {
-	p.set = append(p.set, addr)
+func (p *plane) Set(_ context.Context, addr LeafAddr, v Value) error {
+	at := addr.Path()
+	p.set = append(p.set, at)
 
 	if p.onSet != nil {
 		p.onSet()
 	}
 
-	if err := p.fail[addr]; err != nil {
+	if err := p.fail[at]; err != nil {
 		return err
 	}
 
-	p.values[addr] = v
+	p.values[at] = v
 
 	return nil
+}
+
+// Probe is the container half of the read side. It answers out of the same map
+// the leaves are read from, so a fixture that stores a Null at a container
+// address still means the plane holds a null there (ADR-0016).
+func (p *plane) Probe(_ context.Context, addr Container) (SectionInfo, error) {
+	at := addr.Path()
+	p.probed = append(p.probed, at)
+
+	if p.onGet != nil {
+		p.onGet()
+	}
+
+	if err := p.fail[at]; err != nil {
+		return SectionInfo{}, err
+	}
+
+	if held, wrote := p.presence[at]; wrote {
+		return infoFor(held), nil
+	}
+
+	return infoFor(presenceOf(p.values[at])), nil
+}
+
+// Ensure is the container half of the write side: a null at a nil pointer or an
+// empty composite, and a present at a realised section that wrote nothing.
+func (p *plane) Ensure(_ context.Context, addr Container, held Presence) error {
+	at := addr.Path()
+	p.ensured = append(p.ensured, at)
+
+	if p.onSet != nil {
+		p.onSet()
+	}
+
+	if err := p.fail[at]; err != nil {
+		return err
+	}
+
+	p.presence[at] = held
+
+	return nil
+}
+
+// presenceOf reads a stored Value as what a probe of that address reports, so
+// one map serves both halves of the contract.
+func presenceOf(v Value) Presence {
+	switch v.Kind() {
+	case KindAbsent:
+		return PresenceAbsent
+	case KindNull:
+		return PresenceNull
+	default:
+		return PresencePresent
+	}
+}
+
+func infoFor(held Presence) SectionInfo {
+	switch held {
+	case PresenceNull:
+		return SectionNull
+	case PresencePresent:
+		return SectionPresent
+	default:
+		return SectionAbsent
+	}
 }
 
 func (p *plane) reader() Reader {
@@ -242,18 +323,57 @@ func dumpVisitsTheAddressSet(t *testing.T) {
 	mustBeOneList(t, p.bound, p.set)
 }
 
+// mustBeOneList is axis 1 stated at the leaves, which is where the two lists
+// have to agree exactly: every address handed a Value is one the compiler
+// determined as a leaf, and every leaf the compiler determined was visited.
+//
+// The set is wider than the visit, and that is the address model rather than a
+// gap: it also names the container addresses, and a plain nested struct is a
+// section nothing asks about, because its members come from the type and the
+// walk goes straight into them (ADR-0016).
 func mustBeOneList(t *testing.T, bound *AddressSet, visited []Path) {
 	t.Helper()
 
-	if !bound.Has(At("name")) || bound.Has(At("walkTop", "Name")) {
-		t.Errorf("the address set promotes nothing: %v", slices.Collect(bound.All()))
+	if !bound.Has(leafAt(At("name"))) || bound.Has(leafAt(At("walkTop", "Name"))) {
+		t.Errorf("the address set promotes nothing: %v", kinded(bound))
+	}
+
+	if !bound.Has(sectionAt(At("db"))) {
+		t.Errorf("the nested struct names no section: %v", kinded(bound))
 	}
 
 	got := slices.Clone(visited)
 	slices.SortFunc(got, Path.Compare)
 
-	if want := slices.Collect(bound.All()); !slices.Equal(got, want) {
-		t.Errorf("the walk visited\n\t%v\nand the compiler's address set is\n\t%v", got, want)
+	if want := leavesOf(bound); !slices.Equal(got, want) {
+		t.Errorf("the walk visited\n\t%v\nand the compiler's leaf addresses are\n\t%v", got, want)
+	}
+}
+
+// leavesOf is the leaf addresses of a bound set, in the set's own order.
+func leavesOf(a *AddressSet) []Path {
+	var out []Path
+
+	for m := range a.Seq() {
+		if leaf, ok := m.(LeafAddr); ok {
+			out = append(out, leaf.Path())
+		}
+	}
+
+	return out
+}
+
+// describe names one member as its kind and its address, which is what a
+// failure has to distinguish: /db as a section and /db as a composite render
+// alike and are not the same address.
+func describe(m Member) string {
+	switch m.(type) {
+	case LeafAddr:
+		return "leaf " + m.String()
+	case SectionAddr:
+		return "section " + m.String()
+	default:
+		return "composite " + m.String()
 	}
 }
 

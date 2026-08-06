@@ -10,64 +10,56 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// Children lists what the environment holds immediately under an address, which
-// is how a map-typed or slice-typed field is loaded from this plane at all: its
-// members come from the value rather than from the type, so they are in no
-// compiled address set and only enumeration can reveal them.
+// Children lists what the environment holds immediately under a container whose
+// members come from the value, which is how a map-typed or slice-typed field is
+// loaded from this plane at all: its members are in no compiled address set, and
+// only enumeration can reveal them.
 //
-// It answers addresses and not names, because an address carries its segment
-// kind (ADR-0004). This plane holds no kind of its own, so it has to decide one,
-// and the rule is the one jsontext.Pointer's own documentation admits to: a
-// child spelled as canonical base 10 is a position in a sequence, and everything
-// else is a member of a mapping. Getting it wrong is loud rather than silent -
-// core refuses a position under a mapping and a name under a sequence, naming
-// the address - so a map whose keys are decimal numerals is a refusal at Load
-// and never a quietly reshaped value.
+// It answers segments, so the plane says how it spells each member and the
+// schema decides what is at it. A member spelled as canonical base 10 is a
+// position in a sequence and everything else is a member of a mapping. Getting
+// it wrong is loud rather than silent, because core refuses a position under a
+// mapping and a name under a sequence.
 //
-// The segment text comes from the compiled address set wherever the address is
-// in it, so a tagged field's own spelling is recovered exactly. Only what the
-// value mints falls back on the canonical form, which is [Canonical]'s subject
-// and where the round-trip guarantee is stated.
+// A member's spelling is the canonical form, which is [Canonical]'s subject and
+// where the round-trip guarantee is stated: the name was upper-cased on the way
+// in and there is no way back from a fold that has already happened.
 //
-// The result is sorted segment-wise, so it is 0 1 2 ... 11 rather than the
-// 0 1 10 11 2 that sorting the rendering gives, and a caller asserting on it is
-// not asserting on Go's randomised map iteration order.
-func (r *reader) Children(_ context.Context, prefix ferry.Path) ([]ferry.Path, error) {
-	scan, err := r.scan(prefix)
+// A variable that reaches deeper than a member is still a member here, because a
+// map of maps is spelled exactly that way and this plane cannot tell one from
+// the other. Which of the two it was is settled by the question core asks next:
+// see [reader.Get].
+//
+// The result is sorted, so it is 0 1 2 ... 11 rather than the 0 1 10 11 2 that
+// sorting text gives, and a caller asserting on it is not asserting on Go's
+// randomised map iteration order.
+func (r *reader) Children(_ context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error) {
+	scan, err := r.scan(addr)
 	if err != nil {
 		return nil, err
 	}
 
-	kids := map[ferry.Path]struct{}{}
+	kids := map[ferry.Segment]struct{}{}
 
 	for key := range r.env {
 		if !strings.HasPrefix(key, scan) {
 			continue
 		}
 
-		if kid, ok := r.child(prefix, key, key[len(scan):]); ok {
+		if kid, ok := r.mint(key[len(scan):]); ok {
 			kids[kid] = struct{}{}
 		}
 	}
 
 	out := slices.Collect(maps.Keys(kids))
-	slices.SortFunc(out, ferry.Path.Compare)
+	slices.SortFunc(out, compareSegments)
 
 	return out, nil
 }
 
-// scan is the text every name under this prefix begins with.
-//
-// The empty path is the whole environment rather than an error, because it is
-// the one prefix that names no address: a caller asking what is under nothing is
-// asking for everything, and answering with a refusal would make the root of a
-// plane the one place enumeration does not work.
-func (r *reader) scan(prefix ferry.Path) (string, error) {
-	if prefix == (ferry.Path{}) {
-		return "", nil
-	}
-
-	key, err := r.keys(prefix)
+// scan is the text every name under this container begins with.
+func (r *reader) scan(addr ferry.CompositeAddr) (string, error) {
+	key, err := r.keys(addr.Path())
 	if err != nil {
 		return "", err
 	}
@@ -75,47 +67,59 @@ func (r *reader) scan(prefix ferry.Path) (string, error) {
 	return key + r.cfg.sep, nil
 }
 
-// child is one environment variable name resolved to the immediate child of
-// prefix that it lies under, and whether it lies under one at all.
+// mint builds one member out of the text left over after the container's own
+// name, in the canonical form the caller chose, and reports whether there was
+// one.
 //
-// The static tier is a lookup and not an inverse. A name the compiled set
-// determined is matched against the precomputed table and the address it came
-// from is used whole, which recovers the segment's own spelling; a name matching
-// the prefix text but belonging to an address that is not under prefix -
-// /value_x against /value at the default separator - is not a child and is
-// dropped here rather than turned into one.
-func (r *reader) child(prefix ferry.Path, key, rest string) (ferry.Path, bool) {
-	if addr, ok := r.static[key]; ok {
-		return step(prefix, addr)
-	}
-
+// A leading zero keeps a member a name rather than making it a position: an
+// Index segment's text is canonical base 10, so "01" is not the spelling of any
+// position and reading it as one would silently answer about position 1 instead.
+func (r *reader) mint(rest string) (ferry.Segment, bool) {
 	head, _, _ := strings.Cut(rest, r.cfg.sep)
 	if head == "" {
-		return ferry.Path{}, false
+		return ferry.Segment{}, false
 	}
 
-	return r.mint(prefix, head), true
-}
-
-// mint builds a dynamic child out of the text left over after the prefix, in the
-// canonical form the caller chose.
-//
-// A leading zero keeps a child a name rather than making it a position: an Index
-// segment's text is canonical base 10, so "01" is not the rendering of any
-// position and reading it as one would silently answer about /list#1 instead.
-func (r *reader) mint(prefix ferry.Path, head string) ferry.Path {
 	if i, ok := position(head); ok {
-		return prefix.Elem(i)
+		return ferry.IndexSegment(i), true
 	}
 
 	if r.cfg.canon == Upper {
-		return prefix.At(strings.ToUpper(head))
+		return ferry.NameSegment(strings.ToUpper(head)), true
 	}
 
-	return prefix.At(strings.ToLower(head))
+	return ferry.NameSegment(strings.ToLower(head)), true
 }
 
-// position reads a child's text as a sequence position, and reports false where
+// compareSegments orders two members the way core orders the addresses they
+// name: by kind first, and a position numerically rather than as text.
+//
+// It is the driver's own because ferry publishes the ordering on [ferry.Path]
+// and not on a bare segment, and enumeration answers segments now (ADR-0016).
+func compareSegments(a, b ferry.Segment) int {
+	if a.Kind() != b.Kind() {
+		return int(a.Kind()) - int(b.Kind())
+	}
+
+	if a.Kind() == ferry.Index {
+		return comparePositions(a.Text(), b.Text())
+	}
+
+	return strings.Compare(a.Text(), b.Text())
+}
+
+// comparePositions compares two positions numerically without parsing them.
+// A position's text is canonical base 10 with no leading zero, so the longer
+// number is the larger one and equal lengths compare bytewise.
+func comparePositions(a, b string) int {
+	if len(a) != len(b) {
+		return len(a) - len(b)
+	}
+
+	return strings.Compare(a, b)
+}
+
+// position reads a member's text as a sequence position, and reports false where
 // the text is not one position's canonical spelling.
 func position(text string) (uint, bool) {
 	if text == "" || len(text) > 1 && text[0] == '0' {
@@ -133,43 +137,3 @@ func position(text string) (uint, bool) {
 // base10 is the only base a position is ever spelled in, which is what makes the
 // rendering of an address unique.
 const base10 = 10
-
-// step is the immediate child of prefix that addr lies under, built by extending
-// prefix with addr's own segment at that depth rather than by parsing anything.
-//
-// An address is not a child of itself, so an addr equal to prefix reports false:
-// the walk asks a container what is under it, and answering with the container
-// would be an infinite descent.
-func step(prefix, addr ferry.Path) (ferry.Path, bool) {
-	depth := 0
-	pre := slices.Collect(prefix.Segments())
-
-	for seg := range addr.Segments() {
-		if depth == len(pre) {
-			return extend(prefix, seg), true
-		}
-
-		if seg != pre[depth] {
-			return ferry.Path{}, false
-		}
-
-		depth++
-	}
-
-	return ferry.Path{}, false
-}
-
-// extend appends one segment to an address, keeping the kind it already had.
-//
-// The position cannot fail to read: an Index segment's text is canonical base 10
-// with no leading zero, minted from a uint by ferry itself, so every digit is a
-// digit and every value fits the type it came from.
-func extend(p ferry.Path, s ferry.Segment) ferry.Path {
-	if s.Kind() == ferry.Index {
-		i, _ := position(s.Text())
-
-		return p.Elem(i)
-	}
-
-	return p.At(s.Text())
-}

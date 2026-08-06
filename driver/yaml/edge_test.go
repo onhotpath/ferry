@@ -3,7 +3,6 @@ package yaml_test
 import (
 	"context"
 	"errors"
-	"math"
 	"path/filepath"
 	"testing"
 
@@ -20,7 +19,7 @@ func TestCancelledContextRefusesTheOpen(t *testing.T) {
 
 	path := write(t, "port: 1\n")
 
-	openRead, err := yaml.NewSource(path).Bind(ferry.NewAddressSet(ferry.At("port")))
+	openRead, err := yaml.NewSource(path).Bind(addressesOf[scalars](t).set)
 	if err != nil {
 		t.Fatalf("Source.Bind: %v", err)
 	}
@@ -29,7 +28,7 @@ func TestCancelledContextRefusesTheOpen(t *testing.T) {
 		t.Errorf("opening a reader under a cancelled context gave %v, want context.Canceled", err)
 	}
 
-	openWrite, err := yaml.NewSink(path).Bind(ferry.NewAddressSet(ferry.At("port")))
+	openWrite, err := yaml.NewSink(path).Bind(addressesOf[scalars](t).set)
 	if err != nil {
 		t.Fatalf("Sink.Bind: %v", err)
 	}
@@ -55,7 +54,7 @@ func TestDocumentsWithNoContent(t *testing.T) {
 		t.Run(doc, func(t *testing.T) {
 			path := write(t, doc)
 
-			holds(t, openReader(t, path), ferry.At("port"), ferry.Value{})
+			holds(t, openReader(t, path), addressesOf[scalars](t).leaf(t, ferry.At("port")), ferry.Value{})
 			dumps(t, path, config{Port: 1}, "port: 1\n")
 		})
 	}
@@ -75,44 +74,58 @@ func dumps[T any](t *testing.T, path string, v T, want string) {
 	}
 }
 
-// TestSequencePositionTooWide covers the one failure the tree walk can report
-// that is not the plane's: a position no int on this platform can hold.
-//
-// It is unreachable through a walk over a real value, because no slice in
-// memory has that many elements, and it is reported rather than assumed away -
-// silently reading it as absent on the way in and silently dropping it on the
-// way out are the two things ADR-0001 rules out.
-func TestSequencePositionTooWide(t *testing.T) {
-	addr := ferry.At("list").Elem(math.MaxUint)
-
-	holds(t, openReader(t, write(t, "list:\n  - a\n")), addr, ferry.Value{})
-
-	err := openWriter(t, filepath.Join(t.TempDir(), "plane.yaml")).Set(t.Context(), addr, ferry.String("x"))
-	if err == nil {
-		t.Fatal("a write at a position no int can hold was taken")
-	}
-
-	if !errors.Is(err, ferry.ErrPlane) {
-		t.Errorf("the refusal was %v, want an error carrying ferry.ErrPlane", err)
-	}
-}
-
 // TestPositionPastTheEnd asserts a read past a sequence's last element is
 // absence rather than a failure: the plane simply does not hold that address.
 func TestPositionPastTheEnd(t *testing.T) {
-	holds(t, openReader(t, write(t, "list:\n  - a\n")), ferry.At("list").Elem(4), ferry.Value{})
+	addr := addressesOf[wideList](t).leaf(t, ferry.At("list").Elem(4))
+
+	holds(t, openReader(t, write(t, "list:\n  - a\n")), addr, ferry.Value{})
 }
 
-// TestEmptyPathIsNotAnAddress asserts the write side refuses the one path that
-// names no place. An address has at least one segment.
-func TestEmptyPathIsNotAnAddress(t *testing.T) {
-	err := openWriter(t, filepath.Join(t.TempDir(), "plane.yaml")).Set(t.Context(), ferry.Path{}, ferry.String("x"))
-	if err == nil {
-		t.Fatal("a write at the empty path was taken, and the empty path is not an address")
+// Two cases that used to live here are gone, and the addresses they were about
+// are what went (ADR-0016).
+//
+// One handed the write side a position no int on this platform can hold, and one
+// handed it the empty path. Both were built by the test out of a ferry.Path, and
+// a driver is now only ever handed a typed address the schema compiler minted:
+// there is no schema that names either, so neither can reach a driver through
+// any walk. The refusals themselves are still in tree.go, where they guard the
+// two conversions, and they are unreachable from outside the package.
+
+// TestAPresentButEmptySectionRoundTrips closes the one round trip Go can
+// express and the replace rule would otherwise lose.
+//
+// A non-nil pointer whose every field is omitted writes no child, so without a
+// write at the section's own address the file holds no key for it and the reload
+// hands back nil: present becomes absent, silently. This plane can spell it, so
+// the dump writes an empty mapping and the reload sees a section that is there.
+func TestAPresentButEmptySectionRoundTrips(t *testing.T) {
+	type options struct {
+		Name string `ferry:"name,omitzero"`
 	}
 
-	if !errors.Is(err, ferry.ErrPlane) {
-		t.Errorf("the refusal was %v, want an error carrying ferry.ErrPlane", err)
+	type config struct {
+		Opts *options `ferry:"opts"`
+	}
+
+	path := filepath.Join(t.TempDir(), "plane.yaml")
+
+	if err := ferry.Dump(t.Context(), config{Opts: &options{}}, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, want := read(t, path), "opts: {}\n"; got != want {
+		t.Errorf("the plane holds %q, want %q", got, want)
+	}
+
+	got, err := ferry.Load[config](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if got.Opts == nil {
+		t.Error("a section that was present and empty reloaded as nil, so the round trip turned a section that " +
+			"is there and holds nothing into one that is not there at all")
 	}
 }
 
@@ -176,7 +189,7 @@ func TestMultipleDocumentsAreRefused(t *testing.T) {
 // all is ErrPlane, which is the class the driver has no opinion to overrule:
 // nothing was parsed, so nothing about the operator's document is known.
 func TestUnreadablePlaneIsAPlaneError(t *testing.T) {
-	open, err := yaml.NewSource(t.TempDir()).Bind(ferry.NewAddressSet(ferry.At("port")))
+	open, err := yaml.NewSource(t.TempDir()).Bind(addressesOf[scalars](t).set)
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}

@@ -197,6 +197,32 @@ type spot struct {
 	at Path
 }
 
+// leaf is the typed address of the value this position holds. It is minted here
+// rather than carried on the node, because a node under a dynamic composite
+// holds an address shape and the address is the one the walk realised
+// (ADR-0016).
+func (s spot) leaf() LeafAddr { return leafAt(s.at) }
+
+// container is the typed address of the container this position occupies, at
+// the kind the compiler decided for it. Its callers are the three arms that
+// stand at a container, so a position with no container address never reaches
+// it.
+func (s spot) container() Container {
+	if k, ok := containerKind(s.n); ok && k == kindSection {
+		return sectionAt(s.at)
+	}
+
+	return compositeAt(s.at)
+}
+
+// composite is the typed address of a dynamic container, which is what a driver
+// is asked to enumerate.
+func (s spot) composite() CompositeAddr { return compositeAt(s.at) }
+
+// child is the address of one member a driver enumerated: the driver minted the
+// segment and the schema types what is at it (ADR-0016).
+func (s spot) child(seg Segment) Path { return s.at.child(seg) }
+
 // direction is the residue Load and Dump do not share.
 //
 // ADR-0010 counts three operations and does not claim zero: at a leaf, Dump
@@ -232,12 +258,6 @@ type direction interface {
 	// Dump answers it from the value and Load from the plane, and into is the
 	// walk of what is beneath, which either direction may decline to run.
 	atNullable(ctx context.Context, s spot, into descend) (outcome, error)
-
-	// atArray is what an array's own address is asked before its elements are
-	// walked, which is nothing on Dump and one question on Load: an array's
-	// membership is the type's, so a plane holding an index outside it is
-	// holding something this type cannot take.
-	atArray(ctx context.Context, s spot) error
 
 	// atSlice and atMap are the whole of the dynamic tier. Each mints its
 	// members' addresses - from the value on Dump, from the plane on Load - and
@@ -308,12 +328,6 @@ func (w *walker) walk(ctx context.Context, s spot) (outcome, error) {
 		return w.dir.atLeaf(ctx, s)
 	case nodePointer:
 		return w.dir.atNullable(ctx, s, w.into(ctx, s))
-	case nodeArray:
-		if err := w.dir.atArray(ctx, s); err != nil {
-			return outcome{}, err
-		}
-
-		return w.dir.atStatic(ctx, s, w.into(ctx, s))
 	case nodeSlice:
 		return w.dir.atSlice(ctx, s, w.element(ctx, s))
 	case nodeMap:
@@ -412,7 +426,7 @@ func (loadFrom) omitted(spot) bool { return false }
 
 // atLeaf reads one address and decides what the observation means to the field.
 func (l loadFrom) atLeaf(ctx context.Context, s spot) (outcome, error) {
-	got, err := l.r.Get(ctx, s.at)
+	got, err := l.r.Get(ctx, s.leaf())
 	if err != nil {
 		// A non-nil error reaches the caller as an error and is never
 		// substituted with Absent (ADR-0004). Reading it as absence is how a
@@ -520,52 +534,51 @@ func (loadFrom) supplied(s spot, out outcome) error {
 	return newError(momentWalk, ErrMissing, s.at, "required, and the plane supplied nothing under it")
 }
 
-// atNullable materialises a pointer exactly where the plane spoke under it.
+// atNullable materialises a pointer exactly where the plane spoke about it or
+// under it.
 //
-// The three observations are three answers. A Null at the pointer's own address
+// The three observations are three answers. A null at the section's own address
 // is the plane saying the section is there and is nothing, so the pointer is
-// nil. Anything else at that address is a value at a container address, which
-// carries Absent or Null and never anything else (ADR-0003). Absent is the
-// plane saying nothing about the section itself, so what decides is whether it
-// said anything beneath it: a declared default is not presence and neither is a
-// seed, so an optional section stays optional (ADR-0006).
+// nil. Present is the plane saying the section is there, so the pointer is
+// materialised whether or not anything was written beneath it, which is how a
+// present-but-empty section survives a reload. Absent is the plane saying
+// nothing about the section itself, so what decides is whether it said anything
+// beneath it: a declared default is not presence and neither is a seed, so an
+// optional section stays optional (ADR-0006).
 func (l loadFrom) atNullable(ctx context.Context, s spot, into descend) (outcome, error) {
-	if out, more, err := l.container(ctx, s); !more {
-		return out, err
-	}
-
-	return l.materialise(s, into)
-}
-
-// container answers a container address, and reports whether the plane left the
-// answer to what is under it.
-//
-// The three observations are three answers, and they are the same three at a
-// pointer and at a dynamic composite. A Null is the plane saying the container
-// is there and holds nothing, which is the zero value - nil for a pointer, and
-// nil for a slice or a map, where nil and empty are one value anyway. Anything
-// else is a value at a container address, which carries absence or a null and
-// never anything else (ADR-0003). Absent is the plane saying nothing about the
-// container itself, so what is under it decides.
-func (l loadFrom) container(ctx context.Context, s spot) (out outcome, more bool, err error) {
-	got, err := l.r.Get(ctx, s.at)
+	info, err := l.probe(ctx, s)
 	if err != nil {
-		return outcome{}, false, fromDriver(momentWalk, s.at, err)
+		return outcome{}, err
 	}
 
-	if got.Kind() == KindNull {
+	if info.Presence() == PresenceNull {
 		s.v.SetZero()
 
-		return outcome{wrote: true}, false, nil
+		return outcome{wrote: true}, nil
 	}
 
-	if got.Kind() != KindAbsent {
-		return outcome{}, false, newError(momentWalk, ErrValue, s.at, fmt.Sprintf(
-			"the plane holds %s at a container address, which holds absence or a null and nothing else",
-			got.Kind()))
+	return l.materialise(s, into, info.Presence() == PresencePresent)
+}
+
+// probe asks the plane what it holds at a container's own address.
+//
+// A plane that cannot answer is not a failure: [Prober] is optional, in the
+// same idiom as [Releaser], because a plane that cannot list often cannot say
+// whether a container is there either (ADR-0016). Such a plane answers absence,
+// which is the plane saying nothing about the container itself and leaves what
+// is under it to decide.
+func (l loadFrom) probe(ctx context.Context, s spot) (SectionInfo, error) {
+	pr, ok := l.r.(Prober)
+	if !ok {
+		return sectionAbsent, nil
 	}
 
-	return outcome{}, true, nil
+	info, err := pr.Probe(ctx, s.container())
+	if err != nil {
+		return sectionAbsent, fromDriver(momentWalk, s.at, err)
+	}
+
+	return info, nil
 }
 
 // materialise builds the pointee fresh, walks into it, and publishes it only
@@ -588,7 +601,9 @@ func (l loadFrom) container(ctx context.Context, s spot) (out outcome, more bool
 // nothing else (#253). What stays exactly as it was is the nil seed: a declared
 // default beneath an absent section is not presence, so the pointer is still
 // nil, or no *T with a default anywhere beneath it could ever be nil.
-func (l loadFrom) materialise(s spot, into descend) (outcome, error) {
+// present says whether the plane reported the section there in its own right,
+// which materialises the pointer even where nothing was written beneath it.
+func (l loadFrom) materialise(s spot, into descend, present bool) (outcome, error) {
 	seeded := !s.v.IsNil()
 
 	fresh := reflect.New(s.v.Type().Elem())
@@ -601,6 +616,8 @@ func (l loadFrom) materialise(s spot, into descend) (outcome, error) {
 		return out, err
 	}
 
+	out.wrote = out.wrote || present
+
 	if out.wrote || seeded {
 		s.v.Set(fresh)
 	}
@@ -608,137 +625,72 @@ func (l loadFrom) materialise(s spot, into descend) (outcome, error) {
 	return out, l.supplied(s, out)
 }
 
-// atArray refuses a plane holding an index this array cannot.
-//
-// An array's length is part of its type, so an index outside it is a value with
-// no field to land in, and padding or truncating it would be the silent loss
-// ADR-0001 rules out. It is asked only of a plane that can enumerate, which is
-// the same asymmetry that makes an array loadable from one that cannot: the
-// elements are read by name either way, and only enumeration can reveal an
-// index that is not one of them.
-func (l loadFrom) atArray(ctx context.Context, s spot) error {
-	lister, ok := l.r.(Enumerator)
-	if !ok {
-		return nil
-	}
-
-	kids, err := lister.Children(ctx, s.at)
-	if err != nil {
-		return fromDriver(momentWalk, s.at, err)
-	}
-
-	errs := make([]error, 0, len(kids))
-	for _, kid := range kids {
-		errs = append(errs, overLength(s, kid))
-	}
-
-	return join(errs...)
-}
-
-// overLength reports one child of an array address that the array has no
-// element for, and nothing for one it has.
-//
-// It compares against the element addresses the compiler minted rather than
-// against a number, because those addresses are the whole of what this array
-// can hold and comparing what a driver enumerated with what the type determined
-// is the same question stated once.
-func overLength(s spot, kid Path) error {
-	seg := lastSegment(kid)
-	if seg.Kind() != Index || holds(s, kid) {
-		return nil
-	}
-
-	return newError(momentWalk, ErrValue, s.at, fmt.Sprintf(
-		"the plane holds index %s and %s holds %d", seg.Text(), s.v.Type(), len(s.n.fields)))
-}
-
-// holds reports whether one of a container's members is at this address.
-func holds(s spot, addr Path) bool {
-	return slices.ContainsFunc(s.n.fields, func(f *node) bool { return realised(s, f) == addr })
-}
-
-// lastSegment is an address's final step.
-//
-// The zero Segment is a Name with no text, so a caller may read the kind off the
-// result without asking whether there was a segment at all: an empty path
-// answers Name, and every caller here is looking at what a driver enumerated
-// under an address it was asked about.
-func lastSegment(p Path) Segment {
-	var last Segment
-
-	for seg := range p.Segments() {
-		last = seg
-	}
-
-	return last
-}
-
 // atSlice builds the sequence the plane holds under this address.
 func (l loadFrom) atSlice(ctx context.Context, s spot, into descend) (outcome, error) {
-	kids, out, err := l.members(ctx, s)
-	if len(kids) == 0 {
+	segs, out, err := l.members(ctx, s)
+	if len(segs) == 0 {
 		return out, err
 	}
 
-	return l.buildSlice(s, kids, into)
+	return l.buildSlice(s, segs, into)
 }
 
 // atMap builds the mapping the plane holds under this address.
 func (l loadFrom) atMap(ctx context.Context, s spot, into descend) (outcome, error) {
-	kids, out, err := l.members(ctx, s)
-	if len(kids) == 0 {
+	segs, out, err := l.members(ctx, s)
+	if len(segs) == 0 {
 		return out, err
 	}
 
-	return l.buildMap(s, kids, into)
+	return l.buildMap(s, segs, into)
 }
 
-// members is what a dynamic container holds, asked in one of two orders
-// depending on whether the source can list.
+// members is what a dynamic container holds: the segments the plane mints under
+// its address, or the answer at the address itself where there are none.
 //
-// Over an Enumerator the walk asks Children first and asks the container's own
-// address only where nothing came back, which is what makes the question
-// answerable on a plane whose element addresses collapse onto the container's
-// own name (ADR-0003). An address arrives at Get carrying no kind and no arity,
-// so being asked for children is the only signal a driver gets that core
-// considers the address a dynamic container.
-//
-// Over a source that cannot list the order is the other one, and the reason for
-// it is unchanged: a Null at the container address is a complete answer and a
-// source that cannot list can still give it; only after Absent does the walk
-// need the members, and only then is a source that cannot enumerate a refusal.
-//
-// Both orders agree wherever both run. Nothing under an Absent container address
-// is nothing written, so a seed keeps what it had: a container with no children
-// is indistinguishable from an absent one on every plane surveyed, and ADR-0006
-// puts that row under "does not write". What the first order gives up is an
-// answer at the container's own address where there are children under it, which
-// is never read, and ADR-0003 states that cost rather than leaving it to be
-// found.
-// A member list that comes back empty is the whole answer, and the outcome
-// beside it is what the container's own address said.
-func (l loadFrom) members(ctx context.Context, s spot) (kids []Path, out outcome, err error) {
+// The walk asks Children first and probes the container's own address only where
+// nothing came back, because a member list is the whole answer wherever there is
+// one. A member list that comes back empty leaves the outcome beside it to say
+// what the address itself held.
+func (l loadFrom) members(ctx context.Context, s spot) (segs []Segment, out outcome, err error) {
 	lister, ok := l.r.(Enumerator)
 	if !ok {
 		return l.unlistable(ctx, s)
 	}
 
-	kids, err = lister.Children(ctx, s.at)
+	segs, err = lister.Children(ctx, s.composite())
 	if err != nil {
 		return nil, outcome{}, fromDriver(momentWalk, s.at, err)
 	}
 
-	if len(kids) == 0 {
-		// The container's own address is the whole answer where the plane holds
-		// nothing under it, and it is asked second so that a driver whose element
-		// values live under the container's own name is never asked for a value
-		// there while it is holding some (ADR-0003).
-		out, _, err = l.container(ctx, s)
+	if len(segs) == 0 {
+		out, err = l.empty(ctx, s)
 
 		return nil, out, err
 	}
 
-	return kids, outcome{}, nil
+	return segs, outcome{}, nil
+}
+
+// empty is a dynamic container the plane listed nothing under: its own address
+// is the whole answer.
+//
+// A null there and an absence there land on the same Go value, because nil and
+// empty are one value for a slice and a map. They differ only in what they say
+// to the section above: a null is the plane speaking, and absence is not.
+func (l loadFrom) empty(ctx context.Context, s spot) (outcome, error) {
+	info, err := l.probe(ctx, s)
+	if err != nil {
+		return outcome{}, err
+	}
+
+	if info.Presence() == PresenceAbsent {
+		return outcome{}, nil
+	}
+
+	s.v.SetZero()
+
+	return outcome{wrote: true}, nil
 }
 
 // unlistable is a dynamic container over a source that cannot list: its own
@@ -748,10 +700,16 @@ func (l loadFrom) members(ctx context.Context, s spot) (kids []Path, out outcome
 // The refusal names the field and the source rather than loading an empty
 // composite, which is the most plausible-looking wrong answer available and the
 // silent one ADR-0001 rules out (ADR-0004).
-func (l loadFrom) unlistable(ctx context.Context, s spot) (kids []Path, out outcome, err error) {
-	out, answered, err := l.container(ctx, s)
-	if !answered {
-		return nil, out, err
+func (l loadFrom) unlistable(ctx context.Context, s spot) (segs []Segment, out outcome, err error) {
+	info, err := l.probe(ctx, s)
+	if err != nil {
+		return nil, outcome{}, err
+	}
+
+	if info.Presence() == PresenceNull {
+		s.v.SetZero()
+
+		return nil, outcome{wrote: true}, nil
 	}
 
 	return nil, outcome{}, newError(momentWalk, ErrPlane, s.at, fmt.Sprintf(
@@ -769,19 +727,19 @@ func (l loadFrom) unlistable(ctx context.Context, s spot) (kids []Path, out outc
 // a value the caller still holds. It is also ADR-0006's replacement rule - a
 // composite is a single decision, and if the plane has any children under the
 // address then it has said what the composite is.
-func (loadFrom) buildSlice(s spot, kids []Path, into descend) (outcome, error) {
-	kids = slices.Clone(kids)
-	slices.SortFunc(kids, Path.Compare)
+func (loadFrom) buildSlice(s spot, segs []Segment, into descend) (outcome, error) {
+	segs = slices.Clone(segs)
+	slices.SortFunc(segs, compareSegments)
 
-	if err := contiguous(s, kids); err != nil {
+	if err := contiguous(s, segs); err != nil {
 		return outcome{}, err
 	}
 
-	fresh := reflect.MakeSlice(s.v.Type(), len(kids), len(kids))
+	fresh := reflect.MakeSlice(s.v.Type(), len(segs), len(segs))
 
 	var b batch
-	for i, kid := range kids {
-		b.add(into(fresh.Index(i), kid))
+	for i, seg := range segs {
+		b.add(into(fresh.Index(i), s.child(seg)))
 	}
 
 	out, err := b.done()
@@ -795,26 +753,29 @@ func (loadFrom) buildSlice(s spot, kids []Path, into descend) (outcome, error) {
 	return out, nil
 }
 
-// contiguous refuses an enumerated position the sequence has no place for.
+// contiguous refuses an enumerated member the sequence has no place for.
 //
-// A slice's length is whatever the plane holds, so the positions have to be 0 to
-// n-1 with none missing. A gap would leave ferry choosing between a short
-// sequence and an absent element with nothing to choose on, and a position past
-// the count is a length ferry would be allocating for on a plane's say-so. It is
-// the array rule read at a type whose length the type does not fix.
-func contiguous(s spot, kids []Path) error {
-	var at uint
-
-	for _, kid := range kids {
-		if want := s.at.Elem(at); kid != want {
+// A slice's members are positions, so a Name segment under one is a driver
+// saying the plane holds a mapping where the schema holds a sequence. The
+// positions then have to be 0 to n-1 with none missing: a gap would leave ferry
+// choosing between a short sequence and an absent element with nothing to
+// choose on, and a position past the count is a length ferry would be
+// allocating for on a plane's say-so.
+func contiguous(s spot, segs []Segment) error {
+	for at, seg := range segs {
+		if seg.Kind() != Index {
 			return newError(momentWalk, ErrValue, s.at, fmt.Sprintf(
-				"the plane holds %s under a sequence of %d, and a %s is addressed from %s upwards with no "+
-					"position missing: fill the gap, or model a sequence whose positions are chosen "+
-					"by the plane as a map keyed by those positions",
-				kid, len(kids), s.v.Type(), s.at.Elem(0)))
+				"the plane holds a member named under a sequence, and a %s is addressed by position: model "+
+					"a container whose members the plane names as a map", s.v.Type()))
 		}
 
-		at++
+		if want := IndexSegment(uint(at)); seg != want {
+			return newError(momentWalk, ErrValue, s.at, fmt.Sprintf(
+				"the plane holds position %s under a sequence of %d, and a %s is addressed from 0 upwards "+
+					"with no position missing: fill the gap, or model a sequence whose positions are chosen "+
+					"by the plane as a map keyed by those positions",
+				seg.Text(), len(segs), s.v.Type()))
+		}
 	}
 
 	return nil
@@ -823,12 +784,12 @@ func contiguous(s spot, kids []Path) error {
 // buildMap fills a mapping out of what the plane enumerated, fresh for the
 // reason [loadFrom.buildSlice] gives: a shallow copy of the seed shares a map's
 // buckets outright, so writing into a seeded map mutates the caller's map.
-func (loadFrom) buildMap(s spot, kids []Path, into descend) (outcome, error) {
-	fresh := reflect.MakeMapWithSize(s.v.Type(), len(kids))
+func (loadFrom) buildMap(s spot, segs []Segment, into descend) (outcome, error) {
+	fresh := reflect.MakeMapWithSize(s.v.Type(), len(segs))
 
 	var b batch
-	for _, kid := range kids {
-		b.add(atKey(s, fresh, kid, into))
+	for _, seg := range segs {
+		b.add(atKey(s, fresh, seg, into))
 	}
 
 	out, err := b.done()
@@ -840,10 +801,10 @@ func (loadFrom) buildMap(s spot, kids []Path, into descend) (outcome, error) {
 	// there, two Go keys rendering to one address lose an entry as it is
 	// written; here, two plane keys parsing to one Go key lose one as it is
 	// read. /m/1 and /m/01 are two addresses and one int.
-	if fresh.Len() != len(kids) {
+	if fresh.Len() != len(segs) {
 		return outcome{}, newError(momentWalk, ErrValue, s.at, fmt.Sprintf(
 			"the plane holds %d addresses under this mapping and %s takes %d of them: two plane keys read "+
-				"back as one Go key, so an entry would be lost", len(kids), s.v.Type(), fresh.Len()))
+				"back as one Go key, so an entry would be lost", len(segs), s.v.Type(), fresh.Len()))
 	}
 
 	s.v.Set(fresh)
@@ -852,29 +813,32 @@ func (loadFrom) buildMap(s spot, kids []Path, into descend) (outcome, error) {
 	return out, nil
 }
 
-// atKey reads one key out of an enumerated address and walks the value under it.
+// atKey reads one key out of an enumerated segment and walks the value under it.
 //
-// The address is checked against the one this key would have minted rather than
-// only for its segment kind, which is one comparison for two obligations: a
-// position under a mapping is a plane saying the container is a sequence, and an
-// address that is not an immediate child is a driver answering a question it was
-// not asked.
-func atKey(s spot, fresh reflect.Value, kid Path, into descend) (outcome, error) {
-	text := lastSegment(kid).Text()
-	if s.at.At(text) != kid {
-		return outcome{}, newError(momentWalk, ErrValue, s.at, fmt.Sprintf(
-			"the plane holds %s under this mapping, and a %s takes one member per name immediately under it",
-			kid, s.v.Type()))
+// A position under a mapping is refused: it is the plane saying the container
+// is a sequence where the schema says it is keyed by name, and reading the
+// digits as a key would be ferry deciding that the plane meant something else.
+func atKey(s spot, fresh reflect.Value, seg Segment, into descend) (outcome, error) {
+	if seg.Kind() != Index {
+		return atName(s, fresh, seg, into)
 	}
 
+	return outcome{}, newError(momentWalk, ErrValue, s.at, fmt.Sprintf(
+		"the plane holds a member by position under this mapping, and a %s takes one member per name",
+		s.v.Type()))
+}
+
+func atName(s spot, fresh reflect.Value, seg Segment, into descend) (outcome, error) {
 	key := reflect.New(s.v.Type().Key()).Elem()
-	if err := s.n.key.parse(key, text); err != nil {
-		return outcome{}, newError(momentWalk, ErrValue, kid, err.Error()).withCause(err)
+	at := s.child(seg)
+
+	if err := s.n.key.parse(key, seg.Text()); err != nil {
+		return outcome{}, newError(momentWalk, ErrValue, at, err.Error()).withCause(err)
 	}
 
 	val := reflect.New(s.v.Type().Elem()).Elem()
 
-	out, err := into(val, kid)
+	out, err := into(val, at)
 	if err != nil {
 		return out, err
 	}
@@ -940,47 +904,84 @@ func (d dumpTo) atLeaf(ctx context.Context, s spot) (outcome, error) {
 		return outcome{}, newError(momentWalk, ErrValue, s.at, err.Error()).withCause(err)
 	}
 
-	return d.write(ctx, s.at, v)
+	return d.write(ctx, s.leaf(), v)
 }
 
-// write hands the plane one Value at one address, and reports a driver's refusal
+// write hands the plane one Value at one leaf, and reports a driver's refusal
 // as the driver's.
 //
 // A dump with no plane in sight stages the write in its outcome instead, and
 // the two are one function because they are one decision made once: what the
 // walk does with an encoded value is where it goes, not what it is (ADR-0011).
-func (d dumpTo) write(ctx context.Context, at Path, v Value) (outcome, error) {
+//
+// The outcome says a write happened, which is what a section above reads to
+// decide whether it emitted anything of its own (ADR-0016).
+func (d dumpTo) write(ctx context.Context, at LeafAddr, v Value) (outcome, error) {
 	if d.w == nil {
-		return outcome{writes: []stagedWrite{{at: at, v: v}}}, nil
+		return outcome{wrote: true, writes: []stagedWrite{{leaf: at, v: v}}}, nil
 	}
 
 	if err := d.w.Set(ctx, at, v); err != nil {
-		return outcome{}, fromDriver(momentWalk, at, err)
+		return outcome{}, fromDriver(momentWalk, at.Path(), err)
 	}
 
-	return outcome{}, nil
+	return outcome{wrote: true}, nil
 }
 
-// atNullable writes a Null where the pointer is nil and descends where it is
-// not, which are the two states a pointer has and the two observations a
-// container address carries.
+// ensure says at a container's own address what the value has to say there: a
+// null, or that the container is present and holds nothing.
 //
-// It never writes anything at the container address when the pointer is set,
-// because the answer is then under it: a container address is never realised at
-// the same time as anything beneath it (ADR-0003).
-func (d dumpTo) atNullable(ctx context.Context, s spot, into descend) (outcome, error) {
-	if !s.v.IsNil() {
-		return into(s.v.Elem(), s.at)
+// It is a capability rather than a [Writer] method, because a plane with no
+// spelling for a container should refuse rather than receive a write it will
+// mis-store, and the refusal names the address and the plane (ADR-0016).
+func (d dumpTo) ensure(ctx context.Context, at Container, p Presence) (outcome, error) {
+	if d.w == nil {
+		return outcome{wrote: true, writes: []stagedWrite{{at: at, p: p}}}, nil
 	}
 
-	return d.write(ctx, s.at, nullValue)
+	e, ok := d.w.(Ensurer)
+	if !ok {
+		return outcome{}, newError(momentWalk, ErrPlane, at.Path(), unspellableMsg(p, d.w))
+	}
+
+	if err := e.Ensure(ctx, at, p); err != nil {
+		return outcome{}, fromDriver(momentWalk, at.Path(), err)
+	}
+
+	return outcome{wrote: true}, nil
 }
 
-// atArray asks nothing. An index outside the array is something a plane can
-// hold and a value cannot, so it is a question with a Load side only.
-func (dumpTo) atArray(context.Context, spot) error { return nil }
+// unspellableMsg refuses a container-level write on a plane that cannot spell
+// one, naming what the value needed said and what the plane is.
+func unspellableMsg(p Presence, w Writer) string {
+	return fmt.Sprintf("the value says this container is %s, and %T cannot spell a container at its own "+
+		"address: a sink that does not implement ferry.Ensurer writes the addresses beneath a container "+
+		"and never the container itself, which is a property of that plane rather than of this schema", p, w)
+}
 
-// atSlice writes one address per element, and a Null at the sequence's own
+// atNullable writes a null where the pointer is nil and descends where it is
+// not, which are the two states a pointer has.
+//
+// It never writes anything at the container address when the pointer is set and
+// something was written beneath it, because the answer is then under it: a
+// container address is never realised at the same time as anything beneath it
+// (ADR-0003). A pointer that is set and wrote nothing is the one case with
+// nowhere else to be said: Go can express present-and-empty, and without one
+// section-level write the round trip turns it into absence (ADR-0016).
+func (d dumpTo) atNullable(ctx context.Context, s spot, into descend) (outcome, error) {
+	if s.v.IsNil() {
+		return d.ensure(ctx, s.container(), PresenceNull)
+	}
+
+	out, err := into(s.v.Elem(), s.at)
+	if err != nil || out.wrote {
+		return out, err
+	}
+
+	return d.ensure(ctx, s.container(), PresencePresent)
+}
+
+// atSlice writes one address per element, and a null at the sequence's own
 // address where it has none.
 //
 // Nil and empty are one value there, and the collision is forced rather than
@@ -991,7 +992,7 @@ func (dumpTo) atArray(context.Context, spot) error { return nil }
 // vanish entirely, which is a silently dropped entry (ADR-0005).
 func (d dumpTo) atSlice(ctx context.Context, s spot, into descend) (outcome, error) {
 	if s.v.Len() == 0 {
-		return d.write(ctx, s.at, nullValue)
+		return d.ensure(ctx, s.composite(), PresenceNull)
 	}
 
 	r := d.realising(s, s.v.Len())
@@ -1013,7 +1014,7 @@ func (d dumpTo) atSlice(ctx context.Context, s spot, into descend) (outcome, err
 // the mapping's own address where it has no entries.
 func (d dumpTo) atMap(ctx context.Context, s spot, into descend) (outcome, error) {
 	if s.v.Len() == 0 {
-		return d.write(ctx, s.at, nullValue)
+		return d.ensure(ctx, s.composite(), PresenceNull)
 	}
 
 	keys, err := sortedKeys(s)
@@ -1060,6 +1061,17 @@ func sortedKeys(s spot) ([]entry, error) {
 			return nil, newError(momentWalk, ErrValue, s.at, err.Error()).withCause(err)
 		}
 
+		// An empty segment names no address, and the address model says so from
+		// both ends: a tag cannot write one and neither may a value. Measured
+		// before the refusal existed, a map key rendering to empty text minted
+		// /m/ and the dump returned nil, so a plane was written at an address
+		// ferry declares illegal (#258).
+		if text == "" {
+			return nil, newError(momentWalk, ErrValue, s.at,
+				"a key of this mapping renders to empty text, and an empty segment names no address: "+
+					"an entry at it could not be read back, and the address it would mint is not one")
+		}
+
 		out = append(out, entry{key: k, text: text})
 	}
 
@@ -1076,6 +1088,7 @@ func sortedKeys(s spot) ([]entry, error) {
 // same on every run whatever order the members are walked in.
 type realising struct {
 	s     spot
+	kind  addrKind
 	addrs *AddressSet
 	b     batch
 }
@@ -1083,7 +1096,23 @@ type realising struct {
 // realising starts one, with room for the members the container is about to
 // list.
 func (d dumpTo) realising(s spot, n int) *realising {
-	return &realising{s: s, addrs: d.addrs, b: batch{out: outcome{minted: make(map[Path]spot, n)}}}
+	return &realising{
+		s:     s,
+		kind:  elemKind(s),
+		addrs: d.addrs,
+		b:     batch{out: outcome{minted: make(map[Path]spot, n)}},
+	}
+}
+
+// elemKind is the address kind one member of a dynamic composite takes. The
+// driver mints the segment and the schema types the child, so the kind comes
+// from the element compiled under the composite (ADR-0016).
+func elemKind(s spot) addrKind {
+	if k, ok := containerKind(s.n.fields[elemShape]); ok {
+		return k
+	}
+
+	return kindLeaf
 }
 
 // member mints one address and walks the member it belongs to, and does neither
@@ -1107,7 +1136,7 @@ func (r *realising) member(v reflect.Value, at Path, into descend) {
 // once, at [collided].
 func (r *realising) mint(at Path) error {
 	_, taken := r.b.out.minted[at]
-	if taken || r.addrs.Has(at) {
+	if taken || r.addrs.Has(memberAt(r.kind, at)) {
 		return collided(at, r.s)
 	}
 

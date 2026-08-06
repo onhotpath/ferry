@@ -2,6 +2,7 @@ package ferrytest_test
 
 import (
 	"errors"
+	"maps"
 	"slices"
 	"strconv"
 	"testing"
@@ -10,24 +11,108 @@ import (
 	"github.com/onhotpath/ferry/ferrytest"
 )
 
-// openPlane mints a fresh memory plane and opens both halves of it.
+// The fixtures these tests address the plane through.
+//
+// Every address below is compiled from one of them rather than written out,
+// because the three address kinds are sealed and the schema compiler is the
+// only thing that mints one (ADR-0016). That is stronger than the literals it
+// replaces: a test can no longer assert about an address ferry would never
+// produce.
+type (
+	// memDB is one section over one leaf: /db and /db/host.
+	memDB struct {
+		DB memHost `ferry:"db"`
+	}
+
+	memHost struct {
+		Host string `ferry:"host"`
+	}
+
+	// memNamedZero puts a Name segment whose text is "0" under /tags, which is
+	// the half of the segment-kind pair a flat key space cannot hold.
+	memNamedZero struct {
+		Tags memZero `ferry:"tags"`
+	}
+
+	memZero struct {
+		Zero string `ferry:"0"`
+	}
+
+	// memIndexedZero puts position 0 under the same /tags, through an array,
+	// whose element addresses come from the type.
+	memIndexedZero struct {
+		Tags [1]string `ferry:"tags"`
+	}
+
+	// memFolds is the composite three case-variant keys are minted under.
+	memFolds struct {
+		Folds map[string]string `ferry:"folds"`
+	}
+
+	// memThree is three leaves, for the refusal that names each of them.
+	memThree struct {
+		Host string `ferry:"host"`
+		Port string `ferry:"port"`
+		Rate string `ferry:"rate"`
+	}
+
+	// memTags is the sequence the twelve indices are minted under.
+	memTags struct {
+		Tags []string `ferry:"tags"`
+	}
+
+	// memLabels is a leaf under a section no other fixture here binds.
+	memLabels struct {
+		Labels memEnv `ferry:"labels"`
+	}
+
+	memEnv struct {
+		Env string `ferry:"env"`
+	}
+
+	// memLimits is a composite whose members are themselves composites, which
+	// is the shape a nested container makes.
+	memLimits struct {
+		Limits map[string][]string `ferry:"limits"`
+		Name   string              `ferry:"name"`
+	}
+
+	// memOptional is Go's present-but-empty section: a non-nil pointer whose
+	// every field is omitted.
+	memOptional struct {
+		Opts *memOpts `ferry:"opts"`
+	}
+
+	memOpts struct {
+		Name string `ferry:"name,omitzero"`
+	}
+
+	// memStaticCfg is what the fixed-contents plane is read into.
+	memStaticCfg struct {
+		Port    int    `ferry:"port"`
+		Timeout string `ferry:"timeout"`
+	}
+)
+
+// openPlane mints a fresh memory plane and opens both halves of it over one
+// schema's address set.
 //
 // Fresh per call, never shared between subtests: a destination shared across
 // equivalence cases is the defect that hides a broken second walk, and this
 // plane refuses a duplicate write, so sharing one would also turn every second
 // case into a spurious refusal.
-func openPlane(t *testing.T) (ferry.Reader, ferry.Writer) {
+func openPlane(t *testing.T, set *ferry.AddressSet) (ferry.Reader, ferry.Writer) {
 	t.Helper()
 
 	inst := ferrytest.MemPlane().Open()
 
-	return openReader(t, inst.Source), openWriter(t, inst.Sink)
+	return openReader(t, inst.Source, set), openWriter(t, inst.Sink, set)
 }
 
-func openReader(t *testing.T, src ferry.Source) ferry.Reader {
+func openReader(t *testing.T, src ferry.Source, set *ferry.AddressSet) ferry.Reader {
 	t.Helper()
 
-	open, err := src.Bind(ferry.NewAddressSet())
+	open, err := src.Bind(set)
 	if err != nil {
 		t.Fatalf("Source.Bind: %v", err)
 	}
@@ -40,10 +125,10 @@ func openReader(t *testing.T, src ferry.Source) ferry.Reader {
 	return r
 }
 
-func openWriter(t *testing.T, snk ferry.Sink) ferry.Writer {
+func openWriter(t *testing.T, snk ferry.Sink, set *ferry.AddressSet) ferry.Writer {
 	t.Helper()
 
-	open, err := snk.Bind(ferry.NewAddressSet())
+	open, err := snk.Bind(set)
 	if err != nil {
 		t.Fatalf("Sink.Bind: %v", err)
 	}
@@ -56,7 +141,40 @@ func openWriter(t *testing.T, snk ferry.Sink) ferry.Writer {
 	return w
 }
 
-func mustSet(t *testing.T, w ferry.Writer, addr ferry.Path, v ferry.Value) {
+// leafOf and compositeOf read one typed address back off a compiled set.
+//
+// The types are exported and only their construction is sealed, so a package
+// outside ferry can hold one it was given and can ask a set for one, which is
+// what these do.
+func leafOf(t *testing.T, set *ferry.AddressSet, at ferry.Path) ferry.LeafAddr {
+	t.Helper()
+
+	for m := range set.Seq() {
+		if a, ok := m.(ferry.LeafAddr); ok && a.Path() == at {
+			return a
+		}
+	}
+
+	t.Fatalf("the compiled set holds no leaf at %s", at)
+
+	return ferry.LeafAddr{}
+}
+
+func compositeOf(t *testing.T, set *ferry.AddressSet, at ferry.Path) ferry.CompositeAddr {
+	t.Helper()
+
+	for m := range set.Seq() {
+		if a, ok := m.(ferry.CompositeAddr); ok && a.Path() == at {
+			return a
+		}
+	}
+
+	t.Fatalf("the compiled set holds no composite at %s", at)
+
+	return ferry.CompositeAddr{}
+}
+
+func mustSet(t *testing.T, w ferry.Writer, addr ferry.LeafAddr, v ferry.Value) {
 	t.Helper()
 
 	if err := w.Set(t.Context(), addr, v); err != nil {
@@ -64,7 +182,7 @@ func mustSet(t *testing.T, w ferry.Writer, addr ferry.Path, v ferry.Value) {
 	}
 }
 
-func mustGet(t *testing.T, r ferry.Reader, addr ferry.Path) ferry.Value {
+func mustGet(t *testing.T, r ferry.Reader, addr ferry.LeafAddr) ferry.Value {
 	t.Helper()
 
 	v, err := r.Get(t.Context(), addr)
@@ -75,7 +193,7 @@ func mustGet(t *testing.T, r ferry.Reader, addr ferry.Path) ferry.Value {
 	return v
 }
 
-func mustChildren(t *testing.T, r ferry.Reader, prefix ferry.Path) []ferry.Path {
+func mustChildren(t *testing.T, r ferry.Reader, addr ferry.CompositeAddr) []ferry.Segment {
 	t.Helper()
 
 	e, ok := r.(ferry.Enumerator)
@@ -83,37 +201,42 @@ func mustChildren(t *testing.T, r ferry.Reader, prefix ferry.Path) []ferry.Path 
 		t.Fatalf("%T does not implement ferry.Enumerator", r)
 	}
 
-	kids, err := e.Children(t.Context(), prefix)
+	kids, err := e.Children(t.Context(), addr)
 	if err != nil {
-		t.Fatalf("Children(%s): %v", prefix, err)
+		t.Fatalf("Children(%s): %v", addr, err)
 	}
 
 	return kids
 }
 
-// TestMemPlaneKeysByTheCanonicalRendering is ADR-0003's first obligation,
-// observed from outside: two ways of spelling one address are one slot, and two
-// addresses whose renderings differ are two, including the pair that differs
-// only by segment kind.
-func TestMemPlaneKeysByTheCanonicalRendering(t *testing.T) {
-	_, w := openPlane(t)
+func mustProbe(t *testing.T, r ferry.Reader, addr ferry.Container) ferry.Presence {
+	t.Helper()
 
-	mustSet(t, w, ferry.At("db", "host"), ferry.String("first"))
-
-	err := w.Set(t.Context(), ferry.At("db").At("host"), ferry.String("second"))
-	if !errors.Is(err, ferry.ErrPlane) {
-		t.Errorf("second write at the same rendering = %v, want a refusal", err)
+	pr, ok := r.(ferry.Prober)
+	if !ok {
+		t.Fatalf("%T does not implement ferry.Prober", r)
 	}
+
+	info, err := pr.Probe(t.Context(), addr)
+	if err != nil {
+		t.Fatalf("Probe(%s): %v", addr, err)
+	}
+
+	return info.Presence()
 }
 
-// TestMemPlaneSeparatesTheSegmentKinds is the half of the same obligation that
-// a flat key space cannot hold: a map key spelled "0" and position 0 render
-// differently, so they are two slots here, where a plane keying on text alone
-// would turn the map into a sequence and destroy the key.
+// TestMemPlaneSeparatesTheSegmentKinds is the half of ADR-0003's first
+// obligation that a flat key space cannot hold: a map key spelled "0" and
+// position 0 render differently, so they are two slots here, where a plane
+// keying on text alone would turn the map into a sequence and destroy the key.
+//
+// The two addresses come from two schemas that name the same container, which
+// is what makes them the same prefix with two different steps under it.
 func TestMemPlaneSeparatesTheSegmentKinds(t *testing.T) {
-	r, w := openPlane(t)
+	named := leafOf(t, capturedSet[memNamedZero](t), ferry.At("tags", "0"))
+	indexed := leafOf(t, capturedSet[memIndexedZero](t), ferry.At("tags").Elem(0))
 
-	named, indexed := ferry.At("tags").At("0"), ferry.At("tags").Elem(0)
+	r, w := openPlane(t, capturedSet[memNamedZero](t))
 
 	mustSet(t, w, named, ferry.String("as a map key"))
 	mustSet(t, w, indexed, ferry.String("as a position"))
@@ -131,42 +254,53 @@ func TestMemPlaneSeparatesTheSegmentKinds(t *testing.T) {
 // decision that absence is a kind: a lookup miss is the zero Value, with no
 // second return value to discard and no sentinel to match.
 func TestMemPlaneReportsAbsenceAsAKind(t *testing.T) {
-	r, _ := openPlane(t)
+	set := capturedSet[memDB](t)
+	r, _ := openPlane(t, set)
 
-	got, err := r.Get(t.Context(), ferry.At("nothing", "here"))
+	addr := leafOf(t, set, ferry.At("db", "host"))
+
+	got, err := r.Get(t.Context(), addr)
 	if err != nil || got.Kind() != ferry.KindAbsent {
 		t.Errorf("Get at an unwritten address = %#v, %v, want absent and no error", got, err)
 	}
 }
 
 // TestMemPlaneNeverFolds is ADR-0003's second obligation, and it is the viper
-// defect turned into a property: three case-variant addresses are three
-// entries, each holding its own value, and none of them is reachable through
-// another's spelling.
+// defect turned into a property: three case-variant keys are three entries,
+// each holding its own value, and none of them is reachable through another's
+// spelling.
+//
+// They are map keys rather than tagged fields, because what a value mints is
+// where a folding plane does its damage: a tagged address is in the compiled
+// set and a minted one is not.
 func TestMemPlaneNeverFolds(t *testing.T) {
-	r, w := openPlane(t)
+	inst := ferrytest.MemPlane().Open()
 
-	variants := []string{"Host", "host", "HOST"}
-	for _, name := range variants {
-		mustSet(t, w, ferry.At(name), ferry.String(name))
+	variants := map[string]string{"Host": "Host", "host": "host", "HOST": "HOST"}
+
+	if err := ferry.Dump(t.Context(), memFolds{Folds: variants}, inst.Sink); err != nil {
+		t.Fatalf("dumping three case-variant keys: %v", err)
 	}
 
-	for _, name := range variants {
-		if got := mustGet(t, r, ferry.At(name)); got != ferry.String(name) {
-			t.Errorf("Get(/%s) = %#v, want string(%q)", name, got, name)
-		}
+	back, err := ferry.Load[memFolds](t.Context(), inst.Source)
+	if err != nil {
+		t.Fatalf("loading them back: %v", err)
 	}
 
-	kids := mustChildren(t, r, ferry.Path{})
-	if len(kids) != len(variants) {
-		t.Fatalf("Children at the root = %v, want %d entries", kids, len(variants))
+	if !maps.Equal(back.Folds, variants) {
+		t.Errorf("the round trip gave %v, want %v: a fold would have collapsed them", back.Folds, variants)
 	}
 
 	// Segment text compares by exact bytes, so the order is the byte order of
 	// the three spellings and not a folded one.
-	want := []ferry.Path{ferry.At("HOST"), ferry.At("Host"), ferry.At("host")}
-	if !slices.Equal(kids, want) {
-		t.Errorf("Children at the root = %v, want %v", kids, want)
+	set := capturedSet[memFolds](t)
+	want := []ferry.Segment{
+		ferry.NameSegment("HOST"), ferry.NameSegment("Host"), ferry.NameSegment("host"),
+	}
+
+	got := mustChildren(t, openReader(t, inst.Source, set), compositeOf(t, set, ferry.At("folds")))
+	if !slices.Equal(got, want) {
+		t.Errorf("Children(/folds) = %v, want %v", got, want)
 	}
 }
 
@@ -175,9 +309,10 @@ func TestMemPlaneNeverFolds(t *testing.T) {
 // survives it - a plane that kept the last writer would report success for a
 // dump that lost a field. Naming the address is the test below.
 func TestMemPlaneRefusesADuplicateWrite(t *testing.T) {
-	r, w := openPlane(t)
+	set := capturedSet[memDB](t)
+	r, w := openPlane(t, set)
 
-	addr := ferry.At("db", "host")
+	addr := leafOf(t, set, ferry.At("db", "host"))
 	mustSet(t, w, addr, ferry.String("first"))
 
 	err := w.Set(t.Context(), addr, ferry.String("second"))
@@ -200,7 +335,7 @@ func TestMemPlaneRefusesADuplicateWrite(t *testing.T) {
 // wrote, so what names it is the ferry error a dump reports.
 func TestMemPlaneNamesTheAddressItRefused(t *testing.T) {
 	inst := ferrytest.MemPlane().Open()
-	cfg := errCfg{Host: "h", Port: 1, Rate: 2}
+	cfg := memThree{Host: "h", Port: "1", Rate: "2"}
 
 	if err := ferry.Dump(t.Context(), cfg, inst.Sink); err != nil {
 		t.Fatalf("the first dump failed: %v", err)
@@ -235,27 +370,35 @@ func checkRefusalAt(t *testing.T, el error, want ferry.Path) {
 // twelve indices that make the difference visible: sorted as text they are
 // 0 1 10 11 2 3, and segment-wise they are 0 1 2 3 10 11.
 func TestMemPlaneEnumeratesSegmentWise(t *testing.T) {
-	r, w := openPlane(t)
+	inst := ferrytest.MemPlane().Open()
 
-	tags := ferry.At("tags")
-	for _, i := range []uint{11, 2, 7, 0, 10, 4, 1, 9, 3, 8, 5, 6} {
-		mustSet(t, w, tags.Elem(i), ferry.Number(strconv.FormatUint(uint64(i), 10)))
+	tags := make([]string, 12)
+	for i := range tags {
+		tags[i] = strconv.Itoa(i)
 	}
 
-	want := make([]ferry.Path, 0, 12)
-	for i := range uint(12) {
-		want = append(want, tags.Elem(i))
+	if err := ferry.Dump(t.Context(), memTags{Tags: tags}, inst.Sink); err != nil {
+		t.Fatalf("dumping twelve positions: %v", err)
 	}
 
-	got := mustChildren(t, r, tags)
+	set := capturedSet[memTags](t)
+	addr := compositeOf(t, set, ferry.At("tags"))
+	r := openReader(t, inst.Source, set)
+
+	want := make([]ferry.Segment, 0, len(tags))
+	for i := range uint(len(tags)) {
+		want = append(want, ferry.IndexSegment(i))
+	}
+
+	got := mustChildren(t, r, addr)
 	if !slices.Equal(got, want) {
-		t.Errorf("Children(%s) = %v, want %v", tags, got, want)
+		t.Errorf("Children(%s) = %v, want %v", addr, got, want)
 	}
 
 	// Twice, because the obligation is that a test asserting on this plane's
 	// contents is not asserting on Go's randomised map iteration order.
-	if again := mustChildren(t, r, tags); !slices.Equal(again, got) {
-		t.Errorf("Children(%s) is not stable: %v then %v", tags, got, again)
+	if again := mustChildren(t, r, addr); !slices.Equal(again, got) {
+		t.Errorf("Children(%s) is not stable: %v then %v", addr, got, again)
 	}
 }
 
@@ -269,9 +412,11 @@ func TestMemPlaneEnumeratesSegmentWise(t *testing.T) {
 // about the driver-side rule, which is why that rule needs a first-party driver
 // with a real key function behind it.
 func TestMemPlaneIsTheNegativeCaseForInjectivity(t *testing.T) {
-	r, w := openPlane(t)
+	set := capturedSet[collidingCfg](t)
+	r, w := openPlane(t, set)
 
-	flat, structured := ferry.At("db_host"), ferry.At("db", "host")
+	flat := leafOf(t, set, ferry.At("db_host"))
+	structured := leafOf(t, set, ferry.At("db", "host"))
 
 	mustSet(t, w, flat, ferry.String("flat"))
 	mustSet(t, w, structured, ferry.String("structured"))
@@ -291,26 +436,16 @@ func TestMemPlaneIsTheNegativeCaseForInjectivity(t *testing.T) {
 // fail.
 func TestMemPlaneBindDoesNoIO(t *testing.T) {
 	inst := ferrytest.MemPlane().Open()
-	src, snk := inst.Source, inst.Sink
 
 	// The set a schema determined is not what this plane keys on, and an
 	// address outside it is still writable and readable - which is what stops a
 	// precomputed table from refusing a legitimate map key.
-	unknown := ferry.At("labels", "env")
+	unknown := leafOf(t, capturedSet[memLabels](t), ferry.At("labels", "env"))
 
-	openWrite, err := snk.Bind(ferry.NewAddressSet(ferry.At("known")))
-	if err != nil {
-		t.Fatalf("Sink.Bind: %v", err)
-	}
-
-	w, err := openWrite(t.Context())
-	if err != nil {
-		t.Fatalf("open writer: %v", err)
-	}
-
+	w := openWriter(t, inst.Sink, capturedSet[memDB](t))
 	mustSet(t, w, unknown, ferry.String("minted"))
 
-	openRead, err := src.Bind(nil)
+	openRead, err := inst.Source.Bind(nil)
 	if err != nil {
 		t.Fatalf("Source.Bind(nil): %v", err)
 	}
@@ -326,52 +461,89 @@ func TestMemPlaneBindDoesNoIO(t *testing.T) {
 }
 
 // TestMemPlaneEnumeratesContainers covers the shape a nested composite makes:
-// the children of a container are addresses one segment deeper, whatever their
-// kind, and a leaf has none.
+// the members of a container are one segment deeper, whatever their kind, and
+// what is under each of them is enumerated in turn.
+//
+// The nested half is asserted through a round trip rather than through a second
+// Children call, because the address of a member is minted from the value and
+// the walk is the only thing that holds one.
 func TestMemPlaneEnumeratesContainers(t *testing.T) {
-	r, w := openPlane(t)
+	inst := ferrytest.MemPlane().Open()
 
-	limits := ferry.At("limits")
-	mustSet(t, w, limits.At("http").Elem(0), ferry.Number("1"))
-	mustSet(t, w, limits.At("http").Elem(1), ferry.Number("2"))
-	mustSet(t, w, limits.At("grpc"), ferry.Null)
-	mustSet(t, w, ferry.At("name"), ferry.String("svc"))
+	cfg := memLimits{
+		Limits: map[string][]string{"http": {"1", "2"}, "grpc": {"3"}},
+		Name:   "svc",
+	}
 
-	want := []ferry.Path{limits.At("grpc"), limits.At("http")}
-	if got := mustChildren(t, r, limits); !slices.Equal(got, want) {
+	if err := ferry.Dump(t.Context(), cfg, inst.Sink); err != nil {
+		t.Fatalf("dumping a nested composite: %v", err)
+	}
+
+	set := capturedSet[memLimits](t)
+	limits := compositeOf(t, set, ferry.At("limits"))
+
+	want := []ferry.Segment{ferry.NameSegment("grpc"), ferry.NameSegment("http")}
+	if got := mustChildren(t, openReader(t, inst.Source, set), limits); !slices.Equal(got, want) {
 		t.Errorf("Children(%s) = %v, want %v", limits, got, want)
 	}
 
-	seq := limits.At("http")
-
-	want = []ferry.Path{seq.Elem(0), seq.Elem(1)}
-	if got := mustChildren(t, r, seq); !slices.Equal(got, want) {
-		t.Errorf("Children(%s) = %v, want %v", seq, got, want)
+	back, err := ferry.Load[memLimits](t.Context(), inst.Source)
+	if err != nil {
+		t.Fatalf("loading the nested composite back: %v", err)
 	}
 
-	if got := mustChildren(t, r, seq.Elem(0)); len(got) != 0 {
-		t.Errorf("Children at a leaf = %v, want none", got)
-	}
-
-	if got := mustChildren(t, r, ferry.At("absent")); len(got) != 0 {
-		t.Errorf("Children at an unwritten address = %v, want none", got)
+	if !maps.EqualFunc(back.Limits, cfg.Limits, slices.Equal) || back.Name != cfg.Name {
+		t.Errorf("the round trip gave %+v, want %+v", back, cfg)
 	}
 }
 
-// TestMemPlaneEnumeratesLargeIndices pins the index round trip through
-// enumeration at a width no test value reaches by accident, because the plane
-// rebuilds an enumerated address out of segments rather than parsing text.
-func TestMemPlaneEnumeratesLargeIndices(t *testing.T) {
-	r, w := openPlane(t)
+// TestMemPlaneAnswersAtAContainersOwnAddress is the plane's half of the
+// container question, which moved off Get and onto Probe with the sealed
+// address model (ADR-0016).
+//
+// The three answers are three different things to a reload, and this plane has
+// to keep them apart: a null a nil composite wrote, the presence a realised but
+// empty section wrote, and the absence of an address nothing reached.
+func TestMemPlaneAnswersAtAContainersOwnAddress(t *testing.T) {
+	inst := ferrytest.MemPlane().Open()
 
-	tags := ferry.At("tags")
-	big := uint(1234567890)
+	if err := ferry.Dump(t.Context(), memTags{}, inst.Sink); err != nil {
+		t.Fatalf("dumping a nil sequence: %v", err)
+	}
 
-	mustSet(t, w, tags.Elem(big), ferry.String("x"))
+	set := capturedSet[memTags](t)
 
-	want := []ferry.Path{tags.Elem(big)}
-	if got := mustChildren(t, r, tags); !slices.Equal(got, want) {
-		t.Errorf("Children(%s) = %v, want %v", tags, got, want)
+	r := openReader(t, inst.Source, set)
+	if got := mustProbe(t, r, compositeOf(t, set, ferry.At("tags"))); got != ferry.PresenceNull {
+		t.Errorf("Probe at a nil sequence's own address = %s, want %s", got, ferry.PresenceNull)
+	}
+
+	other := ferrytest.MemPlane().Open()
+	if got := mustProbe(t, openReader(t, other.Source, set),
+		compositeOf(t, set, ferry.At("tags"))); got != ferry.PresenceAbsent {
+		t.Errorf("Probe at an address nothing wrote = %s, want %s", got, ferry.PresenceAbsent)
+	}
+}
+
+// TestMemPlaneCarriesAPresentButEmptySection is what the section-level write
+// buys: Go can express a non-nil pointer whose every field is omitted, and
+// without an answer at the section's own address the round trip would turn it
+// into absence.
+func TestMemPlaneCarriesAPresentButEmptySection(t *testing.T) {
+	inst := ferrytest.MemPlane().Open()
+
+	if err := ferry.Dump(t.Context(), memOptional{Opts: &memOpts{}}, inst.Sink); err != nil {
+		t.Fatalf("dumping a realised but empty section: %v", err)
+	}
+
+	back, err := ferry.Load[memOptional](t.Context(), inst.Source)
+	if err != nil {
+		t.Fatalf("loading it back: %v", err)
+	}
+
+	if back.Opts == nil {
+		t.Error("a present-but-empty section reloaded as absent, which is the divergence the section-level " +
+			"write exists to close")
 	}
 }
 
@@ -380,8 +552,11 @@ func TestMemPlaneEnumeratesLargeIndices(t *testing.T) {
 // optional interface. A Commit here would be a lie, and a Close would be the
 // `return nil` boilerplate that reads in the source exactly like a rollback
 // somebody forgot.
+//
+// It does spell a container at its own address, and that is the one capability
+// a map of Values genuinely has: the answer is a slot in the map like any other.
 func TestMemWriterHasNoLifecycle(t *testing.T) {
-	r, w := openPlane(t)
+	r, w := openPlane(t, capturedSet[memDB](t))
 
 	if _, ok := w.(ferry.Committer); ok {
 		t.Errorf("%T implements ferry.Committer, want it not to", w)
@@ -393,6 +568,10 @@ func TestMemWriterHasNoLifecycle(t *testing.T) {
 
 	if _, ok := r.(ferry.Releaser); ok {
 		t.Errorf("%T implements ferry.Releaser, want it not to", r)
+	}
+
+	if _, ok := w.(ferry.Ensurer); !ok {
+		t.Errorf("%T does not implement ferry.Ensurer, so a nil section could not be written", w)
 	}
 }
 
@@ -411,19 +590,13 @@ func TestStatic(t *testing.T) {
 	values[ferry.At("port")] = ferry.Number("9090")
 	delete(values, ferry.At("timeout"))
 
-	r := openReader(t, src)
-
-	if got := mustGet(t, r, ferry.At("port")); got != ferry.Number("8080") {
-		t.Errorf("Get(/port) = %#v, want number(\"8080\")", got)
+	cfg, err := ferry.Load[memStaticCfg](t.Context(), src)
+	if err != nil {
+		t.Fatalf("loading from fixed contents: %v", err)
 	}
 
-	if got := mustGet(t, r, ferry.At("timeout")); got != ferry.String("30s") {
-		t.Errorf("Get(/timeout) = %#v, want string(\"30s\")", got)
-	}
-
-	want := []ferry.Path{ferry.At("port"), ferry.At("timeout")}
-	if got := mustChildren(t, r, ferry.Path{}); !slices.Equal(got, want) {
-		t.Errorf("Children at the root = %v, want %v", got, want)
+	if cfg.Port != 8080 || cfg.Timeout != "30s" {
+		t.Errorf("Load gave %+v, want the contents the source was built with", cfg)
 	}
 }
 
@@ -450,13 +623,16 @@ func TestMemPlaneDescription(t *testing.T) {
 		t.Errorf("MemPlane().Golden = %v, want none", p.Golden)
 	}
 
+	set := capturedSet[memDB](t)
+	addr := leafOf(t, set, ferry.At("db", "host"))
+
 	// Fresh per Open, or one suite's cases would refuse each other's writes.
 	first := p.Open()
-	mustSet(t, openWriter(t, first.Sink), ferry.At("x"), ferry.String("1"))
+	mustSet(t, openWriter(t, first.Sink, set), addr, ferry.String("1"))
 
 	second := p.Open()
-	if got := mustGet(t, openReader(t, second.Source), ferry.At("x")); got.Kind() != ferry.KindAbsent {
-		t.Errorf("a second Open sees %#v at /x, want absent", got)
+	if got := mustGet(t, openReader(t, second.Source, set), addr); got.Kind() != ferry.KindAbsent {
+		t.Errorf("a second Open sees %#v at %s, want absent", got, addr)
 	}
 }
 

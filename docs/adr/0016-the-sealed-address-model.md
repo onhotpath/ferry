@@ -49,13 +49,27 @@ The three types partition the address space and they are not interchangeable.
 
 ```go
 type Reader     interface { Get(ctx context.Context, addr LeafAddr) (Value, error) }
-type Prober     interface { Probe(ctx context.Context, addr SectionAddr) (SectionInfo, error) }
+type Prober     interface { Probe(ctx context.Context, addr Container) (SectionInfo, error) }
 type Enumerator interface { Children(ctx context.Context, addr CompositeAddr) ([]Segment, error) }
 type Writer     interface { Set(ctx context.Context, addr LeafAddr, v Value) error }
+type Ensurer    interface { Ensure(ctx context.Context, addr Container, p Presence) error }
 ```
 
 `Reader` and `Writer` stay required, as ADR-0004 has them.
-`Prober` and `Enumerator` are optional and discovered by assertion, in the same idiom as `Releaser`, because a plane that cannot list also cannot always answer whether a section is there.
+`Prober`, `Enumerator` and `Ensurer` are optional and discovered by assertion, in the same idiom as `Releaser`, because a plane that cannot list also cannot always answer whether a section is there.
+
+> **Amended when this shipped: `Probe` takes a `Container` and not a `SectionAddr`, and `Ensurer` carries a `Presence`.**
+>
+> As published, `Probe` was spelled over a `SectionAddr` and `Writer.Set` over a `LeafAddr`, and the ADR said nothing about how a plane answers, or is told, about a **composite's** own address.
+> Both halves of the walk need one.
+> The read half has to tell an absent mapping from an explicitly null one, which is the only thing that distinguishes a seed kept from a seed cleared; the write half has to say something at the address of a nil pointer, an empty slice and an empty map, which ADR-0005 writes a null at.
+> Under the signatures as published neither is expressible: `Get` and `Set` refuse a container address by construction, which is the point, and `Probe` reached only half the containers.
+> That the ADR itself names `CompositeRedirect{Target CompositeAddr}` as a redirect **state** is the evidence it intended a composite to be answered about.
+>
+> What moved: `Container` is a second sealed sum, over `SectionAddr` and `CompositeAddr` and nothing else, and `Probe` is asked about one.
+> Probing a leaf is still a compile error, so the safety property the split exists for is unchanged, and the driver-side type switch it costs is on the same cold path as `Bind`'s.
+> `Ensurer` is the write-side mirror: `Probe` reads a presence at a container address and `Ensure` writes one, so the two directions say the same three things in the same vocabulary.
+> ADR-0004's rule that a composite with no elements is written as a null at its own address survives exactly, spelled as `Ensure(addr, PresenceNull)` rather than as a `Set` of `Null`.
 
 **What this does to the four defects is not to fix them but to make them unwritable.**
 
@@ -116,6 +130,21 @@ It retires [#243](https://github.com/onhotpath/ferry/issues/243)'s proposed cont
 
 `Has` is one method because the kinds partition: `Has(SectionAddr{/db})` and `Has(CompositeAddr{/db})` are different questions and the prototype pins that they answer differently.
 
+> **Amended when this shipped: `AddressSet` lost its exported constructor, and the static set grew a section per struct and per array.**
+>
+> As published, this ADR described the set's surface as three methods and said nothing about how one is built.
+> `NewAddressSet(addrs ...Path)` was exported before this change, and keeping it would have been the forging door the sealing exists to shut: a `Path` in and a typed member out is exactly the conversion the unexported field forbids.
+> It is unexported now, and the only thing that reaches it is the compiler.
+>
+> The cost falls on anything outside core that needs a set to bind a driver with, which is the conformance suite and nothing else.
+> It compiles a fixture type and captures the set core hands the driver's own `Bind`, which is strictly better than what it did before: the suite can no longer hand a driver an address the compiler would not have minted.
+> ADR-0014 carries the same note.
+>
+> The set also grew, and the ADR implied this rather than stating it.
+> `#219`'s `/home` is a `SectionAddr`, and `/home` is an ordinary nested struct, which took **no** address at all under ADR-0003: only a composite that can be nil did.
+> So every nested struct and every array now contributes its own `SectionAddr`, a slice and a map contribute a `CompositeAddr`, and a pointer contributes at the kind of what it points at.
+> Without that a flat driver has nothing in its table to answer a probe about, and `/home` is unaskable rather than answerable, which is not what row one of the table above says.
+
 **The payoff, run:**
 
 ```
@@ -157,6 +186,16 @@ Package-level sentinel variables are reassignable, so `ferry.SectionPresent = fe
 Go's own idiom accepts that, and the alternative - three nullary functions - was offered and not taken.
 
 An earlier draft spelled the three as `State*()` constructor functions and was sent back: three global functions to say three constants is surface spent on nothing.
+
+> **Amended when this shipped: the `Presence` constants carry the type's name, and core reads copies of the three sentinels.**
+>
+> As published, this ADR wrote `Presence` with the constants the prototype used, which were `Absent`, `Present` and `Null`.
+> `Null` is taken: `ferry.Null` is the null `Value`, and Go has one package namespace.
+> The three are `PresenceAbsent`, `PresencePresent` and `PresenceNull`, which is `VKind`'s own convention applied rather than reopened.
+>
+> The reassignability hazard is disclosed as this ADR disclosed it, and core does not stand in it.
+> The exported sentinels are copies handed out once, and every comparison the walk makes is against an unexported copy, so `ferry.SectionPresent = ferry.SectionNull` breaks the assigning program's own comparisons and nothing else.
+> That is exactly what ADR-0017 did for `ferry.Null` and it is the same three lines.
 
 ### A reference is a plane fact reported per observation, and core owns the resolution
 
@@ -230,6 +269,17 @@ Classify(map[string][0]int{}) -> refused, same rule
 - [#264](https://github.com/onhotpath/ferry/issues/264), a `Name` child appearing under an array, stops existing: arrays are not enumerated, so there is no call that could mint one.
 - [#260](https://github.com/onhotpath/ferry/issues/260), a zero-length array, is refused at compile the way `struct{}` already is.
 
+> **Amended when this shipped: the over-length array refusal goes with the enumeration that produced it.**
+>
+> As published, this ADR said an array is never enumerated and did not say what happens to the check that lived on that enumeration.
+> Core used to ask a source that could list what it held under an array's address, and refuse an index the array has no element for: "the plane holds index 5 and [3]int holds 3".
+> `Children` now takes a `CompositeAddr` and an array is a section, so the call cannot be written and the check has nowhere to stand.
+>
+> That is a refusal lost, and it is stated rather than left to be found.
+> A plane holding `A_5` for a `[3]int` is now read as three elements and the fourth and sixth are ignored, where before an enumerating source refused the load.
+> The refusal was only ever available over a source that enumerates, so it was never the property it looked like, and getting it back means asking a plane to list a place whose membership the type already fixes.
+> The trade is deliberate: `#264`'s defect and this check are the same call, and the call is the thing the model removes.
+
 ### A repeated plane key mints an index, and a repeated key at a leaf refuses
 
 `?tags=a&tags=b` into a `[]string` was unaddressable, because the container rule refused at `/tags` before any driver code ran.
@@ -262,6 +312,17 @@ Go can express empty-but-present: a non-nil `*Options` whose every field is omit
 > A plane with no spelling for it refuses at open, before any write.
 
 That is the `Ensurer` capability [ADR-0004](0004-source-and-sink.md) gains, and its refusal is the same shape as `Unsetter`'s.
+
+> **Amended when this shipped: the section-level write is scoped to a nullable section, and the refusal lands at the write.**
+>
+> As published, this said "when a realised section emits zero child writes" without saying which sections, and "refuses at open, before any write".
+> Taken at face value it applies to every struct, and it must not: a plain nested struct always exists in Go, so every struct whose fields were all omitted would emit a section write, and ADR-0006's rule that an omission is not a deletion would not survive it.
+> It is scoped to a **nullable** section, which is a non-nil pointer, and that is the only shape where present and absent are distinguishable on reload at all.
+> `Config{Opts: &Options{}}` is the worked example in this ADR and it is a pointer.
+>
+> The refusal is at the write and not at open.
+> Whether any section-level write happens at all depends on the value, and a bind sees no value; refusing at open would mean refusing every schema with an optional section on every flat plane, which is most schemas and most planes.
+> It is one `ErrPlane` naming the address and the sink, made before that address is written and after the addresses before it were, which is where the rest of the write side already refuses.
 
 Worked on `Config{Opts: &Options{}}`:
 

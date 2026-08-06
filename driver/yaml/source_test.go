@@ -35,6 +35,7 @@ map:
 // key becomes "" as well. Here they are four values and five kinds.
 func TestObservations(t *testing.T) {
 	r := openReader(t, write(t, observed))
+	a := addressesOf[scalars](t)
 
 	cases := []struct {
 		name string
@@ -51,20 +52,18 @@ func TestObservations(t *testing.T) {
 		{"a !!binary is Bytes", ferry.At("bin"), ferry.Bytes([]byte("hi"))},
 		{"a timestamp is a String, because ferry's time codec reads one", ferry.At("when"),
 			ferry.String("2026-08-02T12:00:00Z")},
-		{"a sequence holds no value of its own", ferry.At("list"), ferry.Value{}},
-		{"a mapping holds no value of its own", ferry.At("map"), ferry.Value{}},
 		{"an element of a sequence is read by position", ferry.At("list").Elem(1), ferry.String("b")},
 		{"a member of a mapping is read by name", ferry.At("map", "k"), ferry.String("v")},
 	}
 
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) { holds(t, r, c.addr, c.want) })
+		t.Run(c.name, func(t *testing.T) { holds(t, r, a.leaf(t, c.addr), c.want) })
 	}
 }
 
 // holds is one observation, lifted out of its table so that the table stays a
 // table: a subtest body counts against the enclosing function's complexity.
-func holds(t *testing.T, r ferry.Reader, addr ferry.Path, want ferry.Value) {
+func holds(t *testing.T, r ferry.Reader, addr ferry.LeafAddr, want ferry.Value) {
 	t.Helper()
 
 	got, err := r.Get(t.Context(), addr)
@@ -77,11 +76,105 @@ func holds(t *testing.T, r ferry.Reader, addr ferry.Path, want ferry.Value) {
 	}
 }
 
-// TestChildren asserts that enumeration answers with addresses rather than
-// names, so that a sequence position and a mapping member stay different
+// TestAContainerWhereTheSchemaWantsAValueIsRefused is #252, at this plane.
+//
+// A mapping or a sequence at an address the schema types as a leaf used to
+// answer Absent, and absence does not write, so core filled the field with the
+// Go zero and the load returned nil: `limits: {http: {port: 1}, rps: "9"}` into
+// a map[string]string loaded {"http": "", "rps": "9"} and the port was gone.
+// The driver reports what the plane holds, and a container is not an absence.
+func TestAContainerWhereTheSchemaWantsAValueIsRefused(t *testing.T) {
+	r := openReader(t, write(t, observed))
+	a := addressesOf[leafShapes](t)
+
+	for _, at := range []ferry.Path{ferry.At("list"), ferry.At("map")} {
+		got, err := r.Get(t.Context(), a.leaf(t, at))
+		if err == nil {
+			t.Fatalf("Get at %s answered %#v, where the document holds a container: a value that is not "+
+				"there and a container that is are two different observations", at, got)
+		}
+
+		if !errors.Is(err, ferry.ErrValue) {
+			t.Errorf("Get at %s failed with %v, want an error carrying ferry.ErrValue", at, err)
+		}
+	}
+}
+
+// TestProbe is the container half of the read boundary: what this plane answers
+// at an address whose children come from the type or from the document.
+//
+// All three answers are distinguishable here, which is what makes this driver
+// the one that pins them. An empty mapping is present rather than absent, and
+// that row is the one a present-but-empty section round trips through.
+func TestProbe(t *testing.T) {
+	r := openReader(t, write(t, observed+"section: {}\n"))
+	a := addressesOf[containers](t)
+
+	p, ok := r.(ferry.Prober)
+	if !ok {
+		t.Fatal("the reader does not probe, and a plane that cannot say whether a section is there is one no " +
+			"optional section can be loaded from")
+	}
+
+	cases := []struct {
+		name string
+		addr ferry.Container
+		want ferry.SectionInfo
+	}{
+		{"a sequence is present", a.composite(t, ferry.At("list")), ferry.SectionPresent},
+		{"a mapping is present", a.composite(t, ferry.At("map")), ferry.SectionPresent},
+		{"an empty mapping is present", a.section(t, ferry.At("section")), ferry.SectionPresent},
+		{"an explicit null is null", a.composite(t, ferry.At("nul")), ferry.SectionNull},
+		{"a key that is not there is absent", a.composite(t, ferry.At("missing")), ferry.SectionAbsent},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { probes(t, p, c.addr, c.want) })
+	}
+}
+
+// probes is one probe, lifted out of its table for [holds]'s reason.
+func probes(t *testing.T, p ferry.Prober, addr ferry.Container, want ferry.SectionInfo) {
+	t.Helper()
+
+	got, err := p.Probe(t.Context(), addr)
+	if err != nil {
+		t.Fatalf("Probe(%s): %v", addr, err)
+	}
+
+	if got != want {
+		t.Errorf("Probe(%s) = %#v, want %#v", addr, got, want)
+	}
+}
+
+// TestAValueWhereTheSchemaWantsAContainerIsRefused is [TestProbe]'s mirror, and
+// it is the same disagreement seen from the other side: the document holds one
+// value where the destination takes a container.
+func TestAValueWhereTheSchemaWantsAContainerIsRefused(t *testing.T) {
+	r := openReader(t, write(t, observed))
+	a := addressesOf[containers](t)
+
+	p, ok := r.(ferry.Prober)
+	if !ok {
+		t.Fatal("the reader does not probe")
+	}
+
+	got, err := p.Probe(t.Context(), a.composite(t, ferry.At("value")))
+	if err == nil {
+		t.Fatalf("Probe at a scalar answered %#v, want a refusal", got)
+	}
+
+	if !errors.Is(err, ferry.ErrValue) {
+		t.Errorf("Probe at a scalar failed with %v, want an error carrying ferry.ErrValue", err)
+	}
+}
+
+// TestChildren asserts that enumeration answers with segments carrying their
+// kind, so that a sequence position and a mapping member stay different
 // answers.
 func TestChildren(t *testing.T) {
 	r := openReader(t, write(t, observed))
+	a := addressesOf[containers](t)
 
 	e, ok := r.(ferry.Enumerator)
 	if !ok {
@@ -90,14 +183,15 @@ func TestChildren(t *testing.T) {
 
 	cases := []struct {
 		name   string
-		prefix ferry.Path
-		want   []ferry.Path
+		prefix ferry.CompositeAddr
+		want   []ferry.Segment
 	}{
-		{"a sequence answers with positions", ferry.At("list"),
-			[]ferry.Path{ferry.At("list").Elem(0), ferry.At("list").Elem(1)}},
-		{"a mapping answers with names", ferry.At("map"), []ferry.Path{ferry.At("map", "k")}},
-		{"a scalar has no children", ferry.At("value"), nil},
-		{"an address that is not there has no children", ferry.At("missing"), nil},
+		{"a sequence answers with positions", a.composite(t, ferry.At("list")),
+			[]ferry.Segment{ferry.IndexSegment(0), ferry.IndexSegment(1)}},
+		{"a mapping answers with names", a.composite(t, ferry.At("map")),
+			[]ferry.Segment{ferry.NameSegment("k")}},
+		{"a scalar has no children", a.composite(t, ferry.At("value")), nil},
+		{"an address that is not there has no children", a.composite(t, ferry.At("missing")), nil},
 	}
 
 	for _, c := range cases {
@@ -106,7 +200,7 @@ func TestChildren(t *testing.T) {
 }
 
 // lists is one enumeration, lifted out of its table for [holds]'s reason.
-func lists(t *testing.T, e ferry.Enumerator, prefix ferry.Path, want []ferry.Path) {
+func lists(t *testing.T, e ferry.Enumerator, prefix ferry.CompositeAddr, want []ferry.Segment) {
 	t.Helper()
 
 	got, err := e.Children(t.Context(), prefix)
@@ -114,7 +208,7 @@ func lists(t *testing.T, e ferry.Enumerator, prefix ferry.Path, want []ferry.Pat
 		t.Fatalf("Children(%s): %v", prefix, err)
 	}
 
-	if !pathsEqual(got, want) {
+	if !segmentsEqual(got, want) {
 		t.Errorf("Children(%s) = %v, want %v", prefix, got, want)
 	}
 }
@@ -129,7 +223,7 @@ func lists(t *testing.T, e ferry.Enumerator, prefix ferry.Path, want []ferry.Pat
 func TestMalformedDocument(t *testing.T) {
 	path := write(t, "key: [unclosed\n")
 
-	open, err := yaml.NewSource(path).Bind(ferry.NewAddressSet(ferry.At("key")))
+	open, err := yaml.NewSource(path).Bind(addressesOf[scalars](t).set)
 	if err != nil {
 		t.Fatalf("Bind refused a legal address set over a plane it has not read: %v", err)
 	}
@@ -177,7 +271,7 @@ func TestMalformedDocumentThroughLoad(t *testing.T) {
 func TestMissingFileHoldsNothing(t *testing.T) {
 	r := openReader(t, filepath.Join(t.TempDir(), "absent.yaml"))
 
-	got, err := r.Get(t.Context(), ferry.At("anything"))
+	got, err := r.Get(t.Context(), addressesOf[scalars](t).leaf(t, ferry.At("anything")))
 	if err != nil {
 		t.Fatalf("Get against a plane with no file: %v", err)
 	}
@@ -192,7 +286,7 @@ func TestMissingFileHoldsNothing(t *testing.T) {
 func TestAliasIsFollowed(t *testing.T) {
 	r := openReader(t, write(t, "base: &b\n  host: localhost\nnext: *b\n"))
 
-	got, err := r.Get(t.Context(), ferry.At("next", "host"))
+	got, err := r.Get(t.Context(), addressesOf[scalars](t).leaf(t, ferry.At("next", "host")))
 	if err != nil {
 		t.Fatalf("Get through an alias: %v", err)
 	}
@@ -223,7 +317,7 @@ func TestUnreadableScalars(t *testing.T) {
 func refuses(t *testing.T, doc string) {
 	t.Helper()
 
-	got, err := openReader(t, write(t, doc)).Get(t.Context(), ferry.At("v"))
+	got, err := openReader(t, write(t, doc)).Get(t.Context(), addressesOf[scalars](t).leaf(t, ferry.At("v")))
 	if err == nil {
 		t.Fatalf("Get answered %#v, want a refusal", got)
 	}
@@ -250,7 +344,7 @@ func write(t *testing.T, doc string) string {
 func openReader(t *testing.T, path string) ferry.Reader {
 	t.Helper()
 
-	open, err := yaml.NewSource(path).Bind(ferry.NewAddressSet(ferry.At("unused")))
+	open, err := yaml.NewSource(path).Bind(addressesOf[scalars](t).set)
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
@@ -263,9 +357,9 @@ func openReader(t *testing.T, path string) ferry.Reader {
 	return r
 }
 
-// pathsEqual compares two address lists, treating nil and empty as one answer:
-// a plane with nothing under an address has no children either way.
-func pathsEqual(got, want []ferry.Path) bool {
+// segmentsEqual compares two member lists, treating nil and empty as one
+// answer: a plane with nothing under an address has no children either way.
+func segmentsEqual(got, want []ferry.Segment) bool {
 	if len(got) != len(want) {
 		return false
 	}

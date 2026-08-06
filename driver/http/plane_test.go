@@ -204,7 +204,9 @@ type standInWriter struct {
 // both planes hold text, so a Null has no representation in either, and writing
 // one as an empty string would make an empty composite and a composite of one
 // empty element the same request.
-func (w *standInWriter) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
+func (w *standInWriter) Set(_ context.Context, leaf ferry.LeafAddr, v ferry.Value) error {
+	addr := leaf.Path()
+
 	text, err := w.carried(v)
 	if err != nil {
 		return ferry.ErrorAt(addr, err)
@@ -225,6 +227,19 @@ func (w *standInWriter) Set(_ context.Context, addr ferry.Path, v ferry.Value) e
 	}
 
 	return w.putAt(parent, i, text)
+}
+
+// Ensure refuses every container-level write, which is this plane's declaration
+// read at the container's own address.
+//
+// Both halves of the plane hold text and nothing else, so there is no spelling
+// for a container that is present and holds nothing, and none for a null: an
+// empty name would make an empty composite and a composite of one empty element
+// the same request (ADR-0016).
+func (*standInWriter) Ensure(_ context.Context, addr ferry.Container, p ferry.Presence) error {
+	return ferry.ErrorAt(addr.Path(), fmt.Errorf(
+		"%w: this plane holds text under names, and cannot spell a container that is %s at its own name",
+		ferry.ErrPlane, p))
 }
 
 // put writes one value at a name of its own.

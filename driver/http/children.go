@@ -1,6 +1,7 @@
 package ferryhttp
 
 import (
+	"cmp"
 	"context"
 	"maps"
 	"slices"
@@ -27,27 +28,30 @@ import (
 // address. Only an overlap is refused. ?tags=a&tags=b&tags.2=z extends the
 // sequence and loads as three elements.
 //
-// It answers addresses and not names, because an address carries its segment
-// kind (ADR-0004). Neither plane holds a kind of its own, so it has to decide
-// one, and the rule is the one jsontext.Pointer's own documentation admits to: a
-// child spelled as canonical base 10 is a position in a sequence, and everything
-// else is a member of a mapping. Getting it wrong is loud rather than silent -
-// core refuses a position under a mapping and a name under a sequence, naming
-// the address - so a map whose keys are decimal numerals is a refusal at Load
-// and never a quietly reshaped value.
+// It answers segments and not addresses, because the driver says how the plane
+// spells its members and the schema types the child each one names (ADR-0016).
+// Neither plane holds a kind of its own, so it has to decide one, and the rule
+// is the one jsontext.Pointer's own documentation admits to: a child spelled as
+// canonical base 10 is a position in a sequence, and everything else is a member
+// of a mapping. Getting it wrong is loud rather than silent - core refuses a
+// position under a mapping and a name under a sequence, naming the address - so
+// a map whose keys are decimal numerals is a refusal at Load and never a quietly
+// reshaped value.
 //
-// The result is sorted segment-wise, so it is 0 1 2 ... 11 rather than the
-// 0 1 10 11 2 that sorting the rendering gives, and a caller asserting on it is
+// The result is sorted, positions numerically, so it is 0 1 2 ... 11 rather than
+// the 0 1 10 11 2 that sorting the text gives, and a caller asserting on it is
 // not asserting on Go's randomised map iteration order.
-func (r *reader) Children(_ context.Context, prefix ferry.Path) ([]ferry.Path, error) {
-	prefixKey, err := r.prefixKey(prefix)
+func (r *reader) Children(_ context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error) {
+	prefix := addr.Path()
+
+	prefixKey, err := r.keys(prefix)
 	if err != nil {
 		return nil, err
 	}
 
-	behind := r.positions(prefix, prefixKey)
+	behind := r.positions(prefixKey)
 
-	kids := map[ferry.Path]struct{}{}
+	kids := map[ferry.Segment]struct{}{}
 	maps.Copy(kids, behind)
 
 	if err := r.fromNames(prefix, prefixKey, behind, kids); err != nil {
@@ -55,23 +59,29 @@ func (r *reader) Children(_ context.Context, prefix ferry.Path) ([]ferry.Path, e
 	}
 
 	out := slices.Collect(maps.Keys(kids))
-	slices.SortFunc(out, ferry.Path.Compare)
+	slices.SortFunc(out, compareSegments)
 
 	return out, nil
 }
 
-// prefixKey is the name the prefix itself renders to.
+// compareSegments orders the answer: positions before names, positions
+// numerically and names bytewise.
 //
-// The empty path is the whole request rather than an error, because it is the
-// one prefix that names no address: a caller asking what is under nothing is
-// asking for everything, and answering with a refusal would make the root of a
-// plane the one place enumeration does not work.
-func (r *reader) prefixKey(prefix ferry.Path) (string, error) {
-	if prefix == (ferry.Path{}) {
-		return "", nil
+// Numerically rather than as text, because sorting the text gives 0 1 10 11 2
+// for twelve positions, which is the order ADR-0003 names as a subtle bug.
+func compareSegments(a, b ferry.Segment) int {
+	if a.Kind() != b.Kind() {
+		return cmp.Compare(a.Kind(), b.Kind())
 	}
 
-	return r.keys(prefix)
+	if a.Kind() == ferry.Index {
+		ai, _ := position(a.Text())
+		bi, _ := position(b.Text())
+
+		return cmp.Compare(ai, bi)
+	}
+
+	return strings.Compare(a.Text(), b.Text())
 }
 
 // positions is the second dimension read as a sequence: the values a name holds,
@@ -80,15 +90,8 @@ func (r *reader) prefixKey(prefix ferry.Path) (string, error) {
 // Enumerating a name is also what settles the question [reader.Get] could not
 // answer, so the record it left is dropped here: something read this name as a
 // sequence, which is what it is.
-//
-// The root has no second dimension. A request may carry a parameter with an
-// empty name - "?=v" is one - and the root is not a sequence because of it.
-func (r *reader) positions(prefix ferry.Path, prefixKey string) map[ferry.Path]struct{} {
-	out := map[ferry.Path]struct{}{}
-
-	if prefix == (ferry.Path{}) {
-		return out
-	}
+func (r *reader) positions(prefixKey string) map[ferry.Segment]struct{} {
+	out := map[ferry.Segment]struct{}{}
 
 	vs := r.vals[prefixKey]
 	if len(vs) == 0 {
@@ -98,7 +101,7 @@ func (r *reader) positions(prefix ferry.Path, prefixKey string) map[ferry.Path]s
 	delete(r.hid, prefixKey)
 
 	for i := range vs {
-		out[prefix.Elem(uint(i))] = struct{}{}
+		out[ferry.IndexSegment(uint(i))] = struct{}{}
 	}
 
 	return out
@@ -115,7 +118,7 @@ func (r *reader) positions(prefix ferry.Path, prefixKey string) map[ferry.Path]s
 //
 // The address the refusal carries is the container's, because core has one here
 // and core's wins. The position is in the message instead.
-func (r *reader) fromNames(prefix ferry.Path, prefixKey string, behind, kids map[ferry.Path]struct{}) error {
+func (r *reader) fromNames(prefix ferry.Path, prefixKey string, behind, kids map[ferry.Segment]struct{}) error {
 	for key := range r.vals {
 		kid, ok := r.child(prefix, prefixKey, key)
 		if !ok {
@@ -123,7 +126,7 @@ func (r *reader) fromNames(prefix ferry.Path, prefixKey string, behind, kids map
 		}
 
 		if _, both := behind[kid]; both {
-			_, i, _ := splitIndex(kid)
+			i, _ := position(kid.Text())
 
 			return twoSpellings(i)
 		}
@@ -142,59 +145,49 @@ func (r *reader) fromNames(prefix ferry.Path, prefixKey string, behind, kids map
 // from is used whole, which recovers the part's own spelling; a name matching
 // the prefix text but belonging to an address that is not under prefix is not a
 // child and is dropped here rather than turned into one.
-func (r *reader) child(prefix ferry.Path, prefixKey, key string) (ferry.Path, bool) {
+func (r *reader) child(prefix ferry.Path, prefixKey, key string) (ferry.Segment, bool) {
 	if addr, ok := r.static[key]; ok {
 		return step(prefix, addr)
 	}
 
-	rest, ok := r.under(prefix, prefixKey, key)
+	rest, ok := strings.CutPrefix(key, prefixKey+r.sep)
 	if !ok {
-		return ferry.Path{}, false
+		return ferry.Segment{}, false
 	}
 
 	head, _, _ := strings.Cut(rest, r.sep)
 	if head == "" {
-		return ferry.Path{}, false
+		return ferry.Segment{}, false
 	}
 
 	if i, isPosition := position(head); isPosition {
-		return prefix.Elem(i), true
+		return ferry.IndexSegment(i), true
 	}
 
-	return prefix.At(r.p.mint(head)), true
+	return ferry.NameSegment(r.p.mint(head)), true
 }
 
-// under is the text left over after the prefix, and whether the name lies under
-// it at all. At the root every name does, and the whole name is what is left.
-func (r *reader) under(prefix ferry.Path, prefixKey, key string) (string, bool) {
-	if prefix == (ferry.Path{}) {
-		return key, true
-	}
-
-	return strings.CutPrefix(key, prefixKey+r.sep)
-}
-
-// step is the immediate child of prefix that addr lies under, built by extending
-// prefix with addr's own segment at that depth rather than by parsing anything.
+// step is the segment of addr that names the immediate child of prefix it lies
+// under, read off the address rather than parsed out of anything.
 //
 // An address is not a child of itself, so an addr equal to prefix reports false:
 // the walk asks a container what is under it, and answering with the container
 // would be an infinite descent.
-func step(prefix, addr ferry.Path) (ferry.Path, bool) {
+func step(prefix, addr ferry.Path) (ferry.Segment, bool) {
 	depth := 0
 	pre := slices.Collect(prefix.Segments())
 
 	for seg := range addr.Segments() {
 		if depth == len(pre) {
-			return extend(prefix, seg), true
+			return seg, true
 		}
 
 		if seg != pre[depth] {
-			return ferry.Path{}, false
+			return ferry.Segment{}, false
 		}
 
 		depth++
 	}
 
-	return ferry.Path{}, false
+	return ferry.Segment{}, false
 }

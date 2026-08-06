@@ -56,6 +56,13 @@ type (
 		Name string `ferry:"name"`
 	}
 
+	// justMap is the fixture for the two cases about a value-minted address:
+	// its one member's address does not exist until there is a value, so a
+	// dump of it is the only way to reach one.
+	justMap struct {
+		Map map[string]string `ferry:"map"`
+	}
+
 	// onlyLeaf is the fixture for the cases that must not depend on
 	// [ferry.Enumerator], because loading a slice or a map from a source that
 	// cannot list is an error for a reason those cases are not about.
@@ -73,11 +80,60 @@ var (
 	addrList     = ferry.At("list")
 	addrMap      = ferry.At("map")
 	addrLeaf     = ferry.At("leaf")
-	addrMissing  = ferry.At("missing")
 	addrNilList  = ferry.At("nillist")
 	addrEmptyMap = ferry.At("emptymap")
 	addrSection  = ferry.At("section")
 )
+
+// setOf compiles T and hands back the address set core built for it, typed.
+//
+// It is how this package holds a typed address at all. The three address kinds
+// are sealed and the schema compiler is the only thing that mints one
+// (ADR-0016), so a case needing a [ferry.LeafAddr] asks the compiler for the
+// schema's own rather than writing one, which also means the suite can never
+// hand a driver an address the compiler would not have.
+func setOf[T any](opts []ferry.Option) (*ferry.AddressSet, error) {
+	spy := &setSpy{}
+	if _, err := ferry.Bind[T](spy, opts...); err != nil {
+		return nil, err
+	}
+
+	return spy.set, nil
+}
+
+// setSpy is a source that exists to be bound and never read.
+type setSpy struct{ set *ferry.AddressSet }
+
+func (s *setSpy) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
+	s.set = addrs
+
+	return func(context.Context) (ferry.Reader, error) { return setSpy{}, nil }, nil
+}
+
+func (setSpy) Get(context.Context, ferry.LeafAddr) (ferry.Value, error) { return ferry.Value{}, nil }
+
+// sectionIn and compositeIn find one member of a set by address and by kind,
+// which is the question the typed set exists to answer: /db as a section and
+// /db as a composite are different addresses.
+func sectionIn(set *ferry.AddressSet, at ferry.Path) (ferry.SectionAddr, bool) {
+	for m := range set.Seq() {
+		if a, ok := m.(ferry.SectionAddr); ok && a.Path() == at {
+			return a, true
+		}
+	}
+
+	return ferry.SectionAddr{}, false
+}
+
+func compositeIn(set *ferry.AddressSet, at ferry.Path) (ferry.CompositeAddr, bool) {
+	for m := range set.Seq() {
+		if a, ok := m.(ferry.CompositeAddr); ok && a.Path() == at {
+			return a, true
+		}
+	}
+
+	return ferry.CompositeAddr{}, false
+}
 
 // filledFixture is one populated value, minted per use so that no case can hand
 // another case a value it has already mutated.
@@ -118,14 +174,24 @@ var collidingPairs = [][2]ferry.Path{
 	{ferry.At("Host"), ferry.At("host")},
 }
 
-// collidingAddrs flattens the pairs into the set a Bind is handed.
-func collidingAddrs() []ferry.Path {
-	out := make([]ferry.Path, 0, len(collidingPairs)*2)
-	for _, pair := range collidingPairs {
-		out = append(out, pair[0], pair[1])
-	}
+// colliding is the type those pairs are the addresses of.
+//
+// It is a struct rather than a hand-built address set because the address kinds
+// are sealed and only the compiler mints one (ADR-0016), and because a set the
+// compiler produced is one a driver could actually be handed.
+type colliding struct {
+	Flat   string         `ferry:"db_host"`
+	DB     collidingUnder `ferry:"db"`
+	Dashed string         `ferry:"feature-flags"`
+	Scored string         `ferry:"feature_flags"`
+	Upper  string         `ferry:"Host"`
+	Lower  string         `ferry:"host"`
+}
 
-	return out
+// collidingUnder is the subtree whose leaf address a flat key function folds
+// onto the sibling spelled with the separator in it.
+type collidingUnder struct {
+	Host string `ferry:"host"`
 }
 
 // kindSet is [Plane.Kinds] as a set. A plane declaring nothing can express
@@ -245,8 +311,8 @@ type erringReader struct {
 }
 
 // Get fails at one address and answers from the plane everywhere else.
-func (r erringReader) Get(ctx context.Context, addr ferry.Path) (ferry.Value, error) {
-	if addr == r.at {
+func (r erringReader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
+	if addr.Path() == r.at {
 		return ferry.Value{}, r.err
 	}
 

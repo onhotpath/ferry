@@ -17,6 +17,7 @@ import (
 var (
 	_ ferry.Sink      = Sink{}
 	_ ferry.Writer    = (*writer)(nil)
+	_ ferry.Ensurer   = (*writer)(nil)
 	_ ferry.Committer = (*writer)(nil)
 	_ ferry.Releaser  = (*writer)(nil)
 )
@@ -164,13 +165,55 @@ type claim struct {
 // written as an explicit null and read back as Null - the Absent-versus-Null
 // conflation ferry criticises xload for, committed on the write path, where a
 // later load cannot tell it from a null the operator wrote.
-func (w *writer) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
+func (w *writer) Set(_ context.Context, addr ferry.LeafAddr, v ferry.Value) error {
 	spelled, err := spell(v)
 	if err != nil {
-		return ferry.ErrorAt(addr, err)
+		return ferry.ErrorAt(addr.Path(), err)
 	}
 
-	at, err := place(w.doc, addr)
+	return w.put(addr.Path(), spelled, yamlv3.ScalarNode)
+}
+
+// Ensure writes what a container has to say at its own address: the plane's null
+// where the value is nil or empty, and an empty mapping where the value is a
+// section that is there and holds nothing.
+//
+// The empty mapping is what closes the round trip Go can express and ADR-0006's
+// replace rule would otherwise lose: a non-nil pointer whose every field is
+// omitted writes no child, and without one section-level write the reload sees
+// an absent key and hands back nil (ADR-0016).
+func (w *writer) Ensure(_ context.Context, addr ferry.Container, p ferry.Presence) error {
+	node, kind, err := container(p)
+	if err != nil {
+		return ferry.ErrorAt(addr.Path(), err)
+	}
+
+	return w.put(addr.Path(), node, kind)
+}
+
+// container is the node one presence is written as, and the kind an alias at the
+// address has to name for the write to go through it.
+//
+// Absent never reaches here: an address ferry omits gets no call at all rather
+// than a call saying nothing, which is the same rule that keeps [ferry.Value]'s
+// absent kind off the write side entirely (ADR-0006).
+func container(p ferry.Presence) (*yamlv3.Node, yamlv3.Kind, error) {
+	switch p {
+	case ferry.PresenceNull:
+		return leaf(nullTag, nullText), yamlv3.ScalarNode, nil
+	case ferry.PresencePresent:
+		return &yamlv3.Node{Kind: yamlv3.MappingNode, Tag: mapTag}, yamlv3.MappingNode, nil
+	default:
+		return nil, 0, fmt.Errorf("%w: an absent container has nothing to write, and an address ferry omits "+
+			"gets no call rather than an explicit one", ferry.ErrValue)
+	}
+}
+
+// put is the write both halves share: find or build the node at the address,
+// check that no other address has already claimed it, and replace it while
+// keeping what belongs to the operator.
+func (w *writer) put(addr ferry.Path, spelled *yamlv3.Node, kind yamlv3.Kind) error {
+	at, err := place(w.doc, addr, kind)
 	if err != nil {
 		return ferry.ErrorAt(addr, err)
 	}

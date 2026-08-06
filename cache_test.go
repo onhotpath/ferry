@@ -72,12 +72,7 @@ func addressesOf(t *testing.T, a *AddressSet) []string {
 		t.Fatal("no address set reached the driver's Bind")
 	}
 
-	out := make([]string, 0, a.Len())
-	for addr := range a.All() {
-		out = append(out, addr.String())
-	}
-
-	return out
+	return kinded(a)
 }
 
 // TestOneTypeUnderTwoTagKeysIsTwoEntries is the tag key's half of the cache
@@ -107,11 +102,11 @@ func TestOneTypeUnderTwoTagKeysIsTwoEntries(t *testing.T) {
 		t.Errorf("both tag keys bound %v, and the two keys name different segments", under)
 	}
 
-	if want := []string{"/host", "/port"}; !slices.Equal(under, want) {
+	if want := []string{"leaf /host", "leaf /port"}; !slices.Equal(under, want) {
 		t.Errorf("the default key bound %v, want %v", under, want)
 	}
 
-	if want := []string{"/HOST", "/PORT"}; !slices.Equal(over, want) {
+	if want := []string{"leaf /HOST", "leaf /PORT"}; !slices.Equal(over, want) {
 		t.Errorf("mylib bound %v, want %v", over, want)
 	}
 

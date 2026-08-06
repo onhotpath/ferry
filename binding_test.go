@@ -420,13 +420,29 @@ type foldingWriter struct {
 	key   KeyFunc
 }
 
-func (w foldingWriter) Set(_ context.Context, addr Path, v Value) error {
-	key, err := w.key(addr)
+func (w foldingWriter) Set(_ context.Context, addr LeafAddr, v Value) error {
+	key, err := w.key(addr.Path())
 	if err != nil {
 		return err
 	}
 
 	w.store[key] = v
+
+	return nil
+}
+
+// Ensure is what an empty mapping says at its own address. The store is keyed
+// by plane key, so a container's answer lands under the container's own key and
+// the injectivity the key helper checks covers it too.
+func (w foldingWriter) Ensure(_ context.Context, addr Container, p Presence) error {
+	key, err := w.key(addr.Path())
+	if err != nil {
+		return err
+	}
+
+	if p == PresenceNull {
+		w.store[key] = Null
+	}
 
 	return nil
 }
@@ -471,7 +487,7 @@ func TestOneSinkBindingDumpsTwoShapes(t *testing.T) {
 // the key function so that what an open retains is observable.
 type minting struct {
 	store map[string]Value
-	kids  []Path
+	kids  []Segment
 	calls atomic.Int64
 }
 
@@ -494,12 +510,12 @@ func (m *minting) key(addr Path) (string, error) {
 
 type mintingReader struct {
 	store map[string]Value
-	kids  []Path
+	kids  []Segment
 	key   KeyFunc
 }
 
-func (r mintingReader) Get(_ context.Context, addr Path) (Value, error) {
-	key, err := r.key(addr)
+func (r mintingReader) Get(_ context.Context, addr LeafAddr) (Value, error) {
+	key, err := r.key(addr.Path())
 	if err != nil {
 		return Value{}, err
 	}
@@ -507,18 +523,18 @@ func (r mintingReader) Get(_ context.Context, addr Path) (Value, error) {
 	return r.store[key], nil
 }
 
-func (r mintingReader) Children(_ context.Context, prefix Path) ([]Path, error) {
-	if prefix != At("m") {
+func (r mintingReader) Children(_ context.Context, addr CompositeAddr) ([]Segment, error) {
+	if addr.Path() != At("m") {
 		return nil, nil
 	}
 
-	return append([]Path(nil), r.kids...), nil
+	return append([]Segment(nil), r.kids...), nil
 }
 
 func aMintingSource() *minting {
 	return &minting{
 		store: map[string]Value{"m_a-b": Number("1"), "m_c-d": Number("2")},
-		kids:  []Path{At("m", "a-b"), At("m", "c-d")},
+		kids:  []Segment{NameSegment("a-b"), NameSegment("c-d")},
 	}
 }
 
@@ -645,7 +661,9 @@ func (p benchPlane) Bind(*AddressSet) (OpenFunc, error) {
 	return func(context.Context) (Reader, error) { return p, nil }, nil
 }
 
-func (p benchPlane) Get(_ context.Context, addr Path) (Value, error) { return p.values[addr], nil }
+func (p benchPlane) Get(_ context.Context, addr LeafAddr) (Value, error) {
+	return p.values[addr.Path()], nil
+}
 
 // BenchmarkLoad and BenchmarkHeldLoad are the same load over the same plane,
 // bound per call and bound once. No figure from either goes into a doc comment,

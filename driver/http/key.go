@@ -194,6 +194,17 @@ func repeated(n int) error {
 		ferry.ErrPlane, ErrRepeated, n)
 }
 
+// atContainer states the refusal a name earns by holding a value at an address
+// the destination takes a container at.
+//
+// It is the container-side mirror of [repeated] and it prints the same one fact:
+// how many times the name occurs, which is structure rather than text the plane
+// supplied. Core attaches the address.
+func atContainer(n int) error {
+	return fmt.Errorf("%w: the request names this address %d times and the destination takes a container "+
+		"there, whose members are the names under it: nothing could hold the value", ferry.ErrValue, n)
+}
+
 // twoSpellings states the refusal an overlap between the two sequence spellings
 // earns, and names the position both of them spell.
 //

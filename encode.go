@@ -73,12 +73,54 @@ func dumpWalk(ctx context.Context, w Writer, sch *schema, root reflect.Value) (o
 	return newWalker(dir).walk(ctx, spot{n: sch.root, v: root})
 }
 
-// stagedWrite is one address and the Value the walk encoded for it, held in the
-// order the walk produced them so that the replay is the write order a staging
-// sink would have seen.
+// stagedWrite is one thing the walk has to say to the plane, held in the order
+// the walk produced them so that the replay is the write order a staging sink
+// would have seen.
+//
+// It is one type rather than two lists because the order across the two kinds
+// of write is what has to be preserved: a container's own answer and the
+// addresses beneath it are not interchangeable.
 type stagedWrite struct {
-	at Path
-	v  Value
+	// leaf and v are a value write. Where at is non-nil this is a container
+	// write instead, and p is what it says there.
+	leaf LeafAddr
+	v    Value
+
+	at Container
+	p  Presence
+}
+
+// play hands one staged write to the plane it was staged for.
+//
+// The moment is the walk's rather than a phase of its own. The failure is the
+// plane refusing one address, which is what an interleaved dump reports at
+// exactly the same address, and a moment nothing else uses would sort the same
+// errors differently depending on whether the sink could stage.
+func (s stagedWrite) play(ctx context.Context, w Writer) error {
+	if s.at == nil {
+		if err := w.Set(ctx, s.leaf, s.v); err != nil {
+			return fromDriver(momentWalk, s.leaf.Path(), err)
+		}
+
+		return nil
+	}
+
+	return ensured(ctx, w, s.at, s.p)
+}
+
+// ensured replays a container-level write, refusing a plane that cannot spell
+// one. The refusal is the same one an interleaved dump makes, worded once.
+func ensured(ctx context.Context, w Writer, at Container, p Presence) error {
+	e, ok := w.(Ensurer)
+	if !ok {
+		return newError(momentWalk, ErrPlane, at.Path(), unspellableMsg(p, w))
+	}
+
+	if err := e.Ensure(ctx, at, p); err != nil {
+		return fromDriver(momentWalk, at.Path(), err)
+	}
+
+	return nil
 }
 
 // flush hands the plane every encoded value, and aggregates its refusals.
@@ -92,14 +134,7 @@ func flush(ctx context.Context, w Writer, writes []stagedWrite) error {
 	errs := make([]error, 0, len(writes))
 
 	for _, write := range writes {
-		if err := w.Set(ctx, write.at, write.v); err != nil {
-			// The moment is the walk's rather than a phase of its own. The
-			// failure is the plane refusing one address, which is what an
-			// interleaved dump reports at exactly the same address, and a
-			// moment nothing else uses would sort the same errors differently
-			// depending on whether the sink could stage.
-			errs = append(errs, fromDriver(momentWalk, write.at, err))
-		}
+		errs = append(errs, write.play(ctx, w))
 	}
 
 	return join(errs...)

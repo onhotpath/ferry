@@ -70,37 +70,46 @@ type OpenFunc func(ctx context.Context) (Reader, error)
 // writes rather than half way through a walk over the user's struct.
 type OpenWriterFunc func(ctx context.Context) (Writer, error)
 
-// Reader is an open plane, answering one address at a time.
+// Reader is an open plane, answering one leaf at a time.
+//
+// It is asked only about a [LeafAddr], which is an address a value can be at.
+// A container's own address is a [SectionAddr] or a [CompositeAddr], so asking
+// this method about one does not compile, and a plane that happens to hold
+// something under a container's own name can no longer have that something
+// mistaken for the container's value.
 //
 // Absence is a kind of the value rather than a second return value: an address
 // the plane does not have is reported as the zero [Value], whose [Value.Kind]
 // is [KindAbsent]. There is no sentinel error for it, so a driver's own
 // "not found" cannot be confused with a real failure.
 //
-// Two rules bind an implementation. A non-nil error must reach the caller as an
+// One rule binds an implementation: a non-nil error must reach the caller as an
 // error and never as an absent value, which is the defect that turns a parse
-// failure into a config silently loaded from nothing. And at a container
-// address a driver returns absence or a null and nothing else, because a
-// composite is read one element at a time and there is no group value for the
-// container itself to hold.
+// failure into a config silently loaded from nothing. A plane holding a
+// container where the schema says leaf is a mismatch, and a driver refuses it
+// with the address and what the plane holds rather than answering absence.
 //
-// A Reader may also implement [Enumerator] and [Releaser]. Both are discovered
-// by assertion and neither is required.
+// A Reader may also implement [Prober], [Enumerator] and [Releaser]. All three
+// are discovered by assertion and none is required.
 type Reader interface {
-	Get(ctx context.Context, addr Path) (Value, error)
+	Get(ctx context.Context, addr LeafAddr) (Value, error)
 }
 
-// Writer is an open plane being written to, one address at a time.
+// Writer is an open plane being written to, one leaf at a time.
 //
 // Set is never called with an absent value: [KindAbsent] is a [Reader]-side
 // kind, and an omitted address gets no Set call at all rather than a Set of
-// nothing. A composite with no elements is written as a null at its own
-// address, which is a value the plane holds and a different thing entirely.
+// nothing.
 //
-// A Writer may also implement [Committer] and [Releaser]. Both are discovered
-// by assertion and neither is required.
+// It is asked only about a [LeafAddr]. What a dump has to say at a container's
+// own address - that the container is there and holds nothing, or that it is
+// null - goes to [Ensurer], because a plane that cannot spell either of those
+// should refuse rather than receive a write it will mis-store.
+//
+// A Writer may also implement [Ensurer], [Committer] and [Releaser]. All three
+// are discovered by assertion and none is required.
 type Writer interface {
-	Set(ctx context.Context, addr Path, v Value) error
+	Set(ctx context.Context, addr LeafAddr, v Value) error
 }
 
 // Releaser is io.Closer, and a [Reader] or [Writer] implements it when it holds
@@ -134,26 +143,60 @@ type Committer interface {
 	Commit(ctx context.Context) error
 }
 
-// Enumerator is implemented by a [Reader] whose plane can list what is under an
-// address. It is how [Load] discovers the addresses that come from the value
+// Prober is implemented by a [Reader] whose plane can say whether a container
+// is there. It answers about a [Container], which is a [SectionAddr] or a
+// [CompositeAddr] and never a leaf.
+//
+// Return [SectionPresent], [SectionAbsent] or [SectionNull]. Absence means the
+// plane does not have the address at all, a null means it has it and holds its
+// own null there, and present means it has it and holds a container, which may
+// be an empty one.
+//
+// It is optional, in the same idiom as [Releaser], because a plane that cannot
+// list often cannot answer this either. A source implementing neither this nor
+// [Enumerator] loads the leaves the type determines and nothing else: a nil
+// pointer stays nil where the plane is silent beneath it, and a slice or a map
+// is a refusal naming the field and the source.
+type Prober interface {
+	Probe(ctx context.Context, addr Container) (SectionInfo, error)
+}
+
+// Enumerator is implemented by a [Reader] whose plane can list what is under a
+// composite. It is how [Load] discovers the addresses that come from the value
 // rather than from the type: a map's keys, a slice's length.
 //
-// It is optional, because a plane that cannot list is ordinary - a Vault token
-// with read and no LIST is the usual case - so the two directions cover
-// different address sets. [Dump] reaches every address always, since the value
-// is in hand; Load reaches the addresses the type determines always, and the
-// rest only through this interface.
+// It is asked only about a [CompositeAddr], so it cannot be asked to list a
+// leaf or a section. A section's children come from the type and are never
+// enumerated, which is the array-versus-slice difference seen from the driver's
+// side: an array loads from a source that cannot enumerate and a slice does
+// not. Loading a slice or a map from a non-enumerating source is an error
+// naming the field and the source, never a silently empty one.
 //
-// That is the array-versus-slice difference, seen from the driver's side: an
-// array's element addresses come from its type, so an array loads from a source
-// that cannot enumerate and a slice does not. Loading a slice or a map from a
-// non-enumerating source is an error naming the field and the source, never a
-// silently empty one. A null at the container's own address is a complete
-// answer and needs no enumeration.
+// Children returns the segments the plane holds immediately under the address,
+// each a [NameSegment] or an [IndexSegment]. The driver says how the plane
+// spells its members and the schema types the child, so a driver never
+// constructs an address. A [Name] under a sequence, or an [Index] under a
+// mapping, is refused with the segment named.
 //
-// Children returns addresses rather than names, because an address carries its
-// [SegmentKind]: the plane says whether the container is a mapping or a
-// sequence, instead of the caller guessing it from base-10 text.
+// The order is the plane's own, and a plane with no defined order documents the
+// order it mints in.
 type Enumerator interface {
-	Children(ctx context.Context, prefix Path) ([]Path, error)
+	Children(ctx context.Context, addr CompositeAddr) ([]Segment, error)
+}
+
+// Ensurer is implemented by a [Writer] whose plane can spell a container at the
+// container's own address: one that is present and holds nothing, and one that
+// is null.
+//
+// [Dump] calls it where the value has nothing to say beneath a container: a nil
+// pointer and an empty slice or map write [PresenceNull], and a realised
+// section that emitted no child write writes [PresencePresent]. It is never
+// called with [PresenceAbsent], because an address that is not written gets no
+// call at all.
+//
+// It is optional, and a plane with no spelling for a container implements
+// nothing rather than storing something misleading. Dumping a value that needs
+// one to a [Writer] without it is refused, naming the address and the plane.
+type Ensurer interface {
+	Ensure(ctx context.Context, addr Container, p Presence) error
 }

@@ -1,10 +1,12 @@
 package ferrytest
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/onhotpath/ferry"
 )
@@ -19,8 +21,10 @@ var (
 	_ ferry.Source     = memSource{}
 	_ ferry.Sink       = memSink{}
 	_ ferry.Reader     = memReader{}
+	_ ferry.Prober     = memReader{}
 	_ ferry.Enumerator = memReader{}
 	_ ferry.Writer     = memWriter{}
+	_ ferry.Ensurer    = memWriter{}
 )
 
 // memStore is the contents, and the key is the canonical rendering of the
@@ -40,6 +44,12 @@ var (
 // demonstrates is that the rendering already carries it.
 type memStore struct {
 	entries map[string]memEntry
+
+	// marks is what a container's own address was told, which a plane holding
+	// only leaves has nowhere to keep. It is the store's answer to a probe, and
+	// it is what makes a nil section and a present-but-empty one two
+	// observations rather than one (ADR-0016).
+	marks map[string]ferry.Presence
 }
 
 // memEntry keeps the address beside the value so enumeration can hand back
@@ -51,7 +61,9 @@ type memEntry struct {
 	val  ferry.Value
 }
 
-func newMemStore() *memStore { return &memStore{entries: map[string]memEntry{}} }
+func newMemStore() *memStore {
+	return &memStore{entries: map[string]memEntry{}, marks: map[string]ferry.Presence{}}
+}
 
 // put writes unconditionally, and is what [Static] builds its contents with: a
 // Go map literal cannot hold one key twice, so there is no duplicate for the
@@ -87,6 +99,31 @@ func (s *memStore) set(addr ferry.Path, v ferry.Value) error {
 	return nil
 }
 
+// mark records what a container's own address was told.
+func (s *memStore) mark(addr ferry.Path, p ferry.Presence) { s.marks[addr.String()] = p }
+
+// probe answers what the plane holds at a container's own address.
+//
+// What was written there wins, because it is the plane's own statement. Failing
+// that, anything held beneath the address makes the container present, which is
+// what a plane holding only leaves can infer, and nothing beneath it is
+// absence.
+func (s *memStore) probe(addr ferry.Path) ferry.SectionInfo {
+	if p, ok := s.marks[addr.String()]; ok && p == ferry.PresenceNull {
+		return ferry.SectionNull
+	}
+
+	if _, ok := s.marks[addr.String()]; ok {
+		return ferry.SectionPresent
+	}
+
+	if len(s.children(addr)) > 0 {
+		return ferry.SectionPresent
+	}
+
+	return ferry.SectionAbsent
+}
+
 // children answers with the immediate children of prefix, sorted segment-wise.
 //
 // ADR-0003's fourth obligation. The sort is not a nicety: Go map iteration is
@@ -95,75 +132,69 @@ func (s *memStore) set(addr ferry.Path, v ferry.Value) error {
 // have nothing to do with the driver under test. Segment-wise rather than over
 // the rendering, because sorting the rendering gives 0 1 10 11 2 for twelve
 // indices, which ADR-0003 names as a subtle bug and a conformance case.
-func (s *memStore) children(prefix ferry.Path) []ferry.Path {
+//
+// It answers segments rather than addresses, because the driver says how the
+// plane spells its members and the schema types the child (ADR-0016).
+func (s *memStore) children(prefix ferry.Path) []ferry.Segment {
 	pre := slices.Collect(prefix.Segments())
-	kids := map[string]ferry.Path{}
+	kids := map[ferry.Segment]struct{}{}
 
 	for _, e := range s.entries {
-		if c, ok := childOf(prefix, pre, e.addr); ok {
-			kids[c.String()] = c
+		if c, ok := childOf(pre, e.addr); ok {
+			kids[c] = struct{}{}
 		}
 	}
 
-	out := slices.Collect(maps.Values(kids))
-	slices.SortFunc(out, ferry.Path.Compare)
+	out := slices.Collect(maps.Keys(kids))
+	slices.SortFunc(out, compareSegments)
 
 	return out
 }
 
-// childOf reports the immediate child of prefix that addr lies under, and
-// whether addr strictly extends prefix at all. pre is the prefix's own
-// segments, passed in because the caller computes them once for the whole scan.
+// compareSegments orders two enumerated members, positions numerically and
+// names by their bytes, so a suite asserting on this plane is not asserting on
+// Go's randomised map iteration order.
+func compareSegments(a, b ferry.Segment) int {
+	if a.Kind() != b.Kind() {
+		return cmp.Compare(a.Kind(), b.Kind())
+	}
+
+	// A position's text is canonical base 10 with no leading zero, so the
+	// longer number is the larger one and equal lengths compare bytewise. That
+	// is the 0 1 2 ... 11 order rather than the 0 1 10 11 2 the text gives.
+	if a.Kind() == ferry.Index {
+		if c := cmp.Compare(len(a.Text()), len(b.Text())); c != 0 {
+			return c
+		}
+	}
+
+	return strings.Compare(a.Text(), b.Text())
+}
+
+// childOf reports the segment of the immediate child of prefix that addr lies
+// under, and whether addr strictly extends prefix at all. pre is the prefix's
+// own segments, passed in because the caller computes them once for the whole
+// scan.
 //
 // An address is not a child of itself, so an entry equal to prefix reports
 // false: the walk asks a container what is under it, and answering with the
 // container would be an infinite descent.
-func childOf(prefix ferry.Path, pre []ferry.Segment, addr ferry.Path) (ferry.Path, bool) {
+func childOf(pre []ferry.Segment, addr ferry.Path) (ferry.Segment, bool) {
 	i := 0
 
 	for seg := range addr.Segments() {
 		if i == len(pre) {
-			return extend(prefix, seg), true
+			return seg, true
 		}
 
 		if seg != pre[i] {
-			return ferry.Path{}, false
+			return ferry.Segment{}, false
 		}
 
 		i++
 	}
 
-	return ferry.Path{}, false
-}
-
-// extend appends one segment to an address, which is how an enumerated child is
-// built back up out of a stored address without ever parsing a rendering.
-func extend(p ferry.Path, s ferry.Segment) ferry.Path {
-	if s.Kind() == ferry.Name {
-		return p.At(s.Text())
-	}
-
-	return p.Elem(indexOf(s.Text()))
-}
-
-// base10 is the only base an Index segment is ever spelled in, which is what
-// makes the rendering of an address unique.
-const base10 = 10
-
-// indexOf reads back the position an Index segment holds.
-//
-// It accumulates rather than calling strconv.ParseUint because there is no
-// failure to report: an Index segment's text is canonical base-10 with no
-// leading zero, minted by ferry.Path.Elem from a uint, so every digit is a
-// digit and every value fits the type it came from.
-func indexOf(text string) uint {
-	var i uint
-
-	for k := range len(text) {
-		i = i*base10 + uint(text[k]-'0')
-	}
-
-	return i
+	return ferry.Segment{}, false
 }
 
 // memSource is the read half. It carries no state of its own beyond the
@@ -199,8 +230,15 @@ type memReader struct{ store *memStore }
 // this is the reason ADR-0002 says the memory plane keeps no conformance case
 // honest: ADR-0014's case 4, that a non-nil error must reach the caller as an
 // error and never as an Absent, has no way to fire here.
-func (r memReader) Get(_ context.Context, addr ferry.Path) (ferry.Value, error) {
-	return r.store.get(addr), nil
+func (r memReader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
+	return r.store.get(addr.Path()), nil
+}
+
+// Probe answers what is held at a container's own address: the null an empty
+// composite wrote, the presence a realised section wrote, presence inferred
+// from anything held beneath the address, or absence.
+func (r memReader) Probe(_ context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	return r.store.probe(addr.Path()), nil
 }
 
 // Children lists what is held immediately under prefix, segment-wise.
@@ -210,8 +248,8 @@ func (r memReader) Get(_ context.Context, addr ferry.Path) (ferry.Value, error) 
 // a registrant proves their own codec against. Listing a map is free here and
 // the ability says nothing about a driver: a Vault token with read and no list
 // is the case that keeps the interface optional.
-func (r memReader) Children(_ context.Context, prefix ferry.Path) ([]ferry.Path, error) {
-	return r.store.children(prefix), nil
+func (r memReader) Children(_ context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error) {
+	return r.store.children(addr.Path()), nil
 }
 
 // memSink is the write half. It is a second type over the same contents,
@@ -235,6 +273,15 @@ func (s memSink) Bind(_ *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 type memWriter struct{ store *memStore }
 
 // Set writes, or refuses a second write at one address.
-func (w memWriter) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
-	return w.store.set(addr, v)
+func (w memWriter) Set(_ context.Context, addr ferry.LeafAddr, v ferry.Value) error {
+	return w.store.set(addr.Path(), v)
+}
+
+// Ensure records what a container's own address was told, so that a nil
+// section, an empty composite and a present-but-empty section are three
+// observations a reload can tell apart.
+func (w memWriter) Ensure(_ context.Context, addr ferry.Container, p ferry.Presence) error {
+	w.store.mark(addr.Path(), p)
+
+	return nil
 }

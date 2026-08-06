@@ -639,13 +639,13 @@ func TestRegisteringAnInterfaceClaimsTheInterfaceAlone(t *testing.T) {
 
 	reg := registryWith(t, greeterCodec())
 
-	mustBeAddresses(t, boundBy(t, func(ctx context.Context, s Sink) error {
+	mustBeMembers(t, boundBy(t, func(ctx context.Context, s Sink) error {
 		return Dump(ctx, asInterface{G: wave{Name: "hi"}}, s, WithRegistry(reg))
-	}), []string{"/g"})
+	}), []string{"leaf /g"})
 
-	mustBeAddresses(t, boundBy(t, func(ctx context.Context, s Sink) error {
+	mustBeMembers(t, boundBy(t, func(ctx context.Context, s Sink) error {
 		return Dump(ctx, asConcrete{G: &wave{Name: "hi"}}, s, WithRegistry(reg))
-	}), []string{"/g", "/g/loud", "/g/name"})
+	}), []string{"section /g", "leaf /g/loud", "leaf /g/name"})
 }
 
 // TestDurationLikeClosesTheNamedDurationHole is ADR-0005's documented sharp
@@ -729,7 +729,7 @@ func TestARegisteredMapKeyAddressesByItsOwnText(t *testing.T) {
 
 	back, err := Load[conf](t.Context(), &listing{
 		values:   p.values,
-		children: map[Path][]Path{At("limits"): {at}},
+		children: map[Path][]Segment{At("limits"): {NameSegment(addr.String())}},
 	}, WithRegistry(reg))
 	if err != nil {
 		t.Fatalf("load: %+v", err)

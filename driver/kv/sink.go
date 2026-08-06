@@ -105,6 +105,14 @@ func (s *Sink) opener(keys *ferry.Keys) ferry.OpenWriterFunc {
 // `return nil` here, and ADR-0004 refuses that in a driver for a reason beyond
 // noise: in the source it is indistinguishable from a driver that should have
 // rolled back and did not, and nothing in the type system tells the two apart.
+//
+// It implements no [ferry.Ensurer], and that absence is the declaration
+// ADR-0016 asks for rather than an omission. A store holds bytes at keys and has
+// no way to say that a container is there and holds nothing, so a plane with no
+// spelling for one implements nothing and core refuses the dump at the address,
+// naming this plane. Storing a zero-length value instead would make "the section
+// is present and empty" and "the field is empty text" one observation, which is
+// the collision [errNoNull] already exists to refuse at a leaf.
 type writer struct {
 	client Client
 
@@ -146,12 +154,12 @@ type staged struct {
 // rather than at the open. That is deliberate and it is the reason core's dump
 // aggregates: two denied paths are two errors naming two addresses, where a
 // driver that stopped at the first would send an operator round the loop twice.
-func (w *writer) Set(ctx context.Context, addr ferry.Path, v ferry.Value) error {
+func (w *writer) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	key, err := w.key(addr)
+	key, err := w.key(addr.Path())
 	if err != nil {
 		return err
 	}
@@ -170,7 +178,7 @@ func (w *writer) Set(ctx context.Context, addr ferry.Path, v ferry.Value) error 
 			"holds one value per key, so one of the two writes would be lost", ferry.ErrPlane)
 	}
 
-	w.staged[key] = staged{addr: addr, value: value}
+	w.staged[key] = staged{addr: addr.Path(), value: value}
 	w.order = append(w.order, key)
 
 	return nil
@@ -233,14 +241,17 @@ func (w *writer) Commit(ctx context.Context) error {
 // read a Number as a Bool by accident.
 //
 // Null is the one this plane cannot hold, and it is refused rather than
-// mangled. It arrives at a container address from a nil pointer, a nil
-// composite or an empty composite (ADR-0005), and the only thing a store could
-// put there is a zero-length value - which is what String("") already is, so
-// "the field is nil" and "the field is empty text" would become one
-// observation. The class is [ferry.ErrValue] rather than the [ferry.ErrPlane]
-// core would default to, because nothing is wrong with the store: the value has
-// no representation here, and retrying it is pointless in the way an ErrValue
-// promises and a plane error does not.
+// mangled. It arrives at a leaf from a nil pointer to one, and the only thing a
+// store could put there is a zero-length value - which is what String("")
+// already is, so "the field is nil" and "the field is empty text" would become
+// one observation. The class is [ferry.ErrValue] rather than the
+// [ferry.ErrPlane] core would default to, because nothing is wrong with the
+// store: the value has no representation here, and retrying it is pointless in
+// the way an ErrValue promises and a plane error does not.
+//
+// A null at a container's own address no longer arrives here at all. That is
+// not this plane gaining one: core asks [ferry.Ensurer] for it now, this writer
+// implements none, and the refusal is core's with the same outcome (ADR-0016).
 //
 // Absent never arrives. It is a reader-side kind, and an omitted address is one
 // that gets no Set call at all.
@@ -277,5 +288,5 @@ func bytesOf(text string, err error) ([]byte, error) {
 // errNoNull is the refusal that makes this a plane with no null rather than a
 // plane that quietly has one.
 var errNoNull = fmt.Errorf("%w: a key-value store holds bytes and has no null, and this address was handed one: "+
-	"a nil pointer, a nil composite and an empty composite have nothing to be written as here, and storing a "+
-	"zero-length value for them would make them indistinguishable from empty text", ferry.ErrValue)
+	"a nil pointer to a value has nothing to be written as here, and storing a zero-length value for it would "+
+	"make it indistinguishable from empty text", ferry.ErrValue)

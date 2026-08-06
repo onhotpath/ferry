@@ -430,6 +430,24 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 11. A **golden artefact**: a fixed value, dumped, compared against fixed expected plane contents ([ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md)).
 12. A sink accepts `Set` of a `Null` at a **container address** - a nil composite, an empty composite, and a nil optional section - and that address was in the set its `Bind` received ([ADR-0003](0003-how-a-leaf-addresses-a-plane.md), [ADR-0005](0005-the-supported-type-set.md)).
 
+> **Amended under [ADR-0016](0016-the-sealed-address-model.md): case 3 is a probe, case 5 compares segments, and the suite stops building address sets.**
+>
+> As published, case 3 asserted that `Get` at a container address answers `Absent` or `Null` with a nil error.
+> That question does not compile under the sealed address model: `Get` takes a `LeafAddr` and a container's own address is a `SectionAddr` or a `CompositeAddr`.
+> Case 3 is now the same obligation asked through `Prober.Probe`, which is the method that owns it: a populated composite is `PresencePresent`, and a nil composite, an empty composite and a nil optional section are `PresenceNull`, which is the row this case's own [#136](https://github.com/onhotpath/ferry/issues/136) amendment already settled.
+> `Prober` is optional, so a reader that cannot answer is skipped rather than failed.
+>
+> **That is also the whole of [#208](https://github.com/onhotpath/ferry/issues/208)'s blocker dissolving.**
+> #208 recorded that this case forbade a driver from refusing at any `Get` whose address might be a container, because the suite called `Get` at container addresses outside a walk, and a driver could not tell a container address from a leaf one.
+> The suite no longer makes that call and the driver no longer has to tell: a repeated key arriving at a `LeafAddr` is a refusal with a home.
+>
+> Case 5 compares `[]Segment` rather than `[]Path`, because that is what `Children` returns.
+> Case 12 asks that the container address reached `Bind` **at its kind**, which is a stronger question than the one it asked and the one the typed set makes askable.
+>
+> Cases 8 and 9 reach a value-minted address through a dump rather than by calling `Writer.Set` directly, because the three address kinds are sealed and only the compiler mints one.
+> For the same reason the suite no longer constructs an `AddressSet`: it compiles a fixture type and captures the set core hands the driver's own `Bind`.
+> That is strictly better than what it did, because the suite can no longer hand a driver an address the compiler would not have minted.
+
 > **Amended under [#182](https://github.com/onhotpath/ferry/issues/182) and [#269](https://github.com/onhotpath/ferry/issues/269): the list is owed four more cases, and they are recorded here rather than filed one per issue.**
 >
 > As published, the twelve cases above were the whole `Driver` list, and each of them is a rule some ADR had already stated.

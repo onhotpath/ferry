@@ -94,12 +94,91 @@ func TestKeyLegalityIsAPlaneRefusal(t *testing.T) {
 	}
 }
 
-// bindCase is one address set, the options it is bound under, and the pair the
+// The schemas the Bind cases are written against.
+//
+// They are types rather than lists of addresses, because the three address
+// kinds are sealed and the schema compiler is the only thing that mints one
+// (ADR-0016). Compiling a real struct is the same door core comes in through,
+// so what these cases hand the driver is what a caller's own program would.
+type (
+	// metricPort and metricCollide are the separator collision: a nested
+	// section and a flat leaf that render to one name at the default join.
+	metricPort struct {
+		Port string `ferry:"port"`
+	}
+	metricInner struct {
+		HTTP     metricPort `ferry:"http"`
+		HTTPPort string     `ferry:"http_port"`
+	}
+	metricCollide struct {
+		Metric metricInner `ferry:"metric"`
+	}
+
+	// metricWideInner is the same shape one join wider, so that a separator
+	// chosen to avoid a collision meets a segment holding that separator.
+	metricWideInner struct {
+		HTTP        metricPort `ferry:"http"`
+		HTTPDblPort string     `ferry:"http__port"`
+	}
+	metricWideCollide struct {
+		Metric metricWideInner `ferry:"metric"`
+	}
+
+	// hyphenCollide is the transform folding two legal spellings together.
+	hyphenCollide struct {
+		Hyphen string `ferry:"feature-flags"`
+		Under  string `ferry:"feature_flags"`
+	}
+
+	// caseCollide is viper's measured bug turned into an error.
+	caseCollide struct {
+		Mixed string `ferry:"myKey"`
+		Title string `ferry:"MyKey"`
+	}
+
+	// hyphenAlone and hyphenBesideTree are the acceptance rows: a hyphen is
+	// transformed and accepted, and refused only alongside the twin it folds
+	// onto.
+	hyphenAlone struct {
+		Hyphen string `ferry:"feature-flags"`
+	}
+	dbHost struct {
+		Host string `ferry:"host"`
+	}
+	hyphenBesideTree struct {
+		Hyphen string `ferry:"feature-flags"`
+		DB     dbHost `ferry:"db"`
+	}
+
+	// distinctTrees is two sections that share a leaf name and collide nowhere.
+	dbHostPort struct {
+		Host string `ferry:"host"`
+		Port string `ferry:"port"`
+	}
+	distinctTrees struct {
+		DB    dbHostPort `ferry:"db"`
+		Cache dbHost     `ferry:"cache"`
+	}
+)
+
+// bindCase is one schema, the options it is bound under, and the pair the
 // refusal must name. An empty pair is a set the join keeps distinct.
 type bindCase struct {
-	addrs []ferry.Path
-	opts  []Option
-	pair  [2]ferry.Path
+	set  func(...ferry.Option) (*ferry.AddressSet, error)
+	opts []Option
+	pair [2]ferry.Path
+}
+
+// addrs compiles the case's schema, or fails the test on a schema that does not.
+func (tc bindCase) addrs(t *testing.T) *ferry.AddressSet {
+	t.Helper()
+
+	set, err := tc.set()
+	if err != nil {
+		t.Fatalf("compiling the fixture: %v", err)
+	}
+
+	return set
 }
 
 // TestBindRefusesACollidingSchema is ADR-0003's driver-side rule, and it is what
@@ -120,21 +199,21 @@ func TestBindRefusesACollidingSchema(t *testing.T) {
 
 	cases := map[string]bindCase{
 		"the separator, at the default join": {
-			addrs: []ferry.Path{metric, flat},
-			pair:  [2]ferry.Path{metric, flat},
+			set:  addrsOf[metricCollide],
+			pair: [2]ferry.Path{metric, flat},
 		},
 		"a segment holding the wider join, at the wider join": {
-			addrs: []ferry.Path{metric, wide},
-			opts:  []Option{Separator(wider)},
-			pair:  [2]ferry.Path{metric, wide},
+			set:  addrsOf[metricWideCollide],
+			opts: []Option{Separator(wider)},
+			pair: [2]ferry.Path{metric, wide},
 		},
 		"a hyphen against its underscore twin": {
-			addrs: []ferry.Path{hyphen, under},
-			pair:  [2]ferry.Path{hyphen, under},
+			set:  addrsOf[hyphenCollide],
+			pair: [2]ferry.Path{hyphen, under},
 		},
 		"two spellings of one name": {
-			addrs: []ferry.Path{mixed, title},
-			pair:  [2]ferry.Path{mixed, title},
+			set:  addrsOf[caseCollide],
+			pair: [2]ferry.Path{mixed, title},
 		},
 	}
 
@@ -150,9 +229,9 @@ func TestBindRefusesACollidingSchema(t *testing.T) {
 func checkRefused(t *testing.T, tc bindCase) {
 	t.Helper()
 
-	_, err := New(tc.opts...).Bind(ferry.NewAddressSet(tc.addrs...))
+	_, err := New(tc.opts...).Bind(tc.addrs(t))
 	if err == nil {
-		t.Fatalf("Bind accepted %v, which render to one name", tc.addrs)
+		t.Fatalf("Bind accepted %s and %s, which render to one name", tc.pair[0], tc.pair[1])
 	}
 
 	assertPlaneRefusalNaming(t, err, tc.pair)
@@ -171,17 +250,17 @@ func TestBindAcceptsWhatTheJoinKeepsDistinct(t *testing.T) {
 
 	cases := map[string]bindCase{
 		"a hyphen alone": {
-			addrs: []ferry.Path{ferry.At("feature-flags")},
+			set: addrsOf[hyphenAlone],
 		},
 		"a hyphen beside a tree of its own": {
-			addrs: []ferry.Path{ferry.At("feature-flags"), ferry.At("db", "host")},
+			set: addrsOf[hyphenBesideTree],
 		},
 		"the separator pair, at the wider join": {
-			addrs: []ferry.Path{ferry.At("metric", "http", "port"), ferry.At("metric", "http_port")},
-			opts:  []Option{Separator(wider)},
+			set:  addrsOf[metricCollide],
+			opts: []Option{Separator(wider)},
 		},
 		"distinct trees at the default join": {
-			addrs: []ferry.Path{ferry.At("db", "host"), ferry.At("db", "port"), ferry.At("cache", "host")},
+			set: addrsOf[distinctTrees],
 		},
 	}
 
@@ -197,8 +276,8 @@ func TestBindAcceptsWhatTheJoinKeepsDistinct(t *testing.T) {
 func checkAccepted(t *testing.T, tc bindCase) {
 	t.Helper()
 
-	if _, err := New(tc.opts...).Bind(ferry.NewAddressSet(tc.addrs...)); err != nil {
-		t.Errorf("Bind refused %v, which render to distinct names: %v", tc.addrs, err)
+	if _, err := New(tc.opts...).Bind(tc.addrs(t)); err != nil {
+		t.Errorf("Bind refused a set that renders to distinct names: %v", err)
 	}
 }
 

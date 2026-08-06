@@ -90,12 +90,12 @@ func TestTheADR0003Table(t *testing.T) {
 		name string
 		set  *ferry.AddressSet
 	}{
-		{"/DB/HOST, /DB_HOST", ferry.NewAddressSet(ferry.At("DB", "HOST"), ferry.At("DB_HOST"))},
-		{"/myKey, /MyKey, /MYKEY", ferry.NewAddressSet(ferry.At("myKey"), ferry.At("MyKey"), ferry.At("MYKEY"))},
-		{"/db.host, /db/host", ferry.NewAddressSet(ferry.At("db.host"), ferry.At("db", "host"))},
+		{"/DB/HOST, /DB_HOST", ferry.LeafSet(ferry.At("DB", "HOST"), ferry.At("DB_HOST"))},
+		{"/myKey, /MyKey, /MYKEY", ferry.LeafSet(ferry.At("myKey"), ferry.At("MyKey"), ferry.At("MYKEY"))},
+		{"/db.host, /db/host", ferry.LeafSet(ferry.At("db.host"), ferry.At("db", "host"))},
 		{
 			"/db/host, /db/port, /cache/host",
-			ferry.NewAddressSet(ferry.At("db", "host"), ferry.At("db", "port"), ferry.At("cache", "host")),
+			ferry.LeafSet(ferry.At("db", "host"), ferry.At("db", "port"), ferry.At("cache", "host")),
 		},
 	}
 
@@ -163,7 +163,7 @@ func accepted(t *testing.T, keys *ferry.Keys, err error) {
 func TestARefusalNamesBothAddresses(t *testing.T) {
 	t.Parallel()
 
-	set := ferry.NewAddressSet(ferry.At("DB", "HOST"), ferry.At("DB_HOST"))
+	set := ferry.LeafSet(ferry.At("DB", "HOST"), ferry.At("DB_HOST"))
 
 	_, err := ferry.NewKeys(set, "env", envUpper)
 	if err == nil {
@@ -193,7 +193,7 @@ func TestARefusalNamesBothAddresses(t *testing.T) {
 func TestLegalityIsTheDriversQuestion(t *testing.T) {
 	t.Parallel()
 
-	_, err := ferry.NewKeys(ferry.NewAddressSet(ferry.At("")), "env", envUpper)
+	_, err := ferry.NewKeys(ferry.LeafSet(ferry.At("")), "env", envUpper)
 	if err == nil {
 		t.Fatal("an empty segment has no environment variable name and NewKeys accepted it")
 	}
@@ -214,11 +214,11 @@ func TestLegalityIsTheDriversQuestion(t *testing.T) {
 func TestATransformingKeyFunctionIsSafeBecauseOfInjectivity(t *testing.T) {
 	t.Parallel()
 
-	if _, err := ferry.NewKeys(ferry.NewAddressSet(ferry.At("feature-flags")), "env", envTransform); err != nil {
+	if _, err := ferry.NewKeys(ferry.LeafSet(ferry.At("feature-flags")), "env", envTransform); err != nil {
 		t.Errorf("feature-flags alone is ordinary and the driver refused it: %+v", err)
 	}
 
-	set := ferry.NewAddressSet(ferry.At("feature-flags"), ferry.At("feature_flags"))
+	set := ferry.LeafSet(ferry.At("feature-flags"), ferry.At("feature_flags"))
 
 	_, err := ferry.NewKeys(set, "env", envTransform)
 	if err == nil {
@@ -234,7 +234,7 @@ func TestATransformingKeyFunctionIsSafeBecauseOfInjectivity(t *testing.T) {
 func TestNewKeysRefusesEveryOffendingAddress(t *testing.T) {
 	t.Parallel()
 
-	set := ferry.NewAddressSet(
+	set := ferry.LeafSet(
 		ferry.At("a-one"), ferry.At("a_one"),
 		ferry.At("b-two"), ferry.At("b_two"),
 	)
@@ -252,7 +252,7 @@ func TestNewKeysRefusesEveryOffendingAddress(t *testing.T) {
 func TestNewKeysWithoutAKeyFunction(t *testing.T) {
 	t.Parallel()
 
-	if _, err := ferry.NewKeys(ferry.NewAddressSet(ferry.At("a")), "env", nil); err == nil {
+	if _, err := ferry.NewKeys(ferry.LeafSet(ferry.At("a")), "env", nil); err == nil {
 		t.Error("NewKeys accepted a nil key function")
 	}
 
@@ -271,7 +271,7 @@ func TestNewKeysWithoutAKeyFunction(t *testing.T) {
 func TestAMintedAddressIsCheckedAgainstBothTiers(t *testing.T) {
 	t.Parallel()
 
-	keys := mustBind(t, ferry.NewAddressSet(ferry.At("labels"), ferry.At("name")), envTransform)
+	keys := mustBind(t, ferry.LeafSet(ferry.At("labels"), ferry.At("name")), envTransform)
 	key := keys.Open()
 
 	mustMint(t, key, ferry.At("labels", "env"), "LABELS_ENV")
@@ -295,7 +295,7 @@ func TestAMintedAddressIsCheckedAgainstBothTiers(t *testing.T) {
 func TestNoAddressIsRetainedAcrossOpens(t *testing.T) {
 	t.Parallel()
 
-	keys := mustBind(t, ferry.NewAddressSet(ferry.At("labels")), envTransform)
+	keys := mustBind(t, ferry.LeafSet(ferry.At("labels")), envTransform)
 
 	mustMint(t, keys.Open(), ferry.At("labels", "http-port"), "LABELS_HTTP_PORT")
 	mustMint(t, keys.Open(), ferry.At("labels", "http_port"), "LABELS_HTTP_PORT")
@@ -314,7 +314,7 @@ func TestTheStaticTableTakesNoLock(t *testing.T) {
 
 	checkNoLockField(t)
 
-	keys := mustBind(t, ferry.NewAddressSet(ferry.At("labels"), ferry.At("name")), envTransform)
+	keys := mustBind(t, ferry.LeafSet(ferry.At("labels"), ferry.At("name")), envTransform)
 
 	var wg sync.WaitGroup
 
@@ -475,7 +475,22 @@ type flatWriter struct {
 	key ferry.KeyFunc
 }
 
-func (w flatWriter) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
+func (w flatWriter) Set(_ context.Context, addr ferry.LeafAddr, v ferry.Value) error {
+	return w.write(addr.Path(), v)
+}
+
+// Ensure routes a container's own answer through the same key function, which
+// is the whole point of the check: two containers rendering to one plane key
+// merge, so the container addresses are in the set NewKeys sees.
+func (w flatWriter) Ensure(_ context.Context, addr ferry.Container, p ferry.Presence) error {
+	if p != ferry.PresenceNull {
+		return nil
+	}
+
+	return w.write(addr.Path(), ferry.Null)
+}
+
+func (w flatWriter) write(addr ferry.Path, v ferry.Value) error {
 	key, err := w.key(addr)
 	if err != nil {
 		return err
@@ -653,7 +668,22 @@ func (t treeSink) Bind(*ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 	return func(context.Context) (ferry.Writer, error) { return t, nil }, nil
 }
 
-func (t treeSink) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
+func (t treeSink) Set(_ context.Context, addr ferry.LeafAddr, v ferry.Value) error {
+	return t.write(addr.Path(), v)
+}
+
+// Ensure walks the segments exactly as Set does. A tree plane spells a null at
+// a container's own address as a node holding one, which is what a reload reads
+// back.
+func (t treeSink) Ensure(_ context.Context, addr ferry.Container, p ferry.Presence) error {
+	if p != ferry.PresenceNull {
+		return nil
+	}
+
+	return t.write(addr.Path(), ferry.Null)
+}
+
+func (t treeSink) write(addr ferry.Path, v ferry.Value) error {
 	segs := slices.Collect(addr.Segments())
 
 	node := t.s.root
@@ -672,13 +702,30 @@ func (t treeSource) Bind(*ferry.AddressSet) (ferry.OpenFunc, error) {
 	return func(context.Context) (ferry.Reader, error) { return t, nil }, nil
 }
 
-func (t treeSource) Get(_ context.Context, addr ferry.Path) (ferry.Value, error) {
-	v, ok := t.s.at(addr).(ferry.Value)
+func (t treeSource) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
+	v, ok := t.s.at(addr.Path()).(ferry.Value)
 	if !ok {
 		return ferry.Value{}, nil
 	}
 
 	return v, nil
+}
+
+// Probe answers at a container's own address out of the same tree, which is
+// what makes a section this plane holds visible to a load.
+func (t treeSource) Probe(_ context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	switch node := t.s.at(addr.Path()).(type) {
+	case nil:
+		return ferry.SectionAbsent, nil
+	case ferry.Value:
+		if node.Kind() == ferry.KindNull {
+			return ferry.SectionNull, nil
+		}
+
+		return ferry.SectionPresent, nil
+	default:
+		return ferry.SectionPresent, nil
+	}
 }
 
 type treeDB struct {

@@ -2,7 +2,6 @@ package ferrytest_test
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -283,10 +282,14 @@ type renderWriter struct {
 	sink  *renderSink
 }
 
-func (w renderWriter) Set(ctx context.Context, addr ferry.Path, v ferry.Value) error {
+func (w renderWriter) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) error {
 	w.sink.seen[addr.String()] = v.GoString()
 
 	return w.inner.Set(ctx, addr, v)
+}
+
+func (w renderWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error {
+	return ensureThrough(ctx, w.inner, addr, p)
 }
 
 // shoutingPlane is the memory plane with a reader that changes what it holds,
@@ -326,7 +329,7 @@ func (s shoutingSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 
 type shoutingReader struct{ inner ferry.Reader }
 
-func (r shoutingReader) Get(ctx context.Context, addr ferry.Path) (ferry.Value, error) {
+func (r shoutingReader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
 	got, err := r.inner.Get(ctx, addr)
 	if err != nil {
 		return got, err
@@ -351,13 +354,12 @@ func textOf(v ferry.Value) (string, bool) {
 	return s, err == nil
 }
 
-func (r shoutingReader) Children(ctx context.Context, prefix ferry.Path) ([]ferry.Path, error) {
-	e, ok := r.inner.(ferry.Enumerator)
-	if !ok {
-		return nil, errors.New("the plane underneath does not enumerate")
-	}
+func (r shoutingReader) Probe(ctx context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	return probeThrough(ctx, r.inner, addr)
+}
 
-	return e.Children(ctx, prefix)
+func (r shoutingReader) Children(ctx context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error) {
+	return childrenThrough(ctx, r.inner, addr)
 }
 
 // stagingCounts is what a staging plane's writer was asked to do.
@@ -409,8 +411,12 @@ type stagingSpyWriter struct {
 	counts *stagingCounts
 }
 
-func (w stagingSpyWriter) Set(ctx context.Context, addr ferry.Path, v ferry.Value) error {
+func (w stagingSpyWriter) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) error {
 	return w.inner.Set(ctx, addr, v)
+}
+
+func (w stagingSpyWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error {
+	return ensureThrough(ctx, w.inner, addr, p)
 }
 
 func (w stagingSpyWriter) Commit(context.Context) error {

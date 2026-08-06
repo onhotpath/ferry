@@ -260,14 +260,16 @@ func bindPlane(p plane, sep string, addrs *ferry.AddressSet) (*ferry.Keys, map[s
 // It is built once per Bind and never written to afterwards, which is what lets
 // one binding be read from many goroutines with no synchronisation.
 func staticNames(addrs *ferry.AddressSet, keys *ferry.Keys) (map[string]ferry.Path, error) {
-	if addrs == nil {
-		return map[string]ferry.Path{}, nil
-	}
-
 	out := make(map[string]ferry.Path, addrs.Len())
 	name := keys.Open()
 
-	for addr := range addrs.All() {
+	// The kind each member carries is what a driver classifies on at Bind
+	// (ADR-0016), and this table is the one place that does not need it: a name
+	// is a function of the segments, and reading it back recovers the spelling
+	// whatever kind of place the address names.
+	for m := range addrs.Seq() {
+		addr := m.Path()
+
 		key, err := name(addr)
 		if err != nil {
 			// Unreachable: NewKeys computed a name for every address in this

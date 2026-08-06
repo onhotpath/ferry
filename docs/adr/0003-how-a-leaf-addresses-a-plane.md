@@ -107,6 +107,13 @@ Evidence: `X4=6..11` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/pr
 *(Under [#56](https://github.com/onhotpath/ferry/issues/56): what that list **contains** is settled in [An address is a place a `Value` can be](#an-address-is-a-place-a-value-can-be-and-a-container-has-one).
 It is every leaf address the type determines plus every container address, and it is never a wildcard shape.)*
 
+> **Amended under [ADR-0016](0016-the-sealed-address-model.md): the set is typed, and "every container address" is more addresses than it was.**
+>
+> As published, a container address was one a composite that can be nil occupies, so a plain nested struct and an array took none: only a pointer, a slice and a map contributed one.
+> Under the sealed address model an address carries what kind of place it names, and a plane is asked whether a section is there, so a section with no address of its own is a question that cannot be asked.
+> Every nested struct and every array now contributes a `SectionAddr`, a slice and a map contribute a `CompositeAddr`, and a pointer contributes at the kind of what it points at.
+> The set is otherwise unchanged: it is still sorted segment-wise, still holds nothing a value mints, and still never holds a wildcard shape.
+
 ### The case rule: core never folds, confirmed
 
 Core compares segment text by exact byte equality.

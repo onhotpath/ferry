@@ -66,6 +66,32 @@ type Enumerator interface {                                       // planes that
 **Four required interfaces, one method each, in both directions.**
 Everything beyond that is opt-in.
 
+> **Amended under [ADR-0016](0016-the-sealed-address-model.md): the contract is re-signed by address kind, and there are two more optional interfaces.**
+>
+> As published, every method above took a `Path`, so a driver could be asked anything at any address and each one inferred for itself which questions an address admitted.
+> ADR-0016 records the class of defect that produced and replaces the one address type with three sealed ones.
+> The signatures are now:
+>
+> ```go
+> type Reader     interface { Get(ctx context.Context, addr LeafAddr) (Value, error) }
+> type Writer     interface { Set(ctx context.Context, addr LeafAddr, v Value) error }
+> type Prober     interface { Probe(ctx context.Context, addr Container) (SectionInfo, error) }
+> type Enumerator interface { Children(ctx context.Context, addr CompositeAddr) ([]Segment, error) }
+> type Ensurer    interface { Ensure(ctx context.Context, addr Container, p Presence) error }
+> ```
+>
+> Three sentences of this ADR move with them, and are corrected here rather than left standing.
+>
+> **"At a container address a driver returns absence or a null and nothing else" is now unwritable rather than obeyed.**
+> `Get` cannot be asked about a container address at all, and what the plane holds there is `Prober`'s answer.
+>
+> **"A composite with no elements is written as a null at its own address" survives, spelled `Ensure(addr, PresenceNull)`.**
+> The rule is unchanged; the method it is said through is not `Set`, because `Set` writes a `Value` at a leaf.
+>
+> **`Children` returns segments and not addresses.**
+> As published it returned `[]Path` so that the plane, rather than the caller, decided whether a container is a mapping or a sequence; that reason stands and a `Segment` carries the kind just as well.
+> What changes is who builds the address: the driver mints the segment and the schema types the child, so a driver can no longer answer about an address it was not asked about, and core refuses a `Name` under a sequence and an `Index` under a mapping with the segment named.
+
 > **Amended under [#182](https://github.com/onhotpath/ferry/issues/182), [#263](https://github.com/onhotpath/ferry/issues/263) and [#269](https://github.com/onhotpath/ferry/issues/269): this ADR owns the contract a held binding puts on a driver, and as published it stated none of it.**
 >
 > As published this section listed four required interfaces and three optional ones, and said nothing about how many times a bound driver is used, from how many goroutines, or what it may allocate at `Bind`.

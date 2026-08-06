@@ -137,6 +137,17 @@ func (s *storeSink) set(at Path, v Value) error {
 	return nil
 }
 
+// ensure is a container-level write, priced as a write like any other: what a
+// container says at its own address is one of the things a dump has to get past
+// the plane, and a plane refusing it refuses it the same way.
+func (s *storeSink) ensure(at Path, p Presence) error {
+	if p != PresenceNull {
+		return nil
+	}
+
+	return s.set(at, Null)
+}
+
 func (s *storeSink) close() error {
 	s.closes++
 
@@ -148,13 +159,27 @@ func (s *storeSink) close() error {
 // question rather than to "has a lifecycle at all".
 type flatWriter struct{ s *storeSink }
 
-func (w flatWriter) Set(_ context.Context, at Path, v Value) error { return w.s.set(at, v) }
+func (w flatWriter) Set(_ context.Context, at LeafAddr, v Value) error {
+	return w.s.set(at.Path(), v)
+}
+
+// Ensure is the container-level write, routed through the same store so that a
+// refusal at a container address is priced exactly as a refusal at a leaf.
+func (w flatWriter) Ensure(_ context.Context, at Container, p Presence) error {
+	return w.s.ensure(at.Path(), p)
+}
 
 func (w flatWriter) Close() error { return w.s.close() }
 
 type stagingWriter struct{ s *storeSink }
 
-func (w stagingWriter) Set(_ context.Context, at Path, v Value) error { return w.s.set(at, v) }
+func (w stagingWriter) Set(_ context.Context, at LeafAddr, v Value) error {
+	return w.s.set(at.Path(), v)
+}
+
+func (w stagingWriter) Ensure(_ context.Context, at Container, p Presence) error {
+	return w.s.ensure(at.Path(), p)
+}
 
 func (w stagingWriter) Close() error { return w.s.close() }
 

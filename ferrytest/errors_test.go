@@ -173,7 +173,7 @@ func (noWriteSink) Bind(*ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 
 type noWriteWriter struct{}
 
-func (noWriteWriter) Set(context.Context, ferry.Path, ferry.Value) error { return nil }
+func (noWriteWriter) Set(context.Context, ferry.LeafAddr, ferry.Value) error { return nil }
 
 func (noWriteWriter) Commit(context.Context) error {
 	return fmt.Errorf("%w: the token has no write ACL", ferry.ErrReadOnly)

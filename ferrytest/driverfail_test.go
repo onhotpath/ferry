@@ -21,7 +21,6 @@ var (
 	probeLeaf    = ferry.At("leaf")
 	probeList    = ferry.At("list")
 	probeMap     = ferry.At("map")
-	probeMissing = ferry.At("missing")
 	probeSection = ferry.At("section")
 )
 
@@ -90,23 +89,27 @@ func TestDriverCase4ReportsAnOpenThatFails(t *testing.T) {
 	reportsExactly(t, c, "case 4: the load failed with")
 }
 
-// TestDriverCase3ReportsAGetThatFailsWhereThereIsNothingToFailAt is case 3's
+// TestDriverCase3ReportsAProbeThatFailsWhereThereIsNothingToFailAt is case 3's
 // third answer, negative.
 //
-// A container address holds no value, so the only two honest answers there are
-// Absent and the Null an empty composite was dumped with. An error is neither: a
-// driver that fails at an address its plane simply does not hold has turned a
-// missing optional into a broken load. The misbehaviour is scoped to the one
-// address nothing ever writes to, which is the only address in the suite that
-// asks the question.
-func TestDriverCase3ReportsAGetThatFailsWhereThereIsNothingToFailAt(t *testing.T) {
+// A container's own address holds no value, so the honest answers there are
+// absent, present, and the null an empty composite was dumped with. An error is
+// none of them: a driver that fails at a container it has just been handed the
+// contents of has turned a missing optional into a broken load. The
+// misbehaviour is scoped to the one address case 3 probes in its populated
+// half, so nothing else in the suite changes.
+//
+// It asks through Probe rather than Get because that is where the container
+// question lives under the sealed address model: Get takes a leaf, so the
+// question this fixture used to break cannot be put to it (ADR-0016).
+func TestDriverCase3ReportsAProbeThatFailsWhereThereIsNothingToFailAt(t *testing.T) {
 	c := &capture{}
 
-	ferrytest.Driver(c, wrapPlane("failing-get", func(inst *ferrytest.Instance) {
-		inst.Source = pickyReadSource{inner: inst.Source, at: probeMissing, err: errNoRead}
+	ferrytest.Driver(c, wrapPlane("failing-probe", func(inst *ferrytest.Instance) {
+		inst.Source = pickyProbeSource{inner: inst.Source, at: probeList, err: errNoRead}
 	}))
 
-	reportsExactly(t, c, "case 3: Get at the container address /missing failed")
+	reportsExactly(t, c, "case 3: Probe at the container address /list failed")
 }
 
 // TestDriverCase5SkipsAReaderThatDoesNotEnumerate is ADR-0004's optional
@@ -154,10 +157,10 @@ func TestDriverCase5ReportsChildrenThatCannotBeListed(t *testing.T) {
 // the two cases that share an address set.
 //
 // Cases 8 and 9 each bind a sink to the one container address and then mint an
-// address under it, so a sink refusing that set fails both. They are asserted
-// together rather than pretended apart: a fixture that could tell them apart
-// would have to be scoped by call order, which is a property of this file rather
-// than of the driver.
+// address under it by dumping through the binding, so a sink refusing that set
+// fails both. They are asserted together rather than pretended apart: a fixture
+// that could tell them apart would have to be scoped by call order, which is a
+// property of this file rather than of the driver.
 func TestDriverCases8And9ReportASinkThatWillNotBindAContainer(t *testing.T) {
 	c := &capture{}
 
@@ -165,16 +168,23 @@ func TestDriverCases8And9ReportASinkThatWillNotBindAContainer(t *testing.T) {
 		inst.Sink = refusingSink{inner: inst.Sink, when: isContainerSet, err: errUnreachable}
 	}))
 
-	reportsExactly(t, c, "case 8: Sink.Bind:", "case 9: Sink.Bind:")
+	reportsExactly(t, c, "case 8: BindSink:", "case 9: BindSink:")
 }
 
 // TestDriverCases8And9ReportAWriterThatCannotBeOpened is the same pair one step
 // later: the binding is taken and the open behind it fails.
 //
 // Case 8 gives up, because a first write that never happened is no evidence
-// about what a second open retains. Case 9 reports twice, and the second line is
-// the suite reading a failed open as a refusal - which is what a driver author
-// sees, so it is asserted rather than tidied away.
+// about what a second open retains, and it says so out loud rather than
+// silently: a case that quietly did nothing is indistinguishable from a case
+// that passed. Case 9 reports, because a write that did not land is the
+// observation it is about, and it reads a failed open as a refusal - which is
+// what a driver author sees, so it is asserted rather than tidied away.
+//
+// Both cases mint their address by dumping through the binding, since the three
+// address kinds are sealed and only the walk holds a value-minted one
+// (ADR-0016). That is what folded case 8's own "opening a writer" line into the
+// dump's error and left it a skip.
 func TestDriverCases8And9ReportAWriterThatCannotBeOpened(t *testing.T) {
 	c := &capture{}
 
@@ -182,11 +192,11 @@ func TestDriverCases8And9ReportAWriterThatCannotBeOpened(t *testing.T) {
 		inst.Sink = unopenableSink{inner: inst.Sink, when: isContainerSet, err: errNoWriter}
 	}))
 
-	reportsExactly(t, c,
-		"case 8: opening a writer",
-		"case 9: opening a writer",
-		"case 9: the sink refused an address under a container",
-	)
+	reportsExactly(t, c, "case 9: the sink refused an address under a container")
+
+	if !anyLineContains(c.logs, "case 8 skipped: the write was refused with") {
+		t.Errorf("the suite logged %q, want case 8 saying out loud that it could not run", c.logs)
+	}
 }
 
 // TestDriverCase8ReportsAKeyFunctionThatKeptWhatItMinted is case 8, negative,
@@ -435,18 +445,34 @@ func wrapPlane(name string, wrap func(*ferrytest.Instance)) ferrytest.Plane {
 // isLeafSet is the address set case 2 binds and case 6's dump compiles to:
 // exactly the one leaf.
 func isLeafSet(addrs *ferry.AddressSet) bool {
-	return addrs.Len() == 1 && addrs.Has(probeLeaf)
+	return addrs.Len() == 1 && hasPath(addrs, probeLeaf)
+}
+
+// hasPath reports whether the set holds a member at this address, whatever kind
+// it was minted at.
+//
+// The kinds are sealed and nothing outside core mints one (ADR-0016), so a set
+// is asked by reading the addresses back off its members rather than by handing
+// it one to compare against.
+func hasPath(addrs *ferry.AddressSet, at ferry.Path) bool {
+	for m := range addrs.Seq() {
+		if m.Path() == at {
+			return true
+		}
+	}
+
+	return false
 }
 
 // isContainerSet is the address set cases 8 and 9 bind: exactly the one mapping.
 func isContainerSet(addrs *ferry.AddressSet) bool {
-	return addrs.Len() == 1 && addrs.Has(probeMap)
+	return addrs.Len() == 1 && hasPath(addrs, probeMap)
 }
 
 // isChildrenSet is the address set case 5 binds, which is one address wider than
 // case 1's and one narrower than case 3's.
 func isChildrenSet(addrs *ferry.AddressSet) bool {
-	return addrs.Len() == 3 && addrs.Has(probeList) && addrs.Has(probeMap) && addrs.Has(probeLeaf)
+	return addrs.Len() == 3 && hasPath(addrs, probeList) && hasPath(addrs, probeMap) && hasPath(addrs, probeLeaf)
 }
 
 // refuseRetainedKey is a key function that kept what it minted: the second of
@@ -572,37 +598,47 @@ func (s unopenableSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) 
 	return func(context.Context) (ferry.Reader, error) { return nil, s.err }, nil
 }
 
-// pickyReadSource fails one Get and answers from the plane everywhere else. Its
-// reader keeps [ferry.Enumerator], because a source that stopped enumerating
-// would break the cases that load a composite for a reason it is not about.
-type pickyReadSource struct {
+// pickyProbeSource fails one Probe and answers from the plane everywhere else.
+// Its reader keeps [ferry.Enumerator], because a source that stopped
+// enumerating would break the cases that load a composite for a reason it is
+// not about.
+//
+// There is no Get-failing counterpart beside it any more. The one fixture that
+// needed one broke a Get at a container address, and under the sealed address
+// model that question cannot be put to Get at all (ADR-0016); a Get that fails
+// at a leaf is case 4's, and erringSource is what stages it.
+type pickyProbeSource struct {
 	inner ferry.Source
 	at    ferry.Path
 	err   error
 }
 
-func (s pickyReadSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
+func (s pickyProbeSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 	return bindThrough(s.inner, addrs, func(r ferry.Reader) ferry.Reader {
-		return pickyReader{inner: r, at: s.at, err: s.err}
+		return pickyProbeReader{inner: r, at: s.at, err: s.err}
 	})
 }
 
-type pickyReader struct {
+type pickyProbeReader struct {
 	inner ferry.Reader
 	at    ferry.Path
 	err   error
 }
 
-func (r pickyReader) Get(ctx context.Context, addr ferry.Path) (ferry.Value, error) {
-	if addr == r.at {
-		return ferry.Value{}, r.err
-	}
-
+func (r pickyProbeReader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
 	return r.inner.Get(ctx, addr)
 }
 
-func (r pickyReader) Children(ctx context.Context, prefix ferry.Path) ([]ferry.Path, error) {
-	return childrenThrough(ctx, r.inner, prefix)
+func (r pickyProbeReader) Probe(ctx context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	if addr.Path() == r.at {
+		return ferry.SectionAbsent, r.err
+	}
+
+	return probeThrough(ctx, r.inner, addr)
+}
+
+func (r pickyProbeReader) Children(ctx context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error) {
+	return childrenThrough(ctx, r.inner, addr)
 }
 
 // unlistableSource answers [ferry.Enumerator] and then fails the enumeration at
@@ -625,16 +661,20 @@ type unlistableReader struct {
 	err   error
 }
 
-func (r unlistableReader) Get(ctx context.Context, addr ferry.Path) (ferry.Value, error) {
+func (r unlistableReader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
 	return r.inner.Get(ctx, addr)
 }
 
-func (r unlistableReader) Children(ctx context.Context, prefix ferry.Path) ([]ferry.Path, error) {
-	if prefix == r.at {
+func (r unlistableReader) Probe(ctx context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	return probeThrough(ctx, r.inner, addr)
+}
+
+func (r unlistableReader) Children(ctx context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error) {
+	if addr.Path() == r.at {
 		return nil, r.err
 	}
 
-	return childrenThrough(ctx, r.inner, prefix)
+	return childrenThrough(ctx, r.inner, addr)
 }
 
 // blindSource hands back a reader that does not enumerate, which ADR-0004 makes
@@ -656,7 +696,7 @@ func (s blindSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 // would be answering for an interface its plane was asked not to have.
 type blindReader struct{ inner ferry.Reader }
 
-func (r blindReader) Get(ctx context.Context, addr ferry.Path) (ferry.Value, error) {
+func (r blindReader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
 	return r.inner.Get(ctx, addr)
 }
 
@@ -681,13 +721,30 @@ func bindThrough(inner ferry.Source, addrs *ferry.AddressSet, wrap func(ferry.Re
 
 // childrenThrough forwards an enumeration to the plane underneath, and says so
 // where there is nothing under it to enumerate.
-func childrenThrough(ctx context.Context, inner ferry.Reader, prefix ferry.Path) ([]ferry.Path, error) {
+func childrenThrough(ctx context.Context, inner ferry.Reader, addr ferry.CompositeAddr,
+) ([]ferry.Segment, error) {
 	e, ok := inner.(ferry.Enumerator)
 	if !ok {
 		return nil, errors.New("the plane underneath does not enumerate")
 	}
 
-	return e.Children(ctx, prefix)
+	return e.Children(ctx, addr)
+}
+
+// probeThrough forwards a container question to the plane underneath.
+//
+// Every read-side shell in these files needs it: a wrapper that declared Get
+// and Children and nothing else would drop [ferry.Prober], and the case that
+// asks what the plane holds at a container address would then be reporting
+// against the wrapper (ADR-0016).
+func probeThrough(ctx context.Context, inner ferry.Reader, addr ferry.Container,
+) (ferry.SectionInfo, error) {
+	pr, ok := inner.(ferry.Prober)
+	if !ok {
+		return ferry.SectionAbsent, errors.New("the plane underneath does not probe")
+	}
+
+	return pr.Probe(ctx, addr)
 }
 
 // refusingSink is [refusingSource] on the write side.
@@ -752,12 +809,46 @@ type pickyWriter struct {
 	refuse func(addrs *ferry.AddressSet, addr ferry.Path, v ferry.Value) error
 }
 
-func (w pickyWriter) Set(ctx context.Context, addr ferry.Path, v ferry.Value) error {
-	if err := w.refuse(w.addrs, addr, v); err != nil {
+func (w pickyWriter) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) error {
+	if err := w.refuse(w.addrs, addr.Path(), v); err != nil {
 		return err
 	}
 
 	return w.inner.Set(ctx, addr, v)
+}
+
+// Ensure runs the same refusal over the container's own address.
+//
+// The null a nil section writes arrives here rather than at Set under the
+// sealed address model (ADR-0016), so a fixture that refuses a null at a
+// container address has to be asked here or it would refuse nothing at all.
+func (w pickyWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error {
+	if err := w.refuse(w.addrs, addr.Path(), valueFor(p)); err != nil {
+		return err
+	}
+
+	return ensureThrough(ctx, w.inner, addr, p)
+}
+
+// valueFor is the Value a container-level write carried when it was a Set, so
+// that a predicate written about a kind still reads. A presence carries no
+// value of its own, and no predicate here matches the zero one.
+func valueFor(p ferry.Presence) ferry.Value {
+	if p == ferry.PresenceNull {
+		return ferry.Null
+	}
+
+	return ferry.Value{}
+}
+
+// ensureThrough forwards a container write to a writer that can take one.
+func ensureThrough(ctx context.Context, w ferry.Writer, addr ferry.Container, p ferry.Presence) error {
+	e, ok := w.(ferry.Ensurer)
+	if !ok {
+		return errors.New("the plane underneath cannot spell a container at its own address")
+	}
+
+	return e.Ensure(ctx, addr, p)
 }
 
 // unclosableSink's writer holds a resource it cannot release, which is the
@@ -797,8 +888,12 @@ type unclosableWriter struct {
 	err   error
 }
 
-func (w unclosableWriter) Set(ctx context.Context, addr ferry.Path, v ferry.Value) error {
+func (w unclosableWriter) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) error {
 	return w.inner.Set(ctx, addr, v)
+}
+
+func (w unclosableWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error {
+	return ensureThrough(ctx, w.inner, addr, p)
 }
 
 func (w unclosableWriter) Close() error { return w.err }

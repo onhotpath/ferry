@@ -238,7 +238,7 @@ func TestUnwritableDirectoryRefusesInsideTheOpen(t *testing.T) {
 
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-	open, err := yaml.NewSink(filepath.Join(dir, "plane.yaml")).Bind(ferry.NewAddressSet(ferry.At("port")))
+	open, err := yaml.NewSink(filepath.Join(dir, "plane.yaml")).Bind(addressesOf[scalars](t).set)
 	if err != nil {
 		t.Fatalf("Bind refused before any I/O, where it cannot yet know the plane is unwritable: %v", err)
 	}
@@ -992,11 +992,13 @@ func TestSinkRefusesAnAbsent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plane.yaml")
 	w := openWriter(t, path)
 
-	if err := w.Set(t.Context(), ferry.At("kept"), ferry.String("here")); err != nil {
+	a := addressesOf[scalars](t)
+
+	if err := w.Set(t.Context(), a.leaf(t, ferry.At("kept")), ferry.String("here")); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 
-	err := w.Set(t.Context(), ferry.At("gone"), ferry.Value{})
+	err := w.Set(t.Context(), a.leaf(t, ferry.At("gone")), ferry.Value{})
 	if err == nil {
 		t.Fatal("a Set of an Absent was taken, and an absent address written as a value is the conflation this " +
 			"driver refuses")
@@ -1135,7 +1137,7 @@ func onlyPlane(t *testing.T, dir string) {
 func openWriter(t *testing.T, path string) ferry.Writer {
 	t.Helper()
 
-	open, err := yaml.NewSink(path).Bind(ferry.NewAddressSet(ferry.At("unused")))
+	open, err := yaml.NewSink(path).Bind(addressesOf[scalars](t).set)
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
@@ -1211,14 +1213,25 @@ type shellWriter struct {
 	sink  *shell
 }
 
-func (w shellWriter) Set(ctx context.Context, addr ferry.Path, v ferry.Value) error {
-	w.sink.seen = append(w.sink.seen, record{addr: addr, val: v})
+func (w shellWriter) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) error {
+	w.sink.seen = append(w.sink.seen, record{addr: addr.Path(), val: v})
 
-	if addr == w.sink.stop {
+	if addr.Path() == w.sink.stop {
 		return errStop
 	}
 
 	return w.inner.Set(ctx, addr, v)
+}
+
+// Ensure forwards the container-level write, so a shell over a sink that can
+// spell one does not silently take the capability away (ADR-0016).
+func (w shellWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error {
+	e, ok := w.inner.(ferry.Ensurer)
+	if !ok {
+		return nil
+	}
+
+	return e.Ensure(ctx, addr, p)
 }
 
 func (w shellWriter) Commit(ctx context.Context) error {
