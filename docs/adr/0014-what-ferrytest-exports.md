@@ -177,8 +177,7 @@ ADR-0009 measured that this has to be about four lines or nobody writes it.
 
 ```go
 func TestCodec(t *testing.T) {
-    reg := ferry.NewRegistry()
-    _ = reg.Register(ferry.TextCodec[netip.Addr](ferry.KindString).AsMapKey())
+    reg := ferry.NewRegistry(ferry.StringText[netip.Addr]().AsMapKey())
 
     proofs := []ferrytest.Proof{
         ferrytest.Type("netip.Addr", ferrytest.Eq[netip.Addr],
@@ -518,6 +517,7 @@ Without the second, a driver whose static table holds a wildcard shape instead o
 >
 > **The surface table does not move**: no exported name changes, and `TestExportedSurface` locks the same twenty-six.
 > The freeze sentence in the godoc goes, because there is no freeze: a registry is complete when it is built, so there is no longer an ordering rule between registering and calling this suite.
+> The four-line sample above is rewritten in the same surface, because it is the shape this ADR argues nobody writes if it is longer, and it is now three.
 
 Cases 2 and 3 are ADR-0009's two wrapper defects, and they are the reason this suite is load-bearing rather than optional: the codec was correct and the wrapper was not, so **no proof a registrant can write catches them**.
 One value finds both.
