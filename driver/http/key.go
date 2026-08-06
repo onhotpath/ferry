@@ -30,10 +30,9 @@ var ErrIllegalName = errors.New("http: address has no name on this plane")
 // field would have to discard one of them, so it is refused instead, and the
 // refusal names the field. Change the field to a slice, or reject the request.
 //
-// It arrives when the load closes rather than when the field is read, because
-// one occurrence and two are indistinguishable at the moment the field is asked
-// for: both are the same name, and only nothing having enumerated it says the
-// field was not a sequence after all.
+// It arrives while the field is being read, carries that field's address, and
+// says how many times the name occurred. A request with two such names reports
+// both, one failure per name.
 //
 // It wraps [ferry.ErrPlane] and stays reachable under ferry's wrapper.
 var ErrRepeated = errors.New("http: this name occurs more than once")

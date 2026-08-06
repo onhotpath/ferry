@@ -129,10 +129,15 @@ func TestHeaderLoadsWhatTheRequestSpells(t *testing.T) {
 	}
 }
 
-// TestARepeatedNameIsNeverReadAsOneValue is the refusal that lands when the load
-// closes, and the one no other moment can make: at the moment the field is read
-// there is one call at one address, and one occurrence and two are the same
-// name.
+// TestARepeatedNameIsNeverReadAsOneValue is the refusal a scalar field earns
+// when the request names it twice, and it is made while that field is read.
+//
+// The moment is the whole of what changed here. This refusal used to be made at
+// Close, because an address arrived at Get carrying no kind: /tags for a
+// []string and /q for a string were the same call, so the driver could not tell
+// a sequence from a scalar and had to answer Absent and wait to see whether
+// anything enumerated the name (#193, #208). Get takes a ferry.LeafAddr now, so
+// the address says it holds one value and the refusal has a home at it.
 func TestARepeatedNameIsNeverReadAsOneValue(t *testing.T) {
 	t.Parallel()
 
@@ -154,11 +159,91 @@ func TestARepeatedNameIsNeverReadAsOneValue(t *testing.T) {
 		t.Errorf("the refusal is at %v, want /q: %v", addressOf(err), err)
 	}
 
+	// The moment is the walk and no longer the close, which a caller reads off
+	// the report: a refusal made while the field is read says the driver
+	// failed, and one made at Close says the plane was being closed.
+	if strings.Contains(err.Error(), "closing the plane") {
+		t.Errorf("the refusal is still deferred to Close: %v", err)
+	}
+
 	// Two offending names report two failures rather than one, which is what
 	// core keeping every address a driver named buys (#211/#212).
 	both := loadErr[scalars](t, "q=a&q=b&r=c&r=d")
 	if n := len(ferry.Elements(both)); n != 2 {
 		t.Errorf("two repeated names reported %d failures, want 2: %+v", n, both)
+	}
+}
+
+// TestTheSameNameIsASequenceOrARefusalByTheKindOfTheAddress is #193 and #208
+// read as one sentence, which is what they turned out to be.
+//
+// One request, two destinations. ?tags=a&tags=b is two elements where the
+// schema says []string, and it is a refusal where the schema says string, and
+// the driver decides between them from the kind of the address it is asked
+// about rather than from anything in the request. Before the address carried a
+// kind, both were the same call at /tags and neither answer could be made where
+// it belonged.
+func TestTheSameNameIsASequenceOrARefusalByTheKindOfTheAddress(t *testing.T) {
+	t.Parallel()
+
+	type asSequence struct {
+		Tags []string `ferry:"tags"`
+	}
+
+	type asScalar struct {
+		Tags string `ferry:"tags"`
+	}
+
+	const query = "tags=a&tags=b"
+
+	got, err := ferry.Load[asSequence](queryCtx(t, query), NewQuerySource())
+	if err != nil {
+		t.Fatalf("loading %s into a []string: %v", query, err)
+	}
+
+	// The plane's own order, because a position is the offset into what the
+	// name holds and net/url appends in the order the wire carried.
+	if want := []string{"a", "b"}; fmt.Sprint(got.Tags) != fmt.Sprint(want) {
+		t.Errorf("loading %s gave %v, want %v in the request's own order", query, got.Tags, want)
+	}
+
+	refused := loadErr[asScalar](t, query)
+	if !errors.Is(refused, ErrRepeated) {
+		t.Fatalf("loading %s into a string gave %v, want it to wrap ErrRepeated", query, refused)
+	}
+
+	if at := addressOf(refused); at != ferry.At("tags") {
+		t.Errorf("the refusal is at %v, want /tags: %v", at, refused)
+	}
+}
+
+// TestARepeatedNameAtARequiredFieldReportsOneMistakeOnce is the sharpest thing
+// making the refusal at Get buys, and it is a diagnosis rather than a rule.
+//
+// The old placement had to answer Absent at the field and report at Close, so a
+// required field pointed at a repeated name failed twice for one mistake: once
+// for the absence the driver had manufactured, and once at the close for the
+// repetition that caused it. The field is refused where it is read now, so the
+// absence never happens and there is one failure to act on.
+func TestARepeatedNameAtARequiredFieldReportsOneMistakeOnce(t *testing.T) {
+	t.Parallel()
+
+	type required struct {
+		Q string `ferry:"q,required"`
+	}
+
+	err := loadErr[required](t, "q=a&q=b")
+
+	if n := len(ferry.Elements(err)); n != 1 {
+		t.Errorf("one repeated name at a required field reported %d failures, want 1: %+v", n, err)
+	}
+
+	if errors.Is(err, ferry.ErrMissing) {
+		t.Errorf("the request names this field twice and it was also reported missing: %v", err)
+	}
+
+	if !errors.Is(err, ErrRepeated) {
+		t.Errorf("the refusal does not say the name is repeated: %v", err)
 	}
 }
 

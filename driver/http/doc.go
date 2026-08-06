@@ -31,14 +31,19 @@
 //
 // # A repeated name is a sequence
 //
-// ?tags=a&tags=b fills a []string with two elements, and so do two
-// X-Tags: header lines. One occurrence fills a one-element slice. The same
-// values also read as tags.0=a&tags.1=b, and a request that uses both spellings
-// for one position is refused rather than resolved.
+// ?tags=a&tags=b fills a []string with two elements, in the order the request
+// carried them, and so do two X-Tags: header lines. One occurrence fills a
+// one-element slice. The same values also read as tags.0=a&tags.1=b, and a
+// request that uses both spellings for one position is refused rather than
+// resolved.
 //
 // A name occurring more than once is a sequence and nothing else, so reading it
-// into a plain string field is refused too. Nothing quietly takes the first
-// value.
+// into a plain string field is refused while that field is read. Nothing
+// quietly takes the first value.
+//
+// Which of the two a name gets is decided by the field it is read into and
+// never by the request: ?limits.rps=1&limits.rps=2 is two elements into a
+// map[string][]string and a refusal into a map[string]string.
 //
 // # Set but empty is not the same as absent
 //

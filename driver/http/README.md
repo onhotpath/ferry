@@ -177,15 +177,17 @@ A driver that answered from nothing instead would report every field missing, an
 `?sort=name&sort=age` into a `string` field is refused:
 
 ```
-ferry: /sort: closing the plane: plane error: http: this name occurs more than once: it occurs 2 times, and this field takes one value
+ferry: /sort: the driver failed: plane error: http: this name occurs more than once: it occurs 2 times, and this field takes one value
 ```
 
 Nothing quietly takes the first.
 Change the field to a `[]string`, or answer 400 and name the parameter.
 
-The refusal arrives when the load closes rather than when the field is read, and that is a property of the plane rather than a late report.
-At the moment the field is asked for there is one call at one name, and one occurrence and two are indistinguishable there: only the walk finishing without having enumerated the name says the field was not a sequence after all.
+The refusal arrives while that field is read, so it carries the field's address and a `required` field pointed at a repeated name reports one failure rather than two.
+Which reading a name gets is decided by what the field is, not by what the request holds: `?tags=a&tags=b` is two elements into a `[]string` and a refusal into a `string`, and the same is true one level down, where `?limits.rps=1&limits.rps=2` is a refusal into a `map[string]string` and two elements into a `map[string][]string`.
 A request with two such parameters reports both, one failure per parameter, each carrying its own address.
+
+The positions are the request's own order, because position *n* is the *n*th value the name carries.
 
 ## One position cannot be spelled two ways
 
