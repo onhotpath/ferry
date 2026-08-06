@@ -1,6 +1,7 @@
 package ferry_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -136,23 +137,53 @@ func TestLoadFromStatic(t *testing.T) {
 // TestTheMemoryPlaneRefusesASecondWrite is a driver's own refusal travelling
 // the whole way out: it names the address with ErrorAt, core supplies the
 // moment and the provenance, and the caller matches with errors.Is.
+//
+// The duplicate is two writes inside one writer's lifetime, which is what the
+// refusal is about. Two dumps are two writes at different times and are not
+// required to be mutually injective, so the shell below holds one writer across
+// both of them to reach the refusal at all.
 func TestTheMemoryPlaneRefusesASecondWrite(t *testing.T) {
 	t.Parallel()
 
-	inst := ferrytest.MemPlane().Open()
+	sink := heldWriter{inner: ferrytest.MemPlane().Open().Sink}
 
-	if err := ferry.Dump(t.Context(), memFilled(), inst.Sink); err != nil {
+	if err := ferry.Dump(t.Context(), memFilled(), &sink); err != nil {
 		t.Fatalf("the first dump: %+v", err)
 	}
 
-	err := ferry.Dump(t.Context(), memFilled(), inst.Sink)
+	err := ferry.Dump(t.Context(), memFilled(), &sink)
 	if n := len(ferry.Elements(err)); n != 5 {
-		t.Fatalf("the second dump reported %d elements, want one per address:\n%+v", n, err)
+		t.Fatalf("the second dump through one writer reported %d elements, want one per address:\n%+v", n, err)
 	}
 
 	for _, e := range ferry.Elements(err) {
 		mustBeDriverRefusal(t, e)
 	}
+}
+
+// heldWriter is a sink shell handing every open the same writer, so that two
+// dumps through it are two writes inside one writer's lifetime.
+//
+// It is a fixture and not a shape a driver should have: a writer that outlives
+// its open is exactly the retention ADR-0012 rules out on a key function.
+type heldWriter struct {
+	inner ferry.Sink
+	w     ferry.Writer
+}
+
+func (s *heldWriter) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
+	open, err := s.inner.Bind(addrs)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context) (ferry.Writer, error) {
+		if s.w == nil {
+			s.w, err = open(ctx)
+		}
+
+		return s.w, err
+	}, nil
 }
 
 func mustBeDriverRefusal(t *testing.T, err error) {

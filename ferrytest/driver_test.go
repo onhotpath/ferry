@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/onhotpath/ferry"
@@ -199,13 +200,14 @@ func TestDriverCase6ObservesAStagingSink(t *testing.T) {
 		t.Fatalf("a staging plane reported %q", c.lines)
 	}
 
-	if s.commits == 0 || s.closes == 0 {
+	commits, closes := s.read()
+	if commits == 0 || closes == 0 {
 		t.Errorf("the suite observed %d commits and %d closes, want the driver's own lifecycle exercised",
-			s.commits, s.closes)
+			commits, closes)
 	}
 
-	if s.closes <= s.commits {
-		t.Errorf("Close ran %d times against %d commits, and Close runs where Commit does not", s.closes, s.commits)
+	if closes <= commits {
+		t.Errorf("Close ran %d times against %d commits, and Close runs where Commit does not", closes, commits)
 	}
 }
 
@@ -363,9 +365,40 @@ func (r shoutingReader) Children(ctx context.Context, addr ferry.CompositeAddr) 
 }
 
 // stagingCounts is what a staging plane's writer was asked to do.
+// stagingCounts is what the staging spy records.
+//
+// It is guarded, because case 14 opens the write half from many goroutines at
+// once and a spy that counted without a lock would be reporting a race in the
+// fixture rather than in anything under test. That is the obligation ADR-0004
+// puts on a driver's own open, met by the stand-in for one.
 type stagingCounts struct {
+	mu      sync.Mutex
 	commits int
 	closes  int
+}
+
+// commit and close are the two counters, taken under the lock.
+func (c *stagingCounts) commit() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.commits++
+}
+
+func (c *stagingCounts) close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.closes++
+}
+
+// read hands back both counts at once, so a caller compares two numbers from
+// one moment.
+func (c *stagingCounts) read() (commits, closes int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.commits, c.closes
 }
 
 // stagingPlane is the memory plane whose writer stages and holds a resource,
@@ -420,13 +453,13 @@ func (w stagingSpyWriter) Ensure(ctx context.Context, addr ferry.Container, p fe
 }
 
 func (w stagingSpyWriter) Commit(context.Context) error {
-	w.counts.commits++
+	w.counts.commit()
 
 	return nil
 }
 
 func (w stagingSpyWriter) Close() error {
-	w.counts.closes++
+	w.counts.close()
 
 	return nil
 }

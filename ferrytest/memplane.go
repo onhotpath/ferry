@@ -77,7 +77,8 @@ func (s *memStore) put(addr ferry.Path, v ferry.Value) {
 // that a map lookup miss is the answer (ADR-0004).
 func (s *memStore) get(addr ferry.Path) ferry.Value { return s.entries[addr.String()].val }
 
-// set refuses a second write at one address, loudly, rather than overwriting.
+// set refuses a second write at one address within one dump, loudly, rather
+// than overwriting.
 //
 // ADR-0003's third obligation, and its reason is ADR-0001's rule that nothing
 // is ignored silently. Overwriting is the plausible-looking wrong answer here:
@@ -85,14 +86,24 @@ func (s *memStore) get(addr ferry.Path) ferry.Value { return s.entries[addr.Stri
 // the address model exists to prevent, and a plane that quietly keeps the last
 // writer reports success for a dump that lost a field.
 //
+// Within one dump, and that is the whole of what the obligation says. What was
+// written by a previous open of the same binding is a previous dump, and
+// ADR-0004 makes a binding reusable without limit: one SinkBinding dumps any
+// number of times, with a different value each time. So the set of addresses
+// already written belongs to the open, exactly as a key function's minted set
+// does, and a store that kept it would refuse every reload of a value it had
+// already seen.
+//
 // The refusal wraps [ferry.ErrPlane], which is the class for a driver refusing
 // an address, and names the address with [ferry.ErrorAt] rather than putting it
 // in the message text. ADR-0011 lets an address be named because it is
 // structure; the value stored there is the plane's and is never printed.
-func (s *memStore) set(addr ferry.Path, v ferry.Value) error {
-	if _, ok := s.entries[addr.String()]; ok {
-		return ferry.ErrorAt(addr, fmt.Errorf("%w: address already written", ferry.ErrPlane))
+func (s *memStore) set(written map[string]bool, addr ferry.Path, v ferry.Value) error {
+	if written[addr.String()] {
+		return ferry.ErrorAt(addr, fmt.Errorf("%w: address already written by this dump", ferry.ErrPlane))
 	}
+
+	written[addr.String()] = true
 
 	s.put(addr, v)
 
@@ -258,10 +269,18 @@ func (r memReader) Children(_ context.Context, addr ferry.CompositeAddr) ([]ferr
 type memSink struct{ store *memStore }
 
 // Bind keeps nothing, for the reason [memSource.Bind] gives.
+//
+// The open mints the writer's own record of what it has written, which is where
+// the duplicate-write refusal lives. Building it here instead, once per
+// binding, is the retention ADR-0012 rules out on the key function, arrived at
+// by a different route: the second dump through one binding would be refused at
+// every address the first one wrote.
 func (s memSink) Bind(_ *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 	store := s.store
 
-	return func(context.Context) (ferry.Writer, error) { return memWriter{store: store}, nil }, nil
+	return func(context.Context) (ferry.Writer, error) {
+		return memWriter{store: store, written: map[string]bool{}}, nil
+	}, nil
 }
 
 // memWriter is an open write side.
@@ -270,11 +289,19 @@ func (s memSink) Bind(_ *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 // ADR-0004's own table: a recorder in ferrytest stages nothing and holds
 // nothing, so a Commit would be a lie and a Close would be the `return nil`
 // boilerplate that is indistinguishable from a rollback somebody forgot.
-type memWriter struct{ store *memStore }
+type memWriter struct {
+	store *memStore
 
-// Set writes, or refuses a second write at one address.
+	// written is what this open has written, which is what the duplicate-write
+	// refusal is about. It is per open rather than per store, because two dumps
+	// through one binding are two writes at different times and ADR-0004 does
+	// not require those to be mutually injective.
+	written map[string]bool
+}
+
+// Set writes, or refuses a second write at one address within this dump.
 func (w memWriter) Set(_ context.Context, addr ferry.LeafAddr, v ferry.Value) error {
-	return w.store.set(addr.Path(), v)
+	return w.store.set(w.written, addr.Path(), v)
 }
 
 // Ensure records what a container's own address was told, so that a nil
