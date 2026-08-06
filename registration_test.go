@@ -2,6 +2,8 @@ package ferry
 
 import (
 	"errors"
+	"maps"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -166,6 +168,141 @@ func TestAChainClaimedTypeMayNotKeyAMapWhateverItsKindIs(t *testing.T) {
 	if err := Compile[conf](WithRegistry(reg)); err != nil {
 		t.Fatalf("the registration the refusal names still refused: %+v", err)
 	}
+}
+
+// version is a type carried as a number that also keys a map, which is the pair
+// of positions [NumberKey] exists to cover with one registration.
+type version int
+
+func versionText(v version) (string, error) { return strconv.Itoa(int(v)), nil }
+
+func parseVersion(text string) (version, error) {
+	n, err := strconv.Atoi(text)
+
+	return version(n), err
+}
+
+// TestANumberKeyAddressesAMapAndCarriesAsANumber drives one registration at both
+// positions it covers.
+//
+// At the leaf the type crosses the boundary as a Number, which is the kind the
+// constructor names. At the key position it never crosses as a value at all: the
+// encode half's text is the address segment, and the decode half is handed that
+// segment back with no kind attached, which is the one path a registered codec's
+// text half is reached through.
+func TestANumberKeyAddressesAMapAndCarriesAsANumber(t *testing.T) {
+	t.Parallel()
+
+	type conf struct {
+		Pinned map[version]string `ferry:"pinned"`
+		Latest version            `ferry:"latest"`
+	}
+
+	reg := registryWith(t, NumberKey(versionText, parseVersion).AsMapKey())
+	in := conf{Pinned: map[version]string{3: "old", 11: "new"}, Latest: 7}
+
+	p := newPlane(map[Path]Value{})
+	if err := Dump(t.Context(), in, planeSink{p: p}, WithRegistry(reg)); err != nil {
+		t.Fatalf("dump: %+v", err)
+	}
+
+	if got := p.values[At("latest")]; got != Number("7") {
+		t.Errorf("the leaf dumped as %#v, want %#v: the kind is the one the constructor names", got, Number("7"))
+	}
+
+	if got := p.values[At("pinned").At("3")]; got != String("old") {
+		t.Errorf("the entry under key 3 landed at no address the codec's text names: %v", p.values)
+	}
+
+	// The map is read back from a plane that can list what it holds, because a
+	// map's addresses come from enumeration and there is nothing else to hand
+	// the codec's decode half a segment.
+	src := &listing{
+		values:   p.values,
+		children: map[Path][]Path{At("pinned"): {At("pinned").At("3"), At("pinned").At("11")}},
+	}
+
+	back, err := Load[conf](t.Context(), src, WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if !maps.Equal(back.Pinned, in.Pinned) || back.Latest != in.Latest {
+		t.Errorf("loaded back %v and %d, want %v and %d", back.Pinned, back.Latest, in.Pinned, in.Latest)
+	}
+}
+
+// TestANullPolicyThatRefusesTheNullIsReportedAtTheAddress is the load policy's
+// failure arm.
+//
+// The policy's load half is the registrant's own function and it is the only
+// thing that runs for a Null, so a refusal from it is the whole of what the
+// address can report. The policy is null-ish nowhere near the zero value, which
+// is what lets the registration pass its own totality check and leaves the
+// refusal for the walk to find.
+func TestANullPolicyThatRefusesTheNullIsReportedAtTheAddress(t *testing.T) {
+	t.Parallel()
+
+	type conf struct {
+		N plainCount `ferry:"n"`
+	}
+
+	reg := registryWith(t, NullValue(
+		NumberValue(countText, parseCount),
+		func() (plainCount, error) { return 0, errNotAnInteger },
+		func(c plainCount) bool { return c == -1 }))
+
+	_, err := Load[conf](t.Context(), planeSource{
+		p: newPlane(map[Path]Value{At("n"): Null}),
+	}, WithRegistry(reg))
+
+	if !errors.Is(err, ErrValue) {
+		t.Fatalf("the load reported %v, want the load policy's own refusal", err)
+	}
+}
+
+// TestANullPolicyThatPanicsIsFencedLikeAnyOtherCodec is the dump policy's
+// failure arm, and it is the fence's rule applied to a half a caller writes
+// without thinking of it as a codec: isNull is called on every value dumped, so
+// a panic in it is a panic in user code and costs one address rather than the
+// process.
+func TestANullPolicyThatPanicsIsFencedLikeAnyOtherCodec(t *testing.T) {
+	t.Parallel()
+
+	type conf struct {
+		N plainCount `ferry:"n"`
+	}
+
+	reg := registryWith(t, NullValue(
+		NumberValue(countText, parseCount),
+		func() (plainCount, error) { return -1, nil },
+		func(c plainCount) bool {
+			if c == 9 {
+				panic("nil map read in the null policy")
+			}
+
+			return c == -1
+		}))
+
+	err := Dump(t.Context(), conf{N: 9}, planeSink{p: newPlane(map[Path]Value{})}, WithRegistry(reg))
+	if !errors.Is(err, ErrPanic) {
+		t.Fatalf("the dump reported %v, want a recovered panic", err)
+	}
+}
+
+// TestANullPolicyOverNoRegistrationIsRefused is the modifier's own precondition.
+//
+// It is a modifier over one of the kind-named constructors and has no codec of
+// its own, so there is nothing for a policy handed no inner registration to
+// wrap, and the refusal is at the composition site where the caller wrote it.
+func TestANullPolicyOverNoRegistrationIsRefused(t *testing.T) {
+	t.Parallel()
+
+	mustRefuseAtConstruction(t, func() {
+		NullValue[plainCount](nil,
+			func() (plainCount, error) { return 0, nil },
+			func(c plainCount) bool { return c == 0 })
+	}, "was given no registration to wrap")
 }
 
 // TestANullPolicyOverAKeyRegistrationIsRefused is the one composition that

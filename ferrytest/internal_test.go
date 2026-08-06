@@ -205,6 +205,35 @@ func TestCodecReportsAPanic(t *testing.T) {
 	}
 }
 
+// TestCodecRefusesToRunWithoutTheSeam is the suite's own precondition, asserted
+// from inside because the seam is resolved once at package initialisation and
+// no build a test can produce lacks it.
+//
+// The refusal is the alternative to a degraded run, which is why it is worth an
+// assertion of its own: without the seam the per-registrant half cannot run at
+// all, and case 1 falls back to guessing which arm a registration used - so a
+// suite that carried on would report a disagreement ferry never consults rather
+// than reporting nothing.
+//
+// It is not parallel, because it flips a package variable back.
+func TestCodecRefusesToRunWithoutTheSeam(t *testing.T) {
+	defer func(was bool) { coreWalkOK = was }(coreWalkOK)
+
+	coreWalkOK = false
+
+	c := &lines{}
+
+	Codec(c, ferry.NewRegistry())
+
+	if len(c.got) != 1 {
+		t.Fatalf("a build with no seam reported %q, want exactly one line and no case run", c.got)
+	}
+
+	if !strings.Contains(c.got[0], "no reflect.Value-rooted walk") {
+		t.Errorf("report = %q, want the missing seam named", c.got[0])
+	}
+}
+
 // TestShellWriterCallsTheFrontAndAnswersForTheInner is the property [Driver]'s
 // lifecycle case rests on.
 //
@@ -274,7 +303,15 @@ func (*lines) Helper() {}
 // between a registrant and a defect in the registration wrapper, so the values
 // they carry have to be the values the case is about.
 func TestTheCodecProbesAreTotalInBothDirections(t *testing.T) {
-	reg := probesIn(t, ifaceCodec(), numberCodec(), foldingCodec().AsMapKey())
+	t.Run("the interface probe", theInterfaceProbeIsTotal)
+	t.Run("the number probe", theNumberProbeIsTotal)
+}
+
+// theInterfaceProbeIsTotal drives the probe cases 2 and 3 rest on at the value
+// neither of them hands it. Both drive the nil, so a policy that answered a null
+// for every value would pass them while carrying nothing at all.
+func theInterfaceProbeIsTotal(t *testing.T) {
+	reg := probesIn(t, ifaceCodec())
 
 	back, err := ferry.Load[ifaceHolder](context.Background(),
 		Static(map[ferry.Path]ferry.Value{probeAddrPath: ferry.String("udp")}),
@@ -287,6 +324,134 @@ func TestTheCodecProbesAreTotalInBothDirections(t *testing.T) {
 		t.Errorf("the interface probe decoded to %#v, want a probeUDP: case 3 asserts the nil answer and this "+
 			"is the answer it is distinguished from", back.Value)
 	}
+
+	wrote, err := Record(context.Background(), ifaceHolder{Value: probeUDP{}}, ferry.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("dumping a non-nil interface through the probe codec: %v", err)
+	}
+
+	if got := wrote[probeAddrPath]; got != ferry.String("udp") {
+		t.Errorf("the interface probe encoded a non-nil to %#v, want %#v", got, ferry.String("udp"))
+	}
+}
+
+// theNumberProbeIsTotal drives case 5's probe at the values that case does not:
+// its encode half at both arms, and the empty text its decode half refuses so
+// that what case 5 observes is what core donated rather than what it was handed.
+func theNumberProbeIsTotal(t *testing.T) {
+	reg := probesIn(t, numberCodec())
+
+	for in, want := range map[numeric]ferry.Value{"": ferry.Number("0"), probeNumber: ferry.Number(probeNumber)} {
+		wrote, err := Record(context.Background(), numberHolder{Value: in}, ferry.WithRegistry(reg))
+		if err != nil {
+			t.Fatalf("dumping the number probe at %q: %v", in, err)
+		}
+
+		if got := wrote[probeNumberPath]; got != want {
+			t.Errorf("the number probe encoded %q to %#v, want %#v", in, got, want)
+		}
+	}
+
+	if _, err := ferry.Load[numberHolder](context.Background(),
+		Static(map[ferry.Path]ferry.Value{probeNumberPath: ferry.String("")}),
+		ferry.WithRegistry(reg)); err == nil {
+		t.Error("the number probe accepted an empty text, so case 5 would pass over a codec that takes anything")
+	}
+}
+
+// The codec suite's own failure arms.
+//
+// Each case builds the probe registry it is about, and every one of them asserts
+// core's own machinery, so the only build where an arm below fires is a build
+// where core is broken - which is exactly what they exist for and is not a build
+// a test can produce. What is reachable is the registry an arm reads, so these
+// hand one a registry broken in the way the arm is written to describe. A suite
+// whose diagnosis is wrong is worse than no suite, and nothing else would say so.
+
+// nullPolicy builds a null policy over [nullable] out of its two halves, which
+// is where every way one can be broken lives.
+func nullPolicy(load func() (nullable, error), isNull func(nullable) bool) ferry.Codec {
+	return ferry.NullValue(
+		ferry.StringValue(
+			func(n nullable) (string, error) { return string(n), nil },
+			func(s string) (nullable, error) { return nullable(s), nil }),
+		load, isNull)
+}
+
+// TestCodecReportsANullPolicyThatDoesNotHold is case 7's report, at each of the
+// three ways the policy's law breaks.
+func TestCodecReportsANullPolicyThatDoesNotHold(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		codec ferry.Codec
+		in    nullHolder
+		want  string
+	}{
+		"a value it calls null is written as itself": {
+			codec: nullPolicy(func() (nullable, error) { return "", nil }, func(nullable) bool { return false }),
+			want:  "a null policy writes a null for the values it calls null",
+		},
+		// The null is the non-zero value here, because a policy whose load half
+		// refuses the zero is refused at registration: the totality check
+		// encodes the zero, sees a null and decodes it back through this half.
+		"a null it cannot read back": {
+			codec: nullPolicy(func() (nullable, error) { return "", errProbeGet }, func(n nullable) bool {
+				return n == probeNullable
+			}),
+			in:   nullHolder{Value: probeNullable},
+			want: "loading",
+		},
+		"a null it loads as a value it does not recognise": {
+			codec: nullPolicy(func() (nullable, error) { return probeNullable, nil }, func(n nullable) bool {
+				return n == ""
+			}),
+			want: "makes the round trip lie on the null path alone",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			c := &lines{}
+			run := &codecRun{rep: c}
+
+			run.nullRoundTrips(probesIn(t, tc.codec), tc.in, ferry.Null)
+
+			onlyReport(t, c, tc.want)
+		})
+	}
+}
+
+// onlyReport holds a run to one line, saying what that line has to name.
+func onlyReport(t *testing.T, c *lines, want string) {
+	t.Helper()
+
+	if len(c.got) != 1 {
+		t.Fatalf("the run reported %q, want exactly one line", c.got)
+	}
+
+	if !strings.Contains(c.got[0], want) {
+		t.Errorf("report = %q, want %q in it", c.got[0], want)
+	}
+}
+
+// TestCodecReportsTwoKeysThatWereNotRefused is case 6's second half, and the
+// registry it is handed is the one shape that reaches the arm: a key codec that
+// is injective renders the two probe keys to two addresses, so the write core is
+// asserted to refuse is one it has no reason to.
+func TestCodecReportsTwoKeysThatWereNotRefused(t *testing.T) {
+	t.Parallel()
+
+	c := &lines{}
+	run := &codecRun{rep: c}
+
+	run.keyCollisionRefused(probesIn(t, ferry.StringKey(
+		func(f folding) (string, error) { return string(f), nil },
+		func(s string) (folding, error) { return folding(s), nil }).AsMapKey()))
+
+	onlyReport(t, c, "one entry is lost")
 }
 
 // TestTheFoldingKeysOwnStringIsInjective is the pair [Injective] rests on,

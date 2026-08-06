@@ -623,12 +623,14 @@ func setFrom[T any](v reflect.Value, out T) {
 
 // isNilFunc reports a nil function value, whether it arrived as a nil interface
 // or as a typed nil.
+//
+// Every caller reaches it from a generic parameter, so what it is handed is
+// always a typed nil and the nil-interface arm is the defensive one. It is one
+// expression rather than an early return because the defensive arm has no
+// behaviour to reach it through, and a branch nothing can take is a branch
+// nothing can prove.
 func isNilFunc(f any) bool {
-	if f == nil {
-		return true
-	}
-
 	v := reflect.ValueOf(f)
 
-	return v.Kind() == reflect.Func && v.IsNil()
+	return !v.IsValid() || (v.Kind() == reflect.Func && v.IsNil())
 }
