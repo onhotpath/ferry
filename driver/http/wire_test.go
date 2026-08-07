@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -184,6 +185,53 @@ func TestOnePositionSpelledTwiceIsRefused(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "position 0") {
 		t.Errorf("the refusal does not name the position both spellings claim: %v", err)
+	}
+}
+
+// TestANameAtASectionsOwnAddressIsRefused is the container-side mirror of
+// [TestARepeatedNameIsNeverReadAsOneValue], and it is the request and the
+// destination disagreeing about what an address is.
+//
+// A section's members are the names under it, so nothing at the section's own
+// name could hold the value: reading it as absence would build the section out
+// of the Go zero and drop what the request actually sent, which is the silent
+// wrong answer. The count is what the refusal carries, because it is structure
+// rather than text the request supplied.
+//
+// A composite is the other way round - its members come from the value, so a
+// repetition of its own name is the sequence it carries and is read rather than
+// refused, which is the row this test pins beside the refusal.
+func TestANameAtASectionsOwnAddressIsRefused(t *testing.T) {
+	t.Parallel()
+
+	type conf struct {
+		Opt  *nested  `ferry:"opt"`
+		Tags []string `ferry:"tags"`
+	}
+
+	for query, want := range map[string]int{"opt=x": 1, "opt=x&opt=y": 2} {
+		err := loadErr[conf](t, query)
+
+		assertWraps(t, err, ferry.ErrValue, ferry.ErrDriver)
+
+		if got := addressOf(err); got != ferry.At("opt") {
+			t.Errorf("loading %q refused at %v, want /opt: %v", query, got, err)
+		}
+
+		if !strings.Contains(err.Error(), fmt.Sprintf("%d times", want)) {
+			t.Errorf("loading %q does not say the name occurs %d times: %v", query, want, err)
+		}
+	}
+
+	// The same shape at a composite is the sequence it carries, so the refusal
+	// is scoped to the container whose members come from the type.
+	got, err := ferry.Load[conf](queryCtx(t, "tags=a&tags=b"), NewQuerySource())
+	if err != nil {
+		t.Fatalf("loading a repeated name at a composite: %v", err)
+	}
+
+	if !slices.Equal(got.Tags, []string{"a", "b"}) {
+		t.Errorf("loaded %v, want the two occurrences as two elements", got.Tags)
 	}
 }
 

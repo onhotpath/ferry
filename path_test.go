@@ -521,6 +521,29 @@ func TestEmptyAddressSet(t *testing.T) {
 	}
 }
 
+// TestANilAddressSetAnswersAsAnEmptyOne is the guard every accessor carries,
+// asserted at all three rather than at the two a walk happens to reach.
+//
+// A driver holds the set core handed it and asks it questions later, so the
+// nil a driver kept from a Bind it never completed answers rather than panics.
+func TestANilAddressSetAnswersAsAnEmptyOne(t *testing.T) {
+	t.Parallel()
+
+	var set *AddressSet
+
+	if got := set.Len(); got != 0 {
+		t.Errorf("Len() = %d on a nil set, want 0", got)
+	}
+
+	if set.Has(leafAt(At("a"))) {
+		t.Error("Has(leaf /a) = true on a nil set")
+	}
+
+	if got := slices.Collect(set.Seq()); len(got) != 0 {
+		t.Errorf("Seq() yielded %v on a nil set", got)
+	}
+}
+
 // kinded renders a set as its members' kinds and addresses, because two members
 // at one path render alike and are not one address.
 func kinded(a *AddressSet) []string {

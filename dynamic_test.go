@@ -682,6 +682,61 @@ func TestANullAtTheContainerAddressNeedsNoEnumerator(t *testing.T) {
 	}
 }
 
+// unprobed is a source whose reader has the one required method and neither
+// optional one, which is the plane [ferry.Prober]'s optionality is written for:
+// a backend that cannot list often cannot say whether a container is there
+// either, and both questions have to stay askable of it.
+type unprobed struct{ values map[Path]Value }
+
+func (u unprobed) Bind(*AddressSet) (OpenFunc, error) {
+	return func(context.Context) (Reader, error) { return u, nil }, nil
+}
+
+func (u unprobed) Get(_ context.Context, addr LeafAddr) (Value, error) {
+	return u.values[addr.Path()], nil
+}
+
+// TestASourceThatCannotProbeReadsASectionOffWhatIsBeneathIt is the section-side
+// twin of [TestLoadingADynamicCompositeNeedsASourceThatCanList], and it is the
+// opposite answer: a source that cannot list a dynamic container is refused,
+// because nothing else can supply the members, while a source that cannot probe
+// a section is not, because what lies beneath the section is a complete answer
+// on its own.
+//
+// So a plane with neither optional interface loads an optional section exactly
+// where it holds a leaf under it, and leaves the pointer nil where it holds
+// none (ADR-0016).
+func TestASourceThatCannotProbeReadsASectionOffWhatIsBeneathIt(t *testing.T) {
+	t.Parallel()
+
+	type conf struct {
+		Opt *cred `ferry:"opt"`
+	}
+
+	if _, ok := any(Reader(unprobed{})).(Prober); ok {
+		t.Fatal("the plane probes, so this test asserts nothing about a source that cannot")
+	}
+
+	got, err := Load[conf](t.Context(), unprobed{values: map[Path]Value{At("opt", "user"): String("ada")}})
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if got.Opt == nil || got.Opt.User != "ada" {
+		t.Errorf("loaded %+v, want the section materialised out of the leaf beneath it", got.Opt)
+	}
+
+	empty, err := Load[conf](t.Context(), unprobed{values: map[Path]Value{}})
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if empty.Opt != nil {
+		t.Errorf("loaded %+v, want nil: a plane that cannot probe says nothing about the section itself",
+			empty.Opt)
+	}
+}
+
 // counting is a plane that can list and that records how often each side of the
 // boundary was called, which is the only way to price the order the walk asks a
 // dynamic container in.
