@@ -7,7 +7,7 @@ Nothing here is estimated, extrapolated or carried over from another run.
 A cell reading `not measured` is a measurement that was not taken, and the reason is
 in [what was not measured](#what-was-not-measured).
 
-Generated 2026-08-04T21:54:32Z.
+Generated 2026-08-07T23:28:37Z.
 
 ## The machine, the toolchain and the versions
 
@@ -17,8 +17,8 @@ Generated 2026-08-04T21:54:32Z.
 | GOOS / GOARCH | linux / amd64 |
 | CPUs | AMD EPYC 7763 64-Core Processor (GOMAXPROCS 4) |
 | Go toolchain | go1.27rc2 |
-| ferry revision | 27974adcbb22a1064a643e8817a6a448778d87f0 |
-| harness revision | 2aba5671486c4e3ed93d0dfd5e1bc128276dcd7d |
+| ferry revision | a5c3b4bd047cae5d5640ad063ed91f309a4beb80 |
+| harness revision | d94cfca6cd2c7e2187996f42a12cdb3156b8f37a |
 | -count | 10 |
 | -benchtime | 1s |
 
@@ -108,14 +108,14 @@ five flat fields out of the process environment, where a mapping layer has the l
 
 | library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
 | --- | --- | --- | --- | --- | --- |
-| ferry | 8.71µs ±3% | 3.08µs ±1% | 17.38x | 2.62 KiB | 38 |
-| ferry-bound | 8.63µs ±1% | 1.35µs ±0% | 7.62x | 1.23 KiB | 18 |
-| koanf | 15.3µs ±1% | 15.2µs ±1% | 86.04x | 8.41 KiB | 171 |
-| viper | 9.61µs ±0% | 8.04µs ±1% | 45.40x | 3.61 KiB | 67 |
-| xload | 1.98µs ±0% | 1.95µs ±1% | 11.01x | 936 B | 17 |
-| go-envconfig | 767ns ±0% | 736ns ±0% | 4.15x | 0 B | 0 |
-| kelseyhightower | 3.33µs ±1% | 3.33µs ±1% | 18.78x | 1.21 KiB | 56 |
-| stdlib (baseline) | 178ns ±0% | 177ns ±0% | 1.00x, by definition | 0 B | 0 |
+| ferry | 9.90µs ±0% | 4.23µs ±1% | 24.15x | 3.54 KiB | 57 |
+| ferry-bound | 9.87µs ±1% | 1.58µs ±1% | 9.05x | 928 B | 12 |
+| koanf | 14.0µs ±1% | 14.0µs ±1% | 79.94x | 8.41 KiB | 171 |
+| viper | 8.92µs ±0% | 7.52µs ±0% | 42.96x | 3.61 KiB | 67 |
+| xload | 1.89µs ±0% | 1.88µs ±0% | 10.73x | 936 B | 17 |
+| go-envconfig | 786ns ±0% | 770ns ±1% | 4.40x | 0 B | 0 |
+| kelseyhightower | 3.22µs ±1% | 3.19µs ±1% | 18.24x | 1.21 KiB | 56 |
+| stdlib (baseline) | 175ns ±0% | 175ns ±1% | 1.00x, by definition | 0 B | 0 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Compiles a schema per type and caches it on the Registry, which is what the cold/warm gap is. Reads only the addresses the schema names, so the size of the environ costs it nothing. Reads TAGS_0.. and LIMITS_* rather than one delimited variable.
 - **ferry-bound** (`github.com/onhotpath/ferry`) The same job through a caller-held binding. ferry.Bind hands the source the addresses the type names once, when the binding is built, and every load through the binding skips that; ferry.Load does it again on every call. Nothing else differs - the same tag key, the same Registry, the same walk, the same value out - so the distance between this row and ferry's is what holding the binding is worth and nothing else. Building the binding is constructor work, so it lands in the cold column, and this row's cold figure is therefore the same job ferry's cold figure measures.
@@ -132,14 +132,14 @@ fifty-one leaves over three levels, including a slice and a map, out of the proc
 
 | library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
 | --- | --- | --- | --- | --- | --- |
-| ferry | 131µs ±1% | 36.8µs ±1% | 14.74x | 23.7 KiB | 220 |
-| ferry-bound | 128µs ±1% | 20.6µs ±1% | 8.26x | 14.8 KiB | 148 |
-| koanf | 188µs ±1% | 187µs ±1% | 74.74x | 94.5 KiB | 1873 |
-| viper | 116µs ±1% | 102µs ±1% | 40.98x | 47.8 KiB | 920 |
-| xload | 30.5µs ±1% | 30.5µs ±1% | 12.19x | 12.9 KiB | 251 |
-| go-envconfig | 12.8µs ±0% | 12.7µs ±1% | 5.09x | 1.36 KiB | 27 |
-| kelseyhightower | 60.5µs ±1% | 59.9µs ±1% | 23.98x | 31.2 KiB | 909 |
-| stdlib (baseline) | 2.50µs ±0% | 2.50µs ±1% | 1.00x, by definition | 1008 B | 5 |
+| ferry | 205µs ±1% | 63.8µs ±3% | 23.85x | 52.7 KiB | 288 |
+| ferry-bound | 205µs ±1% | 21.9µs ±0% | 8.17x | 10.4 KiB | 78 |
+| koanf | 173µs ±1% | 174µs ±0% | 64.90x | 94.5 KiB | 1873 |
+| viper | 108µs ±1% | 96.5µs ±0% | 36.07x | 47.8 KiB | 920 |
+| xload | 29.1µs ±0% | 29.1µs ±0% | 10.89x | 12.9 KiB | 251 |
+| go-envconfig | 12.7µs ±0% | 12.6µs ±0% | 4.73x | 1.36 KiB | 27 |
+| kelseyhightower | 56.5µs ±0% | 56.6µs ±1% | 21.15x | 31.2 KiB | 909 |
+| stdlib (baseline) | 2.68µs ±0% | 2.68µs ±0% | 1.00x, by definition | 1008 B | 5 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Compiles a schema per type and caches it on the Registry, which is what the cold/warm gap is. Reads only the addresses the schema names, so the size of the environ costs it nothing. Reads TAGS_0.. and LIMITS_* rather than one delimited variable.
 - **ferry-bound** (`github.com/onhotpath/ferry`) The same job through a caller-held binding. ferry.Bind hands the source the addresses the type names once, when the binding is built, and every load through the binding skips that; ferry.Load does it again on every call. Nothing else differs - the same tag key, the same Registry, the same walk, the same value out - so the distance between this row and ferry's is what holding the binding is worth and nothing else. Building the binding is constructor work, so it lands in the cold column, and this row's cold figure is therefore the same job ferry's cold figure measures.
@@ -156,12 +156,12 @@ the same five fields, read from a YAML file on disk on every iteration.
 
 | library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
 | --- | --- | --- | --- | --- | --- |
-| ferry | 32.2µs ±1% | 24.3µs ±1% | 1.06x | 10.8 KiB | 105 |
-| ferry-bound | 32.2µs ±3% | 23.7µs ±1% | 1.03x | 10.7 KiB | 100 |
-| koanf | 42.3µs ±1% | 42.1µs ±0% | 1.83x | 17.4 KiB | 249 |
-| viper | 37.5µs ±1% | 37.0µs ±1% | 1.60x | 15.5 KiB | 171 |
-| xload | 27.3µs ±1% | 2.21µs ±1% † | 0.10x † | 1000 B | 23 |
-| stdlib (baseline) | 23.7µs ±1% | 23.0µs ±2% | 1.00x, by definition | 9.82 KiB | 98 |
+| ferry | 31.8µs ±0% | 23.6µs ±0% | 1.09x | 10.8 KiB | 109 |
+| ferry-bound | 31.8µs ±1% | 22.7µs ±0% | 1.04x | 10.5 KiB | 100 |
+| koanf | 39.0µs ±1% | 38.9µs ±0% | 1.79x | 17.4 KiB | 249 |
+| viper | 34.8µs ±0% | 34.0µs ±0% | 1.57x | 15.5 KiB | 171 |
+| xload | 25.3µs ±0% | 2.13µs ±0% † | 0.10x † | 1000 B | 23 |
+| stdlib (baseline) | 21.7µs ±1% | 21.7µs ±0% | 1.00x, by definition | 9.82 KiB | 98 |
 
 † **xload's warm figure is not comparable with the rest of this table.** xload's YAML provider reads and parses the file once, when the loader is constructed, and every later load is a map lookup against that snapshot. So this warm figure excludes the file read and the YAML parse that ferry, koanf, viper and the stdlib baseline all pay on every single load. The cold column is where these rows are comparable; the warm one measures a different job.
 
@@ -178,11 +178,11 @@ the same fifty-one leaves, read from a YAML file on disk on every iteration.
 
 | library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
 | --- | --- | --- | --- | --- | --- |
-| ferry | 231µs ±1% | 131µs ±1% | 1.02x | 46.1 KiB | 746 |
-| ferry-bound | 229µs ±1% | 129µs ±1% | 1.01x | 45.9 KiB | 741 |
-| koanf | 311µs ±1% | 310µs ±1% | 2.43x | 122 KiB | 2423 |
-| viper | 259µs ±1% | 259µs ±1% | 2.03x | 95.8 KiB | 1692 |
-| stdlib (baseline) | 127µs ±1% | 128µs ±1% | 1.00x, by definition | 39.7 KiB | 750 |
+| ferry | 289µs ±0% | 136µs ±0% | 1.13x | 46.3 KiB | 733 |
+| ferry-bound | 288µs ±0% | 128µs ±0% | 1.06x | 41.7 KiB | 691 |
+| koanf | 291µs ±0% | 290µs ±0% | 2.40x | 122 KiB | 2423 |
+| viper | 244µs ±0% | 244µs ±0% | 2.02x | 95.8 KiB | 1692 |
+| stdlib (baseline) | 120µs ±1% | 121µs ±1% | 1.00x, by definition | 39.7 KiB | 750 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Same compile and cache. The YAML source parses the document into a node tree and reads addresses out of it, rather than unmarshalling into the struct.
 - **ferry-bound** (`github.com/onhotpath/ferry`) The same job through a caller-held binding. ferry.Bind hands the source the addresses the type names once, when the binding is built, and every load through the binding skips that; ferry.Load does it again on every call. Nothing else differs - the same tag key, the same Registry, the same walk, the same value out - so the distance between this row and ferry's is what holding the binding is worth and nothing else. Building the binding is constructor work, so it lands in the cold column, and this row's cold figure is therefore the same job ferry's cold figure measures.
@@ -196,11 +196,11 @@ the other direction: the same fifty-one leaves written back out to a YAML file, 
 
 | library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
 | --- | --- | --- | --- | --- | --- |
-| ferry | 785µs ±5% | 552µs ±3% | 1.70x | 178 KiB | 1912 |
-| ferry-bound | 768µs ±2% | 554µs ±3% | 1.71x | 178 KiB | 1906 |
-| koanf | 574µs ±3% | 486µs ±1% | 1.50x | 193 KiB | 2358 |
-| viper | 940µs ±2% | 814µs ±2% | 2.51x | 165 KiB | 1697 |
-| stdlib (baseline) | 408µs ±2% | 325µs ±2% | 1.00x, by definition | 123 KiB | 1093 |
+| ferry | 795µs ±1% | 535µs ±2% | 1.79x | 177 KiB | 1975 |
+| ferry-bound | 786µs ±1% | 533µs ±3% | 1.78x | 177 KiB | 1963 |
+| koanf | 531µs ±1% | 455µs ±1% | 1.52x | 193 KiB | 2358 |
+| viper | 924µs ±3% | 792µs ±2% | 2.65x | 165 KiB | 1697 |
+| stdlib (baseline) | 386µs ±2% | 299µs ±2% | 1.00x, by definition | 123 KiB | 1093 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Edits the existing document in place: it reads and parses the file, writes only the keys the struct maps, and leaves comments, key order, quoting and unmapped keys intact. The replacement is atomic: a temporary file beside the plane is renamed over it, so nothing ever reads a half-written config and a save that fails leaves the file byte for byte as it was. It is not flushed to the disk unless the caller asks for that, and this row measures the default, so what is timed here offers the same durability koanf and the baseline do. viper is the one column that fsyncs: its WriteConfigAs ends in f.Sync(), which is why it sits an order of magnitude above the other three. ferry's durable mode is yaml.Durable(), and it is opt-in because the journal commit it costs dwarfs everything else in the save. It is not what this row measures.
 - **ferry-bound** (`github.com/onhotpath/ferry`) The dump direction's half of the same thing: ferry.BindSink hands the sink the addresses the type names once and every dump through the binding skips that. It writes its own seeded file, as every dump row does, and it is read back by the same third-party reader as the rest of the table.
@@ -226,11 +226,11 @@ and out of "where ferry loses" below. What it did differently is in its scenario
 
 | scenario | variant | warm | `ferry` warm | the variant is | allocs/op | `ferry` allocs/op |
 | --- | --- | --- | --- | --- | --- | --- |
-| `env_small` | ferry-bound | 1.35µs ±0% | 3.08µs ±1% | 2.28x faster | 18 | 38 |
-| `env_large` | ferry-bound | 20.6µs ±1% | 36.8µs ±1% | 1.78x faster | 148 | 220 |
-| `yaml_small` | ferry-bound | 23.7µs ±1% | 24.3µs ±1% | 1.02x faster | 100 | 105 |
-| `yaml_large` | ferry-bound | 129µs ±1% | 131µs ±1% | 1.01x faster | 741 | 746 |
-| `dump_large` | ferry-bound | 554µs ±3% | 552µs ±3% | 1.00x slower | 1906 | 1912 |
+| `env_small` | ferry-bound | 1.58µs ±1% | 4.23µs ±1% | 2.67x faster | 12 | 57 |
+| `env_large` | ferry-bound | 21.9µs ±0% | 63.8µs ±3% | 2.92x faster | 78 | 288 |
+| `yaml_small` | ferry-bound | 22.7µs ±0% | 23.6µs ±0% | 1.04x faster | 100 | 109 |
+| `yaml_large` | ferry-bound | 128µs ±0% | 136µs ±0% | 1.06x faster | 691 | 733 |
+| `dump_large` | ferry-bound | 533µs ±3% | 535µs ±2% | 1.00x faster | 1963 | 1975 |
 
 ## benchstat's geometric mean
 
@@ -240,7 +240,7 @@ any row is zero - is absent rather than zero.
 
 | unit | geomean |
 | --- | --- |
-| sec/op | 29.9µs |
+| sec/op | 30.1µs |
 | B/op | benchstat computed none |
 | allocs/op | benchstat computed none |
 
@@ -254,17 +254,19 @@ nothing in the comparison beats it is a reason to label the row, not to drop it.
 
 | scenario | library | warm | ferry warm | ferry is |
 | --- | --- | --- | --- | --- |
-| `env_small` | xload | 1.95µs | 3.08µs | 1.58x slower |
-| `env_small` | go-envconfig | 736ns | 3.08µs | 4.18x slower |
-| `env_small` | stdlib (baseline) | 177ns | 3.08µs | 17.38x slower |
-| `env_large` | xload | 30.5µs | 36.8µs | 1.21x slower |
-| `env_large` | go-envconfig | 12.7µs | 36.8µs | 2.89x slower |
-| `env_large` | stdlib (baseline) | 2.50µs | 36.8µs | 14.74x slower |
-| `yaml_small` | xload | 2.21µs | 24.3µs | 10.99x slower |
-| `yaml_small` | stdlib (baseline) | 23.0µs | 24.3µs | 1.06x slower |
-| `yaml_large` | stdlib (baseline) | 128µs | 131µs | 1.02x slower |
-| `dump_large` | koanf | 486µs | 552µs | 1.14x slower |
-| `dump_large` | stdlib (baseline) | 325µs | 552µs | 1.70x slower |
+| `env_small` | xload | 1.88µs | 4.23µs | 2.25x slower |
+| `env_small` | go-envconfig | 770ns | 4.23µs | 5.49x slower |
+| `env_small` | kelseyhightower | 3.19µs | 4.23µs | 1.32x slower |
+| `env_small` | stdlib (baseline) | 175ns | 4.23µs | 24.15x slower |
+| `env_large` | xload | 29.1µs | 63.8µs | 2.19x slower |
+| `env_large` | go-envconfig | 12.6µs | 63.8µs | 5.05x slower |
+| `env_large` | kelseyhightower | 56.6µs | 63.8µs | 1.13x slower |
+| `env_large` | stdlib (baseline) | 2.68µs | 63.8µs | 23.85x slower |
+| `yaml_small` | xload | 2.13µs | 23.6µs | 11.08x slower |
+| `yaml_small` | stdlib (baseline) | 21.7µs | 23.6µs | 1.09x slower |
+| `yaml_large` | stdlib (baseline) | 121µs | 136µs | 1.13x slower |
+| `dump_large` | koanf | 455µs | 535µs | 1.18x slower |
+| `dump_large` | stdlib (baseline) | 299µs | 535µs | 1.79x slower |
 
 ## What was not measured
 
@@ -289,8 +291,8 @@ lookups on one field:
 
 | tag | sec/op |
 | --- | --- |
-| pooled | 67.6ns ±2% |
-| per_library | 192ns ±8% |
+| pooled | 67.5ns ±0% |
+| per_library | 189ns ±5% |
 
 ## Raw benchstat output
 
@@ -301,80 +303,80 @@ pkg: github.com/onhotpath/ferry/bench
 cpu: AMD EPYC 7763 64-Core Processor                
                                       │ /home/runner/work/ferry/ferry/perf-out/bench.txt │
                                       │                      sec/op                      │
-Load/env_small/cold/ferry-4                                                  8.711µ ± 3%
-Load/env_small/warm/ferry-4                                                  3.078µ ± 1%
-Load/env_small/cold/ferry-bound-4                                            8.635µ ± 1%
-Load/env_small/warm/ferry-bound-4                                            1.349µ ± 0%
-Load/env_small/cold/koanf-4                                                  15.28µ ± 1%
-Load/env_small/warm/koanf-4                                                  15.24µ ± 1%
-Load/env_small/cold/viper-4                                                  9.615µ ± 0%
-Load/env_small/warm/viper-4                                                  8.042µ ± 1%
-Load/env_small/cold/xload-4                                                  1.978µ ± 0%
-Load/env_small/warm/xload-4                                                  1.951µ ± 1%
-Load/env_small/cold/go-envconfig-4                                           766.8n ± 0%
-Load/env_small/warm/go-envconfig-4                                           736.0n ± 0%
-Load/env_small/cold/kelseyhightower-4                                        3.330µ ± 1%
-Load/env_small/warm/kelseyhightower-4                                        3.328µ ± 1%
-Load/env_small/cold/stdlib-4                                                 177.9n ± 0%
-Load/env_small/warm/stdlib-4                                                 177.2n ± 0%
-Load/env_large/cold/ferry-4                                                  130.6µ ± 1%
-Load/env_large/warm/ferry-4                                                  36.81µ ± 1%
-Load/env_large/cold/ferry-bound-4                                            128.4µ ± 1%
-Load/env_large/warm/ferry-bound-4                                            20.62µ ± 1%
-Load/env_large/cold/koanf-4                                                  187.8µ ± 1%
-Load/env_large/warm/koanf-4                                                  186.7µ ± 1%
-Load/env_large/cold/viper-4                                                  115.5µ ± 1%
-Load/env_large/warm/viper-4                                                  102.4µ ± 1%
-Load/env_large/cold/xload-4                                                  30.55µ ± 1%
-Load/env_large/warm/xload-4                                                  30.46µ ± 1%
-Load/env_large/cold/go-envconfig-4                                           12.80µ ± 0%
-Load/env_large/warm/go-envconfig-4                                           12.72µ ± 1%
-Load/env_large/cold/kelseyhightower-4                                        60.46µ ± 1%
-Load/env_large/warm/kelseyhightower-4                                        59.90µ ± 1%
-Load/env_large/cold/stdlib-4                                                 2.499µ ± 0%
-Load/env_large/warm/stdlib-4                                                 2.498µ ± 1%
-Load/yaml_small/cold/ferry-4                                                 32.20µ ± 1%
-Load/yaml_small/warm/ferry-4                                                 24.33µ ± 1%
-Load/yaml_small/cold/ferry-bound-4                                           32.21µ ± 3%
-Load/yaml_small/warm/ferry-bound-4                                           23.74µ ± 1%
-Load/yaml_small/cold/koanf-4                                                 42.28µ ± 1%
-Load/yaml_small/warm/koanf-4                                                 42.09µ ± 0%
-Load/yaml_small/cold/viper-4                                                 37.46µ ± 1%
-Load/yaml_small/warm/viper-4                                                 36.96µ ± 1%
-Load/yaml_small/cold/xload-4                                                 27.30µ ± 1%
-Load/yaml_small/warm/xload-4                                                 2.213µ ± 1%
-Load/yaml_small/cold/stdlib-4                                                23.68µ ± 1%
-Load/yaml_small/warm/stdlib-4                                                23.04µ ± 2%
-Load/yaml_large/cold/ferry-4                                                 231.3µ ± 1%
-Load/yaml_large/warm/ferry-4                                                 130.6µ ± 1%
-Load/yaml_large/cold/ferry-bound-4                                           228.9µ ± 1%
-Load/yaml_large/warm/ferry-bound-4                                           129.5µ ± 1%
-Load/yaml_large/cold/koanf-4                                                 311.5µ ± 1%
-Load/yaml_large/warm/koanf-4                                                 310.2µ ± 1%
-Load/yaml_large/cold/viper-4                                                 258.7µ ± 1%
-Load/yaml_large/warm/viper-4                                                 258.8µ ± 1%
-Load/yaml_large/cold/stdlib-4                                                127.3µ ± 1%
-Load/yaml_large/warm/stdlib-4                                                127.7µ ± 1%
-Load/dump_large/cold/ferry-4                                                 784.7µ ± 5%
-Load/dump_large/warm/ferry-4                                                 551.6µ ± 3%
-Load/dump_large/cold/ferry-bound-4                                           767.9µ ± 2%
-Load/dump_large/warm/ferry-bound-4                                           553.9µ ± 3%
-Load/dump_large/cold/koanf-4                                                 574.3µ ± 3%
-Load/dump_large/warm/koanf-4                                                 485.6µ ± 1%
-Load/dump_large/cold/viper-4                                                 940.3µ ± 2%
-Load/dump_large/warm/viper-4                                                 813.7µ ± 2%
-Load/dump_large/cold/stdlib-4                                                408.0µ ± 2%
-Load/dump_large/warm/stdlib-4                                                324.5µ ± 2%
-StructTagCost/pooled-4                                                       67.61n ± 2%
-StructTagCost/per_library-4                                                  192.1n ± 8%
-geomean                                                                      29.88µ
+Load/env_small/cold/ferry-4                                                  9.901µ ± 0%
+Load/env_small/warm/ferry-4                                                  4.226µ ± 1%
+Load/env_small/cold/ferry-bound-4                                            9.873µ ± 1%
+Load/env_small/warm/ferry-bound-4                                            1.584µ ± 1%
+Load/env_small/cold/koanf-4                                                  14.03µ ± 1%
+Load/env_small/warm/koanf-4                                                  13.99µ ± 1%
+Load/env_small/cold/viper-4                                                  8.922µ ± 0%
+Load/env_small/warm/viper-4                                                  7.518µ ± 0%
+Load/env_small/cold/xload-4                                                  1.888µ ± 0%
+Load/env_small/warm/xload-4                                                  1.877µ ± 0%
+Load/env_small/cold/go-envconfig-4                                           786.2n ± 0%
+Load/env_small/warm/go-envconfig-4                                           770.1n ± 1%
+Load/env_small/cold/kelseyhightower-4                                        3.218µ ± 1%
+Load/env_small/warm/kelseyhightower-4                                        3.193µ ± 1%
+Load/env_small/cold/stdlib-4                                                 174.7n ± 0%
+Load/env_small/warm/stdlib-4                                                 175.0n ± 1%
+Load/env_large/cold/ferry-4                                                  205.4µ ± 1%
+Load/env_large/warm/ferry-4                                                  63.82µ ± 3%
+Load/env_large/cold/ferry-bound-4                                            204.6µ ± 1%
+Load/env_large/warm/ferry-bound-4                                            21.87µ ± 0%
+Load/env_large/cold/koanf-4                                                  173.2µ ± 1%
+Load/env_large/warm/koanf-4                                                  173.7µ ± 0%
+Load/env_large/cold/viper-4                                                  108.4µ ± 1%
+Load/env_large/warm/viper-4                                                  96.54µ ± 0%
+Load/env_large/cold/xload-4                                                  29.14µ ± 0%
+Load/env_large/warm/xload-4                                                  29.15µ ± 0%
+Load/env_large/cold/go-envconfig-4                                           12.70µ ± 0%
+Load/env_large/warm/go-envconfig-4                                           12.65µ ± 0%
+Load/env_large/cold/kelseyhightower-4                                        56.54µ ± 0%
+Load/env_large/warm/kelseyhightower-4                                        56.60µ ± 1%
+Load/env_large/cold/stdlib-4                                                 2.677µ ± 0%
+Load/env_large/warm/stdlib-4                                                 2.677µ ± 0%
+Load/yaml_small/cold/ferry-4                                                 31.77µ ± 0%
+Load/yaml_small/warm/ferry-4                                                 23.60µ ± 0%
+Load/yaml_small/cold/ferry-bound-4                                           31.76µ ± 1%
+Load/yaml_small/warm/ferry-bound-4                                           22.68µ ± 0%
+Load/yaml_small/cold/koanf-4                                                 39.00µ ± 1%
+Load/yaml_small/warm/koanf-4                                                 38.95µ ± 0%
+Load/yaml_small/cold/viper-4                                                 34.81µ ± 0%
+Load/yaml_small/warm/viper-4                                                 34.01µ ± 0%
+Load/yaml_small/cold/xload-4                                                 25.30µ ± 0%
+Load/yaml_small/warm/xload-4                                                 2.130µ ± 0%
+Load/yaml_small/cold/stdlib-4                                                21.67µ ± 1%
+Load/yaml_small/warm/stdlib-4                                                21.71µ ± 0%
+Load/yaml_large/cold/ferry-4                                                 288.7µ ± 0%
+Load/yaml_large/warm/ferry-4                                                 136.0µ ± 0%
+Load/yaml_large/cold/ferry-bound-4                                           287.7µ ± 0%
+Load/yaml_large/warm/ferry-bound-4                                           128.3µ ± 0%
+Load/yaml_large/cold/koanf-4                                                 290.6µ ± 0%
+Load/yaml_large/warm/koanf-4                                                 290.0µ ± 0%
+Load/yaml_large/cold/viper-4                                                 244.0µ ± 0%
+Load/yaml_large/warm/viper-4                                                 243.8µ ± 0%
+Load/yaml_large/cold/stdlib-4                                                120.2µ ± 1%
+Load/yaml_large/warm/stdlib-4                                                120.6µ ± 1%
+Load/dump_large/cold/ferry-4                                                 795.1µ ± 1%
+Load/dump_large/warm/ferry-4                                                 535.4µ ± 2%
+Load/dump_large/cold/ferry-bound-4                                           786.1µ ± 1%
+Load/dump_large/warm/ferry-bound-4                                           532.8µ ± 3%
+Load/dump_large/cold/koanf-4                                                 531.5µ ± 1%
+Load/dump_large/warm/koanf-4                                                 455.1µ ± 1%
+Load/dump_large/cold/viper-4                                                 923.5µ ± 3%
+Load/dump_large/warm/viper-4                                                 791.8µ ± 2%
+Load/dump_large/cold/stdlib-4                                                385.7µ ± 2%
+Load/dump_large/warm/stdlib-4                                                299.3µ ± 2%
+StructTagCost/pooled-4                                                       67.53n ± 0%
+StructTagCost/per_library-4                                                  189.2n ± 5%
+geomean                                                                      30.12µ
 
                                       │ /home/runner/work/ferry/ferry/perf-out/bench.txt │
                                       │                       B/op                       │
-Load/env_small/cold/ferry-4                                               5.375Ki ± 0%
-Load/env_small/warm/ferry-4                                               2.617Ki ± 0%
-Load/env_small/cold/ferry-bound-4                                         5.352Ki ± 0%
-Load/env_small/warm/ferry-bound-4                                         1.227Ki ± 0%
+Load/env_small/cold/ferry-4                                               6.555Ki ± 0%
+Load/env_small/warm/ferry-4                                               3.539Ki ± 0%
+Load/env_small/cold/ferry-bound-4                                         6.531Ki ± 0%
+Load/env_small/warm/ferry-bound-4                                           928.0 ± 0%
 Load/env_small/cold/koanf-4                                               8.430Ki ± 0%
 Load/env_small/warm/koanf-4                                               8.414Ki ± 0%
 Load/env_small/cold/viper-4                                               5.227Ki ± 0%
@@ -387,10 +389,10 @@ Load/env_small/cold/kelseyhightower-4                                     1.227K
 Load/env_small/warm/kelseyhightower-4                                     1.211Ki ± 0%
 Load/env_small/cold/stdlib-4                                                0.000 ± 0%
 Load/env_small/warm/stdlib-4                                                0.000 ± 0%
-Load/env_large/cold/ferry-4                                               50.81Ki ± 0%
-Load/env_large/warm/ferry-4                                               23.74Ki ± 0%
-Load/env_large/cold/ferry-bound-4                                         50.79Ki ± 0%
-Load/env_large/warm/ferry-bound-4                                         14.77Ki ± 0%
+Load/env_large/cold/ferry-4                                               83.50Ki ± 0%
+Load/env_large/warm/ferry-4                                               52.74Ki ± 0%
+Load/env_large/cold/ferry-bound-4                                         83.48Ki ± 0%
+Load/env_large/warm/ferry-bound-4                                         10.36Ki ± 0%
 Load/env_large/cold/koanf-4                                               94.49Ki ± 0%
 Load/env_large/warm/koanf-4                                               94.48Ki ± 0%
 Load/env_large/cold/viper-4                                               56.52Ki ± 0%
@@ -403,10 +405,10 @@ Load/env_large/cold/kelseyhightower-4                                     31.18K
 Load/env_large/warm/kelseyhightower-4                                     31.16Ki ± 0%
 Load/env_large/cold/stdlib-4                                               1008.0 ± 0%
 Load/env_large/warm/stdlib-4                                               1008.0 ± 0%
-Load/yaml_small/cold/ferry-4                                              13.62Ki ± 0%
-Load/yaml_small/warm/ferry-4                                              10.84Ki ± 0%
-Load/yaml_small/cold/ferry-bound-4                                        13.58Ki ± 0%
-Load/yaml_small/warm/ferry-bound-4                                        10.73Ki ± 0%
+Load/yaml_small/cold/ferry-4                                              13.81Ki ± 0%
+Load/yaml_small/warm/ferry-4                                              10.78Ki ± 0%
+Load/yaml_small/cold/ferry-bound-4                                        13.78Ki ± 0%
+Load/yaml_small/warm/ferry-bound-4                                        10.49Ki ± 0%
 Load/yaml_small/cold/koanf-4                                              17.41Ki ± 0%
 Load/yaml_small/warm/koanf-4                                              17.38Ki ± 0%
 Load/yaml_small/cold/viper-4                                              16.32Ki ± 0%
@@ -415,20 +417,20 @@ Load/yaml_small/cold/xload-4                                              11.44K
 Load/yaml_small/warm/xload-4                                               1000.0 ± 0%
 Load/yaml_small/cold/stdlib-4                                             9.853Ki ± 0%
 Load/yaml_small/warm/stdlib-4                                             9.821Ki ± 0%
-Load/yaml_large/cold/ferry-4                                              73.14Ki ± 0%
-Load/yaml_large/warm/ferry-4                                              46.05Ki ± 0%
-Load/yaml_large/cold/ferry-bound-4                                        73.10Ki ± 0%
-Load/yaml_large/warm/ferry-bound-4                                        45.94Ki ± 0%
+Load/yaml_large/cold/ferry-4                                              77.04Ki ± 0%
+Load/yaml_large/warm/ferry-4                                              46.25Ki ± 0%
+Load/yaml_large/cold/ferry-bound-4                                        77.00Ki ± 0%
+Load/yaml_large/warm/ferry-bound-4                                        41.70Ki ± 0%
 Load/yaml_large/cold/koanf-4                                              122.3Ki ± 0%
 Load/yaml_large/warm/koanf-4                                              122.3Ki ± 0%
 Load/yaml_large/cold/viper-4                                              96.68Ki ± 0%
 Load/yaml_large/warm/viper-4                                              95.85Ki ± 0%
 Load/yaml_large/cold/stdlib-4                                             39.73Ki ± 0%
 Load/yaml_large/warm/stdlib-4                                             39.70Ki ± 0%
-Load/dump_large/cold/ferry-4                                              207.0Ki ± 0%
-Load/dump_large/warm/ferry-4                                              178.0Ki ± 0%
-Load/dump_large/cold/ferry-bound-4                                        207.2Ki ± 0%
-Load/dump_large/warm/ferry-bound-4                                        178.0Ki ± 0%
+Load/dump_large/cold/ferry-4                                              209.7Ki ± 0%
+Load/dump_large/warm/ferry-4                                              176.9Ki ± 0%
+Load/dump_large/cold/ferry-bound-4                                        209.9Ki ± 0%
+Load/dump_large/warm/ferry-bound-4                                        176.7Ki ± 0%
 Load/dump_large/cold/koanf-4                                              195.2Ki ± 0%
 Load/dump_large/warm/koanf-4                                              193.0Ki ± 0%
 Load/dump_large/cold/viper-4                                              166.7Ki ± 0%
@@ -442,10 +444,10 @@ geomean                                                                         
 
                                       │ /home/runner/work/ferry/ferry/perf-out/bench.txt │
                                       │                    allocs/op                     │
-Load/env_small/cold/ferry-4                                                 92.00 ± 0%
-Load/env_small/warm/ferry-4                                                 38.00 ± 0%
-Load/env_small/cold/ferry-bound-4                                           92.00 ± 0%
-Load/env_small/warm/ferry-bound-4                                           18.00 ± 0%
+Load/env_small/cold/ferry-4                                                 118.0 ± 0%
+Load/env_small/warm/ferry-4                                                 57.00 ± 0%
+Load/env_small/cold/ferry-bound-4                                           118.0 ± 0%
+Load/env_small/warm/ferry-bound-4                                           12.00 ± 0%
 Load/env_small/cold/koanf-4                                                 172.0 ± 0%
 Load/env_small/warm/koanf-4                                                 171.0 ± 0%
 Load/env_small/cold/viper-4                                                 89.00 ± 0%
@@ -458,10 +460,10 @@ Load/env_small/cold/kelseyhightower-4                                       57.0
 Load/env_small/warm/kelseyhightower-4                                       56.00 ± 0%
 Load/env_small/cold/stdlib-4                                                0.000 ± 0%
 Load/env_small/warm/stdlib-4                                                0.000 ± 0%
-Load/env_large/cold/ferry-4                                                 662.0 ± 0%
-Load/env_large/warm/ferry-4                                                 220.0 ± 0%
-Load/env_large/cold/ferry-bound-4                                           662.0 ± 0%
-Load/env_large/warm/ferry-bound-4                                           148.0 ± 0%
+Load/env_large/cold/ferry-4                                                 803.0 ± 0%
+Load/env_large/warm/ferry-4                                                 288.0 ± 0%
+Load/env_large/cold/ferry-bound-4                                           803.0 ± 0%
+Load/env_large/warm/ferry-bound-4                                           78.00 ± 0%
 Load/env_large/cold/koanf-4                                                1.874k ± 0%
 Load/env_large/warm/koanf-4                                                1.873k ± 0%
 Load/env_large/cold/viper-4                                                1.017k ± 0%
@@ -474,9 +476,9 @@ Load/env_large/cold/kelseyhightower-4                                       910.
 Load/env_large/warm/kelseyhightower-4                                       909.0 ± 0%
 Load/env_large/cold/stdlib-4                                                5.000 ± 0%
 Load/env_large/warm/stdlib-4                                                5.000 ± 0%
-Load/yaml_small/cold/ferry-4                                                159.0 ± 0%
-Load/yaml_small/warm/ferry-4                                                105.0 ± 0%
-Load/yaml_small/cold/ferry-bound-4                                          159.0 ± 0%
+Load/yaml_small/cold/ferry-4                                                171.0 ± 0%
+Load/yaml_small/warm/ferry-4                                                109.0 ± 0%
+Load/yaml_small/cold/ferry-bound-4                                          171.0 ± 0%
 Load/yaml_small/warm/ferry-bound-4                                          100.0 ± 0%
 Load/yaml_small/cold/koanf-4                                                250.0 ± 0%
 Load/yaml_small/warm/koanf-4                                                249.0 ± 0%
@@ -486,20 +488,20 @@ Load/yaml_small/cold/xload-4                                                138.
 Load/yaml_small/warm/xload-4                                                23.00 ± 0%
 Load/yaml_small/cold/stdlib-4                                               99.00 ± 0%
 Load/yaml_small/warm/stdlib-4                                               98.00 ± 0%
-Load/yaml_large/cold/ferry-4                                               1.188k ± 0%
-Load/yaml_large/warm/ferry-4                                                746.0 ± 0%
-Load/yaml_large/cold/ferry-bound-4                                         1.188k ± 0%
-Load/yaml_large/warm/ferry-bound-4                                          741.0 ± 0%
+Load/yaml_large/cold/ferry-4                                               1.249k ± 0%
+Load/yaml_large/warm/ferry-4                                                733.0 ± 0%
+Load/yaml_large/cold/ferry-bound-4                                         1.249k ± 0%
+Load/yaml_large/warm/ferry-bound-4                                          691.0 ± 0%
 Load/yaml_large/cold/koanf-4                                               2.424k ± 0%
 Load/yaml_large/warm/koanf-4                                               2.423k ± 0%
 Load/yaml_large/cold/viper-4                                               1.704k ± 0%
 Load/yaml_large/warm/viper-4                                               1.692k ± 0%
 Load/yaml_large/cold/stdlib-4                                               751.0 ± 0%
 Load/yaml_large/warm/stdlib-4                                               750.0 ± 0%
-Load/dump_large/cold/ferry-4                                               2.358k ± 0%
-Load/dump_large/warm/ferry-4                                               1.912k ± 0%
-Load/dump_large/cold/ferry-bound-4                                         2.358k ± 0%
-Load/dump_large/warm/ferry-bound-4                                         1.906k ± 0%
+Load/dump_large/cold/ferry-4                                               2.494k ± 0%
+Load/dump_large/warm/ferry-4                                               1.975k ± 0%
+Load/dump_large/cold/ferry-bound-4                                         2.494k ± 0%
+Load/dump_large/warm/ferry-bound-4                                         1.963k ± 0%
 Load/dump_large/cold/koanf-4                                               2.369k ± 0%
 Load/dump_large/warm/koanf-4                                               2.358k ± 0%
 Load/dump_large/cold/viper-4                                               1.708k ± 0%
@@ -524,668 +526,668 @@ goos: linux
 goarch: amd64
 pkg: github.com/onhotpath/ferry/bench
 cpu: AMD EPYC 7763 64-Core Processor                
-BenchmarkLoad/env_small/cold/ferry-4         	  114872	      8949 ns/op	    5504 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-4         	  133821	      8670 ns/op	    5504 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-4         	  134901	      8721 ns/op	    5504 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-4         	  135710	      8639 ns/op	    5504 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-4         	  137857	      8971 ns/op	    5504 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-4         	  137160	      8911 ns/op	    5504 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-4         	  135126	      8810 ns/op	    5504 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-4         	  136216	      8663 ns/op	    5504 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-4         	  136789	      8649 ns/op	    5504 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-4         	  136868	      8701 ns/op	    5504 B/op	      92 allocs/op
-BenchmarkLoad/env_small/warm/ferry-4         	  376964	      3085 ns/op	    2680 B/op	      38 allocs/op
-BenchmarkLoad/env_small/warm/ferry-4         	  377060	      3054 ns/op	    2680 B/op	      38 allocs/op
-BenchmarkLoad/env_small/warm/ferry-4         	  384862	      3078 ns/op	    2680 B/op	      38 allocs/op
-BenchmarkLoad/env_small/warm/ferry-4         	  376069	      3122 ns/op	    2680 B/op	      38 allocs/op
-BenchmarkLoad/env_small/warm/ferry-4         	  385980	      3115 ns/op	    2680 B/op	      38 allocs/op
-BenchmarkLoad/env_small/warm/ferry-4         	  374600	      3118 ns/op	    2680 B/op	      38 allocs/op
-BenchmarkLoad/env_small/warm/ferry-4         	  378145	      3041 ns/op	    2680 B/op	      38 allocs/op
-BenchmarkLoad/env_small/warm/ferry-4         	  386718	      3078 ns/op	    2680 B/op	      38 allocs/op
-BenchmarkLoad/env_small/warm/ferry-4         	  373623	      3062 ns/op	    2680 B/op	      38 allocs/op
-BenchmarkLoad/env_small/warm/ferry-4         	  379941	      3078 ns/op	    2680 B/op	      38 allocs/op
-BenchmarkLoad/env_small/cold/ferry-bound-4   	  136760	      8552 ns/op	    5480 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-bound-4   	  132342	      8628 ns/op	    5480 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-bound-4   	  139279	      8639 ns/op	    5480 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-bound-4   	  137365	      8591 ns/op	    5480 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-bound-4   	  133953	      8622 ns/op	    5480 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-bound-4   	  133496	      8630 ns/op	    5480 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-bound-4   	  139725	      8653 ns/op	    5480 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-bound-4   	  139465	      8655 ns/op	    5480 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-bound-4   	  136020	      8680 ns/op	    5480 B/op	      92 allocs/op
-BenchmarkLoad/env_small/cold/ferry-bound-4   	  135789	      8822 ns/op	    5480 B/op	      92 allocs/op
-BenchmarkLoad/env_small/warm/ferry-bound-4   	  820164	      1344 ns/op	    1256 B/op	      18 allocs/op
-BenchmarkLoad/env_small/warm/ferry-bound-4   	  814846	      1352 ns/op	    1256 B/op	      18 allocs/op
-BenchmarkLoad/env_small/warm/ferry-bound-4   	  844650	      1348 ns/op	    1256 B/op	      18 allocs/op
-BenchmarkLoad/env_small/warm/ferry-bound-4   	  843379	      1353 ns/op	    1256 B/op	      18 allocs/op
-BenchmarkLoad/env_small/warm/ferry-bound-4   	  836656	      1355 ns/op	    1256 B/op	      18 allocs/op
-BenchmarkLoad/env_small/warm/ferry-bound-4   	  807750	      1344 ns/op	    1256 B/op	      18 allocs/op
-BenchmarkLoad/env_small/warm/ferry-bound-4   	  829844	      1349 ns/op	    1256 B/op	      18 allocs/op
-BenchmarkLoad/env_small/warm/ferry-bound-4   	  845674	      1347 ns/op	    1256 B/op	      18 allocs/op
-BenchmarkLoad/env_small/warm/ferry-bound-4   	  818967	      1351 ns/op	    1256 B/op	      18 allocs/op
-BenchmarkLoad/env_small/warm/ferry-bound-4   	  803071	      1350 ns/op	    1256 B/op	      18 allocs/op
-BenchmarkLoad/env_small/cold/koanf-4         	   77496	     15263 ns/op	    8632 B/op	     172 allocs/op
-BenchmarkLoad/env_small/cold/koanf-4         	   77330	     15255 ns/op	    8632 B/op	     172 allocs/op
-BenchmarkLoad/env_small/cold/koanf-4         	   78313	     15288 ns/op	    8632 B/op	     172 allocs/op
-BenchmarkLoad/env_small/cold/koanf-4         	   77288	     15311 ns/op	    8632 B/op	     172 allocs/op
-BenchmarkLoad/env_small/cold/koanf-4         	   76704	     15206 ns/op	    8632 B/op	     172 allocs/op
-BenchmarkLoad/env_small/cold/koanf-4         	   78639	     15267 ns/op	    8632 B/op	     172 allocs/op
-BenchmarkLoad/env_small/cold/koanf-4         	   78772	     15401 ns/op	    8632 B/op	     172 allocs/op
-BenchmarkLoad/env_small/cold/koanf-4         	   78754	     15214 ns/op	    8632 B/op	     172 allocs/op
-BenchmarkLoad/env_small/cold/koanf-4         	   77757	     15357 ns/op	    8632 B/op	     172 allocs/op
-BenchmarkLoad/env_small/cold/koanf-4         	   79318	     15354 ns/op	    8632 B/op	     172 allocs/op
-BenchmarkLoad/env_small/warm/koanf-4         	   78346	     15283 ns/op	    8616 B/op	     171 allocs/op
-BenchmarkLoad/env_small/warm/koanf-4         	   77619	     15148 ns/op	    8616 B/op	     171 allocs/op
-BenchmarkLoad/env_small/warm/koanf-4         	   77914	     15378 ns/op	    8616 B/op	     171 allocs/op
-BenchmarkLoad/env_small/warm/koanf-4         	   77858	     15316 ns/op	    8616 B/op	     171 allocs/op
-BenchmarkLoad/env_small/warm/koanf-4         	   78408	     15354 ns/op	    8616 B/op	     171 allocs/op
-BenchmarkLoad/env_small/warm/koanf-4         	   78538	     15049 ns/op	    8616 B/op	     171 allocs/op
-BenchmarkLoad/env_small/warm/koanf-4         	   78668	     15111 ns/op	    8616 B/op	     171 allocs/op
-BenchmarkLoad/env_small/warm/koanf-4         	   78828	     15200 ns/op	    8616 B/op	     171 allocs/op
-BenchmarkLoad/env_small/warm/koanf-4         	   78402	     15046 ns/op	    8616 B/op	     171 allocs/op
-BenchmarkLoad/env_small/warm/koanf-4         	   78957	     15366 ns/op	    8616 B/op	     171 allocs/op
-BenchmarkLoad/env_small/cold/viper-4         	  122400	      9748 ns/op	    5352 B/op	      89 allocs/op
-BenchmarkLoad/env_small/cold/viper-4         	  123405	      9578 ns/op	    5352 B/op	      89 allocs/op
-BenchmarkLoad/env_small/cold/viper-4         	  122445	      9624 ns/op	    5352 B/op	      89 allocs/op
-BenchmarkLoad/env_small/cold/viper-4         	  125379	      9645 ns/op	    5352 B/op	      89 allocs/op
-BenchmarkLoad/env_small/cold/viper-4         	  123328	      9605 ns/op	    5352 B/op	      89 allocs/op
-BenchmarkLoad/env_small/cold/viper-4         	  125028	      9622 ns/op	    5352 B/op	      89 allocs/op
-BenchmarkLoad/env_small/cold/viper-4         	  123968	      9635 ns/op	    5352 B/op	      89 allocs/op
-BenchmarkLoad/env_small/cold/viper-4         	  113982	      9595 ns/op	    5352 B/op	      89 allocs/op
-BenchmarkLoad/env_small/cold/viper-4         	  124401	      9521 ns/op	    5352 B/op	      89 allocs/op
-BenchmarkLoad/env_small/cold/viper-4         	  126016	      9607 ns/op	    5352 B/op	      89 allocs/op
-BenchmarkLoad/env_small/warm/viper-4         	  149779	      8060 ns/op	    3696 B/op	      67 allocs/op
-BenchmarkLoad/env_small/warm/viper-4         	  144918	      8008 ns/op	    3696 B/op	      67 allocs/op
-BenchmarkLoad/env_small/warm/viper-4         	  146028	      8087 ns/op	    3696 B/op	      67 allocs/op
-BenchmarkLoad/env_small/warm/viper-4         	  145288	      8015 ns/op	    3696 B/op	      67 allocs/op
-BenchmarkLoad/env_small/warm/viper-4         	  147985	      7976 ns/op	    3696 B/op	      67 allocs/op
-BenchmarkLoad/env_small/warm/viper-4         	  147559	      8133 ns/op	    3696 B/op	      67 allocs/op
-BenchmarkLoad/env_small/warm/viper-4         	  147840	      8065 ns/op	    3696 B/op	      67 allocs/op
-BenchmarkLoad/env_small/warm/viper-4         	  145941	      8019 ns/op	    3696 B/op	      67 allocs/op
-BenchmarkLoad/env_small/warm/viper-4         	  147736	      8085 ns/op	    3696 B/op	      67 allocs/op
-BenchmarkLoad/env_small/warm/viper-4         	  148790	      8024 ns/op	    3696 B/op	      67 allocs/op
-BenchmarkLoad/env_small/cold/xload-4         	  578499	      1978 ns/op	     952 B/op	      18 allocs/op
-BenchmarkLoad/env_small/cold/xload-4         	  554596	      1995 ns/op	     952 B/op	      18 allocs/op
-BenchmarkLoad/env_small/cold/xload-4         	  609970	      1986 ns/op	     952 B/op	      18 allocs/op
-BenchmarkLoad/env_small/cold/xload-4         	  580118	      1971 ns/op	     952 B/op	      18 allocs/op
-BenchmarkLoad/env_small/cold/xload-4         	  577788	      1986 ns/op	     952 B/op	      18 allocs/op
-BenchmarkLoad/env_small/cold/xload-4         	  592369	      1976 ns/op	     952 B/op	      18 allocs/op
-BenchmarkLoad/env_small/cold/xload-4         	  586474	      1974 ns/op	     952 B/op	      18 allocs/op
-BenchmarkLoad/env_small/cold/xload-4         	  575499	      1978 ns/op	     952 B/op	      18 allocs/op
-BenchmarkLoad/env_small/cold/xload-4         	  592108	      1979 ns/op	     952 B/op	      18 allocs/op
-BenchmarkLoad/env_small/cold/xload-4         	  566113	      1986 ns/op	     952 B/op	      18 allocs/op
-BenchmarkLoad/env_small/warm/xload-4         	  584012	      1961 ns/op	     936 B/op	      17 allocs/op
-BenchmarkLoad/env_small/warm/xload-4         	  576769	      1945 ns/op	     936 B/op	      17 allocs/op
-BenchmarkLoad/env_small/warm/xload-4         	  602568	      1958 ns/op	     936 B/op	      17 allocs/op
-BenchmarkLoad/env_small/warm/xload-4         	  594439	      1938 ns/op	     936 B/op	      17 allocs/op
-BenchmarkLoad/env_small/warm/xload-4         	  601401	      1949 ns/op	     936 B/op	      17 allocs/op
-BenchmarkLoad/env_small/warm/xload-4         	  581113	      1999 ns/op	     936 B/op	      17 allocs/op
-BenchmarkLoad/env_small/warm/xload-4         	  597162	      1955 ns/op	     936 B/op	      17 allocs/op
-BenchmarkLoad/env_small/warm/xload-4         	  597896	      1949 ns/op	     936 B/op	      17 allocs/op
-BenchmarkLoad/env_small/warm/xload-4         	  588625	      1944 ns/op	     936 B/op	      17 allocs/op
-BenchmarkLoad/env_small/warm/xload-4         	  580437	      1952 ns/op	     936 B/op	      17 allocs/op
-BenchmarkLoad/env_small/cold/go-envconfig-4  	 1532733	       768.2 ns/op	      16 B/op	       1 allocs/op
-BenchmarkLoad/env_small/cold/go-envconfig-4  	 1561350	       765.2 ns/op	      16 B/op	       1 allocs/op
-BenchmarkLoad/env_small/cold/go-envconfig-4  	 1563386	       766.7 ns/op	      16 B/op	       1 allocs/op
-BenchmarkLoad/env_small/cold/go-envconfig-4  	 1565350	       766.1 ns/op	      16 B/op	       1 allocs/op
-BenchmarkLoad/env_small/cold/go-envconfig-4  	 1570918	       766.3 ns/op	      16 B/op	       1 allocs/op
-BenchmarkLoad/env_small/cold/go-envconfig-4  	 1562300	       767.4 ns/op	      16 B/op	       1 allocs/op
-BenchmarkLoad/env_small/cold/go-envconfig-4  	 1560162	       764.2 ns/op	      16 B/op	       1 allocs/op
-BenchmarkLoad/env_small/cold/go-envconfig-4  	 1564526	       768.2 ns/op	      16 B/op	       1 allocs/op
-BenchmarkLoad/env_small/cold/go-envconfig-4  	 1563093	       766.8 ns/op	      16 B/op	       1 allocs/op
-BenchmarkLoad/env_small/cold/go-envconfig-4  	 1567318	       767.0 ns/op	      16 B/op	       1 allocs/op
-BenchmarkLoad/env_small/warm/go-envconfig-4  	 1639574	       734.6 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/go-envconfig-4  	 1594696	       735.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/go-envconfig-4  	 1632794	       736.3 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/go-envconfig-4  	 1625025	       736.1 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/go-envconfig-4  	 1632514	       734.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/go-envconfig-4  	 1632058	       737.5 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/go-envconfig-4  	 1632403	       738.4 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/go-envconfig-4  	 1630188	       734.9 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/go-envconfig-4  	 1632325	       740.3 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/go-envconfig-4  	 1624897	       735.9 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/cold/kelseyhightower-4         	  360520	      3354 ns/op	    1256 B/op	      57 allocs/op
-BenchmarkLoad/env_small/cold/kelseyhightower-4         	  344757	      3315 ns/op	    1256 B/op	      57 allocs/op
-BenchmarkLoad/env_small/cold/kelseyhightower-4         	  348500	      3337 ns/op	    1256 B/op	      57 allocs/op
-BenchmarkLoad/env_small/cold/kelseyhightower-4         	  350242	      3334 ns/op	    1256 B/op	      57 allocs/op
-BenchmarkLoad/env_small/cold/kelseyhightower-4         	  341187	      3318 ns/op	    1256 B/op	      57 allocs/op
-BenchmarkLoad/env_small/cold/kelseyhightower-4         	  358542	      3301 ns/op	    1256 B/op	      57 allocs/op
-BenchmarkLoad/env_small/cold/kelseyhightower-4         	  345673	      3327 ns/op	    1256 B/op	      57 allocs/op
-BenchmarkLoad/env_small/cold/kelseyhightower-4         	  340806	      3318 ns/op	    1256 B/op	      57 allocs/op
-BenchmarkLoad/env_small/cold/kelseyhightower-4         	  344778	      3333 ns/op	    1256 B/op	      57 allocs/op
-BenchmarkLoad/env_small/cold/kelseyhightower-4         	  353415	      3385 ns/op	    1256 B/op	      57 allocs/op
-BenchmarkLoad/env_small/warm/kelseyhightower-4         	  354271	      3359 ns/op	    1240 B/op	      56 allocs/op
-BenchmarkLoad/env_small/warm/kelseyhightower-4         	  347125	      3331 ns/op	    1240 B/op	      56 allocs/op
-BenchmarkLoad/env_small/warm/kelseyhightower-4         	  341067	      3320 ns/op	    1240 B/op	      56 allocs/op
-BenchmarkLoad/env_small/warm/kelseyhightower-4         	  321375	      3369 ns/op	    1240 B/op	      56 allocs/op
-BenchmarkLoad/env_small/warm/kelseyhightower-4         	  343064	      3367 ns/op	    1240 B/op	      56 allocs/op
-BenchmarkLoad/env_small/warm/kelseyhightower-4         	  354698	      3324 ns/op	    1240 B/op	      56 allocs/op
-BenchmarkLoad/env_small/warm/kelseyhightower-4         	  352022	      3339 ns/op	    1240 B/op	      56 allocs/op
-BenchmarkLoad/env_small/warm/kelseyhightower-4         	  351008	      3309 ns/op	    1240 B/op	      56 allocs/op
-BenchmarkLoad/env_small/warm/kelseyhightower-4         	  349914	      3315 ns/op	    1240 B/op	      56 allocs/op
-BenchmarkLoad/env_small/warm/kelseyhightower-4         	  349158	      3301 ns/op	    1240 B/op	      56 allocs/op
-BenchmarkLoad/env_small/cold/stdlib-4                  	 6764328	       177.7 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/cold/stdlib-4                  	 6762217	       177.6 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/cold/stdlib-4                  	 6765062	       178.3 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/cold/stdlib-4                  	 6763726	       178.1 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/cold/stdlib-4                  	 6767971	       177.4 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/cold/stdlib-4                  	 6743289	       178.1 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/cold/stdlib-4                  	 6757288	       180.8 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/cold/stdlib-4                  	 6735733	       177.6 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/cold/stdlib-4                  	 6768907	       177.3 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/cold/stdlib-4                  	 6626180	       178.2 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/stdlib-4                  	 6786843	       176.9 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/stdlib-4                  	 6787140	       177.1 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/stdlib-4                  	 6740971	       176.8 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/stdlib-4                  	 6760468	       177.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/stdlib-4                  	 6796945	       177.2 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/stdlib-4                  	 6758265	       179.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/stdlib-4                  	 6765054	       177.9 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/stdlib-4                  	 6802407	       177.6 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/stdlib-4                  	 6770859	       177.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_small/warm/stdlib-4                  	 6809733	       177.4 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLoad/env_large/cold/ferry-4                   	    9148	    130748 ns/op	   52032 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-4                   	    8410	    130530 ns/op	   52032 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-4                   	    8394	    131586 ns/op	   52032 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-4                   	    8361	    130063 ns/op	   52032 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-4                   	    9234	    129447 ns/op	   52032 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-4                   	    8650	    131150 ns/op	   52032 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-4                   	    8464	    128486 ns/op	   52032 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-4                   	    8658	    131317 ns/op	   52032 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-4                   	    8546	    129715 ns/op	   52032 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-4                   	    8587	    134738 ns/op	   52032 B/op	     662 allocs/op
-BenchmarkLoad/env_large/warm/ferry-4                   	   31885	     36904 ns/op	   24313 B/op	     220 allocs/op
-BenchmarkLoad/env_large/warm/ferry-4                   	   32176	     37215 ns/op	   24313 B/op	     220 allocs/op
-BenchmarkLoad/env_large/warm/ferry-4                   	   32384	     37106 ns/op	   24313 B/op	     220 allocs/op
-BenchmarkLoad/env_large/warm/ferry-4                   	   32480	     36615 ns/op	   24313 B/op	     220 allocs/op
-BenchmarkLoad/env_large/warm/ferry-4                   	   32832	     36663 ns/op	   24313 B/op	     220 allocs/op
-BenchmarkLoad/env_large/warm/ferry-4                   	   32712	     36848 ns/op	   24313 B/op	     220 allocs/op
-BenchmarkLoad/env_large/warm/ferry-4                   	   32572	     36611 ns/op	   24313 B/op	     220 allocs/op
-BenchmarkLoad/env_large/warm/ferry-4                   	   32319	     36749 ns/op	   24313 B/op	     220 allocs/op
-BenchmarkLoad/env_large/warm/ferry-4                   	   32478	     37281 ns/op	   24313 B/op	     220 allocs/op
-BenchmarkLoad/env_large/warm/ferry-4                   	   33072	     36776 ns/op	   24313 B/op	     220 allocs/op
-BenchmarkLoad/env_large/cold/ferry-bound-4             	    8916	    128212 ns/op	   52008 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-bound-4             	    8556	    128986 ns/op	   52008 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-bound-4             	    8335	    130830 ns/op	   52008 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-bound-4             	    8610	    129391 ns/op	   52008 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-bound-4             	    8760	    128607 ns/op	   52008 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-bound-4             	    8439	    129502 ns/op	   52008 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-bound-4             	    8894	    126123 ns/op	   52008 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-bound-4             	    8811	    128038 ns/op	   52008 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-bound-4             	    8815	    127159 ns/op	   52008 B/op	     662 allocs/op
-BenchmarkLoad/env_large/cold/ferry-bound-4             	    8548	    127181 ns/op	   52008 B/op	     662 allocs/op
-BenchmarkLoad/env_large/warm/ferry-bound-4             	   58195	     20392 ns/op	   15128 B/op	     148 allocs/op
-BenchmarkLoad/env_large/warm/ferry-bound-4             	   58053	     20845 ns/op	   15128 B/op	     148 allocs/op
-BenchmarkLoad/env_large/warm/ferry-bound-4             	   58838	     20553 ns/op	   15128 B/op	     148 allocs/op
-BenchmarkLoad/env_large/warm/ferry-bound-4             	   58069	     20800 ns/op	   15128 B/op	     148 allocs/op
-BenchmarkLoad/env_large/warm/ferry-bound-4             	   58057	     20380 ns/op	   15128 B/op	     148 allocs/op
-BenchmarkLoad/env_large/warm/ferry-bound-4             	   58474	     20324 ns/op	   15128 B/op	     148 allocs/op
-BenchmarkLoad/env_large/warm/ferry-bound-4             	   58063	     20539 ns/op	   15128 B/op	     148 allocs/op
-BenchmarkLoad/env_large/warm/ferry-bound-4             	   59101	     20695 ns/op	   15128 B/op	     148 allocs/op
-BenchmarkLoad/env_large/warm/ferry-bound-4             	   58038	     20832 ns/op	   15128 B/op	     148 allocs/op
-BenchmarkLoad/env_large/warm/ferry-bound-4             	   57297	     20730 ns/op	   15128 B/op	     148 allocs/op
-BenchmarkLoad/env_large/cold/koanf-4                   	    6036	    189245 ns/op	   96762 B/op	    1874 allocs/op
-BenchmarkLoad/env_large/cold/koanf-4                   	    6140	    189347 ns/op	   96762 B/op	    1874 allocs/op
-BenchmarkLoad/env_large/cold/koanf-4                   	    6064	    189190 ns/op	   96762 B/op	    1874 allocs/op
-BenchmarkLoad/env_large/cold/koanf-4                   	    5954	    188253 ns/op	   96762 B/op	    1874 allocs/op
-BenchmarkLoad/env_large/cold/koanf-4                   	    6038	    187579 ns/op	   96762 B/op	    1874 allocs/op
-BenchmarkLoad/env_large/cold/koanf-4                   	    6771	    186142 ns/op	   96762 B/op	    1874 allocs/op
-BenchmarkLoad/env_large/cold/koanf-4                   	    6158	    186425 ns/op	   96762 B/op	    1874 allocs/op
-BenchmarkLoad/env_large/cold/koanf-4                   	    6129	    186554 ns/op	   96762 B/op	    1874 allocs/op
-BenchmarkLoad/env_large/cold/koanf-4                   	    5974	    186781 ns/op	   96762 B/op	    1874 allocs/op
-BenchmarkLoad/env_large/cold/koanf-4                   	    5851	    187940 ns/op	   96762 B/op	    1874 allocs/op
-BenchmarkLoad/env_large/warm/koanf-4                   	    6040	    187236 ns/op	   96746 B/op	    1873 allocs/op
-BenchmarkLoad/env_large/warm/koanf-4                   	    5953	    185551 ns/op	   96746 B/op	    1873 allocs/op
-BenchmarkLoad/env_large/warm/koanf-4                   	    5990	    186716 ns/op	   96746 B/op	    1873 allocs/op
-BenchmarkLoad/env_large/warm/koanf-4                   	    6798	    187739 ns/op	   96746 B/op	    1873 allocs/op
-BenchmarkLoad/env_large/warm/koanf-4                   	    6236	    187045 ns/op	   96746 B/op	    1873 allocs/op
-BenchmarkLoad/env_large/warm/koanf-4                   	    6121	    186687 ns/op	   96746 B/op	    1873 allocs/op
-BenchmarkLoad/env_large/warm/koanf-4                   	    6270	    187616 ns/op	   96746 B/op	    1873 allocs/op
-BenchmarkLoad/env_large/warm/koanf-4                   	    5877	    185331 ns/op	   96746 B/op	    1873 allocs/op
-BenchmarkLoad/env_large/warm/koanf-4                   	    6030	    186647 ns/op	   96746 B/op	    1873 allocs/op
-BenchmarkLoad/env_large/warm/koanf-4                   	    6052	    186038 ns/op	   96746 B/op	    1873 allocs/op
-BenchmarkLoad/env_large/cold/viper-4                   	    9552	    114554 ns/op	   57877 B/op	    1017 allocs/op
-BenchmarkLoad/env_large/cold/viper-4                   	   10000	    114415 ns/op	   57877 B/op	    1017 allocs/op
-BenchmarkLoad/env_large/cold/viper-4                   	   10000	    115480 ns/op	   57877 B/op	    1017 allocs/op
-BenchmarkLoad/env_large/cold/viper-4                   	   10000	    114497 ns/op	   57877 B/op	    1017 allocs/op
-BenchmarkLoad/env_large/cold/viper-4                   	    9356	    115532 ns/op	   57878 B/op	    1017 allocs/op
-BenchmarkLoad/env_large/cold/viper-4                   	    9544	    116195 ns/op	   57877 B/op	    1017 allocs/op
-BenchmarkLoad/env_large/cold/viper-4                   	    9252	    117423 ns/op	   57877 B/op	    1017 allocs/op
-BenchmarkLoad/env_large/cold/viper-4                   	    9648	    116473 ns/op	   57877 B/op	    1017 allocs/op
-BenchmarkLoad/env_large/cold/viper-4                   	    9352	    114957 ns/op	   57877 B/op	    1017 allocs/op
-BenchmarkLoad/env_large/cold/viper-4                   	    9474	    115652 ns/op	   57877 B/op	    1017 allocs/op
-BenchmarkLoad/env_large/warm/viper-4                   	   10000	    102107 ns/op	   48924 B/op	     920 allocs/op
-BenchmarkLoad/env_large/warm/viper-4                   	   10000	    101965 ns/op	   48917 B/op	     920 allocs/op
-BenchmarkLoad/env_large/warm/viper-4                   	   10000	    102265 ns/op	   48910 B/op	     920 allocs/op
-BenchmarkLoad/env_large/warm/viper-4                   	   10000	    102753 ns/op	   48914 B/op	     920 allocs/op
-BenchmarkLoad/env_large/warm/viper-4                   	   10000	    102633 ns/op	   48914 B/op	     920 allocs/op
-BenchmarkLoad/env_large/warm/viper-4                   	   10000	    102174 ns/op	   48917 B/op	     920 allocs/op
-BenchmarkLoad/env_large/warm/viper-4                   	   10000	    103400 ns/op	   48923 B/op	     920 allocs/op
-BenchmarkLoad/env_large/warm/viper-4                   	   10000	    101207 ns/op	   48919 B/op	     920 allocs/op
-BenchmarkLoad/env_large/warm/viper-4                   	   10000	    104145 ns/op	   48913 B/op	     920 allocs/op
-BenchmarkLoad/env_large/warm/viper-4                   	   10000	    102458 ns/op	   48915 B/op	     920 allocs/op
-BenchmarkLoad/env_large/cold/xload-4                   	   39469	     30580 ns/op	   13200 B/op	     252 allocs/op
-BenchmarkLoad/env_large/cold/xload-4                   	   39022	     30515 ns/op	   13200 B/op	     252 allocs/op
-BenchmarkLoad/env_large/cold/xload-4                   	   39476	     30510 ns/op	   13200 B/op	     252 allocs/op
-BenchmarkLoad/env_large/cold/xload-4                   	   39270	     30883 ns/op	   13200 B/op	     252 allocs/op
-BenchmarkLoad/env_large/cold/xload-4                   	   39122	     30471 ns/op	   13200 B/op	     252 allocs/op
-BenchmarkLoad/env_large/cold/xload-4                   	   39160	     30732 ns/op	   13200 B/op	     252 allocs/op
-BenchmarkLoad/env_large/cold/xload-4                   	   39031	     30375 ns/op	   13200 B/op	     252 allocs/op
-BenchmarkLoad/env_large/cold/xload-4                   	   39462	     30496 ns/op	   13200 B/op	     252 allocs/op
-BenchmarkLoad/env_large/cold/xload-4                   	   39356	     30744 ns/op	   13200 B/op	     252 allocs/op
-BenchmarkLoad/env_large/cold/xload-4                   	   39421	     31197 ns/op	   13200 B/op	     252 allocs/op
-BenchmarkLoad/env_large/warm/xload-4                   	   39258	     30494 ns/op	   13184 B/op	     251 allocs/op
-BenchmarkLoad/env_large/warm/xload-4                   	   39184	     30238 ns/op	   13184 B/op	     251 allocs/op
-BenchmarkLoad/env_large/warm/xload-4                   	   39801	     30673 ns/op	   13184 B/op	     251 allocs/op
-BenchmarkLoad/env_large/warm/xload-4                   	   39276	     30179 ns/op	   13184 B/op	     251 allocs/op
-BenchmarkLoad/env_large/warm/xload-4                   	   39511	     30232 ns/op	   13184 B/op	     251 allocs/op
-BenchmarkLoad/env_large/warm/xload-4                   	   38974	     30297 ns/op	   13184 B/op	     251 allocs/op
-BenchmarkLoad/env_large/warm/xload-4                   	   39226	     30470 ns/op	   13184 B/op	     251 allocs/op
-BenchmarkLoad/env_large/warm/xload-4                   	   39409	     30466 ns/op	   13184 B/op	     251 allocs/op
-BenchmarkLoad/env_large/warm/xload-4                   	   39429	     30445 ns/op	   13184 B/op	     251 allocs/op
-BenchmarkLoad/env_large/warm/xload-4                   	   39595	     30497 ns/op	   13184 B/op	     251 allocs/op
-BenchmarkLoad/env_large/cold/go-envconfig-4            	   93588	     12760 ns/op	    1408 B/op	      28 allocs/op
-BenchmarkLoad/env_large/cold/go-envconfig-4            	   92446	     12800 ns/op	    1408 B/op	      28 allocs/op
-BenchmarkLoad/env_large/cold/go-envconfig-4            	   91470	     12737 ns/op	    1408 B/op	      28 allocs/op
-BenchmarkLoad/env_large/cold/go-envconfig-4            	   92350	     12793 ns/op	    1408 B/op	      28 allocs/op
-BenchmarkLoad/env_large/cold/go-envconfig-4            	   92701	     12785 ns/op	    1408 B/op	      28 allocs/op
-BenchmarkLoad/env_large/cold/go-envconfig-4            	   91626	     12800 ns/op	    1408 B/op	      28 allocs/op
-BenchmarkLoad/env_large/cold/go-envconfig-4            	   92642	     12787 ns/op	    1408 B/op	      28 allocs/op
-BenchmarkLoad/env_large/cold/go-envconfig-4            	   92876	     12826 ns/op	    1408 B/op	      28 allocs/op
-BenchmarkLoad/env_large/cold/go-envconfig-4            	   92866	     12844 ns/op	    1408 B/op	      28 allocs/op
-BenchmarkLoad/env_large/cold/go-envconfig-4            	   92560	     12828 ns/op	    1408 B/op	      28 allocs/op
-BenchmarkLoad/env_large/warm/go-envconfig-4            	   92904	     12854 ns/op	    1392 B/op	      27 allocs/op
-BenchmarkLoad/env_large/warm/go-envconfig-4            	   93344	     12836 ns/op	    1392 B/op	      27 allocs/op
-BenchmarkLoad/env_large/warm/go-envconfig-4            	   93602	     12764 ns/op	    1392 B/op	      27 allocs/op
-BenchmarkLoad/env_large/warm/go-envconfig-4            	   93883	     12715 ns/op	    1392 B/op	      27 allocs/op
-BenchmarkLoad/env_large/warm/go-envconfig-4            	   93932	     12721 ns/op	    1392 B/op	      27 allocs/op
-BenchmarkLoad/env_large/warm/go-envconfig-4            	   93361	     12720 ns/op	    1392 B/op	      27 allocs/op
-BenchmarkLoad/env_large/warm/go-envconfig-4            	   92247	     12738 ns/op	    1392 B/op	      27 allocs/op
-BenchmarkLoad/env_large/warm/go-envconfig-4            	   93982	     12715 ns/op	    1392 B/op	      27 allocs/op
-BenchmarkLoad/env_large/warm/go-envconfig-4            	   94288	     12719 ns/op	    1392 B/op	      27 allocs/op
-BenchmarkLoad/env_large/warm/go-envconfig-4            	   94533	     12703 ns/op	    1392 B/op	      27 allocs/op
-BenchmarkLoad/env_large/cold/kelseyhightower-4         	   19699	     60810 ns/op	   31928 B/op	     910 allocs/op
-BenchmarkLoad/env_large/cold/kelseyhightower-4         	   19608	     60440 ns/op	   31927 B/op	     910 allocs/op
-BenchmarkLoad/env_large/cold/kelseyhightower-4         	   19723	     61174 ns/op	   31927 B/op	     910 allocs/op
-BenchmarkLoad/env_large/cold/kelseyhightower-4         	   19833	     60290 ns/op	   31927 B/op	     910 allocs/op
-BenchmarkLoad/env_large/cold/kelseyhightower-4         	   19742	     61098 ns/op	   31927 B/op	     910 allocs/op
-BenchmarkLoad/env_large/cold/kelseyhightower-4         	   19765	     60616 ns/op	   31927 B/op	     910 allocs/op
-BenchmarkLoad/env_large/cold/kelseyhightower-4         	   19760	     60482 ns/op	   31927 B/op	     910 allocs/op
-BenchmarkLoad/env_large/cold/kelseyhightower-4         	   19996	     59988 ns/op	   31927 B/op	     910 allocs/op
-BenchmarkLoad/env_large/cold/kelseyhightower-4         	   20041	     60236 ns/op	   31927 B/op	     910 allocs/op
-BenchmarkLoad/env_large/cold/kelseyhightower-4         	   19833	     59425 ns/op	   31927 B/op	     910 allocs/op
-BenchmarkLoad/env_large/warm/kelseyhightower-4         	   20342	     59752 ns/op	   31911 B/op	     909 allocs/op
-BenchmarkLoad/env_large/warm/kelseyhightower-4         	   19819	     60020 ns/op	   31911 B/op	     909 allocs/op
-BenchmarkLoad/env_large/warm/kelseyhightower-4         	   19953	     60742 ns/op	   31911 B/op	     909 allocs/op
-BenchmarkLoad/env_large/warm/kelseyhightower-4         	   20168	     59788 ns/op	   31911 B/op	     909 allocs/op
-BenchmarkLoad/env_large/warm/kelseyhightower-4         	   20024	     59767 ns/op	   31911 B/op	     909 allocs/op
-BenchmarkLoad/env_large/warm/kelseyhightower-4         	   20217	     59628 ns/op	   31911 B/op	     909 allocs/op
-BenchmarkLoad/env_large/warm/kelseyhightower-4         	   20268	     60656 ns/op	   31911 B/op	     909 allocs/op
-BenchmarkLoad/env_large/warm/kelseyhightower-4         	   19893	     59559 ns/op	   31911 B/op	     909 allocs/op
-BenchmarkLoad/env_large/warm/kelseyhightower-4         	   20463	     60026 ns/op	   31911 B/op	     909 allocs/op
-BenchmarkLoad/env_large/warm/kelseyhightower-4         	   20094	     60076 ns/op	   31911 B/op	     909 allocs/op
-BenchmarkLoad/env_large/cold/stdlib-4                  	  459630	      2510 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/cold/stdlib-4                  	  455311	      2496 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/cold/stdlib-4                  	  464805	      2488 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/cold/stdlib-4                  	  461241	      2485 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/cold/stdlib-4                  	  467545	      2491 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/cold/stdlib-4                  	  465954	      2498 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/cold/stdlib-4                  	  464952	      2507 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/cold/stdlib-4                  	  447195	      2509 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/cold/stdlib-4                  	  455758	      2500 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/cold/stdlib-4                  	  460471	      2508 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/warm/stdlib-4                  	  450147	      2540 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/warm/stdlib-4                  	  461815	      2515 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/warm/stdlib-4                  	  440119	      2499 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/warm/stdlib-4                  	  464085	      2485 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/warm/stdlib-4                  	  474294	      2470 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/warm/stdlib-4                  	  462052	      2479 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/warm/stdlib-4                  	  463095	      2514 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/warm/stdlib-4                  	  470599	      2485 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/warm/stdlib-4                  	  453302	      2497 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/env_large/warm/stdlib-4                  	  458704	      2525 ns/op	    1008 B/op	       5 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-4                  	   36765	     31914 ns/op	   13946 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-4                  	   37459	     32528 ns/op	   13946 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-4                  	   37266	     32209 ns/op	   13946 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-4                  	   37008	     32209 ns/op	   13946 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-4                  	   36187	     32874 ns/op	   13946 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-4                  	   37279	     32195 ns/op	   13946 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-4                  	   37411	     32079 ns/op	   13946 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-4                  	   36960	     32146 ns/op	   13946 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-4                  	   37248	     32301 ns/op	   13946 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-4                  	   37502	     32082 ns/op	   13946 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-4                  	   49095	     24127 ns/op	   11098 B/op	     105 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-4                  	   49329	     24009 ns/op	   11098 B/op	     105 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-4                  	   49467	     24313 ns/op	   11098 B/op	     105 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-4                  	   48920	     24346 ns/op	   11098 B/op	     105 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-4                  	   49152	     24196 ns/op	   11098 B/op	     105 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-4                  	   49405	     24309 ns/op	   11098 B/op	     105 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-4                  	   48705	     24529 ns/op	   11098 B/op	     105 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-4                  	   49324	     24521 ns/op	   11098 B/op	     105 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-4                  	   49520	     24509 ns/op	   11098 B/op	     105 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-4                  	   49330	     24555 ns/op	   11098 B/op	     105 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37485	     32280 ns/op	   13906 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37220	     32086 ns/op	   13906 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37476	     32164 ns/op	   13906 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37582	     31814 ns/op	   13906 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37840	     31406 ns/op	   13906 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37527	     32259 ns/op	   13906 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   36735	     31932 ns/op	   13906 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   36984	     33426 ns/op	   13906 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   36279	     33073 ns/op	   13906 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   36379	     32884 ns/op	   13906 B/op	     159 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   49662	     23778 ns/op	   10986 B/op	     100 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   50298	     23786 ns/op	   10986 B/op	     100 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   50301	     24161 ns/op	   10986 B/op	     100 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   51285	     23675 ns/op	   10986 B/op	     100 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   51154	     23679 ns/op	   10986 B/op	     100 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   50146	     23513 ns/op	   10986 B/op	     100 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   50634	     23616 ns/op	   10986 B/op	     100 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   50802	     23700 ns/op	   10986 B/op	     100 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   50082	     23805 ns/op	   10986 B/op	     100 allocs/op
-BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   49723	     23833 ns/op	   10986 B/op	     100 allocs/op
-BenchmarkLoad/yaml_small/cold/koanf-4                  	   28208	     42193 ns/op	   17827 B/op	     250 allocs/op
-BenchmarkLoad/yaml_small/cold/koanf-4                  	   28322	     42186 ns/op	   17827 B/op	     250 allocs/op
-BenchmarkLoad/yaml_small/cold/koanf-4                  	   27928	     42471 ns/op	   17827 B/op	     250 allocs/op
-BenchmarkLoad/yaml_small/cold/koanf-4                  	   28378	     42343 ns/op	   17827 B/op	     250 allocs/op
-BenchmarkLoad/yaml_small/cold/koanf-4                  	   28638	     42551 ns/op	   17827 B/op	     250 allocs/op
-BenchmarkLoad/yaml_small/cold/koanf-4                  	   28028	     42446 ns/op	   17827 B/op	     250 allocs/op
-BenchmarkLoad/yaml_small/cold/koanf-4                  	   28240	     42226 ns/op	   17827 B/op	     250 allocs/op
-BenchmarkLoad/yaml_small/cold/koanf-4                  	   28255	     42170 ns/op	   17827 B/op	     250 allocs/op
-BenchmarkLoad/yaml_small/cold/koanf-4                  	   28452	     42689 ns/op	   17827 B/op	     250 allocs/op
-BenchmarkLoad/yaml_small/cold/koanf-4                  	   28677	     41926 ns/op	   17827 B/op	     250 allocs/op
-BenchmarkLoad/yaml_small/warm/koanf-4                  	   28956	     42049 ns/op	   17795 B/op	     249 allocs/op
-BenchmarkLoad/yaml_small/warm/koanf-4                  	   28144	     42199 ns/op	   17795 B/op	     249 allocs/op
-BenchmarkLoad/yaml_small/warm/koanf-4                  	   28262	     42159 ns/op	   17795 B/op	     249 allocs/op
-BenchmarkLoad/yaml_small/warm/koanf-4                  	   28827	     41907 ns/op	   17795 B/op	     249 allocs/op
-BenchmarkLoad/yaml_small/warm/koanf-4                  	   28249	     42105 ns/op	   17795 B/op	     249 allocs/op
-BenchmarkLoad/yaml_small/warm/koanf-4                  	   28560	     41929 ns/op	   17795 B/op	     249 allocs/op
-BenchmarkLoad/yaml_small/warm/koanf-4                  	   28506	     42138 ns/op	   17795 B/op	     249 allocs/op
-BenchmarkLoad/yaml_small/warm/koanf-4                  	   28332	     42318 ns/op	   17795 B/op	     249 allocs/op
-BenchmarkLoad/yaml_small/warm/koanf-4                  	   28618	     42079 ns/op	   17795 B/op	     249 allocs/op
-BenchmarkLoad/yaml_small/warm/koanf-4                  	   28676	     41506 ns/op	   17795 B/op	     249 allocs/op
-BenchmarkLoad/yaml_small/cold/viper-4                  	   32398	     37089 ns/op	   16707 B/op	     183 allocs/op
-BenchmarkLoad/yaml_small/cold/viper-4                  	   32212	     36982 ns/op	   16707 B/op	     183 allocs/op
-BenchmarkLoad/yaml_small/cold/viper-4                  	   32593	     36987 ns/op	   16707 B/op	     183 allocs/op
-BenchmarkLoad/yaml_small/cold/viper-4                  	   32389	     37170 ns/op	   16707 B/op	     183 allocs/op
-BenchmarkLoad/yaml_small/cold/viper-4                  	   31113	     37248 ns/op	   16707 B/op	     183 allocs/op
-BenchmarkLoad/yaml_small/cold/viper-4                  	   32464	     37680 ns/op	   16707 B/op	     183 allocs/op
-BenchmarkLoad/yaml_small/cold/viper-4                  	   31371	     38084 ns/op	   16707 B/op	     183 allocs/op
-BenchmarkLoad/yaml_small/cold/viper-4                  	   31958	     37850 ns/op	   16707 B/op	     183 allocs/op
-BenchmarkLoad/yaml_small/cold/viper-4                  	   32041	     37859 ns/op	   16707 B/op	     183 allocs/op
-BenchmarkLoad/yaml_small/cold/viper-4                  	   32008	     38020 ns/op	   16707 B/op	     183 allocs/op
-BenchmarkLoad/yaml_small/warm/viper-4                  	   32212	     37748 ns/op	   15851 B/op	     171 allocs/op
-BenchmarkLoad/yaml_small/warm/viper-4                  	   32247	     37052 ns/op	   15851 B/op	     171 allocs/op
-BenchmarkLoad/yaml_small/warm/viper-4                  	   32617	     37102 ns/op	   15851 B/op	     171 allocs/op
-BenchmarkLoad/yaml_small/warm/viper-4                  	   32119	     36925 ns/op	   15851 B/op	     171 allocs/op
-BenchmarkLoad/yaml_small/warm/viper-4                  	   32628	     36928 ns/op	   15851 B/op	     171 allocs/op
-BenchmarkLoad/yaml_small/warm/viper-4                  	   32338	     36994 ns/op	   15851 B/op	     171 allocs/op
-BenchmarkLoad/yaml_small/warm/viper-4                  	   32552	     36501 ns/op	   15851 B/op	     171 allocs/op
-BenchmarkLoad/yaml_small/warm/viper-4                  	   32895	     36363 ns/op	   15851 B/op	     171 allocs/op
-BenchmarkLoad/yaml_small/warm/viper-4                  	   32857	     36984 ns/op	   15851 B/op	     171 allocs/op
-BenchmarkLoad/yaml_small/warm/viper-4                  	   32796	     36724 ns/op	   15851 B/op	     171 allocs/op
-BenchmarkLoad/yaml_small/cold/xload-4                  	   42633	     27695 ns/op	   11714 B/op	     138 allocs/op
-BenchmarkLoad/yaml_small/cold/xload-4                  	   43231	     27369 ns/op	   11714 B/op	     138 allocs/op
-BenchmarkLoad/yaml_small/cold/xload-4                  	   42808	     27977 ns/op	   11714 B/op	     138 allocs/op
-BenchmarkLoad/yaml_small/cold/xload-4                  	   43683	     27269 ns/op	   11714 B/op	     138 allocs/op
-BenchmarkLoad/yaml_small/cold/xload-4                  	   43785	     27310 ns/op	   11714 B/op	     138 allocs/op
-BenchmarkLoad/yaml_small/cold/xload-4                  	   43830	     27094 ns/op	   11714 B/op	     138 allocs/op
-BenchmarkLoad/yaml_small/cold/xload-4                  	   43200	     27256 ns/op	   11714 B/op	     138 allocs/op
-BenchmarkLoad/yaml_small/cold/xload-4                  	   43735	     27086 ns/op	   11714 B/op	     138 allocs/op
-BenchmarkLoad/yaml_small/cold/xload-4                  	   44484	     27297 ns/op	   11714 B/op	     138 allocs/op
-BenchmarkLoad/yaml_small/cold/xload-4                  	   44301	     27569 ns/op	   11714 B/op	     138 allocs/op
-BenchmarkLoad/yaml_small/warm/xload-4                  	  507469	      2220 ns/op	    1000 B/op	      23 allocs/op
-BenchmarkLoad/yaml_small/warm/xload-4                  	  522450	      2228 ns/op	    1000 B/op	      23 allocs/op
-BenchmarkLoad/yaml_small/warm/xload-4                  	  517726	      2216 ns/op	    1000 B/op	      23 allocs/op
-BenchmarkLoad/yaml_small/warm/xload-4                  	  530832	      2242 ns/op	    1000 B/op	      23 allocs/op
-BenchmarkLoad/yaml_small/warm/xload-4                  	  528031	      2210 ns/op	    1000 B/op	      23 allocs/op
-BenchmarkLoad/yaml_small/warm/xload-4                  	  525781	      2199 ns/op	    1000 B/op	      23 allocs/op
-BenchmarkLoad/yaml_small/warm/xload-4                  	  509076	      2216 ns/op	    1000 B/op	      23 allocs/op
-BenchmarkLoad/yaml_small/warm/xload-4                  	  519735	      2208 ns/op	    1000 B/op	      23 allocs/op
-BenchmarkLoad/yaml_small/warm/xload-4                  	  527455	      2201 ns/op	    1000 B/op	      23 allocs/op
-BenchmarkLoad/yaml_small/warm/xload-4                  	  525708	      2206 ns/op	    1000 B/op	      23 allocs/op
-BenchmarkLoad/yaml_small/cold/stdlib-4                 	   51991	     23594 ns/op	   10090 B/op	      99 allocs/op
-BenchmarkLoad/yaml_small/cold/stdlib-4                 	   51262	     23681 ns/op	   10089 B/op	      99 allocs/op
-BenchmarkLoad/yaml_small/cold/stdlib-4                 	   51306	     23683 ns/op	   10089 B/op	      99 allocs/op
-BenchmarkLoad/yaml_small/cold/stdlib-4                 	   50565	     23564 ns/op	   10089 B/op	      99 allocs/op
-BenchmarkLoad/yaml_small/cold/stdlib-4                 	   48511	     23976 ns/op	   10089 B/op	      99 allocs/op
-BenchmarkLoad/yaml_small/cold/stdlib-4                 	   50262	     23678 ns/op	   10089 B/op	      99 allocs/op
-BenchmarkLoad/yaml_small/cold/stdlib-4                 	   51596	     23183 ns/op	   10090 B/op	      99 allocs/op
-BenchmarkLoad/yaml_small/cold/stdlib-4                 	   51364	     23440 ns/op	   10090 B/op	      99 allocs/op
-BenchmarkLoad/yaml_small/cold/stdlib-4                 	   50828	     24060 ns/op	   10090 B/op	      99 allocs/op
-BenchmarkLoad/yaml_small/cold/stdlib-4                 	   49821	     23744 ns/op	   10090 B/op	      99 allocs/op
-BenchmarkLoad/yaml_small/warm/stdlib-4                 	   51010	     23324 ns/op	   10057 B/op	      98 allocs/op
-BenchmarkLoad/yaml_small/warm/stdlib-4                 	   50389	     23557 ns/op	   10057 B/op	      98 allocs/op
-BenchmarkLoad/yaml_small/warm/stdlib-4                 	   51225	     23195 ns/op	   10057 B/op	      98 allocs/op
-BenchmarkLoad/yaml_small/warm/stdlib-4                 	   50338	     23632 ns/op	   10057 B/op	      98 allocs/op
-BenchmarkLoad/yaml_small/warm/stdlib-4                 	   51487	     23282 ns/op	   10057 B/op	      98 allocs/op
-BenchmarkLoad/yaml_small/warm/stdlib-4                 	   52548	     22688 ns/op	   10057 B/op	      98 allocs/op
-BenchmarkLoad/yaml_small/warm/stdlib-4                 	   51877	     22657 ns/op	   10057 B/op	      98 allocs/op
-BenchmarkLoad/yaml_small/warm/stdlib-4                 	   52473	     22873 ns/op	   10057 B/op	      98 allocs/op
-BenchmarkLoad/yaml_small/warm/stdlib-4                 	   52335	     22846 ns/op	   10058 B/op	      98 allocs/op
-BenchmarkLoad/yaml_small/warm/stdlib-4                 	   51588	     22878 ns/op	   10057 B/op	      98 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-4                  	    4881	    231056 ns/op	   74894 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-4                  	    4872	    231540 ns/op	   74894 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-4                  	    5008	    231977 ns/op	   74894 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-4                  	    4809	    231484 ns/op	   74894 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-4                  	    4990	    231209 ns/op	   74894 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-4                  	    4975	    232853 ns/op	   74894 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-4                  	    4800	    236414 ns/op	   74894 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-4                  	    4701	    231069 ns/op	   74894 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-4                  	    4906	    231141 ns/op	   74894 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-4                  	    4922	    230504 ns/op	   74894 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-4                  	    8079	    130193 ns/op	   47156 B/op	     746 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-4                  	    8403	    133004 ns/op	   47156 B/op	     746 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-4                  	    8073	    130022 ns/op	   47156 B/op	     746 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-4                  	    8439	    130808 ns/op	   47156 B/op	     746 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-4                  	    8112	    130484 ns/op	   47156 B/op	     746 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-4                  	    8316	    131386 ns/op	   47156 B/op	     746 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-4                  	    8310	    129855 ns/op	   47156 B/op	     746 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-4                  	    8354	    130460 ns/op	   47156 B/op	     746 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-4                  	    8295	    130913 ns/op	   47156 B/op	     746 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-4                  	    8307	    131179 ns/op	   47156 B/op	     746 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    4941	    230257 ns/op	   74853 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    5172	    231043 ns/op	   74854 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    5178	    227993 ns/op	   74854 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    5156	    226810 ns/op	   74854 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    4784	    228280 ns/op	   74854 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    4933	    227807 ns/op	   74854 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    4904	    227628 ns/op	   74854 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    4969	    229528 ns/op	   74854 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    4875	    232282 ns/op	   74854 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    4958	    231535 ns/op	   74854 B/op	    1188 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8235	    129936 ns/op	   47041 B/op	     741 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8317	    130018 ns/op	   47041 B/op	     741 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8851	    128781 ns/op	   47041 B/op	     741 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8661	    128884 ns/op	   47041 B/op	     741 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8366	    128688 ns/op	   47041 B/op	     741 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8758	    129240 ns/op	   47041 B/op	     741 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    9265	    129732 ns/op	   47041 B/op	     741 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8407	    131026 ns/op	   47041 B/op	     741 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8594	    129178 ns/op	   47041 B/op	     741 allocs/op
-BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8412	    130575 ns/op	   47041 B/op	     741 allocs/op
-BenchmarkLoad/yaml_large/cold/koanf-4                  	    3744	    314179 ns/op	  125225 B/op	    2424 allocs/op
-BenchmarkLoad/yaml_large/cold/koanf-4                  	    3778	    310942 ns/op	  125224 B/op	    2424 allocs/op
-BenchmarkLoad/yaml_large/cold/koanf-4                  	    3501	    311542 ns/op	  125225 B/op	    2424 allocs/op
-BenchmarkLoad/yaml_large/cold/koanf-4                  	    3685	    328509 ns/op	  125225 B/op	    2424 allocs/op
-BenchmarkLoad/yaml_large/cold/koanf-4                  	    3704	    312135 ns/op	  125224 B/op	    2424 allocs/op
-BenchmarkLoad/yaml_large/cold/koanf-4                  	    3768	    311379 ns/op	  125225 B/op	    2424 allocs/op
-BenchmarkLoad/yaml_large/cold/koanf-4                  	    3649	    311396 ns/op	  125224 B/op	    2424 allocs/op
-BenchmarkLoad/yaml_large/cold/koanf-4                  	    3607	    312459 ns/op	  125224 B/op	    2424 allocs/op
-BenchmarkLoad/yaml_large/cold/koanf-4                  	    3829	    308464 ns/op	  125224 B/op	    2424 allocs/op
-BenchmarkLoad/yaml_large/cold/koanf-4                  	    3820	    306189 ns/op	  125224 B/op	    2424 allocs/op
-BenchmarkLoad/yaml_large/warm/koanf-4                  	    3763	    309871 ns/op	  125193 B/op	    2423 allocs/op
-BenchmarkLoad/yaml_large/warm/koanf-4                  	    3831	    308317 ns/op	  125192 B/op	    2423 allocs/op
-BenchmarkLoad/yaml_large/warm/koanf-4                  	    3636	    311643 ns/op	  125192 B/op	    2423 allocs/op
-BenchmarkLoad/yaml_large/warm/koanf-4                  	    3786	    310575 ns/op	  125193 B/op	    2423 allocs/op
-BenchmarkLoad/yaml_large/warm/koanf-4                  	    3674	    306768 ns/op	  125192 B/op	    2423 allocs/op
-BenchmarkLoad/yaml_large/warm/koanf-4                  	    3753	    313654 ns/op	  125192 B/op	    2423 allocs/op
-BenchmarkLoad/yaml_large/warm/koanf-4                  	    3726	    306741 ns/op	  125192 B/op	    2423 allocs/op
-BenchmarkLoad/yaml_large/warm/koanf-4                  	    3896	    310626 ns/op	  125192 B/op	    2423 allocs/op
-BenchmarkLoad/yaml_large/warm/koanf-4                  	    3790	    319912 ns/op	  125192 B/op	    2423 allocs/op
-BenchmarkLoad/yaml_large/warm/koanf-4                  	    3738	    309688 ns/op	  125192 B/op	    2423 allocs/op
-BenchmarkLoad/yaml_large/cold/viper-4                  	    4555	    263738 ns/op	   99003 B/op	    1704 allocs/op
-BenchmarkLoad/yaml_large/cold/viper-4                  	    4513	    262168 ns/op	   99003 B/op	    1704 allocs/op
-BenchmarkLoad/yaml_large/cold/viper-4                  	    4310	    258169 ns/op	   99003 B/op	    1704 allocs/op
-BenchmarkLoad/yaml_large/cold/viper-4                  	    4357	    259303 ns/op	   99003 B/op	    1704 allocs/op
-BenchmarkLoad/yaml_large/cold/viper-4                  	    4449	    257049 ns/op	   99003 B/op	    1704 allocs/op
-BenchmarkLoad/yaml_large/cold/viper-4                  	    4678	    259457 ns/op	   99003 B/op	    1704 allocs/op
-BenchmarkLoad/yaml_large/cold/viper-4                  	    4335	    261504 ns/op	   99003 B/op	    1704 allocs/op
-BenchmarkLoad/yaml_large/cold/viper-4                  	    4474	    257612 ns/op	   99003 B/op	    1704 allocs/op
-BenchmarkLoad/yaml_large/cold/viper-4                  	    4356	    257831 ns/op	   99003 B/op	    1704 allocs/op
-BenchmarkLoad/yaml_large/cold/viper-4                  	    4414	    257526 ns/op	   99003 B/op	    1704 allocs/op
-BenchmarkLoad/yaml_large/warm/viper-4                  	    4424	    255203 ns/op	   98147 B/op	    1692 allocs/op
-BenchmarkLoad/yaml_large/warm/viper-4                  	    4485	    255628 ns/op	   98147 B/op	    1692 allocs/op
-BenchmarkLoad/yaml_large/warm/viper-4                  	    4402	    257503 ns/op	   98147 B/op	    1692 allocs/op
-BenchmarkLoad/yaml_large/warm/viper-4                  	    4467	    259675 ns/op	   98147 B/op	    1692 allocs/op
-BenchmarkLoad/yaml_large/warm/viper-4                  	    4429	    259111 ns/op	   98147 B/op	    1692 allocs/op
-BenchmarkLoad/yaml_large/warm/viper-4                  	    4575	    259933 ns/op	   98147 B/op	    1692 allocs/op
-BenchmarkLoad/yaml_large/warm/viper-4                  	    4340	    260427 ns/op	   98147 B/op	    1692 allocs/op
-BenchmarkLoad/yaml_large/warm/viper-4                  	    4572	    258487 ns/op	   98147 B/op	    1692 allocs/op
-BenchmarkLoad/yaml_large/warm/viper-4                  	    4572	    257941 ns/op	   98147 B/op	    1692 allocs/op
-BenchmarkLoad/yaml_large/warm/viper-4                  	    4346	    260368 ns/op	   98147 B/op	    1692 allocs/op
-BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8190	    127698 ns/op	   40688 B/op	     751 allocs/op
-BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8319	    127454 ns/op	   40688 B/op	     751 allocs/op
-BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8626	    127807 ns/op	   40688 B/op	     751 allocs/op
-BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8425	    126496 ns/op	   40687 B/op	     751 allocs/op
-BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8691	    126824 ns/op	   40687 B/op	     751 allocs/op
-BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8259	    127122 ns/op	   40688 B/op	     751 allocs/op
-BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8497	    128194 ns/op	   40688 B/op	     751 allocs/op
-BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8671	    126906 ns/op	   40687 B/op	     751 allocs/op
-BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8566	    125486 ns/op	   40687 B/op	     751 allocs/op
-BenchmarkLoad/yaml_large/cold/stdlib-4                 	    9465	    128490 ns/op	   40687 B/op	     751 allocs/op
-BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8500	    127447 ns/op	   40655 B/op	     750 allocs/op
-BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8523	    126964 ns/op	   40655 B/op	     750 allocs/op
-BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8707	    127145 ns/op	   40656 B/op	     750 allocs/op
-BenchmarkLoad/yaml_large/warm/stdlib-4                 	    9121	    127596 ns/op	   40655 B/op	     750 allocs/op
-BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8518	    130082 ns/op	   40655 B/op	     750 allocs/op
-BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8932	    127708 ns/op	   40656 B/op	     750 allocs/op
-BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8599	    128321 ns/op	   40656 B/op	     750 allocs/op
-BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8521	    128350 ns/op	   40656 B/op	     750 allocs/op
-BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8416	    127159 ns/op	   40656 B/op	     750 allocs/op
-BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8494	    128053 ns/op	   40656 B/op	     750 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-4                  	    1508	    783513 ns/op	  212017 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-4                  	    1534	    793687 ns/op	  212019 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-4                  	    1434	    785968 ns/op	  212018 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-4                  	    1488	    822419 ns/op	  212018 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-4                  	    1424	    822010 ns/op	  212018 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-4                  	    1500	    779172 ns/op	  212017 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-4                  	    1506	    759383 ns/op	  212017 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-4                  	    1534	    795378 ns/op	  212018 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-4                  	    1411	    778537 ns/op	  212018 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-4                  	    1569	    780806 ns/op	  212019 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-4                  	    2074	    584737 ns/op	  182233 B/op	    1912 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-4                  	    2155	    550320 ns/op	  182231 B/op	    1912 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-4                  	    2148	    568557 ns/op	  182232 B/op	    1912 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-4                  	    2072	    555901 ns/op	  182233 B/op	    1912 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-4                  	    2019	    542121 ns/op	  182233 B/op	    1912 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-4                  	    2216	    551280 ns/op	  182232 B/op	    1912 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-4                  	    2124	    561806 ns/op	  182233 B/op	    1912 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-4                  	    2108	    547072 ns/op	  182232 B/op	    1912 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-4                  	    2181	    551911 ns/op	  182233 B/op	    1912 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-4                  	    2067	    550943 ns/op	  182233 B/op	    1912 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1456	    791695 ns/op	  212194 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1384	    772595 ns/op	  212195 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1584	    761699 ns/op	  212194 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1500	    778724 ns/op	  212194 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1497	    749505 ns/op	  212194 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1566	    783525 ns/op	  212194 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1351	    765621 ns/op	  212194 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1585	    770259 ns/op	  212194 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1639	    753918 ns/op	  212193 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1578	    761523 ns/op	  212194 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2101	    557126 ns/op	  182227 B/op	    1906 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2029	    542008 ns/op	  182227 B/op	    1906 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2110	    547577 ns/op	  182227 B/op	    1906 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2211	    554435 ns/op	  182227 B/op	    1906 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2185	    570090 ns/op	  182227 B/op	    1906 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-bound-4            	    1964	    564926 ns/op	  182228 B/op	    1906 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2192	    570500 ns/op	  182228 B/op	    1906 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2095	    553302 ns/op	  182228 B/op	    1906 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2156	    537141 ns/op	  182227 B/op	    1906 allocs/op
-BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2086	    549829 ns/op	  182226 B/op	    1906 allocs/op
-BenchmarkLoad/dump_large/cold/koanf-4                  	    2136	    572302 ns/op	  199883 B/op	    2369 allocs/op
-BenchmarkLoad/dump_large/cold/koanf-4                  	    1909	    559602 ns/op	  199884 B/op	    2369 allocs/op
-BenchmarkLoad/dump_large/cold/koanf-4                  	    2124	    580790 ns/op	  199883 B/op	    2369 allocs/op
-BenchmarkLoad/dump_large/cold/koanf-4                  	    2019	    573363 ns/op	  199883 B/op	    2369 allocs/op
-BenchmarkLoad/dump_large/cold/koanf-4                  	    1995	    569050 ns/op	  199884 B/op	    2369 allocs/op
-BenchmarkLoad/dump_large/cold/koanf-4                  	    2016	    571640 ns/op	  199884 B/op	    2369 allocs/op
-BenchmarkLoad/dump_large/cold/koanf-4                  	    2086	    575237 ns/op	  199884 B/op	    2369 allocs/op
-BenchmarkLoad/dump_large/cold/koanf-4                  	    2085	    592599 ns/op	  199884 B/op	    2369 allocs/op
-BenchmarkLoad/dump_large/cold/koanf-4                  	    1975	    586906 ns/op	  199884 B/op	    2369 allocs/op
-BenchmarkLoad/dump_large/cold/koanf-4                  	    2192	    609680 ns/op	  199884 B/op	    2369 allocs/op
-BenchmarkLoad/dump_large/warm/koanf-4                  	    2456	    489837 ns/op	  197652 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/warm/koanf-4                  	    2502	    489363 ns/op	  197652 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/warm/koanf-4                  	    2390	    486101 ns/op	  197651 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/warm/koanf-4                  	    2402	    482075 ns/op	  197652 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/warm/koanf-4                  	    2547	    486972 ns/op	  197650 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/warm/koanf-4                  	    2527	    483193 ns/op	  197651 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/warm/koanf-4                  	    2488	    481449 ns/op	  197651 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/warm/koanf-4                  	    2389	    485070 ns/op	  197651 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/warm/koanf-4                  	    2425	    479203 ns/op	  197652 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/warm/koanf-4                  	    2430	    487353 ns/op	  197652 B/op	    2358 allocs/op
-BenchmarkLoad/dump_large/cold/viper-4                  	    1334	    955702 ns/op	  170728 B/op	    1708 allocs/op
-BenchmarkLoad/dump_large/cold/viper-4                  	    1219	    932613 ns/op	  170730 B/op	    1708 allocs/op
-BenchmarkLoad/dump_large/cold/viper-4                  	    1316	    937806 ns/op	  170728 B/op	    1708 allocs/op
-BenchmarkLoad/dump_large/cold/viper-4                  	    1242	    944475 ns/op	  170730 B/op	    1708 allocs/op
-BenchmarkLoad/dump_large/cold/viper-4                  	    1302	    950518 ns/op	  170728 B/op	    1708 allocs/op
-BenchmarkLoad/dump_large/cold/viper-4                  	    1194	    959092 ns/op	  170730 B/op	    1708 allocs/op
-BenchmarkLoad/dump_large/cold/viper-4                  	    1286	    933484 ns/op	  170730 B/op	    1708 allocs/op
-BenchmarkLoad/dump_large/cold/viper-4                  	    1309	    917452 ns/op	  170729 B/op	    1708 allocs/op
-BenchmarkLoad/dump_large/cold/viper-4                  	    1346	    942750 ns/op	  170730 B/op	    1708 allocs/op
-BenchmarkLoad/dump_large/cold/viper-4                  	    1189	    908650 ns/op	  170729 B/op	    1708 allocs/op
-BenchmarkLoad/dump_large/warm/viper-4                  	    1498	    791330 ns/op	  168498 B/op	    1697 allocs/op
-BenchmarkLoad/dump_large/warm/viper-4                  	    1516	    796982 ns/op	  168497 B/op	    1697 allocs/op
-BenchmarkLoad/dump_large/warm/viper-4                  	    1515	    795994 ns/op	  168496 B/op	    1697 allocs/op
-BenchmarkLoad/dump_large/warm/viper-4                  	    1399	    830594 ns/op	  168496 B/op	    1697 allocs/op
-BenchmarkLoad/dump_large/warm/viper-4                  	    1288	    843405 ns/op	  168496 B/op	    1697 allocs/op
-BenchmarkLoad/dump_large/warm/viper-4                  	    1419	    814275 ns/op	  168500 B/op	    1697 allocs/op
-BenchmarkLoad/dump_large/warm/viper-4                  	    1436	    820966 ns/op	  168496 B/op	    1697 allocs/op
-BenchmarkLoad/dump_large/warm/viper-4                  	    1478	    819037 ns/op	  168497 B/op	    1697 allocs/op
-BenchmarkLoad/dump_large/warm/viper-4                  	    1446	    800380 ns/op	  168495 B/op	    1697 allocs/op
-BenchmarkLoad/dump_large/warm/viper-4                  	    1413	    813107 ns/op	  168496 B/op	    1697 allocs/op
-BenchmarkLoad/dump_large/cold/stdlib-4                 	    3003	    416936 ns/op	  128338 B/op	    1104 allocs/op
-BenchmarkLoad/dump_large/cold/stdlib-4                 	    2983	    408308 ns/op	  128338 B/op	    1104 allocs/op
-BenchmarkLoad/dump_large/cold/stdlib-4                 	    3075	    401785 ns/op	  128337 B/op	    1104 allocs/op
-BenchmarkLoad/dump_large/cold/stdlib-4                 	    2724	    403448 ns/op	  128337 B/op	    1104 allocs/op
-BenchmarkLoad/dump_large/cold/stdlib-4                 	    2715	    397446 ns/op	  128337 B/op	    1104 allocs/op
-BenchmarkLoad/dump_large/cold/stdlib-4                 	    2950	    407680 ns/op	  128337 B/op	    1104 allocs/op
-BenchmarkLoad/dump_large/cold/stdlib-4                 	    2761	    411790 ns/op	  128337 B/op	    1104 allocs/op
-BenchmarkLoad/dump_large/cold/stdlib-4                 	    2968	    399715 ns/op	  128337 B/op	    1104 allocs/op
-BenchmarkLoad/dump_large/cold/stdlib-4                 	    3058	    410309 ns/op	  128337 B/op	    1104 allocs/op
-BenchmarkLoad/dump_large/cold/stdlib-4                 	    2878	    412116 ns/op	  128338 B/op	    1104 allocs/op
-BenchmarkLoad/dump_large/warm/stdlib-4                 	    3726	    325245 ns/op	  126106 B/op	    1093 allocs/op
-BenchmarkLoad/dump_large/warm/stdlib-4                 	    3350	    321016 ns/op	  126105 B/op	    1093 allocs/op
-BenchmarkLoad/dump_large/warm/stdlib-4                 	    3357	    322629 ns/op	  126105 B/op	    1093 allocs/op
-BenchmarkLoad/dump_large/warm/stdlib-4                 	    3631	    323777 ns/op	  126105 B/op	    1093 allocs/op
-BenchmarkLoad/dump_large/warm/stdlib-4                 	    3808	    321372 ns/op	  126105 B/op	    1093 allocs/op
-BenchmarkLoad/dump_large/warm/stdlib-4                 	    3710	    327088 ns/op	  126105 B/op	    1093 allocs/op
-BenchmarkLoad/dump_large/warm/stdlib-4                 	    3271	    328583 ns/op	  126105 B/op	    1093 allocs/op
-BenchmarkLoad/dump_large/warm/stdlib-4                 	    3532	    320856 ns/op	  126105 B/op	    1093 allocs/op
-BenchmarkLoad/dump_large/warm/stdlib-4                 	    3660	    341079 ns/op	  126104 B/op	    1093 allocs/op
-BenchmarkLoad/dump_large/warm/stdlib-4                 	    4021	    330556 ns/op	  126105 B/op	    1093 allocs/op
-BenchmarkStructTagCost/pooled-4                        	17777157	        68.24 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/pooled-4                        	17623489	        68.83 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/pooled-4                        	17700586	        67.45 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/pooled-4                        	17761086	        67.67 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/pooled-4                        	17779134	        70.15 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/pooled-4                        	17723487	        67.48 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/pooled-4                        	17792540	        67.71 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/pooled-4                        	17499926	        67.39 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/pooled-4                        	17643352	        67.54 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/pooled-4                        	17741044	        67.39 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/per_library-4                   	 6365840	       194.6 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/per_library-4                   	 5810713	       207.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/per_library-4                   	 6346468	       189.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/per_library-4                   	 6345930	       188.8 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/per_library-4                   	 6365725	       189.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/per_library-4                   	 6358485	       200.2 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/per_library-4                   	 5934272	       208.1 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/per_library-4                   	 6349016	       189.5 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/per_library-4                   	 6358407	       189.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStructTagCost/per_library-4                   	 6352710	       201.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/cold/ferry-4         	  113865	      9946 ns/op	    6712 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-4         	  120049	      9862 ns/op	    6712 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-4         	  119906	      9874 ns/op	    6712 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-4         	  120164	     10601 ns/op	    6712 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-4         	  120502	      9944 ns/op	    6712 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-4         	  120884	      9922 ns/op	    6712 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-4         	  120423	      9904 ns/op	    6712 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-4         	  121833	      9897 ns/op	    6712 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-4         	  117388	      9875 ns/op	    6712 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-4         	  119838	      9881 ns/op	    6712 B/op	     118 allocs/op
+BenchmarkLoad/env_small/warm/ferry-4         	  275161	      4191 ns/op	    3624 B/op	      57 allocs/op
+BenchmarkLoad/env_small/warm/ferry-4         	  278844	      4234 ns/op	    3624 B/op	      57 allocs/op
+BenchmarkLoad/env_small/warm/ferry-4         	  278212	      4247 ns/op	    3624 B/op	      57 allocs/op
+BenchmarkLoad/env_small/warm/ferry-4         	  283339	      4249 ns/op	    3624 B/op	      57 allocs/op
+BenchmarkLoad/env_small/warm/ferry-4         	  279992	      4219 ns/op	    3624 B/op	      57 allocs/op
+BenchmarkLoad/env_small/warm/ferry-4         	  284155	      4206 ns/op	    3624 B/op	      57 allocs/op
+BenchmarkLoad/env_small/warm/ferry-4         	  277101	      4219 ns/op	    3624 B/op	      57 allocs/op
+BenchmarkLoad/env_small/warm/ferry-4         	  253450	      4196 ns/op	    3624 B/op	      57 allocs/op
+BenchmarkLoad/env_small/warm/ferry-4         	  276685	      4243 ns/op	    3624 B/op	      57 allocs/op
+BenchmarkLoad/env_small/warm/ferry-4         	  279288	      4233 ns/op	    3624 B/op	      57 allocs/op
+BenchmarkLoad/env_small/cold/ferry-bound-4   	  120319	      9831 ns/op	    6688 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-bound-4   	  119092	      9950 ns/op	    6688 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-bound-4   	  121983	      9932 ns/op	    6688 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-bound-4   	  120832	     10053 ns/op	    6688 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-bound-4   	  120622	      9907 ns/op	    6688 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-bound-4   	  120014	      9830 ns/op	    6688 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-bound-4   	  120588	      9816 ns/op	    6688 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-bound-4   	  120082	      9847 ns/op	    6688 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-bound-4   	  120979	      9854 ns/op	    6688 B/op	     118 allocs/op
+BenchmarkLoad/env_small/cold/ferry-bound-4   	  121105	      9892 ns/op	    6688 B/op	     118 allocs/op
+BenchmarkLoad/env_small/warm/ferry-bound-4   	  694528	      1580 ns/op	     928 B/op	      12 allocs/op
+BenchmarkLoad/env_small/warm/ferry-bound-4   	  722428	      1593 ns/op	     928 B/op	      12 allocs/op
+BenchmarkLoad/env_small/warm/ferry-bound-4   	  710604	      1587 ns/op	     928 B/op	      12 allocs/op
+BenchmarkLoad/env_small/warm/ferry-bound-4   	  722860	      1597 ns/op	     928 B/op	      12 allocs/op
+BenchmarkLoad/env_small/warm/ferry-bound-4   	  716904	      1585 ns/op	     928 B/op	      12 allocs/op
+BenchmarkLoad/env_small/warm/ferry-bound-4   	  721152	      1590 ns/op	     928 B/op	      12 allocs/op
+BenchmarkLoad/env_small/warm/ferry-bound-4   	  691192	      1580 ns/op	     928 B/op	      12 allocs/op
+BenchmarkLoad/env_small/warm/ferry-bound-4   	  708926	      1583 ns/op	     928 B/op	      12 allocs/op
+BenchmarkLoad/env_small/warm/ferry-bound-4   	  710463	      1574 ns/op	     928 B/op	      12 allocs/op
+BenchmarkLoad/env_small/warm/ferry-bound-4   	  723512	      1576 ns/op	     928 B/op	      12 allocs/op
+BenchmarkLoad/env_small/cold/koanf-4         	   85105	     13947 ns/op	    8632 B/op	     172 allocs/op
+BenchmarkLoad/env_small/cold/koanf-4         	   84592	     14003 ns/op	    8632 B/op	     172 allocs/op
+BenchmarkLoad/env_small/cold/koanf-4         	   85261	     14022 ns/op	    8632 B/op	     172 allocs/op
+BenchmarkLoad/env_small/cold/koanf-4         	   84385	     14031 ns/op	    8632 B/op	     172 allocs/op
+BenchmarkLoad/env_small/cold/koanf-4         	   85234	     14032 ns/op	    8632 B/op	     172 allocs/op
+BenchmarkLoad/env_small/cold/koanf-4         	   84754	     14089 ns/op	    8632 B/op	     172 allocs/op
+BenchmarkLoad/env_small/cold/koanf-4         	   86980	     13917 ns/op	    8632 B/op	     172 allocs/op
+BenchmarkLoad/env_small/cold/koanf-4         	   84111	     14015 ns/op	    8632 B/op	     172 allocs/op
+BenchmarkLoad/env_small/cold/koanf-4         	   83996	     14136 ns/op	    8632 B/op	     172 allocs/op
+BenchmarkLoad/env_small/cold/koanf-4         	   84206	     14101 ns/op	    8632 B/op	     172 allocs/op
+BenchmarkLoad/env_small/warm/koanf-4         	   83866	     13969 ns/op	    8616 B/op	     171 allocs/op
+BenchmarkLoad/env_small/warm/koanf-4         	   83400	     14270 ns/op	    8616 B/op	     171 allocs/op
+BenchmarkLoad/env_small/warm/koanf-4         	   84790	     13945 ns/op	    8616 B/op	     171 allocs/op
+BenchmarkLoad/env_small/warm/koanf-4         	   85002	     13995 ns/op	    8616 B/op	     171 allocs/op
+BenchmarkLoad/env_small/warm/koanf-4         	   86170	     13983 ns/op	    8616 B/op	     171 allocs/op
+BenchmarkLoad/env_small/warm/koanf-4         	   86223	     13949 ns/op	    8616 B/op	     171 allocs/op
+BenchmarkLoad/env_small/warm/koanf-4         	   85276	     14127 ns/op	    8616 B/op	     171 allocs/op
+BenchmarkLoad/env_small/warm/koanf-4         	   85167	     13919 ns/op	    8616 B/op	     171 allocs/op
+BenchmarkLoad/env_small/warm/koanf-4         	   85393	     14062 ns/op	    8616 B/op	     171 allocs/op
+BenchmarkLoad/env_small/warm/koanf-4         	   84628	     13997 ns/op	    8616 B/op	     171 allocs/op
+BenchmarkLoad/env_small/cold/viper-4         	  134528	      8912 ns/op	    5352 B/op	      89 allocs/op
+BenchmarkLoad/env_small/cold/viper-4         	  130950	      8902 ns/op	    5352 B/op	      89 allocs/op
+BenchmarkLoad/env_small/cold/viper-4         	  133380	      8885 ns/op	    5352 B/op	      89 allocs/op
+BenchmarkLoad/env_small/cold/viper-4         	  132807	      8921 ns/op	    5352 B/op	      89 allocs/op
+BenchmarkLoad/env_small/cold/viper-4         	  132699	      8955 ns/op	    5352 B/op	      89 allocs/op
+BenchmarkLoad/env_small/cold/viper-4         	  133870	      8978 ns/op	    5352 B/op	      89 allocs/op
+BenchmarkLoad/env_small/cold/viper-4         	  131218	      8940 ns/op	    5352 B/op	      89 allocs/op
+BenchmarkLoad/env_small/cold/viper-4         	  131517	      8923 ns/op	    5352 B/op	      89 allocs/op
+BenchmarkLoad/env_small/cold/viper-4         	  133872	      8944 ns/op	    5352 B/op	      89 allocs/op
+BenchmarkLoad/env_small/cold/viper-4         	  131820	      8903 ns/op	    5352 B/op	      89 allocs/op
+BenchmarkLoad/env_small/warm/viper-4         	  157300	      7497 ns/op	    3696 B/op	      67 allocs/op
+BenchmarkLoad/env_small/warm/viper-4         	  156849	      7500 ns/op	    3696 B/op	      67 allocs/op
+BenchmarkLoad/env_small/warm/viper-4         	  159607	      7538 ns/op	    3696 B/op	      67 allocs/op
+BenchmarkLoad/env_small/warm/viper-4         	  157582	      7488 ns/op	    3696 B/op	      67 allocs/op
+BenchmarkLoad/env_small/warm/viper-4         	  155866	      7543 ns/op	    3696 B/op	      67 allocs/op
+BenchmarkLoad/env_small/warm/viper-4         	  154524	      7523 ns/op	    3696 B/op	      67 allocs/op
+BenchmarkLoad/env_small/warm/viper-4         	  156079	      7513 ns/op	    3696 B/op	      67 allocs/op
+BenchmarkLoad/env_small/warm/viper-4         	  156080	      7547 ns/op	    3696 B/op	      67 allocs/op
+BenchmarkLoad/env_small/warm/viper-4         	  153102	      7506 ns/op	    3696 B/op	      67 allocs/op
+BenchmarkLoad/env_small/warm/viper-4         	  158211	      7526 ns/op	    3696 B/op	      67 allocs/op
+BenchmarkLoad/env_small/cold/xload-4         	  606914	      1887 ns/op	     952 B/op	      18 allocs/op
+BenchmarkLoad/env_small/cold/xload-4         	  597751	      1882 ns/op	     952 B/op	      18 allocs/op
+BenchmarkLoad/env_small/cold/xload-4         	  610821	      1892 ns/op	     952 B/op	      18 allocs/op
+BenchmarkLoad/env_small/cold/xload-4         	  610107	      1884 ns/op	     952 B/op	      18 allocs/op
+BenchmarkLoad/env_small/cold/xload-4         	  603585	      1897 ns/op	     952 B/op	      18 allocs/op
+BenchmarkLoad/env_small/cold/xload-4         	  615717	      1888 ns/op	     952 B/op	      18 allocs/op
+BenchmarkLoad/env_small/cold/xload-4         	  606898	      1887 ns/op	     952 B/op	      18 allocs/op
+BenchmarkLoad/env_small/cold/xload-4         	  598176	      1890 ns/op	     952 B/op	      18 allocs/op
+BenchmarkLoad/env_small/cold/xload-4         	  600994	      1892 ns/op	     952 B/op	      18 allocs/op
+BenchmarkLoad/env_small/cold/xload-4         	  614430	      1886 ns/op	     952 B/op	      18 allocs/op
+BenchmarkLoad/env_small/warm/xload-4         	  609116	      1876 ns/op	     936 B/op	      17 allocs/op
+BenchmarkLoad/env_small/warm/xload-4         	  607606	      1877 ns/op	     936 B/op	      17 allocs/op
+BenchmarkLoad/env_small/warm/xload-4         	  613664	      1870 ns/op	     936 B/op	      17 allocs/op
+BenchmarkLoad/env_small/warm/xload-4         	  612990	      1873 ns/op	     936 B/op	      17 allocs/op
+BenchmarkLoad/env_small/warm/xload-4         	  611536	      1884 ns/op	     936 B/op	      17 allocs/op
+BenchmarkLoad/env_small/warm/xload-4         	  594997	      1882 ns/op	     936 B/op	      17 allocs/op
+BenchmarkLoad/env_small/warm/xload-4         	  623626	      1871 ns/op	     936 B/op	      17 allocs/op
+BenchmarkLoad/env_small/warm/xload-4         	  610296	      1877 ns/op	     936 B/op	      17 allocs/op
+BenchmarkLoad/env_small/warm/xload-4         	  599662	      1886 ns/op	     936 B/op	      17 allocs/op
+BenchmarkLoad/env_small/warm/xload-4         	  610680	      1886 ns/op	     936 B/op	      17 allocs/op
+BenchmarkLoad/env_small/cold/go-envconfig-4  	 1518579	       780.6 ns/op	      16 B/op	       1 allocs/op
+BenchmarkLoad/env_small/cold/go-envconfig-4  	 1537856	       785.8 ns/op	      16 B/op	       1 allocs/op
+BenchmarkLoad/env_small/cold/go-envconfig-4  	 1520053	       788.0 ns/op	      16 B/op	       1 allocs/op
+BenchmarkLoad/env_small/cold/go-envconfig-4  	 1538401	       789.1 ns/op	      16 B/op	       1 allocs/op
+BenchmarkLoad/env_small/cold/go-envconfig-4  	 1531272	       786.3 ns/op	      16 B/op	       1 allocs/op
+BenchmarkLoad/env_small/cold/go-envconfig-4  	 1515776	       786.2 ns/op	      16 B/op	       1 allocs/op
+BenchmarkLoad/env_small/cold/go-envconfig-4  	 1516273	       790.3 ns/op	      16 B/op	       1 allocs/op
+BenchmarkLoad/env_small/cold/go-envconfig-4  	 1521452	       786.0 ns/op	      16 B/op	       1 allocs/op
+BenchmarkLoad/env_small/cold/go-envconfig-4  	 1518832	       785.5 ns/op	      16 B/op	       1 allocs/op
+BenchmarkLoad/env_small/cold/go-envconfig-4  	 1516311	       789.4 ns/op	      16 B/op	       1 allocs/op
+BenchmarkLoad/env_small/warm/go-envconfig-4  	 1581805	       763.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/go-envconfig-4  	 1566673	       770.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/go-envconfig-4  	 1559380	       764.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/go-envconfig-4  	 1567899	       779.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/go-envconfig-4  	 1539368	       774.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/go-envconfig-4  	 1581092	       774.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/go-envconfig-4  	 1555552	       770.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/go-envconfig-4  	 1549508	       769.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/go-envconfig-4  	 1543116	       765.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/go-envconfig-4  	 1574158	       773.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/cold/kelseyhightower-4         	  356233	      3234 ns/op	    1256 B/op	      57 allocs/op
+BenchmarkLoad/env_small/cold/kelseyhightower-4         	  356815	      3220 ns/op	    1256 B/op	      57 allocs/op
+BenchmarkLoad/env_small/cold/kelseyhightower-4         	  355088	      3228 ns/op	    1256 B/op	      57 allocs/op
+BenchmarkLoad/env_small/cold/kelseyhightower-4         	  358316	      3225 ns/op	    1256 B/op	      57 allocs/op
+BenchmarkLoad/env_small/cold/kelseyhightower-4         	  357433	      3199 ns/op	    1256 B/op	      57 allocs/op
+BenchmarkLoad/env_small/cold/kelseyhightower-4         	  354031	      3227 ns/op	    1256 B/op	      57 allocs/op
+BenchmarkLoad/env_small/cold/kelseyhightower-4         	  359272	      3194 ns/op	    1256 B/op	      57 allocs/op
+BenchmarkLoad/env_small/cold/kelseyhightower-4         	  359215	      3215 ns/op	    1256 B/op	      57 allocs/op
+BenchmarkLoad/env_small/cold/kelseyhightower-4         	  359635	      3210 ns/op	    1256 B/op	      57 allocs/op
+BenchmarkLoad/env_small/cold/kelseyhightower-4         	  351829	      3199 ns/op	    1256 B/op	      57 allocs/op
+BenchmarkLoad/env_small/warm/kelseyhightower-4         	  364945	      3196 ns/op	    1240 B/op	      56 allocs/op
+BenchmarkLoad/env_small/warm/kelseyhightower-4         	  366085	      3192 ns/op	    1240 B/op	      56 allocs/op
+BenchmarkLoad/env_small/warm/kelseyhightower-4         	  350793	      3185 ns/op	    1240 B/op	      56 allocs/op
+BenchmarkLoad/env_small/warm/kelseyhightower-4         	  356544	      3186 ns/op	    1240 B/op	      56 allocs/op
+BenchmarkLoad/env_small/warm/kelseyhightower-4         	  354630	      3202 ns/op	    1240 B/op	      56 allocs/op
+BenchmarkLoad/env_small/warm/kelseyhightower-4         	  356778	      3227 ns/op	    1240 B/op	      56 allocs/op
+BenchmarkLoad/env_small/warm/kelseyhightower-4         	  360783	      3185 ns/op	    1240 B/op	      56 allocs/op
+BenchmarkLoad/env_small/warm/kelseyhightower-4         	  351294	      3265 ns/op	    1240 B/op	      56 allocs/op
+BenchmarkLoad/env_small/warm/kelseyhightower-4         	  357280	      3193 ns/op	    1240 B/op	      56 allocs/op
+BenchmarkLoad/env_small/warm/kelseyhightower-4         	  362485	      3190 ns/op	    1240 B/op	      56 allocs/op
+BenchmarkLoad/env_small/cold/stdlib-4                  	 6828267	       174.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/cold/stdlib-4                  	 6812691	       175.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/cold/stdlib-4                  	 6882908	       174.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/cold/stdlib-4                  	 6826676	       175.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/cold/stdlib-4                  	 6861568	       174.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/cold/stdlib-4                  	 6888960	       174.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/cold/stdlib-4                  	 6621646	       174.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/cold/stdlib-4                  	 6838650	       174.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/cold/stdlib-4                  	 6884630	       174.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/cold/stdlib-4                  	 6889832	       174.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/stdlib-4                  	 6855522	       175.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/stdlib-4                  	 6847956	       175.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/stdlib-4                  	 6907761	       174.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/stdlib-4                  	 6904335	       174.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/stdlib-4                  	 6842290	       175.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/stdlib-4                  	 6874617	       175.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/stdlib-4                  	 6888356	       174.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/stdlib-4                  	 6856294	       175.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/stdlib-4                  	 6859116	       174.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_small/warm/stdlib-4                  	 6900853	       175.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad/env_large/cold/ferry-4                   	    5460	    205197 ns/op	   85504 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-4                   	    5835	    205459 ns/op	   85504 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-4                   	    5730	    205251 ns/op	   85504 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-4                   	    5535	    205644 ns/op	   85505 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-4                   	    5408	    205090 ns/op	   85504 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-4                   	    5456	    205754 ns/op	   85504 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-4                   	    5689	    206558 ns/op	   85504 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-4                   	    5401	    206777 ns/op	   85504 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-4                   	    5901	    205002 ns/op	   85504 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-4                   	    5437	    205330 ns/op	   85504 B/op	     803 allocs/op
+BenchmarkLoad/env_large/warm/ferry-4                   	   18718	     62858 ns/op	   54002 B/op	     288 allocs/op
+BenchmarkLoad/env_large/warm/ferry-4                   	   18774	     65488 ns/op	   54002 B/op	     288 allocs/op
+BenchmarkLoad/env_large/warm/ferry-4                   	   19010	     63374 ns/op	   54002 B/op	     288 allocs/op
+BenchmarkLoad/env_large/warm/ferry-4                   	   18745	     63633 ns/op	   54002 B/op	     288 allocs/op
+BenchmarkLoad/env_large/warm/ferry-4                   	   18572	     63707 ns/op	   54001 B/op	     288 allocs/op
+BenchmarkLoad/env_large/warm/ferry-4                   	   18727	     63999 ns/op	   54002 B/op	     288 allocs/op
+BenchmarkLoad/env_large/warm/ferry-4                   	   18735	     63785 ns/op	   54001 B/op	     288 allocs/op
+BenchmarkLoad/env_large/warm/ferry-4                   	   19161	     63884 ns/op	   54001 B/op	     288 allocs/op
+BenchmarkLoad/env_large/warm/ferry-4                   	   18766	     63863 ns/op	   54001 B/op	     288 allocs/op
+BenchmarkLoad/env_large/warm/ferry-4                   	   18642	     66045 ns/op	   54001 B/op	     288 allocs/op
+BenchmarkLoad/env_large/cold/ferry-bound-4             	    5613	    204431 ns/op	   85480 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-bound-4             	    5044	    204285 ns/op	   85480 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-bound-4             	    5600	    206457 ns/op	   85480 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-bound-4             	    5558	    204720 ns/op	   85480 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-bound-4             	    5512	    204991 ns/op	   85480 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-bound-4             	    5253	    204735 ns/op	   85480 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-bound-4             	    5472	    204543 ns/op	   85480 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-bound-4             	    5160	    204097 ns/op	   85480 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-bound-4             	    5492	    203658 ns/op	   85480 B/op	     803 allocs/op
+BenchmarkLoad/env_large/cold/ferry-bound-4             	    5576	    205821 ns/op	   85480 B/op	     803 allocs/op
+BenchmarkLoad/env_large/warm/ferry-bound-4             	   54882	     21921 ns/op	   10608 B/op	      78 allocs/op
+BenchmarkLoad/env_large/warm/ferry-bound-4             	   54693	     21897 ns/op	   10608 B/op	      78 allocs/op
+BenchmarkLoad/env_large/warm/ferry-bound-4             	   54361	     21795 ns/op	   10608 B/op	      78 allocs/op
+BenchmarkLoad/env_large/warm/ferry-bound-4             	   54340	     21872 ns/op	   10608 B/op	      78 allocs/op
+BenchmarkLoad/env_large/warm/ferry-bound-4             	   54987	     21938 ns/op	   10608 B/op	      78 allocs/op
+BenchmarkLoad/env_large/warm/ferry-bound-4             	   54538	     21788 ns/op	   10608 B/op	      78 allocs/op
+BenchmarkLoad/env_large/warm/ferry-bound-4             	   54770	     21859 ns/op	   10608 B/op	      78 allocs/op
+BenchmarkLoad/env_large/warm/ferry-bound-4             	   54555	     21864 ns/op	   10608 B/op	      78 allocs/op
+BenchmarkLoad/env_large/warm/ferry-bound-4             	   54694	     21907 ns/op	   10608 B/op	      78 allocs/op
+BenchmarkLoad/env_large/warm/ferry-bound-4             	   54787	     21834 ns/op	   10608 B/op	      78 allocs/op
+BenchmarkLoad/env_large/cold/koanf-4                   	    6825	    172895 ns/op	   96762 B/op	    1874 allocs/op
+BenchmarkLoad/env_large/cold/koanf-4                   	    6541	    172995 ns/op	   96762 B/op	    1874 allocs/op
+BenchmarkLoad/env_large/cold/koanf-4                   	    6433	    173499 ns/op	   96762 B/op	    1874 allocs/op
+BenchmarkLoad/env_large/cold/koanf-4                   	    6400	    174367 ns/op	   96762 B/op	    1874 allocs/op
+BenchmarkLoad/env_large/cold/koanf-4                   	    6326	    173234 ns/op	   96762 B/op	    1874 allocs/op
+BenchmarkLoad/env_large/cold/koanf-4                   	    6362	    172528 ns/op	   96762 B/op	    1874 allocs/op
+BenchmarkLoad/env_large/cold/koanf-4                   	    6504	    173534 ns/op	   96762 B/op	    1874 allocs/op
+BenchmarkLoad/env_large/cold/koanf-4                   	    6460	    173176 ns/op	   96762 B/op	    1874 allocs/op
+BenchmarkLoad/env_large/cold/koanf-4                   	    6327	    174217 ns/op	   96762 B/op	    1874 allocs/op
+BenchmarkLoad/env_large/cold/koanf-4                   	    6037	    173171 ns/op	   96762 B/op	    1874 allocs/op
+BenchmarkLoad/env_large/warm/koanf-4                   	    6496	    173765 ns/op	   96746 B/op	    1873 allocs/op
+BenchmarkLoad/env_large/warm/koanf-4                   	    6489	    173983 ns/op	   96746 B/op	    1873 allocs/op
+BenchmarkLoad/env_large/warm/koanf-4                   	    6916	    173671 ns/op	   96746 B/op	    1873 allocs/op
+BenchmarkLoad/env_large/warm/koanf-4                   	    6505	    173318 ns/op	   96746 B/op	    1873 allocs/op
+BenchmarkLoad/env_large/warm/koanf-4                   	    6435	    173756 ns/op	   96746 B/op	    1873 allocs/op
+BenchmarkLoad/env_large/warm/koanf-4                   	    6387	    173918 ns/op	   96746 B/op	    1873 allocs/op
+BenchmarkLoad/env_large/warm/koanf-4                   	    6666	    173343 ns/op	   96746 B/op	    1873 allocs/op
+BenchmarkLoad/env_large/warm/koanf-4                   	    6196	    173516 ns/op	   96746 B/op	    1873 allocs/op
+BenchmarkLoad/env_large/warm/koanf-4                   	    6325	    174152 ns/op	   96746 B/op	    1873 allocs/op
+BenchmarkLoad/env_large/warm/koanf-4                   	    6794	    173582 ns/op	   96746 B/op	    1873 allocs/op
+BenchmarkLoad/env_large/cold/viper-4                   	    9817	    108721 ns/op	   57877 B/op	    1017 allocs/op
+BenchmarkLoad/env_large/cold/viper-4                   	   10000	    107878 ns/op	   57877 B/op	    1017 allocs/op
+BenchmarkLoad/env_large/cold/viper-4                   	    9970	    108388 ns/op	   57877 B/op	    1017 allocs/op
+BenchmarkLoad/env_large/cold/viper-4                   	    9854	    108342 ns/op	   57877 B/op	    1017 allocs/op
+BenchmarkLoad/env_large/cold/viper-4                   	   10000	    108499 ns/op	   57877 B/op	    1017 allocs/op
+BenchmarkLoad/env_large/cold/viper-4                   	   10000	    108861 ns/op	   57877 B/op	    1017 allocs/op
+BenchmarkLoad/env_large/cold/viper-4                   	    9922	    108064 ns/op	   57877 B/op	    1017 allocs/op
+BenchmarkLoad/env_large/cold/viper-4                   	   10000	    107858 ns/op	   57877 B/op	    1017 allocs/op
+BenchmarkLoad/env_large/cold/viper-4                   	    9962	    109106 ns/op	   57877 B/op	    1017 allocs/op
+BenchmarkLoad/env_large/cold/viper-4                   	    9822	    110303 ns/op	   57877 B/op	    1017 allocs/op
+BenchmarkLoad/env_large/warm/viper-4                   	   12436	     96957 ns/op	   48917 B/op	     920 allocs/op
+BenchmarkLoad/env_large/warm/viper-4                   	   12454	     96099 ns/op	   48916 B/op	     920 allocs/op
+BenchmarkLoad/env_large/warm/viper-4                   	   12435	     96225 ns/op	   48916 B/op	     920 allocs/op
+BenchmarkLoad/env_large/warm/viper-4                   	   12426	     96884 ns/op	   48923 B/op	     920 allocs/op
+BenchmarkLoad/env_large/warm/viper-4                   	   12403	     96397 ns/op	   48926 B/op	     920 allocs/op
+BenchmarkLoad/env_large/warm/viper-4                   	   12498	     96690 ns/op	   48914 B/op	     920 allocs/op
+BenchmarkLoad/env_large/warm/viper-4                   	   12428	     96395 ns/op	   48923 B/op	     920 allocs/op
+BenchmarkLoad/env_large/warm/viper-4                   	   12434	     96004 ns/op	   48922 B/op	     920 allocs/op
+BenchmarkLoad/env_large/warm/viper-4                   	   12442	     97046 ns/op	   48917 B/op	     920 allocs/op
+BenchmarkLoad/env_large/warm/viper-4                   	   12454	     96754 ns/op	   48914 B/op	     920 allocs/op
+BenchmarkLoad/env_large/cold/xload-4                   	   40827	     29243 ns/op	   13200 B/op	     252 allocs/op
+BenchmarkLoad/env_large/cold/xload-4                   	   41404	     29214 ns/op	   13200 B/op	     252 allocs/op
+BenchmarkLoad/env_large/cold/xload-4                   	   41174	     29085 ns/op	   13200 B/op	     252 allocs/op
+BenchmarkLoad/env_large/cold/xload-4                   	   40752	     29263 ns/op	   13200 B/op	     252 allocs/op
+BenchmarkLoad/env_large/cold/xload-4                   	   40915	     29229 ns/op	   13200 B/op	     252 allocs/op
+BenchmarkLoad/env_large/cold/xload-4                   	   41271	     29133 ns/op	   13200 B/op	     252 allocs/op
+BenchmarkLoad/env_large/cold/xload-4                   	   41079	     28986 ns/op	   13200 B/op	     252 allocs/op
+BenchmarkLoad/env_large/cold/xload-4                   	   41040	     29144 ns/op	   13200 B/op	     252 allocs/op
+BenchmarkLoad/env_large/cold/xload-4                   	   41011	     29074 ns/op	   13200 B/op	     252 allocs/op
+BenchmarkLoad/env_large/cold/xload-4                   	   41036	     29095 ns/op	   13200 B/op	     252 allocs/op
+BenchmarkLoad/env_large/warm/xload-4                   	   40682	     29193 ns/op	   13184 B/op	     251 allocs/op
+BenchmarkLoad/env_large/warm/xload-4                   	   41406	     29112 ns/op	   13184 B/op	     251 allocs/op
+BenchmarkLoad/env_large/warm/xload-4                   	   40960	     29222 ns/op	   13184 B/op	     251 allocs/op
+BenchmarkLoad/env_large/warm/xload-4                   	   40908	     29126 ns/op	   13184 B/op	     251 allocs/op
+BenchmarkLoad/env_large/warm/xload-4                   	   41322	     29136 ns/op	   13184 B/op	     251 allocs/op
+BenchmarkLoad/env_large/warm/xload-4                   	   41066	     29066 ns/op	   13184 B/op	     251 allocs/op
+BenchmarkLoad/env_large/warm/xload-4                   	   41415	     29234 ns/op	   13184 B/op	     251 allocs/op
+BenchmarkLoad/env_large/warm/xload-4                   	   41082	     29197 ns/op	   13184 B/op	     251 allocs/op
+BenchmarkLoad/env_large/warm/xload-4                   	   41022	     29164 ns/op	   13184 B/op	     251 allocs/op
+BenchmarkLoad/env_large/warm/xload-4                   	   41040	     29090 ns/op	   13184 B/op	     251 allocs/op
+BenchmarkLoad/env_large/cold/go-envconfig-4            	   94238	     12653 ns/op	    1408 B/op	      28 allocs/op
+BenchmarkLoad/env_large/cold/go-envconfig-4            	   94060	     12723 ns/op	    1408 B/op	      28 allocs/op
+BenchmarkLoad/env_large/cold/go-envconfig-4            	   94164	     12699 ns/op	    1408 B/op	      28 allocs/op
+BenchmarkLoad/env_large/cold/go-envconfig-4            	   93870	     12713 ns/op	    1408 B/op	      28 allocs/op
+BenchmarkLoad/env_large/cold/go-envconfig-4            	   93729	     12657 ns/op	    1408 B/op	      28 allocs/op
+BenchmarkLoad/env_large/cold/go-envconfig-4            	   93679	     12779 ns/op	    1408 B/op	      28 allocs/op
+BenchmarkLoad/env_large/cold/go-envconfig-4            	   93315	     12721 ns/op	    1408 B/op	      28 allocs/op
+BenchmarkLoad/env_large/cold/go-envconfig-4            	   93967	     12683 ns/op	    1408 B/op	      28 allocs/op
+BenchmarkLoad/env_large/cold/go-envconfig-4            	   93978	     12685 ns/op	    1408 B/op	      28 allocs/op
+BenchmarkLoad/env_large/cold/go-envconfig-4            	   94496	     12695 ns/op	    1408 B/op	      28 allocs/op
+BenchmarkLoad/env_large/warm/go-envconfig-4            	   91906	     12648 ns/op	    1392 B/op	      27 allocs/op
+BenchmarkLoad/env_large/warm/go-envconfig-4            	   95212	     12649 ns/op	    1392 B/op	      27 allocs/op
+BenchmarkLoad/env_large/warm/go-envconfig-4            	   93840	     12634 ns/op	    1392 B/op	      27 allocs/op
+BenchmarkLoad/env_large/warm/go-envconfig-4            	   91665	     12631 ns/op	    1392 B/op	      27 allocs/op
+BenchmarkLoad/env_large/warm/go-envconfig-4            	   94090	     12679 ns/op	    1392 B/op	      27 allocs/op
+BenchmarkLoad/env_large/warm/go-envconfig-4            	   94068	     12663 ns/op	    1392 B/op	      27 allocs/op
+BenchmarkLoad/env_large/warm/go-envconfig-4            	   93799	     12662 ns/op	    1392 B/op	      27 allocs/op
+BenchmarkLoad/env_large/warm/go-envconfig-4            	   94274	     12588 ns/op	    1392 B/op	      27 allocs/op
+BenchmarkLoad/env_large/warm/go-envconfig-4            	   95142	     12663 ns/op	    1392 B/op	      27 allocs/op
+BenchmarkLoad/env_large/warm/go-envconfig-4            	   94617	     12637 ns/op	    1392 B/op	      27 allocs/op
+BenchmarkLoad/env_large/cold/kelseyhightower-4         	   21127	     56637 ns/op	   31927 B/op	     910 allocs/op
+BenchmarkLoad/env_large/cold/kelseyhightower-4         	   21213	     56323 ns/op	   31927 B/op	     910 allocs/op
+BenchmarkLoad/env_large/cold/kelseyhightower-4         	   21303	     56562 ns/op	   31927 B/op	     910 allocs/op
+BenchmarkLoad/env_large/cold/kelseyhightower-4         	   21100	     56597 ns/op	   31927 B/op	     910 allocs/op
+BenchmarkLoad/env_large/cold/kelseyhightower-4         	   21240	     56531 ns/op	   31927 B/op	     910 allocs/op
+BenchmarkLoad/env_large/cold/kelseyhightower-4         	   21384	     56545 ns/op	   31927 B/op	     910 allocs/op
+BenchmarkLoad/env_large/cold/kelseyhightower-4         	   21228	     56600 ns/op	   31927 B/op	     910 allocs/op
+BenchmarkLoad/env_large/cold/kelseyhightower-4         	   21093	     56494 ns/op	   31927 B/op	     910 allocs/op
+BenchmarkLoad/env_large/cold/kelseyhightower-4         	   21200	     56403 ns/op	   31927 B/op	     910 allocs/op
+BenchmarkLoad/env_large/cold/kelseyhightower-4         	   21302	     56490 ns/op	   31927 B/op	     910 allocs/op
+BenchmarkLoad/env_large/warm/kelseyhightower-4         	   21216	     56532 ns/op	   31911 B/op	     909 allocs/op
+BenchmarkLoad/env_large/warm/kelseyhightower-4         	   21214	     57002 ns/op	   31911 B/op	     909 allocs/op
+BenchmarkLoad/env_large/warm/kelseyhightower-4         	   21062	     56498 ns/op	   31911 B/op	     909 allocs/op
+BenchmarkLoad/env_large/warm/kelseyhightower-4         	   21118	     57226 ns/op	   31911 B/op	     909 allocs/op
+BenchmarkLoad/env_large/warm/kelseyhightower-4         	   21144	     56608 ns/op	   31911 B/op	     909 allocs/op
+BenchmarkLoad/env_large/warm/kelseyhightower-4         	   20455	     56777 ns/op	   31911 B/op	     909 allocs/op
+BenchmarkLoad/env_large/warm/kelseyhightower-4         	   21380	     56589 ns/op	   31911 B/op	     909 allocs/op
+BenchmarkLoad/env_large/warm/kelseyhightower-4         	   21364	     56681 ns/op	   31911 B/op	     909 allocs/op
+BenchmarkLoad/env_large/warm/kelseyhightower-4         	   21183	     56429 ns/op	   31911 B/op	     909 allocs/op
+BenchmarkLoad/env_large/warm/kelseyhightower-4         	   21267	     56475 ns/op	   31911 B/op	     909 allocs/op
+BenchmarkLoad/env_large/cold/stdlib-4                  	  429267	      2672 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/cold/stdlib-4                  	  394078	      2684 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/cold/stdlib-4                  	  429432	      2681 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/cold/stdlib-4                  	  436953	      2685 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/cold/stdlib-4                  	  434460	      2728 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/cold/stdlib-4                  	  430370	      2669 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/cold/stdlib-4                  	  425319	      2675 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/cold/stdlib-4                  	  434289	      2676 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/cold/stdlib-4                  	  436903	      2677 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/cold/stdlib-4                  	  424953	      2675 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/warm/stdlib-4                  	  433318	      2674 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/warm/stdlib-4                  	  432492	      2676 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/warm/stdlib-4                  	  433520	      2680 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/warm/stdlib-4                  	  427118	      2685 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/warm/stdlib-4                  	  436142	      2675 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/warm/stdlib-4                  	  428226	      2676 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/warm/stdlib-4                  	  427408	      2677 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/warm/stdlib-4                  	  424544	      2677 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/warm/stdlib-4                  	  431066	      2678 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/env_large/warm/stdlib-4                  	  416131	      2672 ns/op	    1008 B/op	       5 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-4                  	   37628	     31717 ns/op	   14146 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-4                  	   37346	     31875 ns/op	   14146 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-4                  	   37450	     31721 ns/op	   14146 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-4                  	   37810	     31703 ns/op	   14146 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-4                  	   37593	     31662 ns/op	   14146 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-4                  	   37640	     31824 ns/op	   14146 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-4                  	   37672	     31725 ns/op	   14146 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-4                  	   37801	     31837 ns/op	   14146 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-4                  	   37858	     31888 ns/op	   14146 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-4                  	   37944	     31830 ns/op	   14146 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-4                  	   50407	     23656 ns/op	   11034 B/op	     109 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-4                  	   51054	     23552 ns/op	   11034 B/op	     109 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-4                  	   49802	     23624 ns/op	   11034 B/op	     109 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-4                  	   50115	     23517 ns/op	   11034 B/op	     109 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-4                  	   50431	     23698 ns/op	   11034 B/op	     109 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-4                  	   50522	     23540 ns/op	   11034 B/op	     109 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-4                  	   50641	     23567 ns/op	   11034 B/op	     109 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-4                  	   50469	     23576 ns/op	   11034 B/op	     109 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-4                  	   50666	     23624 ns/op	   11034 B/op	     109 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-4                  	   50568	     23658 ns/op	   11034 B/op	     109 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37269	     31728 ns/op	   14106 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37477	     31782 ns/op	   14106 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37783	     31813 ns/op	   14106 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37885	     31715 ns/op	   14106 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37533	     31575 ns/op	   14106 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37610	     32005 ns/op	   14106 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37960	     31899 ns/op	   14106 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37867	     31586 ns/op	   14106 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37287	     31959 ns/op	   14106 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/ferry-bound-4            	   37664	     31624 ns/op	   14106 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   52732	     22736 ns/op	   10738 B/op	     100 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   52848	     22718 ns/op	   10738 B/op	     100 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   52696	     22657 ns/op	   10738 B/op	     100 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   52448	     22738 ns/op	   10738 B/op	     100 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   52508	     22662 ns/op	   10738 B/op	     100 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   52440	     22618 ns/op	   10738 B/op	     100 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   52588	     22800 ns/op	   10738 B/op	     100 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   52599	     22702 ns/op	   10738 B/op	     100 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   53005	     22621 ns/op	   10738 B/op	     100 allocs/op
+BenchmarkLoad/yaml_small/warm/ferry-bound-4            	   52963	     22626 ns/op	   10738 B/op	     100 allocs/op
+BenchmarkLoad/yaml_small/cold/koanf-4                  	   30451	     38926 ns/op	   17827 B/op	     250 allocs/op
+BenchmarkLoad/yaml_small/cold/koanf-4                  	   30570	     38943 ns/op	   17827 B/op	     250 allocs/op
+BenchmarkLoad/yaml_small/cold/koanf-4                  	   30465	     38877 ns/op	   17827 B/op	     250 allocs/op
+BenchmarkLoad/yaml_small/cold/koanf-4                  	   30690	     39065 ns/op	   17827 B/op	     250 allocs/op
+BenchmarkLoad/yaml_small/cold/koanf-4                  	   30517	     39144 ns/op	   17827 B/op	     250 allocs/op
+BenchmarkLoad/yaml_small/cold/koanf-4                  	   30483	     39247 ns/op	   17827 B/op	     250 allocs/op
+BenchmarkLoad/yaml_small/cold/koanf-4                  	   30439	     39070 ns/op	   17827 B/op	     250 allocs/op
+BenchmarkLoad/yaml_small/cold/koanf-4                  	   30732	     39225 ns/op	   17827 B/op	     250 allocs/op
+BenchmarkLoad/yaml_small/cold/koanf-4                  	   30783	     38845 ns/op	   17827 B/op	     250 allocs/op
+BenchmarkLoad/yaml_small/cold/koanf-4                  	   30651	     38938 ns/op	   17827 B/op	     250 allocs/op
+BenchmarkLoad/yaml_small/warm/koanf-4                  	   30410	     38746 ns/op	   17795 B/op	     249 allocs/op
+BenchmarkLoad/yaml_small/warm/koanf-4                  	   30662	     38984 ns/op	   17795 B/op	     249 allocs/op
+BenchmarkLoad/yaml_small/warm/koanf-4                  	   30670	     38869 ns/op	   17795 B/op	     249 allocs/op
+BenchmarkLoad/yaml_small/warm/koanf-4                  	   30392	     39255 ns/op	   17795 B/op	     249 allocs/op
+BenchmarkLoad/yaml_small/warm/koanf-4                  	   31128	     39004 ns/op	   17795 B/op	     249 allocs/op
+BenchmarkLoad/yaml_small/warm/koanf-4                  	   30258	     38959 ns/op	   17795 B/op	     249 allocs/op
+BenchmarkLoad/yaml_small/warm/koanf-4                  	   30920	     38976 ns/op	   17795 B/op	     249 allocs/op
+BenchmarkLoad/yaml_small/warm/koanf-4                  	   30594	     38849 ns/op	   17795 B/op	     249 allocs/op
+BenchmarkLoad/yaml_small/warm/koanf-4                  	   30552	     38793 ns/op	   17795 B/op	     249 allocs/op
+BenchmarkLoad/yaml_small/warm/koanf-4                  	   30645	     38934 ns/op	   17795 B/op	     249 allocs/op
+BenchmarkLoad/yaml_small/cold/viper-4                  	   34347	     34817 ns/op	   16707 B/op	     183 allocs/op
+BenchmarkLoad/yaml_small/cold/viper-4                  	   34644	     34885 ns/op	   16707 B/op	     183 allocs/op
+BenchmarkLoad/yaml_small/cold/viper-4                  	   34066	     34655 ns/op	   16707 B/op	     183 allocs/op
+BenchmarkLoad/yaml_small/cold/viper-4                  	   34461	     34777 ns/op	   16707 B/op	     183 allocs/op
+BenchmarkLoad/yaml_small/cold/viper-4                  	   34436	     34941 ns/op	   16707 B/op	     183 allocs/op
+BenchmarkLoad/yaml_small/cold/viper-4                  	   34678	     34910 ns/op	   16707 B/op	     183 allocs/op
+BenchmarkLoad/yaml_small/cold/viper-4                  	   34545	     34766 ns/op	   16707 B/op	     183 allocs/op
+BenchmarkLoad/yaml_small/cold/viper-4                  	   34311	     35599 ns/op	   16707 B/op	     183 allocs/op
+BenchmarkLoad/yaml_small/cold/viper-4                  	   34308	     34812 ns/op	   16707 B/op	     183 allocs/op
+BenchmarkLoad/yaml_small/cold/viper-4                  	   34197	     34702 ns/op	   16707 B/op	     183 allocs/op
+BenchmarkLoad/yaml_small/warm/viper-4                  	   35042	     33993 ns/op	   15851 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/warm/viper-4                  	   35280	     33984 ns/op	   15851 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/warm/viper-4                  	   35162	     34002 ns/op	   15851 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/warm/viper-4                  	   35035	     34073 ns/op	   15851 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/warm/viper-4                  	   35342	     33911 ns/op	   15851 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/warm/viper-4                  	   34470	     34145 ns/op	   15851 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/warm/viper-4                  	   35064	     34024 ns/op	   15851 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/warm/viper-4                  	   35085	     34016 ns/op	   15851 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/warm/viper-4                  	   35180	     34034 ns/op	   15851 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/warm/viper-4                  	   35487	     33926 ns/op	   15851 B/op	     171 allocs/op
+BenchmarkLoad/yaml_small/cold/xload-4                  	   46830	     25319 ns/op	   11714 B/op	     138 allocs/op
+BenchmarkLoad/yaml_small/cold/xload-4                  	   47630	     25208 ns/op	   11714 B/op	     138 allocs/op
+BenchmarkLoad/yaml_small/cold/xload-4                  	   46857	     25175 ns/op	   11714 B/op	     138 allocs/op
+BenchmarkLoad/yaml_small/cold/xload-4                  	   47066	     25249 ns/op	   11714 B/op	     138 allocs/op
+BenchmarkLoad/yaml_small/cold/xload-4                  	   46759	     25327 ns/op	   11714 B/op	     138 allocs/op
+BenchmarkLoad/yaml_small/cold/xload-4                  	   47296	     25292 ns/op	   11714 B/op	     138 allocs/op
+BenchmarkLoad/yaml_small/cold/xload-4                  	   47004	     25358 ns/op	   11714 B/op	     138 allocs/op
+BenchmarkLoad/yaml_small/cold/xload-4                  	   47095	     25270 ns/op	   11714 B/op	     138 allocs/op
+BenchmarkLoad/yaml_small/cold/xload-4                  	   47097	     25360 ns/op	   11714 B/op	     138 allocs/op
+BenchmarkLoad/yaml_small/cold/xload-4                  	   47624	     25306 ns/op	   11714 B/op	     138 allocs/op
+BenchmarkLoad/yaml_small/warm/xload-4                  	  548010	      2136 ns/op	    1000 B/op	      23 allocs/op
+BenchmarkLoad/yaml_small/warm/xload-4                  	  538560	      2122 ns/op	    1000 B/op	      23 allocs/op
+BenchmarkLoad/yaml_small/warm/xload-4                  	  540390	      2132 ns/op	    1000 B/op	      23 allocs/op
+BenchmarkLoad/yaml_small/warm/xload-4                  	  511532	      2121 ns/op	    1000 B/op	      23 allocs/op
+BenchmarkLoad/yaml_small/warm/xload-4                  	  524408	      2138 ns/op	    1000 B/op	      23 allocs/op
+BenchmarkLoad/yaml_small/warm/xload-4                  	  543948	      2127 ns/op	    1000 B/op	      23 allocs/op
+BenchmarkLoad/yaml_small/warm/xload-4                  	  539931	      2130 ns/op	    1000 B/op	      23 allocs/op
+BenchmarkLoad/yaml_small/warm/xload-4                  	  549678	      2128 ns/op	    1000 B/op	      23 allocs/op
+BenchmarkLoad/yaml_small/warm/xload-4                  	  524835	      2129 ns/op	    1000 B/op	      23 allocs/op
+BenchmarkLoad/yaml_small/warm/xload-4                  	  540546	      2138 ns/op	    1000 B/op	      23 allocs/op
+BenchmarkLoad/yaml_small/cold/stdlib-4                 	   54950	     21689 ns/op	   10090 B/op	      99 allocs/op
+BenchmarkLoad/yaml_small/cold/stdlib-4                 	   55146	     21674 ns/op	   10089 B/op	      99 allocs/op
+BenchmarkLoad/yaml_small/cold/stdlib-4                 	   55078	     21671 ns/op	   10089 B/op	      99 allocs/op
+BenchmarkLoad/yaml_small/cold/stdlib-4                 	   54838	     21659 ns/op	   10089 B/op	      99 allocs/op
+BenchmarkLoad/yaml_small/cold/stdlib-4                 	   54793	     21619 ns/op	   10089 B/op	      99 allocs/op
+BenchmarkLoad/yaml_small/cold/stdlib-4                 	   55122	     21638 ns/op	   10089 B/op	      99 allocs/op
+BenchmarkLoad/yaml_small/cold/stdlib-4                 	   55382	     21644 ns/op	   10089 B/op	      99 allocs/op
+BenchmarkLoad/yaml_small/cold/stdlib-4                 	   55083	     21786 ns/op	   10089 B/op	      99 allocs/op
+BenchmarkLoad/yaml_small/cold/stdlib-4                 	   55608	     21845 ns/op	   10090 B/op	      99 allocs/op
+BenchmarkLoad/yaml_small/cold/stdlib-4                 	   55066	     21880 ns/op	   10090 B/op	      99 allocs/op
+BenchmarkLoad/yaml_small/warm/stdlib-4                 	   52009	     21685 ns/op	   10057 B/op	      98 allocs/op
+BenchmarkLoad/yaml_small/warm/stdlib-4                 	   55004	     21718 ns/op	   10057 B/op	      98 allocs/op
+BenchmarkLoad/yaml_small/warm/stdlib-4                 	   54836	     21896 ns/op	   10058 B/op	      98 allocs/op
+BenchmarkLoad/yaml_small/warm/stdlib-4                 	   54702	     21701 ns/op	   10058 B/op	      98 allocs/op
+BenchmarkLoad/yaml_small/warm/stdlib-4                 	   54709	     21634 ns/op	   10058 B/op	      98 allocs/op
+BenchmarkLoad/yaml_small/warm/stdlib-4                 	   54867	     21740 ns/op	   10057 B/op	      98 allocs/op
+BenchmarkLoad/yaml_small/warm/stdlib-4                 	   54956	     21742 ns/op	   10057 B/op	      98 allocs/op
+BenchmarkLoad/yaml_small/warm/stdlib-4                 	   54880	     21729 ns/op	   10057 B/op	      98 allocs/op
+BenchmarkLoad/yaml_small/warm/stdlib-4                 	   55159	     21686 ns/op	   10057 B/op	      98 allocs/op
+BenchmarkLoad/yaml_small/warm/stdlib-4                 	   54883	     21699 ns/op	   10058 B/op	      98 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-4                  	    3892	    288317 ns/op	   78886 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-4                  	    3940	    288241 ns/op	   78886 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-4                  	    3912	    288724 ns/op	   78886 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-4                  	    3928	    288817 ns/op	   78886 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-4                  	    4063	    287974 ns/op	   78886 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-4                  	    3966	    288667 ns/op	   78886 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-4                  	    3962	    288772 ns/op	   78886 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-4                  	    3902	    288862 ns/op	   78886 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-4                  	    4064	    289279 ns/op	   78886 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-4                  	    3951	    288598 ns/op	   78886 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-4                  	    7971	    135897 ns/op	   47364 B/op	     733 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-4                  	    8127	    135632 ns/op	   47364 B/op	     733 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-4                  	    8131	    136474 ns/op	   47365 B/op	     733 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-4                  	    8037	    136695 ns/op	   47365 B/op	     733 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-4                  	    8344	    136120 ns/op	   47364 B/op	     733 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-4                  	    8139	    136647 ns/op	   47365 B/op	     733 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-4                  	    7842	    136664 ns/op	   47365 B/op	     733 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-4                  	    7977	    135647 ns/op	   47365 B/op	     733 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-4                  	    8358	    135943 ns/op	   47364 B/op	     733 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-4                  	    7933	    135922 ns/op	   47365 B/op	     733 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    3908	    289320 ns/op	   78846 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    3939	    288566 ns/op	   78846 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    3937	    288009 ns/op	   78846 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    3985	    286242 ns/op	   78846 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    3952	    286845 ns/op	   78846 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    3919	    288699 ns/op	   78846 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    4035	    287367 ns/op	   78846 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    3921	    287383 ns/op	   78846 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    3897	    288751 ns/op	   78846 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/cold/ferry-bound-4            	    3992	    286754 ns/op	   78846 B/op	    1249 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8592	    128740 ns/op	   42696 B/op	     691 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8428	    128041 ns/op	   42696 B/op	     691 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8265	    128055 ns/op	   42695 B/op	     691 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    9010	    128373 ns/op	   42696 B/op	     691 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    9087	    128114 ns/op	   42696 B/op	     691 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    9013	    128036 ns/op	   42696 B/op	     691 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8595	    128617 ns/op	   42696 B/op	     691 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8476	    128251 ns/op	   42696 B/op	     691 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8413	    128336 ns/op	   42696 B/op	     691 allocs/op
+BenchmarkLoad/yaml_large/warm/ferry-bound-4            	    8461	    130397 ns/op	   42696 B/op	     691 allocs/op
+BenchmarkLoad/yaml_large/cold/koanf-4                  	    3818	    291772 ns/op	  125224 B/op	    2424 allocs/op
+BenchmarkLoad/yaml_large/cold/koanf-4                  	    3865	    290968 ns/op	  125225 B/op	    2424 allocs/op
+BenchmarkLoad/yaml_large/cold/koanf-4                  	    4004	    289736 ns/op	  125224 B/op	    2424 allocs/op
+BenchmarkLoad/yaml_large/cold/koanf-4                  	    3952	    289578 ns/op	  125224 B/op	    2424 allocs/op
+BenchmarkLoad/yaml_large/cold/koanf-4                  	    3914	    290565 ns/op	  125225 B/op	    2424 allocs/op
+BenchmarkLoad/yaml_large/cold/koanf-4                  	    3943	    293360 ns/op	  125224 B/op	    2424 allocs/op
+BenchmarkLoad/yaml_large/cold/koanf-4                  	    3550	    289896 ns/op	  125224 B/op	    2424 allocs/op
+BenchmarkLoad/yaml_large/cold/koanf-4                  	    4129	    289952 ns/op	  125223 B/op	    2424 allocs/op
+BenchmarkLoad/yaml_large/cold/koanf-4                  	    3938	    290723 ns/op	  125224 B/op	    2424 allocs/op
+BenchmarkLoad/yaml_large/cold/koanf-4                  	    4026	    291400 ns/op	  125224 B/op	    2424 allocs/op
+BenchmarkLoad/yaml_large/warm/koanf-4                  	    3936	    294046 ns/op	  125192 B/op	    2423 allocs/op
+BenchmarkLoad/yaml_large/warm/koanf-4                  	    4102	    290383 ns/op	  125192 B/op	    2423 allocs/op
+BenchmarkLoad/yaml_large/warm/koanf-4                  	    3950	    288998 ns/op	  125192 B/op	    2423 allocs/op
+BenchmarkLoad/yaml_large/warm/koanf-4                  	    4033	    289239 ns/op	  125192 B/op	    2423 allocs/op
+BenchmarkLoad/yaml_large/warm/koanf-4                  	    4124	    290748 ns/op	  125192 B/op	    2423 allocs/op
+BenchmarkLoad/yaml_large/warm/koanf-4                  	    3944	    290140 ns/op	  125192 B/op	    2423 allocs/op
+BenchmarkLoad/yaml_large/warm/koanf-4                  	    3978	    289812 ns/op	  125192 B/op	    2423 allocs/op
+BenchmarkLoad/yaml_large/warm/koanf-4                  	    3906	    289127 ns/op	  125192 B/op	    2423 allocs/op
+BenchmarkLoad/yaml_large/warm/koanf-4                  	    4044	    290803 ns/op	  125192 B/op	    2423 allocs/op
+BenchmarkLoad/yaml_large/warm/koanf-4                  	    4068	    289387 ns/op	  125191 B/op	    2423 allocs/op
+BenchmarkLoad/yaml_large/cold/viper-4                  	    4732	    243888 ns/op	   99003 B/op	    1704 allocs/op
+BenchmarkLoad/yaml_large/cold/viper-4                  	    4636	    244843 ns/op	   99003 B/op	    1704 allocs/op
+BenchmarkLoad/yaml_large/cold/viper-4                  	    4669	    244041 ns/op	   99003 B/op	    1704 allocs/op
+BenchmarkLoad/yaml_large/cold/viper-4                  	    4591	    243923 ns/op	   99003 B/op	    1704 allocs/op
+BenchmarkLoad/yaml_large/cold/viper-4                  	    4621	    243233 ns/op	   99002 B/op	    1704 allocs/op
+BenchmarkLoad/yaml_large/cold/viper-4                  	    4647	    244206 ns/op	   99002 B/op	    1704 allocs/op
+BenchmarkLoad/yaml_large/cold/viper-4                  	    4550	    244301 ns/op	   99003 B/op	    1704 allocs/op
+BenchmarkLoad/yaml_large/cold/viper-4                  	    4689	    244021 ns/op	   99002 B/op	    1704 allocs/op
+BenchmarkLoad/yaml_large/cold/viper-4                  	    4647	    245838 ns/op	   99003 B/op	    1704 allocs/op
+BenchmarkLoad/yaml_large/cold/viper-4                  	    4596	    244054 ns/op	   99002 B/op	    1704 allocs/op
+BenchmarkLoad/yaml_large/warm/viper-4                  	    4422	    243169 ns/op	   98146 B/op	    1692 allocs/op
+BenchmarkLoad/yaml_large/warm/viper-4                  	    4621	    243222 ns/op	   98146 B/op	    1692 allocs/op
+BenchmarkLoad/yaml_large/warm/viper-4                  	    4677	    244078 ns/op	   98147 B/op	    1692 allocs/op
+BenchmarkLoad/yaml_large/warm/viper-4                  	    4620	    244065 ns/op	   98146 B/op	    1692 allocs/op
+BenchmarkLoad/yaml_large/warm/viper-4                  	    4792	    244114 ns/op	   98146 B/op	    1692 allocs/op
+BenchmarkLoad/yaml_large/warm/viper-4                  	    4867	    242630 ns/op	   98147 B/op	    1692 allocs/op
+BenchmarkLoad/yaml_large/warm/viper-4                  	    4794	    243918 ns/op	   98146 B/op	    1692 allocs/op
+BenchmarkLoad/yaml_large/warm/viper-4                  	    4642	    243905 ns/op	   98147 B/op	    1692 allocs/op
+BenchmarkLoad/yaml_large/warm/viper-4                  	    4617	    243694 ns/op	   98147 B/op	    1692 allocs/op
+BenchmarkLoad/yaml_large/warm/viper-4                  	    4696	    243737 ns/op	   98147 B/op	    1692 allocs/op
+BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8906	    120856 ns/op	   40688 B/op	     751 allocs/op
+BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8887	    120643 ns/op	   40688 B/op	     751 allocs/op
+BenchmarkLoad/yaml_large/cold/stdlib-4                 	    9470	    120344 ns/op	   40687 B/op	     751 allocs/op
+BenchmarkLoad/yaml_large/cold/stdlib-4                 	    9006	    120024 ns/op	   40687 B/op	     751 allocs/op
+BenchmarkLoad/yaml_large/cold/stdlib-4                 	    9006	    120045 ns/op	   40687 B/op	     751 allocs/op
+BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8886	    119873 ns/op	   40687 B/op	     751 allocs/op
+BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8877	    120160 ns/op	   40687 B/op	     751 allocs/op
+BenchmarkLoad/yaml_large/cold/stdlib-4                 	    9055	    120320 ns/op	   40687 B/op	     751 allocs/op
+BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8860	    120120 ns/op	   40687 B/op	     751 allocs/op
+BenchmarkLoad/yaml_large/cold/stdlib-4                 	    8686	    120998 ns/op	   40688 B/op	     751 allocs/op
+BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8692	    119871 ns/op	   40655 B/op	     750 allocs/op
+BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8875	    121284 ns/op	   40655 B/op	     750 allocs/op
+BenchmarkLoad/yaml_large/warm/stdlib-4                 	    9034	    120491 ns/op	   40655 B/op	     750 allocs/op
+BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8737	    120064 ns/op	   40655 B/op	     750 allocs/op
+BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8906	    120899 ns/op	   40655 B/op	     750 allocs/op
+BenchmarkLoad/yaml_large/warm/stdlib-4                 	    9518	    120730 ns/op	   40655 B/op	     750 allocs/op
+BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8924	    120241 ns/op	   40655 B/op	     750 allocs/op
+BenchmarkLoad/yaml_large/warm/stdlib-4                 	    9822	    119975 ns/op	   40655 B/op	     750 allocs/op
+BenchmarkLoad/yaml_large/warm/stdlib-4                 	    9764	    120823 ns/op	   40656 B/op	     750 allocs/op
+BenchmarkLoad/yaml_large/warm/stdlib-4                 	    8798	    120688 ns/op	   40655 B/op	     750 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-4                  	    1491	    798864 ns/op	  214736 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-4                  	    1524	    822303 ns/op	  214736 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-4                  	    1471	    798926 ns/op	  214738 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-4                  	    1300	    784663 ns/op	  214738 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-4                  	    1494	    782445 ns/op	  214737 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-4                  	    1374	    786404 ns/op	  214737 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-4                  	    1591	    797226 ns/op	  214738 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-4                  	    1518	    801935 ns/op	  214736 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-4                  	    1477	    786772 ns/op	  214736 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-4                  	    1537	    793047 ns/op	  214736 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-4                  	    2116	    536123 ns/op	  181161 B/op	    1975 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-4                  	    2218	    530995 ns/op	  181162 B/op	    1975 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-4                  	    2193	    534732 ns/op	  181161 B/op	    1975 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-4                  	    2020	    547137 ns/op	  181162 B/op	    1975 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-4                  	    2186	    534421 ns/op	  181162 B/op	    1975 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-4                  	    2246	    548198 ns/op	  181160 B/op	    1975 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-4                  	    2238	    542395 ns/op	  181161 B/op	    1975 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-4                  	    2130	    530577 ns/op	  181161 B/op	    1975 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-4                  	    2220	    529172 ns/op	  181161 B/op	    1975 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-4                  	    2124	    536849 ns/op	  181161 B/op	    1975 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1490	    786229 ns/op	  214928 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1417	    793741 ns/op	  214930 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1482	    783617 ns/op	  214928 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1364	    776062 ns/op	  214928 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1542	    796620 ns/op	  214927 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1538	    782469 ns/op	  214928 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1585	    786769 ns/op	  214928 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1549	    782234 ns/op	  214929 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1546	    801774 ns/op	  214928 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/cold/ferry-bound-4            	    1508	    785951 ns/op	  214929 B/op	    2494 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2175	    547184 ns/op	  180914 B/op	    1963 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2292	    532799 ns/op	  180913 B/op	    1963 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2248	    530485 ns/op	  180913 B/op	    1963 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2212	    551248 ns/op	  180914 B/op	    1963 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2216	    529969 ns/op	  180913 B/op	    1963 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2232	    528337 ns/op	  180913 B/op	    1963 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2312	    532790 ns/op	  180914 B/op	    1963 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2232	    537128 ns/op	  180914 B/op	    1963 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2215	    537788 ns/op	  180915 B/op	    1963 allocs/op
+BenchmarkLoad/dump_large/warm/ferry-bound-4            	    2308	    523995 ns/op	  180915 B/op	    1963 allocs/op
+BenchmarkLoad/dump_large/cold/koanf-4                  	    2220	    529034 ns/op	  199883 B/op	    2369 allocs/op
+BenchmarkLoad/dump_large/cold/koanf-4                  	    2170	    528547 ns/op	  199883 B/op	    2369 allocs/op
+BenchmarkLoad/dump_large/cold/koanf-4                  	    2128	    531603 ns/op	  199883 B/op	    2369 allocs/op
+BenchmarkLoad/dump_large/cold/koanf-4                  	    2259	    530631 ns/op	  199883 B/op	    2369 allocs/op
+BenchmarkLoad/dump_large/cold/koanf-4                  	    2071	    531338 ns/op	  199884 B/op	    2369 allocs/op
+BenchmarkLoad/dump_large/cold/koanf-4                  	    2202	    539309 ns/op	  199885 B/op	    2369 allocs/op
+BenchmarkLoad/dump_large/cold/koanf-4                  	    2356	    526211 ns/op	  199883 B/op	    2369 allocs/op
+BenchmarkLoad/dump_large/cold/koanf-4                  	    2235	    536186 ns/op	  199883 B/op	    2369 allocs/op
+BenchmarkLoad/dump_large/cold/koanf-4                  	    2364	    536462 ns/op	  199883 B/op	    2369 allocs/op
+BenchmarkLoad/dump_large/cold/koanf-4                  	    2185	    532308 ns/op	  199884 B/op	    2369 allocs/op
+BenchmarkLoad/dump_large/warm/koanf-4                  	    2601	    455803 ns/op	  197651 B/op	    2358 allocs/op
+BenchmarkLoad/dump_large/warm/koanf-4                  	    2514	    453494 ns/op	  197649 B/op	    2358 allocs/op
+BenchmarkLoad/dump_large/warm/koanf-4                  	    2377	    450997 ns/op	  197651 B/op	    2358 allocs/op
+BenchmarkLoad/dump_large/warm/koanf-4                  	    2517	    457469 ns/op	  197652 B/op	    2358 allocs/op
+BenchmarkLoad/dump_large/warm/koanf-4                  	    2688	    459488 ns/op	  197651 B/op	    2358 allocs/op
+BenchmarkLoad/dump_large/warm/koanf-4                  	    2618	    442070 ns/op	  197650 B/op	    2358 allocs/op
+BenchmarkLoad/dump_large/warm/koanf-4                  	    2528	    463319 ns/op	  197651 B/op	    2358 allocs/op
+BenchmarkLoad/dump_large/warm/koanf-4                  	    2610	    459786 ns/op	  197651 B/op	    2358 allocs/op
+BenchmarkLoad/dump_large/warm/koanf-4                  	    2347	    450640 ns/op	  197651 B/op	    2358 allocs/op
+BenchmarkLoad/dump_large/warm/koanf-4                  	    2528	    454369 ns/op	  197651 B/op	    2358 allocs/op
+BenchmarkLoad/dump_large/cold/viper-4                  	    1185	    907038 ns/op	  170725 B/op	    1708 allocs/op
+BenchmarkLoad/dump_large/cold/viper-4                  	    1329	    917686 ns/op	  170727 B/op	    1708 allocs/op
+BenchmarkLoad/dump_large/cold/viper-4                  	    1348	    909295 ns/op	  170728 B/op	    1708 allocs/op
+BenchmarkLoad/dump_large/cold/viper-4                  	    1273	    906186 ns/op	  170728 B/op	    1708 allocs/op
+BenchmarkLoad/dump_large/cold/viper-4                  	    1375	    918225 ns/op	  170725 B/op	    1708 allocs/op
+BenchmarkLoad/dump_large/cold/viper-4                  	    1268	    935478 ns/op	  170730 B/op	    1708 allocs/op
+BenchmarkLoad/dump_large/cold/viper-4                  	    1230	    950453 ns/op	  170726 B/op	    1708 allocs/op
+BenchmarkLoad/dump_large/cold/viper-4                  	    1353	    934261 ns/op	  170730 B/op	    1708 allocs/op
+BenchmarkLoad/dump_large/cold/viper-4                  	    1258	    928777 ns/op	  170727 B/op	    1708 allocs/op
+BenchmarkLoad/dump_large/cold/viper-4                  	    1275	   1010408 ns/op	  170727 B/op	    1708 allocs/op
+BenchmarkLoad/dump_large/warm/viper-4                  	    1507	    796551 ns/op	  168493 B/op	    1697 allocs/op
+BenchmarkLoad/dump_large/warm/viper-4                  	    1298	    801497 ns/op	  168494 B/op	    1697 allocs/op
+BenchmarkLoad/dump_large/warm/viper-4                  	    1471	    790683 ns/op	  168494 B/op	    1697 allocs/op
+BenchmarkLoad/dump_large/warm/viper-4                  	    1370	    828485 ns/op	  168492 B/op	    1697 allocs/op
+BenchmarkLoad/dump_large/warm/viper-4                  	    1530	    779697 ns/op	  168492 B/op	    1697 allocs/op
+BenchmarkLoad/dump_large/warm/viper-4                  	    1557	    792842 ns/op	  168495 B/op	    1697 allocs/op
+BenchmarkLoad/dump_large/warm/viper-4                  	    1546	    781880 ns/op	  168495 B/op	    1697 allocs/op
+BenchmarkLoad/dump_large/warm/viper-4                  	    1510	    779681 ns/op	  168495 B/op	    1697 allocs/op
+BenchmarkLoad/dump_large/warm/viper-4                  	    1492	    803059 ns/op	  168497 B/op	    1697 allocs/op
+BenchmarkLoad/dump_large/warm/viper-4                  	    1465	    783939 ns/op	  168496 B/op	    1697 allocs/op
+BenchmarkLoad/dump_large/cold/stdlib-4                 	    3021	    394836 ns/op	  128337 B/op	    1104 allocs/op
+BenchmarkLoad/dump_large/cold/stdlib-4                 	    3092	    381646 ns/op	  128337 B/op	    1104 allocs/op
+BenchmarkLoad/dump_large/cold/stdlib-4                 	    3099	    394988 ns/op	  128338 B/op	    1104 allocs/op
+BenchmarkLoad/dump_large/cold/stdlib-4                 	    2905	    383604 ns/op	  128337 B/op	    1104 allocs/op
+BenchmarkLoad/dump_large/cold/stdlib-4                 	    2998	    386373 ns/op	  128337 B/op	    1104 allocs/op
+BenchmarkLoad/dump_large/cold/stdlib-4                 	    3006	    388431 ns/op	  128337 B/op	    1104 allocs/op
+BenchmarkLoad/dump_large/cold/stdlib-4                 	    2905	    384644 ns/op	  128337 B/op	    1104 allocs/op
+BenchmarkLoad/dump_large/cold/stdlib-4                 	    3091	    390064 ns/op	  128338 B/op	    1104 allocs/op
+BenchmarkLoad/dump_large/cold/stdlib-4                 	    3019	    377428 ns/op	  128337 B/op	    1104 allocs/op
+BenchmarkLoad/dump_large/cold/stdlib-4                 	    3019	    385078 ns/op	  128337 B/op	    1104 allocs/op
+BenchmarkLoad/dump_large/warm/stdlib-4                 	    3685	    293460 ns/op	  126105 B/op	    1093 allocs/op
+BenchmarkLoad/dump_large/warm/stdlib-4                 	    3786	    294528 ns/op	  126104 B/op	    1093 allocs/op
+BenchmarkLoad/dump_large/warm/stdlib-4                 	    3962	    304477 ns/op	  126104 B/op	    1093 allocs/op
+BenchmarkLoad/dump_large/warm/stdlib-4                 	    4060	    298383 ns/op	  126105 B/op	    1093 allocs/op
+BenchmarkLoad/dump_large/warm/stdlib-4                 	    4165	    300160 ns/op	  126104 B/op	    1093 allocs/op
+BenchmarkLoad/dump_large/warm/stdlib-4                 	    3936	    303475 ns/op	  126104 B/op	    1093 allocs/op
+BenchmarkLoad/dump_large/warm/stdlib-4                 	    4009	    296125 ns/op	  126105 B/op	    1093 allocs/op
+BenchmarkLoad/dump_large/warm/stdlib-4                 	    3991	    298103 ns/op	  126104 B/op	    1093 allocs/op
+BenchmarkLoad/dump_large/warm/stdlib-4                 	    3537	    301288 ns/op	  126104 B/op	    1093 allocs/op
+BenchmarkLoad/dump_large/warm/stdlib-4                 	    4014	    306921 ns/op	  126104 B/op	    1093 allocs/op
+BenchmarkStructTagCost/pooled-4                        	17721579	        68.00 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/pooled-4                        	17783958	        67.47 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/pooled-4                        	17778822	        67.40 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/pooled-4                        	17781786	        67.66 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/pooled-4                        	17700832	        67.46 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/pooled-4                        	17713994	        67.69 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/pooled-4                        	17791492	        67.61 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/pooled-4                        	17811110	        67.46 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/pooled-4                        	17711341	        67.50 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/pooled-4                        	17759032	        67.55 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/per_library-4                   	 6348405	       193.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/per_library-4                   	 6239544	       189.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/per_library-4                   	 6345729	       204.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/per_library-4                   	 6107545	       198.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/per_library-4                   	 6353034	       188.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/per_library-4                   	 6352782	       188.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/per_library-4                   	 6352156	       188.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/per_library-4                   	 6358887	       189.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/per_library-4                   	 6328682	       192.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStructTagCost/per_library-4                   	 6365082	       189.2 ns/op	       0 B/op	       0 allocs/op
 PASS
-ok  	github.com/onhotpath/ferry/bench	878.799s
+ok  	github.com/onhotpath/ferry/bench	885.015s
 ```
 
 </details>
