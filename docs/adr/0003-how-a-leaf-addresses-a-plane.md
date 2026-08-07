@@ -343,19 +343,35 @@ So a driver runs **two** checks over the address set before any I/O, and they ar
 Legality asks whether the plane can name this address at all, which no transformation can rescue: an empty segment has no environment variable name, and a segment containing a backslash has no Registry name.
 Injectivity asks whether the transformation it chose collapses two addresses into one.
 
-Measured, over four address sets and three key functions:
+Measured, over four address sets and four key functions:
 
-| Address set | env, uppercase and `_` | env, no fold and `_` | dotted, no fold |
-| --- | --- | --- | --- |
-| `/DB/HOST`, `/DB_HOST` | rejected | rejected | ok |
-| `/myKey`, `/MyKey`, `/MYKEY` | rejected | ok | ok |
-| `/db.host`, `/db/host` | ok | ok | rejected |
-| `/db/host`, `/db/port`, `/cache/host` | ok | ok | ok |
+| Address set | env, uppercase and `_`, no character transform | env, no fold and `_`, no character transform | dotted, no fold | env, uppercase and `_`, illegal byte to `_` |
+| --- | --- | --- | --- | --- |
+| `/DB/HOST`, `/DB_HOST` | rejected | rejected | ok | rejected |
+| `/myKey`, `/MyKey`, `/MYKEY` | rejected | ok | ok | rejected |
+| `/db.host`, `/db/host` | ok | ok | rejected | rejected |
+| `/db/host`, `/db/port`, `/cache/host` | ok | ok | ok | ok |
 
 Two things to read out of that table.
 The first row is the collision a flat key space creates and cannot see, appearing as a driver error before any I/O rather than as a silent overwrite.
 The second row is viper's measured bug, and it is now an error that names both offending addresses.
 No key function is universally right, which is precisely why the rule is stated over the schema rather than over the key function.
+
+> **Amended under [#125](https://github.com/onhotpath/ferry/issues/125): every column says what its key function does, and the transforming driver this section argues for has a column of its own.**
+> As published the header row read `env, uppercase and _`, `env, no fold and _` and `dotted, no fold`, over three key functions, and it did not say that none of the three transforms segment text.
+> **No published cell moves and nothing is re-measured.**
+> All twelve reproduce under exactly that reading, which is the only reading under which every passage of this section holds: the two env columns are a case fold and a join separator and nothing else.
+> What was missing is the fourth column.
+> The paragraph above the table argues for a driver that maps an illegal byte to `_`, and that driver is none of the three the table measured, so a reader building an env driver from the prose and a reader building one from the table's first column got different answers.
+> Row 3 is the whole of the difference: `/db.host` and `/db/host` stay apart under a key function that only folds case, and fold together under one that also maps `.` to `_`.
+>
+> The fourth column is the key function `driver/env` ships, and its cells are read off that driver rather than off a prototype.
+> It folds a byte at a time, upper-casing a letter, keeping a digit and mapping everything else to `_`, so `/db.host` and `/db/host` both render `DB_HOST` and a schema holding both is refused at `Bind` naming both addresses.
+> This section's own argument reproduces at the same seam: `feature-flags` alone renders `FEATURE_FLAGS` and binds, and `feature-flags` beside `feature_flags` is refused before any I/O.
+>
+> The fold is total, so nothing reaches that driver's legality check by way of a character.
+> What it refuses as illegal is a shape no fold rescues: an empty segment, and a name beginning with a digit, which no shell can set.
+> That is the legality half of the two checks this section separates, and it is unaffected by the column being added.
 
 **The check needs the whole address set up front, and the compiled schema has it before any I/O.**
 That is the same precondition a batch or snapshot source needs, so the collision rule and the capability the survey identifies as the biggest non-generics win in section 5.13 are unlocked by the same fact.
