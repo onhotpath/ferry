@@ -284,8 +284,8 @@
 //
 // A failed call carries a set rather than the first thing that went wrong.
 // Range it with [Elements], and match a member with errors.Is against
-// [ErrSchema], [ErrMissing], [ErrValue], [ErrPlane], [ErrDriver] or
-// [ErrReadOnly]. Read where it happened with errors.AsType[*ferry.Error] and
+// [ErrSchema], [ErrMissing], [ErrValue], [ErrPlane], [ErrPanic], [ErrDriver]
+// or [ErrReadOnly]. Read where it happened with errors.AsType[*ferry.Error] and
 // [Error.Address]:
 //
 //	for _, e := range ferry.Elements(err) {

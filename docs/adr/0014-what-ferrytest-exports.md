@@ -759,6 +759,16 @@ That is weaker than a compile-time signal and it is the only shape available, be
 - **A run says what it scaled to.**
   Six of the contract's interfaces are optional, so two conformant drivers execute very different numbers of cases, and the difference used to be invisible: a case that quietly did nothing read exactly like a case that passed.
 
+> **Corrected: the counts this section restates were never re-totalled, and four of them are now wrong.**
+>
+> Every figure below was true when the line carrying it was written, and each was moved by a later change that amended the section owning it and not the summary repeating it.
+> Nothing here is a new decision, and no case, name or interface moves: what moves is the arithmetic.
+>
+> - **The optional interfaces are seven, not six.** The bullet above and the #201 amendment both read "six": `Releaser`, `Committer`, `Prober`, `Enumerator`, `Ensurer` and `Unsetter`. [ADR-0019](0019-the-concurrency-model.md) added `Concurrent`, which is discovered by assertion on the reader exactly like the other six, and `ferrytest`'s own scaling line already names seven.
+> - **The `Driver` list is seventeen cases, not fifteen.** The bullet above ends its parenthetical at fifteen; the two amendments after it, the concurrency model's and [#220](https://github.com/onhotpath/ferry/issues/220)/[#221](https://github.com/onhotpath/ferry/issues/221)'s, carry the list to sixteen and then seventeen, and seventeen is what ships.
+> - **The exported-name count is the surface table's**, and the first bullet of this section - "Nineteen exported names in one package", raised to twenty in its parenthetical - predates [#175](https://github.com/onhotpath/ferry/issues/175)'s re-total. The table under [The surface](#the-surface) and its amendments are the authority, and this section states no figure of its own.
+> - **The registrant's sample no longer compiles as printed.** It reads `reg := ferry.NewRegistry(...)` in one assignment, and [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md), amended under [#299](https://github.com/onhotpath/ferry/issues/299), makes `NewRegistry` return `(*Registry, error)` and puts the panicking spelling under `MustRegistry`. A test writes `reg := ferry.MustRegistry(...)` and stays the length this ADR argues it has to be; a caller that wants the report writes the two-value form and checks it.
+
 ## Items from the xload survey
 
 The survey is [`docs/research/generics-and-modern-go.md`](../research/generics-and-modern-go.md), section 5, against `github.com/gojekfarm/xtools` at [`a90b3aa`](https://github.com/gojekfarm/xtools/commit/a90b3aad2133248cec50f6b4d6e37b0d9e788adb).

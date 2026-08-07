@@ -86,6 +86,33 @@ It is [ADR-0008](0008-the-struct-tag-grammar.md)'s tag grammar throughout, and t
 > **Nothing in this ADR's decision moves**: a codec still declares a boundary kind, and that kind is still one of the same six.
 > Left unamended this ADR would have been the trap, because `ferry.String` here means the kind constant and `ferry.String` in the code now means the constructor, so the two would have read alike and meant different things.
 
+> **Corrected: every code block in this ADR is written against a surface that no longer exists, and none of them compiles.**
+>
+> The [#227](https://github.com/onhotpath/ferry/issues/227) amendment further down supersedes the freeze mechanics and names three sections it retires.
+> It does not reach the code, and the code is where the damage is: a registrant reads this ADR first and types what it prints.
+> This note is the whole of that correction, kept in one place because the substitution is mechanical and the same one everywhere.
+>
+> **What every block reads as published, and what it is now.**
+>
+> | as published | what ships |
+> | --- | --- |
+> | `ferry.Register(...)` in an `init()`, writing to a mutable default registry | `reg := ferry.MustRegistry(...)`, handed to a call as `ferry.WithRegistry(reg)` |
+> | `reg := ferry.NewRegistry()` then `reg.Register(...)` | `reg, err := ferry.NewRegistry(...)`, one complete set and no mutators |
+> | `Reg`, the opaque registration type | `Codec`, and `KeyCodec` where the type may also key a map |
+> | `ferry.TextCodec[T](ferry.KindString)` | `ferry.StringText[T]()` |
+> | `ferry.TextCodec[T](ferry.KindNumber)` | `ferry.NumberText[T]()` |
+> | `ferry.StringCodec(format, parse)` | `ferry.StringValue[T](enc, dec)`, or `ferry.StringKey[T](enc, dec)` for a key type |
+> | `ferry.ValueCodec(ferry.KindNumber, enc, dec)` | `ferry.NumberValue[T](enc, dec)`, and one constructor per kind beside it |
+> | `func DurationLike[T ~int64]() Reg` | `func DurationLike[T ~int64]() KeyCodec` |
+>
+> **The kind stopped being an argument and became the constructor's name**, which is [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md)'s, and it is why the `VKind`/`KindString` spelling #95 settled above no longer appears at a registration call site at all.
+> **`NewRegistry` gained an error return** under [#299](https://github.com/onhotpath/ferry/issues/299), so a one-value assignment does not compile; `MustRegistry` is the panicking spelling, and it is what a test and an `init()` reach for.
+>
+> Beyond the worked example below, the same substitution applies to the signature block that follows it, to `DurationLike`'s return type, to the two spellings weighed under [the default registry](#the-default-registry-and-the-init-order-question-it-has-to-answer), to the `init()` sketches in [global-and-frozen was costed](#global-and-frozen-was-costed-rather-than-assumed), to the map-key example under [a key codec says so](#a-key-codec-says-so-and-that-is-where-injectivity-is-communicated), and to the working-spellings and inference bullets at the end.
+> **The map-key remedy is worth spelling out**, because this ADR quotes it as a diagnostic a user will see: the shipped text says `ferry.StringText[netip.Addr]().AsMapKey()`, and this ADR prints `ferry.TextCodec[netip.Addr](ferry.KindString).AsMapKey()`.
+>
+> **No decision in this ADR moves.** A registration is still a typed pair, still declares a boundary kind, still opts in to keying a map by a keyword, and still refuses a type core already owns. What moved is how each of those is spelled.
+
 ```go
 package main
 

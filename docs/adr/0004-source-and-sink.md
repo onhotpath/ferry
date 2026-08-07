@@ -175,7 +175,12 @@ Everything beyond that is opt-in.
 > **The suite gains the case**, capability-scaled in the ordinary way: it runs for a sink asserting `Unsetter` and skips, out loud, for every sink that does not, so a driver cannot fail a case for a claim its author never made.
 > That is [ADR-0014](0014-what-ferrytest-exports.md)'s list and the amendment is there.
 
-### `Bind` is a separate phase because the two halves have different lifetimes
+> **Corrected: `Ensure` takes a `Container` and a `Presence`, and the block two amendments above prints an older signature.**
+>
+> That block reads `Ensure(ctx context.Context, addr SectionAddr) error`, which is what the capability was sketched as when it was three lines of specification with nothing under it.
+> What ships, and what the sealed address model's amendment higher up this ADR already prints, is `Ensure(ctx context.Context, addr Container, p Presence) error`.
+> **Two things moved and both are that amendment's, not this one's.** The address widened from `SectionAddr` to `Container`, because a composite has an own address to ensure exactly as a section does; and the `Presence` argument arrived, because what a value has to say at a container's own address is present-and-empty or null, and a call with no argument can say only one of them.
+> The two spellings are otherwise the same capability, and the earlier print is left in place as the record of what the capability looked like before it had a caller.
 
 This is the one seam that survived every round of simplification, because it is the only thing carrying ADR-0003's before-any-I/O rule.
 
@@ -643,6 +648,21 @@ So env is the only plane where the absence of a `Sink` implementation is a prope
 
 The memory plane's column is empty on every axis, which is ADR-0002's own point restated as a measurement.
 
+> **Corrected: the list is four drivers, `query` is one of them, and it implements two optional interfaces.**
+>
+> As published the list is `yaml`, `kv` and `env`, `query` is a candidate rather than a commitment, and its bullet says it is "the only driver implementing no optional interface at all".
+> `driver/http` ships, it is the query-parameter plane, and it asserts `Prober` and `Enumerator` on its reader.
+> The admission rule that put it there is unchanged and is the one this section states: it owns the per-request axis, which [ADR-0012](0012-the-caller-held-binding.md) named as the trigger for the held binding and which nothing else exercises.
+>
+> **The axis table above predates four of the seven optional interfaces**, and no row exists for `Prober`, `Ensurer`, `Unsetter` or `Concurrent`.
+> Counted off the shipped drivers rather than off the prototype: `yaml` asserts `Prober`, `Enumerator`, `Ensurer`, `Unsetter`, `Committer` and `Releaser`; `kv` asserts `Prober`, `Enumerator`, `Concurrent`, `Committer` and `Unsetter`; `env` and `http` each assert `Prober` and `Enumerator`.
+> So "no driver implements all three optional interfaces" is true of a set of three that is now seven, and the sentence it supports - that a capability belongs on an interface a driver opts into rather than on `Reader` and `Writer` - is the reason the count kept growing without the contract moving.
+>
+> **The line counts are the prototype's**, as this ADR's own preamble says of every number in it, and no shipped driver has been re-measured against them.
+> They were evidence for a bar, the bar held, and they are left as the record of the measurement rather than restated as a fact about `driver/`.
+>
+> **Nothing in the decision moves.** The admission rule is still one row per axis, the axes are still read off the contract, and a driver still earns its place by owning a row no other driver has.
+
 ### What this ADR does not decide
 
 - Whether an absent address takes a default, whether `null` and absent mean the same thing to a Go field, and whether present-and-empty satisfies `required`: [#8](https://github.com/onhotpath/ferry/issues/8).
@@ -667,6 +687,9 @@ The plane instance has to be suppliable at load time rather than at bind time, a
 This is not decided here, because deciding it inline would settle the caller-facing API as a side effect of a driver-facing ADR.
 **Filed as [#25](https://github.com/onhotpath/ferry/issues/25), "How a caller holds a binding, and where a per-request plane is supplied."**
 It blocks nothing in this ADR; the contract above is the same either way.
+
+*(Closed since, by [ADR-0012](0012-the-caller-held-binding.md), which is #25's own ADR: the caller holds a `Binding`, and a per-request plane arrives in the `context.Context`.
+The contract above is indeed the same, exactly as this paragraph predicted.)*
 
 ## Consequences
 

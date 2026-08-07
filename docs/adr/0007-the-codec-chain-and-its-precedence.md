@@ -68,8 +68,11 @@ Four questions this ADR had to answer that the ticket did not name:
   This is stated as a cost with a named mitigation, not solved.
 - **`map[time.Time]string` collapses two distinct keys into one address, today, in core's own set.**
   Found here, and fixing it amends ADR-0005 rather than this one, so a ticket is proposed rather than a fix taken inline.
+  *(Closed since, under [#31](https://github.com/onhotpath/ferry/issues/31), by exactly the amendment this bullet predicted: [ADR-0005](0005-the-supported-type-set.md) makes key admissibility a per-entry declaration rather than an inheritance from the identity table, and `time.Time` is dropped as a key type because no text form is injective over it under `==`.
+  A `map[time.Time]string` is refused at schema compile, and the diagnostic says why.)*
 - **A `[]byte` field's declared default is taken as raw bytes and not as base64.**
   Named, and it belongs to [#11](https://github.com/onhotpath/ferry/issues/11)'s documentation of how a default is written.
+  *(Discharged since, exactly where this bullet sends it: [`docs/guide/tags.md`](../guide/tags.md) carries the sharp edge under its own heading, with the worked case.)*
 
 ### The chain is three steps, and a type is claimed once as a pair
 
@@ -637,6 +640,11 @@ register a codec and mark it usable as a key with
 ferry.TextCodec[netip.Addr](ferry.VString).AsMapKey()
 ```
 
+> **Corrected: the remedy the shipped diagnostic prints is `ferry.StringText[netip.Addr]().AsMapKey()`.**
+>
+> The block above quotes it as `ferry.TextCodec[netip.Addr](ferry.VString).AsMapKey()`, which is the registration surface [ADR-0009](0009-typed-codec-registration.md) published and [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md) replaced: the kind stopped being an argument and became the constructor's name, so there is no `TextCodec` and no kind to pass.
+> ADR-0009 prints the same remedy in the same stale spelling, and its own correction says so.
+> **The diagnostic's job is unchanged**, and it is this section's whole point: a chain-claimed type at a map key is refused, and the message names the one line that fixes it.
 **One thing this reversal makes worth doing.**
 Two Go keys collapsing into one address is detectable **exactly** at dump time, with no registrant, no value list and no injectivity proof, because the walk already renders every key to text and sorts by it - so the check is an adjacent-pair scan over a list that is already built.
 It was rejected as an *answer* to #45 because it is a runtime refusal where ADR-0005's framing is schema-compile, and because it cannot see the Load side at all.
@@ -809,6 +817,9 @@ Two Go keys, one address, no error.
 This is exactly the hazard ADR-0005 states for a **registered** key codec, occurring inside **core's own set**, and no probe in #7 reached it because none used a composite map key.
 It is not fixed here, because the fix - dropping `time.Time` from the admissible key set, or attaching a proof obligation to it - amends ADR-0005's decision rather than this one.
 **Proposed as a ticket** in the resolution comment.
+
+*(Closed since, under [#31](https://github.com/onhotpath/ferry/issues/31), by the first of the two fixes this paragraph names: `time.Time` is dropped from the admissible key set, and key admissibility became a per-entry declaration on [ADR-0005](0005-the-supported-type-set.md)'s table rather than something inherited from membership of it.
+The section further up already records that #31 landed; this paragraph is where the defect is stated, and it is the one that read as open.)*
 
 **The declared kind must live inside the identity-table entry, not beside it.**
 This ADR says core applies the donor rule before calling any codec.

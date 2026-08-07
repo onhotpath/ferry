@@ -615,6 +615,8 @@ This is the reversible direction: a list can be added later, and nothing depends
 >
 > One thing this ADR shipped is a precondition for the other: `tagScan` substring-matches the configured key, so a foreign tag beside a `ferry` tag can be misread today.
 > That is [#261](https://github.com/onhotpath/ferry/issues/261), it is worth fixing regardless, and nothing in ADR-0021 lands before it.
+>
+> *(Both halves closed since. #261 is fixed: the scan matches at a real key boundary, so another library's malformed tag is no longer refused as ferry's own. And [ADR-0021](0021-the-multi-key-extension-mechanism.md) has landed, in the order this line asked for.)*
 
 ### What is not in the vocabulary, and why each is a refusal rather than an omission
 
@@ -833,6 +835,17 @@ No **tag option** affects what compiles, so the key is the only thing this ADR a
 What else might be in it is not this ADR's to close: ADR-0007 makes a registered codec change whether a type compiles at all, so whether the codec registry belongs there depends on [#19](https://github.com/onhotpath/ferry/issues/19) making it process-wide or per-instance.
 If a tag-key Option ever lands it becomes part of that key, at a measured 12 ns against 18 ns and no allocations either way, which is the cheap end of the question ADR-0006 opened.
 The expensive end, a compile-affecting Option whose value is unhashable, is untouched by this ADR because no tag option is one.
+
+> **Corrected: the tag-key Option landed, the registry question is settled, and the entry point is not called `Validate`.**
+>
+> Three things this section leaves open have since closed, and one figure in it does not match its own table.
+>
+> - **"If a tag-key Option ever lands" is past tense.** `TagKey` is a shipped Option, it is part of the schema cache key exactly as this paragraph predicted, and [ADR-0010](0010-the-entry-point-and-the-schema-cache.md) is where the key is stated. The sentence fourteen lines above already says the tag key is part of whatever keys the cache, so the two read as disagreeing when only the tense does.
+> - **The measurement is 18 ns against 28 ns**, which is what the table above this paragraph prints and what the later section quotes. The "12 ns against 18 ns" here is a third pair for the same comparison and is the one with no table behind it.
+> - **The codec registry is per-instance**, which is what [#19](https://github.com/onhotpath/ferry/issues/19) settled and [ADR-0009](0009-typed-codec-registration.md) records: a registry is a value a caller builds and hands to a call, there is no process-wide one, and it is the outer level of the cache key rather than a component inside it.
+> - **`Validate[T]()` ships as `Compile[T]()`.** ADR-0010 renamed it and states why; this ADR names the old spelling in three places and none of them is marked. The entry point is unchanged in everything but its name: it compiles a schema, touches no plane, and is where a schema fault is reported.
+>
+> **Nothing this ADR decides moves.** The grammar, the tag key's status as compile-affecting, and the rule that no tag option affects what compiles are all unchanged.
 
 **[#19](https://github.com/onhotpath/ferry/issues/19), registration.**
 No tag option names a codec, in either direction.

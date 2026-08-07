@@ -181,6 +181,15 @@ Measured: `[3]string` given only index 0 loads `["a", "", ""]`, and given index 
 `encoding/json/v2` is stricter here, refusing a short array outright with `too few array elements` and offering `UnmarshalArrayFromAnyLength` as the v1-legacy escape.
 ferry does not follow it, because an absent address leaving a zero value is the rule ferry applies everywhere else and an array element is a static address like any other.
 
+> **Corrected: `[0]T` is refused at schema compile, and this section admits every array length.**
+>
+> As published an array is admitted for its length and nothing is said about a length of zero, which reads as admitting `[0]T` alongside `[3]T`.
+> A `[0]T` maps no address at all: it contributes no index, so a field declared as one names nothing on the plane and can neither be loaded into nor dumped from.
+> That is [ADR-0011](0011-the-error-model.md)'s `ErrSchema` shape exactly - provable from the type with no plane in sight - and it refuses there, with a diagnostic saying the field maps no address.
+> It is refused for the same reason `struct{}` is, and it was being dropped silently where `struct{}` was refused: the element type was never compiled either, so a `[0]chan int` reached a shipped schema.
+> **The rule this section states is unchanged**: an array's addresses come from its length, and a length of zero is the degenerate case of that rule rather than an exception to it.
+> The over-index refusal measured above still holds, unchanged.
+
 **`Index` segments are used, which answers the question ADR-0003 reserved.**
 ADR-0003 said that if this ticket admitted no indexed composite, the kind would simply go unused.
 Slices and arrays are admitted, so it is used, and ADR-0003's measured reason for kinding segments at all stands: an emitter that guesses list-versus-map from base-10 text turns `map[string]int{"0": ...}` into a YAML sequence and destroys the key.
@@ -1159,6 +1168,16 @@ Core's test iterates the identity table and the admitted kind list and asserts t
 > **Closed at `0d86c00`**, which is later than the paragraph above and is why this one is in the past tense: the seven rows are in `CoreTypes()`, each carrying the boundary values that distinguish its width from its neighbours, so a codec that silently truncates to a narrower type fails here rather than in production.
 > **11 of 11 is 18 of 18**, and `go test ./...` is green.
 > Evidence: `TestCoreTypesComplete` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/proto/tip).
+
+> **Corrected: the table is nineteen rows and 57 cases, and the harness sketch above is not the shape that shipped.**
+>
+> "18 of 18" was the count when the completeness check first ran, and the [#35](https://github.com/onhotpath/ferry/issues/35) amendment further up already carries the table to nineteen rows and 57 cases.
+> Nineteen rows is what `CoreTypes()` ships and what the check asserts against, so the two figures in this section disagree and the later-reading one is the older.
+>
+> **The `Plane{Source, Sink, Kinds}` sketch in this section is superseded**, and by [ADR-0014](0014-what-ferrytest-exports.md), which owns that surface.
+> A `Plane` is a description rather than a pair of halves: it carries a name, the kinds it can carry, what it cannot spell inside them, a golden artefact, and an `Open` that mints an `Instance` - and the `Instance` is what holds a `Source` and a `Sink`.
+> The reason is this ADR's own rule applied one level up: two proofs sharing one plane share a destination, and minting the pair together is what stops them.
+> **Nothing this ADR decides moves.** The proof is still values, a relation and a golden `Value`; the completeness check still iterates the identity table; the harness surface was always ADR-0014's to publish.
 
 ### What this ADR does not decide
 

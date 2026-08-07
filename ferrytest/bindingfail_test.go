@@ -22,11 +22,12 @@ var (
 // TestDriverSaysWhatItScaledTo is what a driver author has instead of counting
 // which cases ran.
 //
-// Six of the contract's interfaces are optional and are discovered by
+// Seven of the contract's interfaces are optional and are discovered by
 // assertion, so two conformant drivers execute very different numbers of cases,
 // and a case that quietly did nothing reads exactly like a case that passed.
-// The memory plane probes, enumerates and ensures, and holds neither resource
-// nor staging, so the line names three capabilities and not the other two.
+// The memory plane probes, enumerates, ensures and forgets a composite, and
+// holds neither resource nor staging, so the line names those four capabilities
+// and neither "commits" nor "releases".
 func TestDriverSaysWhatItScaledTo(t *testing.T) {
 	c := &capture{}
 

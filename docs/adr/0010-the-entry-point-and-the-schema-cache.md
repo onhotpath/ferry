@@ -278,6 +278,13 @@ It is recorded as the runner-up rather than dismissed: the difficulty of naming 
 > The schema cache is keyed by the type, the struct tag key, and the registry.
 > The registry is the outer level: the cache hangs off the `*Registry`, and the inner key is `struct{ reflect.Type; string }`.
 
+> **Corrected: the inner key carries a third field, so the key is four components in all.**
+>
+> As published the inner key is `struct{ reflect.Type; string }` hanging off the registry, which is three components counting the registry outer.
+> [ADR-0021](0021-the-multi-key-extension-mechanism.md) added a fourth: a call may declare foreign tag keys, and what a schema compiles to then depends on which keys were declared, so the declaration joins the inner key beside the type and the tag key.
+> **The rule is exactly the one this section states and is why the fourth fits without argument**: everything a compile depends on is in the key, and anything that is not compile-affecting stays out.
+> The shape is unchanged too - the cache still hangs off the registry, and the inner key is still one comparable struct - so the measurements below still describe the mechanism that ships, with one more comparable field in the struct they measure.
+
 Nothing in that sentence is this ticket's to decide.
 ADR-0008 put the tag key in, ADR-0009 put the registry in, and both measured what happens without it.
 Both were re-run against a real compile rather than inherited:
@@ -683,6 +690,10 @@ The first is what the principle actually asks for, and it is not available here.
 ADR-0001 leaves "whether core ever exports a read-only schema view" open and says to reopen it only if a concrete need survives the dump-into-a-recording-sink pattern; and a caller-held handle is [#25](https://github.com/onhotpath/ferry/issues/25)'s bind-then-load question by name.
 So there is nothing for a parse to hand back.
 
+*(#25 closed since, by [ADR-0012](0012-the-caller-held-binding.md): a caller does hold a handle, and it is a `Binding` rather than a schema.
+That ADR answers the question this sentence defers, and answers it in the direction that leaves the sentence true - a binding exposes no address set, no field list and no defaults, so there is still nothing for a parse to hand back and `Compile[T]() error` keeps its shape.
+Whether core ever exports a read-only schema view is a separate open item and is not settled here.)*
+
 > The discard is a consequence of ADR-0001 keeping the compiled schema unexported, not a choice #16 made.
 
 Two things follow and are stated rather than left.
@@ -757,6 +768,17 @@ ADR-0009's one broken shape, a **`Load`** during `init`, is unchanged and still 
 The residual cost is stated rather than hidden: a `Compile` that runs during `init` answers about a registry a later `init` may still add to, so it can report a failure a later registration would have fixed.
 That is loud, it is at the `Compile` call, and it costs the user a moved line.
 The freezing reading's failure is a plane holding a representation nobody chose.
+
+> **Corrected: there is no freeze, so the machinery this section measures is gone and its decision is stronger without it.**
+>
+> As published, and throughout this subsection, a registry is built empty, filled by `Register` calls, and frozen at first use, and the question is which entry points trip that freeze.
+> [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md) removed the mutable phase: a registry is built complete in one call and has no mutators at all, so there is no later `Register` to be refused and no `frozen` bit to observe.
+> Every probe printed here - "a later `Register` is accepted", "a later `Register` is refused" - describes a sequence that can no longer be written.
+>
+> **The decision this subsection reaches is untouched and is why the replacement is safe.**
+> The rule it lands on is that a constraint attaches to a resolution which is *retained*, and a call discarding its schema resolves nothing that outlives it.
+> A registry with no mutable phase satisfies that rule at every entry point, for free, and the failure mode measured above - a caller dropping a `Register` error and getting a plane holding the representation they replaced - has nowhere to occur.
+> **`Compile` still takes neither the cache nor the freeze**, and it still may be called anywhere, including during `init`; the residual cost stated in the paragraph above is unchanged.
 
 #### The amendment to ADR-0008, stated plainly
 
@@ -972,6 +994,13 @@ Nothing is added to that package, and one thing is handed to it: the equivalence
   So `Compile[T]() error` diverges from `regexp.Compile`'s shape knowingly, and if #25 ever exports a handle this is the function whose signature changes - a break ferry can afford only because ADR-0002 keeps it at v0.
 - The caller-facing surface is four functions and two Options.
   Every Option that exists today is compile-affecting, which is a coincidence of the order the tickets landed in and not a design property, and the rule above is what stops it being read as one.
+
+> **Corrected: not every Option is compile-affecting any more, and this bullet's own warning is what stopped it mattering.**
+>
+> As published every Option ferry had changed what a schema compiles to, and this bullet says in as many words that the coincidence must not be read as a design property.
+> `MaxConcurrency`, which [ADR-0019](0019-the-concurrency-model.md) added, is the first that is not: it bounds how many calls into the plane may overlap during one load, changes nothing about the compiled schema, and is therefore out of the cache key entirely.
+> [ADR-0012](0012-the-caller-held-binding.md) restates the same coincidence in its own consequences and is stale in the same way.
+> **The rule is unchanged and it absorbed the case without an amendment to itself**: what a compile depends on is in the key, and an Option that affects only the run is not.
 
 ## Items from the xload survey
 

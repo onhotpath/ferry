@@ -853,6 +853,16 @@ It changes nothing this ADR measured, because no probe here depends on a driver 
   It is strictly more expressive than an Option, because it can be put on a child of a combinator and answer which layer supplied a value, which is the question ADR-0001 milestones drift detection on.
   The cost is that ADR-0010's Option rule loses its only load-affecting example, so every Option ferry has is now compile-affecting, and the ADR says that is a coincidence rather than a property.
 - **`Compile[T]() error` stands and the v0 break ADR-0010 priced is not spent**, because a binding is a handle on a schema bound to a plane and answers no question about the type.
+
+> **Corrected: four things this ADR states in the future or conditional tense have happened.**
+>
+> Each was true when written and each was moved by a change that amended the section owning it rather than every restatement of it.
+> No decision here moves; what moves is the tense and, in one case, an arithmetic claim.
+>
+> - **The named trigger has fired.** "The binding lands with the first driver whose plane is per request" reads as a deferral in the section that states it, and `driver/http` ships. The amendments earlier in this ADR record that the surface landed alongside it; the deferral paragraph itself was never marked.
+> - **The key-helper amendment is not owed, it landed.** Three places here say it is owed to [#13](https://github.com/onhotpath/ferry/issues/13), which is closed and whose ADR is [ADR-0020](0020-watch-and-reload.md). The static table is the bind's and the minted set is the open's, exactly as those paragraphs specify, and it is what makes a second dump through one held sink binding legal.
+> - **`Bind` freezes nothing, because there is no freeze.** [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md) removed the mutable phase from a registry, so the probe printed above - `frozen=false` after a `Compile`, `frozen=true` after a `Bind` - describes a bit that no longer exists. ADR-0010's rule that a call retaining a schema is the one that constrains a registry is unchanged, and a registry that was never mutable satisfies it at both entry points.
+> - **Not every Option is compile-affecting.** The bullet above says the presence observation being a `Source` costs ADR-0010's rule its only load-affecting example. [ADR-0019](0019-the-concurrency-model.md)'s `MaxConcurrency` is one: it bounds overlap during a load, changes no compiled schema, and stays out of the cache key. The coincidence this bullet flags is over, and the rule it flagged it against absorbed the case unchanged.
 - **A binding is shared across goroutines and a driver's `OpenFunc` and `OpenWriterFunc` must be safe for concurrent calls**, which is a new driver obligation and a new conformance case.
   It is clean under `-race` in the prototype for the drivers there, and [#20](https://github.com/onhotpath/ferry/issues/20) inherits the fact rather than a design.
 - **Core stops rebuilding the address set on every load**, taking a per-request load from 125 allocations to 85 with no API attached, found while separating the bind's cost from the load's.

@@ -82,7 +82,7 @@ var ErrValue = errors.New("invalid value")
 // address set it was bound to.
 var ErrPlane = errors.New("plane error")
 
-// ErrDriver is provenance rather than a class, and it crosses the other four:
+// ErrDriver is provenance rather than a class, and it crosses the others:
 // it says the cause came from below the boundary. Core supplies it, so a driver
 // cannot forge it.
 //
@@ -160,10 +160,10 @@ func declaredClass(err error) error {
 // [ErrSchema], [ErrMissing], [ErrValue], [ErrPlane], [ErrPanic], [ErrDriver] or
 // [ErrReadOnly].
 //
-// The address is the plane address, except at schema compile, where it is the
-// Go field path - a field with no tag never named an address, and that is the
-// whole error. An error with no location, a close failure among them, returns
-// the zero [Path].
+// The address is the plane address wherever the position has one, and the Go
+// field path only where it has none - a field with no tag never named an
+// address, and that is the whole error. An error with no location, a close
+// failure among them, returns the zero [Path].
 //
 // The cause stays in the chain, so errors.Is against a driver's own sentinel or
 // against strconv.ErrRange still answers.
@@ -202,8 +202,8 @@ func (e *Error) Error() string { return errPrefix + e.line() }
 func (e *Error) Unwrap() error { return e.cause }
 
 // Address is where the failure happened: the plane address, or the Go field
-// path for a schema compile failure. An error with no location returns the zero
-// [Path].
+// path where the position names no address at all. An error with no location
+// returns the zero [Path].
 func (e *Error) Address() Path { return e.loc }
 
 // Is matches the class sentinel and the provenance marker, which is what makes

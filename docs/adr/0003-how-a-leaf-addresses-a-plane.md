@@ -58,6 +58,16 @@ Four things follow from it, and they are why the rendering is a string rather th
 - Errors and diagnostics have one spelling for one address.
 - Determinism has something stable to sort, which ADR-0001 makes a package-wide invariant.
 
+> **Corrected: ADR-0001 states no determinism invariant, and this ADR credits it with one in four places.**
+>
+> As published this line, two of the bullets under [Ordering is segment-wise](#ordering-is-segment-wise-and-this-is-not-the-same-as-sorting-the-rendering), and the map-key argument later on all rest an argument on "ADR-0001's determinism invariant".
+> [ADR-0001](0001-what-ferry-supports.md) contains no such sentence and never did; the word does not appear in it.
+> [ADR-0004](0004-source-and-sink.md) inherited the same citation once.
+>
+> **The property is real and this ADR is where it is stated.** What holds is that a report and a dump are single-valued for one input, and the evidence is on this page: the error report sorts at construction, verified against two reversed `Get` sequences producing one identical report, and the dumped output is sorted at the write loop.
+> **What is wrong is only the attribution**, so nothing in the decision moves: a comparable, sortable address is still what the sortedness rests on, and the measurements quoted for it stand.
+> Read the requirement as this ADR's own rather than as one inherited, and do not go looking for it in ADR-0001.
+
 **Core copies the property and does not import the type.**
 ADR-0002 bars `encoding/json/jsontext` from core, and this ADR does not reopen that.
 The prototype's address type was extracted into a module at `go 1.26` and tested green under `GOTOOLCHAIN=local GOEXPERIMENT=nojsonv2`, so the address model is core-eligible and does not consume ADR-0001's `go 1.27` fallback.

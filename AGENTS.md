@@ -11,8 +11,9 @@ This file is the short form.
 
 ## The API is decided, and the ADRs are where
 
-Fifteen ADRs in `docs/adr/` settle the address model, the source and sink contract, the type set, defaults and absence, the codec chain, the tag grammar, registration, the entry point and schema cache, the error model, the caller-held binding, plane compatibility, the conformance package and the plane that spells one address two ways.
-Every one is Accepted, and all of them are implemented.
+Twenty-one ADRs in `docs/adr/` settle what ferry supports, the module layout, the address model and its sealed kinds, the source and sink contract, the type set, defaults and absence, the codec chain, the tag grammar, typed codec registration and the `Value` it builds, the entry point and schema cache, the error model, the caller-held binding, plane compatibility, the conformance package, the plane that spells one address two ways, the spelling seam, the concurrency model, watch and reload, and the multi-key extension mechanism.
+Every one is Accepted.
+All are implemented except [ADR-0018](docs/adr/0018-the-spelling-seam.md), the spelling seam, which is Accepted and not yet built.
 
 **The ADRs are the specification.**
 Where an issue and an ADR disagree, the ADR wins.
@@ -30,8 +31,8 @@ Only an unmade decision gets a new number.
 An amendment the user asks for is folded into the same pull request as one commit.
 A correction large enough to need evidence gets a prototype and its own pull request, and the user decides.
 
-**Three questions are parked deliberately and must get no silent answer**: tag-grammar extension, concurrency, and watch/reload.
-Nothing may ship that anticipates them.
+**The three questions that used to be parked are decided and shipped**: tag-grammar extension by [ADR-0021](docs/adr/0021-the-multi-key-extension-mechanism.md), concurrency by [ADR-0019](docs/adr/0019-the-concurrency-model.md), and watch and reload by [ADR-0020](docs/adr/0020-watch-and-reload.md).
+There is no prohibition left on any of them, and each is now an ADR to read before changing it, like every other.
 
 ## Doc comments
 
