@@ -28,6 +28,7 @@ const (
 	caseForeignNo    = 13
 	caseConcurrentNo = 14
 	caseSecondDumpNo = 15
+	caseEquivalentNo = 16
 )
 
 // The suite's own fixtures, and their addresses.
@@ -86,7 +87,56 @@ type (
 	onlyLeaf struct {
 		Leaf string `ferry:"leaf"`
 	}
+
+	// spread is case 16's fixture: enough leaves at two depths for a walk to
+	// have something to overlap, and no composite anywhere, so a plane that
+	// cannot enumerate is asked nothing it cannot answer.
+	//
+	// It is comparable, which is what lets the case compare two destinations
+	// without a relation: every member is a string, and the equivalence being
+	// asserted is equality of the whole value rather than of a field.
+	spread struct {
+		One   string      `ferry:"one"`
+		Two   string      `ferry:"two"`
+		Three string      `ferry:"three"`
+		Four  string      `ferry:"four"`
+		Under spreadUnder `ferry:"under"`
+	}
+
+	// spreadUnder is the second depth, which is what makes the fixture a walk
+	// that enters a container inside a container rather than one flat list.
+	spreadUnder struct {
+		Five string `ferry:"five"`
+		Six  string `ferry:"six"`
+	}
+
+	// demanded is case 16's other fixture: several addresses a plane that holds
+	// nothing cannot answer, so a load of it reports one failure per member.
+	//
+	// It is the report half of the equivalence, and it needs no sink at all: a
+	// fresh plane is empty by construction, which is what makes every one of
+	// these required addresses missing.
+	// Its addresses are its own and are no address of [spread], so a plane can
+	// be wrong about one half of the case without being wrong about the other.
+	demanded struct {
+		One   string `ferry:"needone,required"`
+		Two   string `ferry:"needtwo,required"`
+		Three string `ferry:"needthree,required"`
+		Four  string `ferry:"needfour,required"`
+	}
 )
+
+// spreadFixture is case 16's populated value, minted per use so that no load
+// can be handed a value another load has already been compared against.
+func spreadFixture() spread {
+	return spread{
+		One:   "1",
+		Two:   "2",
+		Three: "3",
+		Four:  "4",
+		Under: spreadUnder{Five: "5", Six: "6"},
+	}
+}
 
 // fixtureKey is the one map key the fixtures carry, and the one a dynamic
 // address is minted at.
@@ -211,6 +261,8 @@ func driverFixturesCompile(opts []ferry.Option) error {
 		ferry.Compile[filled](opts...),
 		ferry.Compile[blanks](opts...),
 		ferry.Compile[onlyLeaf](opts...),
+		ferry.Compile[spread](opts...),
+		ferry.Compile[demanded](opts...),
 		ferry.Compile[justSection](opts...),
 		ferry.Compile[neighbour](opts...),
 	)

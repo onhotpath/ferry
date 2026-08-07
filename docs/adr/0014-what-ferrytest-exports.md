@@ -532,6 +532,19 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 >
 > **`MemPlane` now satisfies both cases.** Its duplicate-write refusal was keyed on the store, so a second dump through one binding was refused at every address the first one wrote - the reference implementation failing the rule it exists to demonstrate. ADR-0003's obligation is unchanged and is now scoped to the open, exactly as a key function's minted set is.
 
+> **Amended when the concurrency model shipped: the list is sixteen cases, and the sixteenth is [ADR-0019](0019-the-concurrency-model.md)'s gate.**
+>
+> As published the list ends at fifteen, and none of those cases asks anything of a reader that declares it tolerates overlapping calls, because no such declaration existed.
+> ADR-0019 makes serial equivalence the property that makes fanout safe to enable at all, and puts it here by name: "for a driver asserting `Concurrent`, the property belongs in the conformance suite rather than in that driver's own tests, because a driver that declares the capability is making a claim core relies on."
+>
+> 16. **Serial equivalence.** A reader declaring `ferry.Concurrent` produces, under every concurrency budget, the destination and the error report it produces serially ([ADR-0019](0019-the-concurrency-model.md)).
+>
+> **Nothing here is a new rule**, which is why this is a note rather than an ADR: ADR-0019 states the gate and this is the case that runs it.
+> The case is skipped, out loud, for every reader that does not declare the capability, which is every driver that has not opted in - so it is not a case that can turn a CI red for a promise its author never made.
+> **Both halves are asked**, because the promise is about both: one plane written once and loaded under several budgets, and one plane holding none of a fixture's required addresses, whose aggregate must read identically however it was scheduled.
+> Every load mints its own destination, which is this ADR's fresh-destination rule and ADR-0019's own named trap: a shared destination is what makes a broken second walk pass.
+> **What a driver declares is what runs**, so the capability joins the line a run says about itself under [#201](https://github.com/onhotpath/ferry/issues/201): a reader that tolerates overlap says so before any case runs.
+
 > **Amended under [#201](https://github.com/onhotpath/ferry/issues/201): a run says what it scaled to, and the description gains nothing.**
 >
 > #201 records that `Instance` carries capabilities as optional fields, that three of its four members mean a capability by being nil or not, and that a skipped case is indistinguishable from a passing one for any reporter that is not `*testing.T`.

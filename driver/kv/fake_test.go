@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/driver/kv"
@@ -48,6 +49,16 @@ type fake struct {
 	blockGet bool
 	entered  chan struct{}
 	once     sync.Once
+
+	// The inflight meter, which is what "the reads actually overlapped" is read
+	// from. want is how many the meter waits to see at once, inflight is how
+	// many are in the store right now, peak is the most there have ever been,
+	// and until bounds the wait so that a driver which never overlaps fails
+	// rather than hangs.
+	want     int
+	inflight int
+	peak     int
+	until    time.Time
 }
 
 // errFakeRead is what a staged read failure reports, and the sentinel a test
@@ -94,11 +105,70 @@ func (f *fake) failPuts(keys ...string) *fake {
 	return f
 }
 
+// meterGets makes every Get record how many of them were in the store at once,
+// and hold until it has seen want of them or the meter's own deadline passes.
+//
+// Waiting rather than sampling is what makes the assertion deterministic in the
+// passing case: a read returns as soon as the overlap it was looking for has
+// happened, so a driver that overlaps is not timing-dependent. The deadline is
+// what a driver that does not overlap costs, once for the whole run rather than
+// once per read.
+func (f *fake) meterGets(want int) *fake {
+	f.want = want
+
+	return f
+}
+
+// meterWait is how long the meter waits to see the overlap it was asked for. It
+// is spent only by a run that never produces one, which is a failing run.
+const meterWait = 2 * time.Second
+
+// enter records one read arriving and holds it until the overlap the meter was
+// asked for has been seen, or until the meter's deadline passes.
+func (f *fake) enter() {
+	f.mu.Lock()
+
+	if f.until.IsZero() {
+		f.until = time.Now().Add(meterWait)
+	}
+
+	f.inflight++
+	f.peak = max(f.peak, f.inflight)
+	deadline := f.until
+	f.mu.Unlock()
+
+	for f.peaked() < f.want && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// leave records one read finishing.
+func (f *fake) leave() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.inflight--
+}
+
+// peaked is the most reads this store has ever held at once.
+func (f *fake) peaked() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.peak
+}
+
 func (f *fake) Get(ctx context.Context, key string) ([]byte, bool, error) {
 	f.mu.Lock()
 	f.gets++
 	n, blocking, failOn := f.gets, f.blockGet, f.failGetOn
+	metering := f.want > 0
 	f.mu.Unlock()
+
+	if metering {
+		f.enter()
+		defer f.leave()
+	}
 
 	if blocking {
 		f.once.Do(func() { close(f.entered) })

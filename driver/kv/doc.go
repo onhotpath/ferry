@@ -53,6 +53,23 @@
 // prefix holds far more than you want. The struct you get back is identical
 // either way.
 //
+// # One load, several reads at once
+//
+// A reader from this package tells ferry that it tolerates overlapping calls,
+// so a caller who sets ferry.MaxConcurrency has several of one load's reads in
+// flight together. It declares no bound of its own: how much overlap a store
+// will take is a fact about that store and that token, and the caller is the
+// one holding both.
+//
+// What it costs you is what [Client] already asks for, which is that your
+// client is safe for use from many goroutines at once. Nothing else in one
+// open is shared: a batch open's snapshot is read and never written, and this
+// package serialises the key function that turns an address into a store key.
+//
+// A batch open has nothing to overlap - it already made its one call - so the
+// budget buys nothing there, and the struct you get back is the same either
+// way, under any budget.
+//
 // # Whether you can write is discovered when the save starts
 //
 // Implement [ACL] and this package asks your client before writing anything. A

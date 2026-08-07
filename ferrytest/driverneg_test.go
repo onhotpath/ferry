@@ -466,3 +466,137 @@ func (s *setCapture) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 func (setCapture) Get(context.Context, ferry.LeafAddr) (ferry.Value, error) {
 	return ferry.Value{}, nil
 }
+
+// TestDriverCase16ReportsADestinationThatDependsOnTheSchedule is the value half
+// of case 16, against a plane that declares it tolerates overlapping calls and
+// answers one address differently when the walk is allowed to overlap.
+//
+// The divergence is deliberate rather than raced. What a driver's real defect
+// looks like is shared mutable state, and staging one here would make this
+// package's own -race run report the very thing the case exists to catch out of
+// a fixture rather than out of a driver; the observable half is that the two
+// schedules disagree, and that is what is staged.
+func TestDriverCase16ReportsADestinationThatDependsOnTheSchedule(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, overlappingPlane(divergeAt, ferry.String("scheduled"), nil))
+
+	assertCase16(t, c, "want the serial load's")
+}
+
+// TestDriverCase16ReportsAFailureThatDependsOnTheSchedule is the report half:
+// one required address fails only where the walk was allowed to overlap, so the
+// two schedules aggregate different text.
+func TestDriverCase16ReportsAFailureThatDependsOnTheSchedule(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, overlappingPlane(refuseAt, ferry.Value{}, errScheduled))
+
+	assertCase16(t, c, "want the serial load's")
+}
+
+// assertCase16 holds the run to reporting case 16 once per budget the suite
+// compares, and nothing else.
+func assertCase16(t *testing.T, c *capture, want string) {
+	t.Helper()
+
+	if len(c.lines) != case16Budgets {
+		t.Fatalf("report = %q, want one line per budget the case compares", c.lines)
+	}
+
+	for _, line := range c.lines {
+		if !strings.Contains(line, "case 16") {
+			t.Errorf("report = %q, want case 16 and only case 16", line)
+		}
+
+		if !strings.Contains(line, want) {
+			t.Errorf("report = %q, want %q in it", line, want)
+		}
+	}
+}
+
+// case16Budgets is how many budgets case 16 holds a plane to, and therefore how
+// many lines one address answered wrongly produces.
+const case16Budgets = 3
+
+// The two addresses the planes below misbehave at, one in each of case 16's
+// fixtures, so that a plane wrong about the destination is not also wrong about
+// the report.
+var (
+	divergeAt = ferry.At("under", "five")
+	refuseAt  = ferry.At("needone")
+)
+
+// errScheduled is what the refusing plane fails with.
+var errScheduled = errors.New("this address is only unreadable when the walk overlaps")
+
+// overlappingPlane is the memory plane whose reader declares the concurrency
+// capability and answers one address differently once a budget rides the
+// context.
+func overlappingPlane(at ferry.Path, v ferry.Value, err error) ferrytest.Plane {
+	mem := ferrytest.MemPlane()
+	p := mem
+
+	p.Name = "overlapping"
+	p.Open = func() ferrytest.Instance {
+		inst := mem.Open()
+		inst.Source = overlappingSource{inner: inst.Source, at: at, value: v, err: err}
+
+		return inst
+	}
+
+	return p
+}
+
+type overlappingSource struct {
+	inner ferry.Source
+	at    ferry.Path
+	value ferry.Value
+	err   error
+}
+
+func (s overlappingSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
+	open, err := s.inner.Bind(addrs)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context) (ferry.Reader, error) {
+		r, err := open(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		return overlappingReader{inner: r, at: s.at, value: s.value, err: s.err}, nil
+	}, nil
+}
+
+// overlappingReader declares the capability and is not equivalent under it.
+type overlappingReader struct {
+	inner ferry.Reader
+	at    ferry.Path
+	value ferry.Value
+	err   error
+}
+
+// MaxConcurrent is the declaration the case gates on: no bound of this reader's
+// own, so the caller's budget stands alone.
+func (overlappingReader) MaxConcurrent() int { return 0 }
+
+// Get answers out of the plane, except at the one address this plane answers
+// differently once the walk was given a budget.
+func (r overlappingReader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
+	if addr.Path() == r.at && ferry.ConcurrencyBudget(ctx) > 1 {
+		return r.value, r.err
+	}
+
+	return r.inner.Get(ctx, addr)
+}
+
+func (r overlappingReader) Probe(ctx context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	return probeThrough(ctx, r.inner, addr)
+}
+
+func (r overlappingReader) Children(ctx context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error) {
+	return childrenThrough(ctx, r.inner, addr)
+}

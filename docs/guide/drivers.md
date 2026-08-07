@@ -224,9 +224,9 @@ The set is sorted segment-wise and the order is stable across builds of one sche
 A driver that treats its precomputed table as a **closed** set refuses a legal write, because the addresses a value mints are in no address set.
 That is why core hands out a key function rather than a map.
 
-## The five optional interfaces
+## The six optional interfaces
 
-All five are discovered by type assertion on your `Reader` or `Writer`, and none is required.
+All six are discovered by type assertion on your `Reader` or `Writer`, and none is required.
 
 ```go
 type Releaser interface {
@@ -248,6 +248,10 @@ type Enumerator interface {
 type Ensurer interface {
 	Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error
 }
+
+type Concurrent interface {
+	MaxConcurrent() int
+}
 ```
 
 | implement | if |
@@ -257,11 +261,13 @@ type Ensurer interface {
 | `Prober` | your plane can say whether a container is there |
 | `Enumerator` | your plane can list what is under a composite |
 | `Ensurer` | your plane can spell a container at the container's own address |
+| `Concurrent` | your open instance tolerates overlapping calls |
 
-Of the four drivers here, `driver/yaml` implements all five and the flat planes implement fewer: `driver/kv` reads with `Prober` and `Enumerator` and writes with `Committer` alone, and its refusal to implement `Ensurer` is a declaration rather than an omission, because a store that holds bytes at keys has no way to say that a container is there and holds nothing.
+Of the four drivers here, `driver/yaml` implements five of the six and the flat planes implement fewer: `driver/kv` reads with `Prober` and `Enumerator` and writes with `Committer` alone, and its refusal to implement `Ensurer` is a declaration rather than an omission, because a store that holds bytes at keys has no way to say that a container is there and holds nothing.
 
 That spread is the case for making them optional rather than methods on `Reader` and `Writer`: a required `Close` would be `return nil` boilerplate in four of ADR-0004's six sinks, and in the source that is indistinguishable from a driver that should have rolled back and did not.
 The same argument holds for `Ensurer`: a stub that stored a zero-length value would make "the section is present and empty" and "the field is empty text" one observation, which is precisely the collision the kinds exist to keep apart.
+`Concurrent` is the one of the six that is a promise rather than a capability, and it has a section of its own below.
 
 ### `Releaser` and `Committer`
 
@@ -402,6 +408,61 @@ A plane with no spelling for a container implements no `Ensurer`, and core refus
 The alternatives were weighed and both lose ([ADR-0016](../adr/0016-the-sealed-address-model.md)).
 Accepting the degradation makes present-empty become absent on reload, which is the silent divergence the whole address model exists to remove; refusing everywhere makes a legal Go value undumpable on planes that could carry it perfectly.
 The rule taken is the loud refusal scoped to exactly the planes that cannot spell the value.
+
+### `Concurrent`
+
+This is the only optional interface that is a **promise** rather than a capability, and it is the one to read twice before implementing.
+
+```go
+type Concurrent interface {
+	MaxConcurrent() int
+}
+```
+
+Implement it and core is allowed to call your open instance from several goroutines at once, bounded by the smaller of your number and the caller's `ferry.MaxConcurrency(n)`.
+Return zero or less to say you impose no bound of your own, which is the honest answer when the real bound belongs to the caller's backend rather than to your code.
+Implement nothing and every walk over your instance is serial, whatever the caller asked for, so no driver changes behaviour because somebody set the option.
+
+**The promise covers everything the instance reaches, not only its own fields.**
+`Get`, `Probe` and `Children` may all be entered at once, and so may anything the instance closed over: a client, a cache, a callback the caller supplied - and **your key function**.
+
+That last one is the sharp edge, and it is the one that costs a line of code.
+
+> `Keys.Open()` hands back a `KeyFunc` that **belongs to the open and is not safe for concurrent use**.
+> It mints the addresses a value produced - a map key, a sequence index - as they are asked for, and minting writes the open's own minted set.
+> Per open is not per goroutine.
+
+So a driver that calls its key function inside `Get` and declares `Concurrent` is a data race, and it is the declaring driver's to fix.
+Core's `KeyFunc` contract does not move, deliberately: a lock inside core would charge every serial load for a capability it never asked for.
+
+`driver/kv` is the worked example, and the whole of the fix is one place to enter the function from:
+
+```go
+type reader struct {
+	mu  sync.Mutex
+	key ferry.KeyFunc
+	// ...
+}
+
+func (r *reader) keyOf(at ferry.Path) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.key(at)
+}
+```
+
+The lock is held over the call and never over the store, so nothing waits there for I/O, and every other call site - `Get`, `Probe`, `Children` - goes through `keyOf`.
+
+**Batch at open before reaching for this.**
+`Bind` hands you the whole `AddressSet` before any I/O, so a plane you can fetch in one call is a plane you should fetch in one call: fanout changes when the round trips happen, and only batching changes how many there are.
+`driver/kv`'s `WithBatch()` is that pattern, and a batched reader has nothing left to overlap.
+A driver whose plane routes across several backends is where the second layer pays, and `ferry.ConcurrencyBudget(ctx)` - readable from the context your open and your walk both run under - is the number to size that private parallelism with, so you spend inside the caller's budget rather than beside it.
+
+**How the suite proves it.**
+Declare `Concurrent` and conformance case 16 starts running: the same plane, loaded serially and again under several budgets, has to produce the same destination and the same error report.
+Nothing about the schedule may reach the answer.
+Run your own suite under `go test -race`, which is what reports the race itself - the case creates the concurrency and asserts the observable half, exactly as case 14 does.
 
 ## Links
 
@@ -832,7 +893,7 @@ func TestConformance(t *testing.T) {
 ```
 
 That is the whole file.
-`Driver` is fifteen cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
+`Driver` is sixteen cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
 
 ### The four fields
 
@@ -880,7 +941,7 @@ See [plane compatibility](compatibility.md).
 `Want` is one string, which puts an obligation on a plane holding more than one storage unit: what it renders for this comparison must be **deterministic and injective over stores**.
 That is the same obligation your key function already carries.
 
-### The fifteen cases
+### The sixteen cases
 
 1. Every proof the plane can express round-trips, and every kind it declared it cannot carry is refused loudly.
 2. `Bind` succeeds against an unreachable plane, and the refusal lands inside the open.
@@ -897,10 +958,16 @@ That is the same obligation your key function already carries.
 13. A plane key belonging to no address of the schema says nothing about a container whose key space it shares: `Probe` at a section beside it answers absent.
 14. One binding, opened from many goroutines at once, on both halves, and loaded through concurrently: every open succeeds and every load reads what the plane holds.
 15. A second dump through one held sink binding, with a different value at the same addresses: it is taken, and it is what the plane holds afterwards.
+16. A reader declaring `Concurrent` produces, under every concurrency budget, the destination and the error report it produces serially.
 
 Case 14 is where a driver that keeps mutable state in the closure it handed back is found, and the case creates the concurrency rather than judging it: run your own suite under `go test -race`, which is what actually reports the defect.
 It opens the write half concurrently and walks nothing, because what the contract obligates is the open.
 Both halves run once on their own first, so a plane that cannot be opened at all is reported by the cases that own a broken open rather than three more times.
+
+Case 16 is the gate on the one optional interface that is a promise, and it is skipped, out loud, for every reader that does not declare `Concurrent` - so it cannot turn your CI red for a promise you never made.
+It asks both halves, because the promise is about both: one plane written once and read back under several budgets, and one plane holding none of a fixture's required addresses, whose report has to read identically however the walk was scheduled.
+The report is compared in full rather than by its one-line summary, since two aggregates carrying different failures at the same addresses summarise alike.
+Every load mints its own destination, which is the fresh-destination rule and the trap this property has: a destination shared between the two schedules is what makes a broken second walk pass.
 
 Cases 8 and 9 reach a value-minted address by dumping a one-entry map rather than by calling `Set` directly, because the address kinds are sealed and only the compiler mints one.
 Case 9 mints case 8's first key as well as its own: case 8 stops where a write is refused, correctly, and a store that cannot spell a hyphen would otherwise be asked by nothing.
@@ -915,6 +982,8 @@ case 6 skipped: the plane's writer holds no resource, so it implements no Close
 case 10 skipped: the plane puts nothing in a context, so it does not take its plane per request
 case 12 skipped: the plane declares no null; case 1 is where its refusal of one is asserted
 case 13 skipped: the plane's reader does not probe, which is optional for the same reason enumeration is
+case 16 skipped: the plane's reader does not declare that it tolerates overlapping calls, so core walks it
+    serially whatever the caller asked for
 ```
 
 And a run says once, before any case, what it scaled itself to, so that a skipped case is never mistaken for a passing one:
@@ -923,6 +992,13 @@ And a run says once, before any case, what it scaled itself to, so that a skippe
 plane yaml: the suite scaled to: a source, a sink, readable contents, a pinned spelling,
     probes a container's own address, enumerates, releases its reader,
     ensures a container's own address, commits, releases its writer
+```
+
+A reader that declares the concurrency capability says so in the same line, and case 16 then runs for it:
+
+```
+plane kv: the suite scaled to: a source, a sink, readable contents, a pinned spelling,
+    probes a container's own address, enumerates, tolerates overlapping calls, commits
 ```
 
 Which of the optional interfaces you implement is read off your own reader and writer rather than declared, so there is no field to fill in wrongly, and `Plane` describes only what cannot be discovered that way.

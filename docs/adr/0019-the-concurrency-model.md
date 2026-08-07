@@ -169,4 +169,24 @@ Reproduced and fixed in the prototype, and it is [#254](https://github.com/onhot
 - **[ADR-0012](0012-the-caller-held-binding.md)'s published promise survives.**
   A binding is safe from many goroutines, and nothing here makes a walk mutate anything reachable from one: the static key table is written once, the minted set is per open, and every per-subtree fact is now a return value.
 
+  > **Amended when the driver side shipped: a `KeyFunc` is the declaring driver's to serialise, and this bullet as published did not see it.**
+  >
+  > As published, this bullet is the whole of what the ADR says about ADR-0012, and it names no `KeyFunc` anywhere.
+  > The argument has a hole: **per open is not per goroutine.**
+  > `Keys.Open` closes over that open's own minted set and *writes* it while the walk is running, and a driver calls the function it handed back from inside `Get`.
+  > So a driver that declares `Concurrent` and mints an address a value produced is a data race, and `-race` finds it the moment a first-party driver declares the capability, which is exactly what happened when `driver/kv` did.
+  >
+  > **The obligation is the driver's**, and nothing else in this ADR moves.
+  > `Concurrent`'s own wording already carries it - declaring it is a promise about everything the instance reaches, a key function included - so a driver that declares the capability makes its whole `Get` path safe from many goroutines, key function and all.
+  > `driver/kv` is the worked example: one mutex around the one place it enters its key function, and it is the same obligation that driver already places on its `Client`.
+  >
+  > **Core's contract does not move.**
+  > `Keys.Open` still hands back a function that belongs to the open and is not safe for concurrent use.
+  > A serial driver therefore pays nothing, which is this ADR's own rule that absence of the capability changes no existing driver's behaviour, applied to the lock as well as to the schedule.
+  >
+  > Two other resolutions were costed and are not taken.
+  > **Locking the minted set inside `Keys.Open`** makes it safe for everybody and charges a lock per dynamic address to every load, including every serial one, on the path ADR-0012 was measured on.
+  > **A second constructor**, `Keys.OpenConcurrent`, prices it correctly and is a second way to say what the capability already says, which is survey item 5.14's defect: the declaration and the constructor could then disagree, and nothing would report it.
+  > Placing it on the declaration is the only spelling where the promise and the cost sit on the same statement.
+
 Evidence: `prototype/concwalk` on [`proto/04-concurrency`](https://github.com/onhotpath/ferry/tree/proto/04-concurrency), 21 tests under `-race -count=5` and 2 benchmarks, including `TestSharedCounterMaterialisesOnSiblingWrite`, `TestOutcomeComposesUnderConcurrentScheduler`, `TestConcurrentErrorsByteIdenticalToSerial`, `TestIndexSeamAggregationIsTheSchedulers`, `TestRoundTripLedger`, `TestMultiRoundTripLedger`, `TestCapabilityGate`, `TestHybridPaysWhenCostGrowsWithSize`, `TestHybridIsAWashWhenCostIsFlat`, `TestShippedShapeLeaksOnPanic` and `TestDeferredReleaseClosesOnPanic`.

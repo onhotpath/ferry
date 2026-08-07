@@ -81,6 +81,7 @@ func (d *driverRun) readCapabilities(inst Instance) []string {
 		implemented[ferry.Prober]("probes a container's own address"),
 		implemented[ferry.Enumerator]("enumerates"),
 		implemented[ferry.Releaser]("releases its reader"),
+		implemented[ferry.Concurrent]("tolerates overlapping calls"),
 	)
 }
 
