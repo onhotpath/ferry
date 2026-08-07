@@ -18,8 +18,8 @@ import (
 // [ferry.Load] returned.
 var ErrOption = errors.New("env: unusable driver option")
 
-// Option configures a [Source]. The set is closed at three: [Separator],
-// [Canonical] and [Environ].
+// Option configures a [Source]. The set is closed at four: [Separator],
+// [Canonical], [Environ] and [BoolWords].
 type Option interface {
 	apply(*config)
 }
@@ -37,6 +37,15 @@ type config struct {
 	sep     string
 	canon   Form
 	environ func() []string
+	// bools is the spelling [BoolWords] built, and it is nil until it is asked
+	// for: this plane holds text and nothing else, so a variable is a String
+	// unless a word of this plane's own says it is a bool (ADR-0018).
+	bools ferry.Spelling[bool, string]
+	// wordsErr is what building it refused with, held until Bind for the reason
+	// [ErrOption] gives: an Option is applied inside [New], which returns no
+	// error, so the refusal waits for the first moment the driver is asked for
+	// anything.
+	wordsErr error
 }
 
 // DefaultSeparator is the join a [Source] uses when no [Separator] is given.
@@ -153,7 +162,7 @@ func (c config) validate() error {
 		return optionError("there is no environment to read: env.Environ was given no function")
 	}
 
-	return nil
+	return c.wordsErr
 }
 
 // legalSeparator reports whether every byte of the separator is one an

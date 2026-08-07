@@ -229,11 +229,22 @@ func under(prefix, p ferry.Path) bool {
 // An entry with no "=" is not a variable and is skipped, and so is one with an
 // empty name: Windows carries entries such as "=C:=C:\\" in its environment
 // block, and neither is a name any address renders to.
+//
+// A name carried twice keeps the first entry, which is getenv's own answer and
+// therefore what a process reading the same environment would see. Taking the
+// last was #266: an environ handed to [Environ] resolved differently from the
+// process environment it stands in for, so a test and the program it tested
+// could load two different values off one list.
 func environMap(environ []string) map[string]string {
 	out := make(map[string]string, len(environ))
 
 	for _, entry := range environ {
-		if name, value, ok := strings.Cut(entry, "="); ok && name != "" {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok || name == "" {
+			continue
+		}
+
+		if _, taken := out[name]; !taken {
 			out[name] = value
 		}
 	}
@@ -289,7 +300,7 @@ func (r *reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error
 	}
 
 	if text, ok := r.env[key]; ok {
-		return ferry.String(text), nil
+		return r.cfg.observe(text), nil
 	}
 
 	if !declared && r.holdsBelow(key) {
