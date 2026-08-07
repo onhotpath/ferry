@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	yamlv3 "go.yaml.in/yaml/v3"
 
@@ -172,7 +173,8 @@ func open(ctx context.Context, path string, cfg config, nodes map[ferry.Path]str
 // (ADR-0021, #156).
 //
 // forget is the composites this dump replaces, in the order core named them,
-// and wrote is every address it wrote with every address above it. The two are
+// and wrote is every address it wrote with every address above it, each under
+// its [trail] rather than under its ferry.Path, for [mark]'s reason. The two are
 // subtracted at the commit rather than at the moment core asks, for the reason
 // [writer.Unset] gives, and both stay empty for a dump over a value with no
 // slice and no map in it (ADR-0004, #220).
@@ -183,7 +185,7 @@ type writer struct {
 	claims map[*yamlv3.Node]claim
 	nodes  map[ferry.Path]string
 	forget []ferry.Path
-	wrote  map[ferry.Path]bool
+	wrote  map[string]bool
 
 	shared  bool
 	durable bool
@@ -288,11 +290,13 @@ func (w *writer) replace() {
 // prune is one replaced composite's own subtraction, by the kind of node the
 // walk left at its address.
 func (w *writer) prune(at ferry.Path, n *yamlv3.Node) {
+	held := trail(at)
+
 	switch n.Kind {
 	case yamlv3.SequenceNode:
-		n.Content = n.Content[:w.written(at, len(n.Content))]
+		n.Content = n.Content[:w.written(held, len(n.Content))]
 	case yamlv3.MappingNode:
-		n.Content = w.members(at, n.Content)
+		n.Content = w.members(held, n.Content)
 	default:
 		// A scalar, an alias resolving to one, or a node the document never
 		// had: nothing holds members here, so nothing is subtracted.
@@ -301,11 +305,11 @@ func (w *writer) prune(at ferry.Path, n *yamlv3.Node) {
 
 // written is how long a replaced sequence stays: one past the last position this
 // dump wrote at, and zero where it wrote at none.
-func (w *writer) written(at ferry.Path, held int) int {
+func (w *writer) written(at string, held int) int {
 	kept := 0
 
 	for i := range held {
-		if w.wrote[at.Elem(uint(i))] {
+		if w.wrote[at+mark(ferry.IndexSegment(uint(i)))] {
 			kept = i + 1
 		}
 	}
@@ -320,12 +324,12 @@ func (w *writer) written(at ferry.Path, held int) int {
 // reaches: [member] reads the first and [keys] enumerates it once, so leaving
 // the second behind would leave a member no address can reach under a mapping
 // the dump replaced.
-func (w *writer) members(at ferry.Path, held []*yamlv3.Node) []*yamlv3.Node {
+func (w *writer) members(at string, held []*yamlv3.Node) []*yamlv3.Node {
 	out, seen := held[:0], make(map[string]bool, len(held)/2)
 
 	for i := 0; i+1 < len(held); i += 2 {
 		k := held[i]
-		if k.Kind != yamlv3.ScalarNode || seen[k.Value] || !w.wrote[at.At(k.Value)] {
+		if k.Kind != yamlv3.ScalarNode || seen[k.Value] || !w.wrote[at+mark(ferry.NameSegment(k.Value))] {
 			continue
 		}
 
@@ -352,39 +356,39 @@ func (w *writer) record(addr ferry.Path) {
 	}
 
 	if w.wrote == nil {
-		w.wrote = make(map[ferry.Path]bool)
+		w.wrote = make(map[string]bool)
 	}
 
-	var p ferry.Path
+	var b []byte
 
 	for seg := range addr.Segments() {
-		next, err := below(p, seg)
-		if err != nil {
-			return
-		}
-
-		p = next
-		w.wrote[p] = true
+		b = append(b, mark(seg)...)
+		w.wrote[string(b)] = true
 	}
 }
 
-// below extends an address with one segment, which is how an address the walk
-// handed over is rebuilt one prefix at a time.
+// mark is one segment's contribution to a trail: its kind, then its text under a
+// length that keeps one segment from spelling two.
 //
-// The position a failure reports is one no write could have reached either:
-// [elementSlot] reads the same text through the same helper, so the write this
-// is recording is already on its way to refusing.
-func below(p ferry.Path, seg ferry.Segment) (ferry.Path, error) {
-	if seg.Kind() != ferry.Index {
-		return p.At(seg.Text()), nil
+// It is what an address is recorded and looked up under, rather than the
+// [ferry.Path] itself, because a prefix of an address has to be recorded and a
+// Path cannot be extended by a [ferry.Segment]: [ferry.Path.Elem] takes a
+// position, and recovering one from the segment's text means a parse that only
+// an address no walk can mint could fail (ADR-0016).
+func mark(seg ferry.Segment) string {
+	return string(byte(seg.Kind())) + strconv.Itoa(len(seg.Text())) + ":" + seg.Text()
+}
+
+// trail is a whole address spelled in [mark]s, which is what a replaced
+// composite's children are looked up beneath.
+func trail(p ferry.Path) string {
+	var b []byte
+
+	for seg := range p.Segments() {
+		b = append(b, mark(seg)...)
 	}
 
-	i, err := indexOf(seg.Text())
-	if err != nil {
-		return p, err
-	}
-
-	return p.Elem(uint(i)), nil
+	return string(b)
 }
 
 // put is the write both halves share: find or build the node at the address,
