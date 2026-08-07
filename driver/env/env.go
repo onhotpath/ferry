@@ -359,8 +359,8 @@ func (r *reader) holdsUnder(prefix string) bool {
 // which is the caller's value; core attaches the address, which is structure.
 func deeperThanLeaf() error {
 	return fmt.Errorf("%w: %w: the environment holds nothing at this name and holds names below it, "+
-		"so the plane carries a section where the schema carries a value: the addresses under a container "+
-		"come from the environment, and one that reaches deeper than an element is not an element",
+		"so it holds a group of variables where the field takes a single value: the members of a container "+
+		"come from the variables under its name, and one that reaches deeper than a member is not a member",
 		ferry.ErrPlane, ErrDeeperThanLeaf)
 }
 
@@ -373,7 +373,7 @@ func deeperThanLeaf() error {
 //
 // It wraps [ferry.ErrPlane], and it stays reachable under ferry's wrapper, so
 // errors.Is answers for it on what [ferry.Load] returned.
-var ErrDeeperThanLeaf = errors.New("env: the environment reaches deeper than this address")
+var ErrDeeperThanLeaf = errors.New("env: the environment reaches deeper than this name")
 
 // Probe answers whether the environment holds anything this schema addresses
 // under a container's own name.

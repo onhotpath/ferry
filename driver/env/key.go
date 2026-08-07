@@ -8,7 +8,8 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// ErrIllegalName reports an address this plane cannot name at all.
+// ErrIllegalName reports an address this driver cannot name as an environment
+// variable at all.
 //
 // No fold rescues these two: an empty tag name has no environment variable name
 // however it is folded, and a name beginning with a digit is one no shell can
@@ -17,7 +18,7 @@ import (
 //
 // It wraps [ferry.ErrPlane], and it stays reachable under ferry's wrapper, so
 // errors.Is answers for it on what [ferry.Load] returned.
-var ErrIllegalName = errors.New("env: address has no environment variable name")
+var ErrIllegalName = errors.New("env: this cannot be named as an environment variable")
 
 // driverName is what this driver calls itself in a refusal, so that a schema
 // which is fine on one plane and impossible on this one reports as this plane's
@@ -49,11 +50,11 @@ func (c config) key(addr ferry.Path) (string, error) {
 	// Every segment contributes at least one byte, so an empty name is an
 	// address with no segments: the empty path, which is not an address at all.
 	if name == "" {
-		return "", illegalName("the empty address names nothing")
+		return "", illegalName("there is nothing here to name")
 	}
 
 	if !nameStart(name[0]) {
-		return "", illegalName("an environment variable name may not begin with a digit")
+		return "", illegalName("it folds to a name beginning with a digit, and no shell will set one")
 	}
 
 	return name, nil
@@ -76,7 +77,7 @@ func (c config) join(addr ferry.Path) (string, error) {
 
 	for seg := range addr.Segments() {
 		if seg.Text() == "" {
-			return "", illegalName("a segment is empty, and no fold gives an empty segment a name")
+			return "", illegalName("a part of it is empty, and no fold gives an empty part a name")
 		}
 
 		if !first {

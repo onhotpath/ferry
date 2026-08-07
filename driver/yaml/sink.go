@@ -500,8 +500,8 @@ func writeUnder(tag string, spelled *yamlv3.Node) error {
 
 		return nil
 	default:
-		return fmt.Errorf("%w: this address declares the node tag %s and holds a value this plane writes as %s: "+
-			"a scalar under a tag this plane does not read comes back as a string, so the value would not "+
+		return fmt.Errorf("%w: this key declares the node tag %s and holds a value written as %s: "+
+			"a scalar under a tag this driver does not read comes back as a string, so the value would not "+
 			"survive the trip", ferry.ErrValue, tag, spelled.Tag)
 	}
 }
@@ -529,7 +529,7 @@ func (w *writer) claim(addr ferry.Path, at, spelled *yamlv3.Node) error {
 
 	held, taken := w.claims[node]
 	if taken && (held.tag != spelled.Tag || held.text != spelled.Value) {
-		return fmt.Errorf("%w: this address and %s are one value in the plane, which shares it through an alias, "+
+		return fmt.Errorf("%w: this key and %s are one value in the document, which shares it through an alias, "+
 			"and the dump gave them different values", ferry.ErrPlane, held.addr)
 	}
 
@@ -628,8 +628,8 @@ func (w *writer) unchanged(now stamp) error {
 		return nil
 	}
 
-	return fmt.Errorf("%w: the plane changed after this save read it, and saving now would discard that change: "+
-		"load the plane again, apply the same edits to what it holds now, and save again", ferry.ErrPlane)
+	return fmt.Errorf("%w: the file changed after this save read it, and saving now would discard that change: "+
+		"load the file again, apply the same edits to what it holds now, and save again", ferry.ErrPlane)
 }
 
 // swap renames the staged file over the plane and makes the rename itself
@@ -651,7 +651,7 @@ func (w *writer) unchanged(now stamp) error {
 // the sync is the expensive half and the caller asks for it.
 func (w *writer) swap() error {
 	if err := os.Rename(w.tmp.Name(), w.path); err != nil {
-		return fmt.Errorf("%w: the staged document could not replace the plane: %w", ferry.ErrPlane, err)
+		return fmt.Errorf("%w: the staged document could not replace the file: %w", ferry.ErrPlane, err)
 	}
 
 	// Set on the rename and not at the end, because from here there is no
@@ -663,7 +663,7 @@ func (w *writer) swap() error {
 	}
 
 	if err := syncDir(filepath.Dir(w.path)); err != nil {
-		return fmt.Errorf("%w: the staged document replaced the plane and the replacement could not be made "+
+		return fmt.Errorf("%w: the staged document replaced the file and the replacement could not be made "+
 			"durable: %w", ferry.ErrPlane, err)
 	}
 
@@ -730,7 +730,7 @@ func (w *writer) flushAndClose() error {
 // took it: a plane that is not there reaches neither.
 func (w *writer) inheritMode(fi os.FileInfo) error {
 	if err := os.Chmod(w.tmp.Name(), fi.Mode().Perm()); err != nil {
-		return fmt.Errorf("%w: the staged document could not take the plane's mode: %w", ferry.ErrPlane, err)
+		return fmt.Errorf("%w: the staged document could not take the file's mode: %w", ferry.ErrPlane, err)
 	}
 
 	return nil

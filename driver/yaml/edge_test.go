@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/onhotpath/ferry"
@@ -182,6 +183,33 @@ func TestMultipleDocumentsAreRefused(t *testing.T) {
 
 	if got := read(t, path); got != before {
 		t.Errorf("the plane holds %q, want the %q it held before a refused dump", got, before)
+	}
+}
+
+// TestASecondDocumentThatDoesNotParseIsRefused is the other half of the stream
+// refusal, and it is a different branch: the file is a stream, and what the
+// decoder reports about its second document is a parse failure rather than a
+// document.
+//
+// The refusal is the parser's own message and not the stream one, because that
+// is the honest thing to hand an operator: the file is broken at a line, and
+// saying it holds more than one document would send them to the wrong place.
+func TestASecondDocumentThatDoesNotParseIsRefused(t *testing.T) {
+	type config struct {
+		Port int `ferry:"port"`
+	}
+
+	before := "port: 1\n---\nport: [unclosed\n"
+	path := write(t, before)
+
+	_, err := ferry.Load[config](t.Context(), yaml.NewSource(path))
+	if !errors.Is(err, ferry.ErrValue) {
+		t.Errorf("loading a file whose second document does not parse gave %v, want an error carrying "+
+			"ferry.ErrValue", err)
+	}
+
+	if got, want := err.Error(), "not a YAML document"; !strings.Contains(got, want) {
+		t.Errorf("the refusal is %q, want one saying %q: the file is broken rather than a stream", got, want)
 	}
 }
 

@@ -123,7 +123,7 @@ func (gzipPayload) Invert(payload []byte) ([]byte, error) {
 // notGzip is the inbound refusal, and it names the decompressor's own reason
 // and nothing the plane held, for [parseBase64]'s reason.
 func notGzip(err error) error {
-	return fmt.Errorf("%w: this value is not a gzip stream this plane can read back: %w", ferry.ErrValue, err)
+	return fmt.Errorf("%w: this value is not a gzip stream, so it cannot be read back: %w", ferry.ErrValue, err)
 }
 
 // MaxSize refuses a payload larger than n bytes, in both directions.
@@ -164,7 +164,7 @@ func (m maxSize) Invert(payload []byte) ([]byte, error) {
 // within is the one check both halves are, so that the two cannot drift.
 func (m maxSize) within(payload []byte, direction string) ([]byte, error) {
 	if len(payload) > m.n {
-		return nil, fmt.Errorf("%w: this payload is %d bytes and at most %d may be %s this plane",
+		return nil, fmt.Errorf("%w: this payload is %d bytes and at most %d may be %s this request",
 			ferry.ErrValue, len(payload), m.n, direction)
 	}
 

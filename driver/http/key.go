@@ -10,7 +10,7 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// ErrIllegalName reports an address this plane cannot name at all.
+// ErrIllegalName reports an address this driver cannot name in a request at all.
 //
 // A query parameter name is any byte sequence, so only the two degenerate
 // addresses reach it there: one with an empty part, and the empty address
@@ -20,7 +20,7 @@ import (
 //
 // It wraps [ferry.ErrPlane], and it stays reachable under ferry's wrapper, so
 // errors.Is answers for it on what [ferry.Load] returned.
-var ErrIllegalName = errors.New("http: address has no name on this plane")
+var ErrIllegalName = errors.New("http: this cannot be named in a request")
 
 // ErrRepeated reports a name occurring more than once, read into a field that
 // takes a single value.
@@ -84,7 +84,7 @@ func join(addr ferry.Path, sep string) (string, error) {
 	}
 
 	if first {
-		return "", illegalName("the empty address names nothing")
+		return "", illegalName("there is nothing here to name")
 	}
 
 	return b.String(), nil
@@ -200,7 +200,7 @@ func repeated(n int) error {
 // how many times the name occurs, which is structure rather than text the plane
 // supplied. Core attaches the address.
 func atContainer(n int) error {
-	return fmt.Errorf("%w: the request names this address %d times and the destination takes a container "+
+	return fmt.Errorf("%w: the request carries this name %d times and the destination takes a container "+
 		"there, whose members are the names under it: nothing could hold the value", ferry.ErrValue, n)
 }
 

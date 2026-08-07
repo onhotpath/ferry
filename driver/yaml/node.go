@@ -211,7 +211,7 @@ func valueOf(n *yamlv3.Node) (ferry.Value, error) {
 	}
 
 	if n.Kind != yamlv3.ScalarNode {
-		return ferry.Value{}, fmt.Errorf("%w: the plane holds %s here and the destination takes a single "+
+		return ferry.Value{}, fmt.Errorf("%w: the document holds %s here and the destination takes a single "+
 			"value: model the field as a map or a struct, or change the document", ferry.ErrValue, shapeOf(n))
 	}
 
@@ -324,7 +324,7 @@ func presenceOf(n *yamlv3.Node) (ferry.SectionInfo, error) {
 	case n.Kind == yamlv3.ScalarNode && n.Tag == nullTag:
 		return ferry.SectionNull, nil
 	default:
-		return ferry.SectionAbsent, fmt.Errorf("%w: the plane holds a single value here and the destination "+
+		return ferry.SectionAbsent, fmt.Errorf("%w: the document holds a single value here and the destination "+
 			"takes a container: model the field as a leaf, or change the document", ferry.ErrValue)
 	}
 }
@@ -360,7 +360,7 @@ func boolOf(text string) (ferry.Value, error) {
 	case strings.EqualFold(text, "false"):
 		return ferry.Bool(false), nil
 	default:
-		return ferry.Value{}, fmt.Errorf("%w: the plane tagged a scalar !!bool that is neither true nor false",
+		return ferry.Value{}, fmt.Errorf("%w: the document tags a scalar !!bool that is neither true nor false",
 			ferry.ErrValue)
 	}
 }
