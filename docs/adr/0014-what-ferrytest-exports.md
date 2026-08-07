@@ -641,6 +641,31 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 > **What it deliberately does not do is rescale the cases that dump the suite's composite-bearing fixtures.** Cases 1, 3, 5, 9, 11, 12 and 18 dump a slice or a map, so against such a sink they now report the open's refusal too, and whether they should instead skip is a question about what this suite certifies for a plane that can hold no composite at all.
 > That is a decision this amendment does not take.
 
+> **Amended under [#306](https://github.com/onhotpath/ferry/issues/306): the list is twenty-one cases, and the last two are conformance cases two other ADRs promised and nobody wrote.**
+>
+> The amendment above carries the list to nineteen, and neither of the two rules below had a case at any point before that.
+> [ADR-0003](0003-how-a-leaf-addresses-a-plane.md) says in its consequences that sorting the rendering rather than the segments "will be a conformance-suite case", and [ADR-0006](0006-defaults-and-zero-values.md) says that `Absent` being a read-side kind "is a conformance case rather than a note".
+> Neither existed, and both are rules a driver can break while every case above stays green.
+>
+> 20. **A sequence of twelve members is listed by position.** For a reader declaring `ferry.Enumerator`, the members of a sequence come back where they were written, and not in the order their addresses render ([ADR-0003](0003-how-a-leaf-addresses-a-plane.md)).
+> 21. **An address a dump was silent at holds nothing afterwards.** A value whose `omitzero` field is at its zero value is dumped, and a load over a seed reads the seed at that address ([ADR-0006](0006-defaults-and-zero-values.md)).
+>
+> **Twelve members is what makes case 20 a case at all.**
+> The two orders agree to nine and part company at ten, and every other fixture in this suite carries two, so a driver that lists by text passes the whole list above and loses the shape of the first list a user writes with ten entries in it.
+> Core refuses the scrambled answer at the load, because a sequence's positions have to run from zero upwards with none missing, so the visible symptom is a list that will not load and a plane that looks fine.
+> **It asks only about the order**, and case 5 owns everything else: that case sorts the driver's answer before comparing, deliberately, because what it is about is the set and the kind of each member.
+> So a `Children` that fails, or that answers anything but the twelve positions, leaves case 20 quietly rather than reporting case 5's failure a second time.
+>
+> **Case 21 is the half a driver can get wrong, and the half it cannot is core's.**
+> That `Writer.Set` is never called with an `Absent` is core's guarantee and core's own tests pin it, in the same way `(nil, nil)` is core's refusal and not a case.
+> What is left for a plane is the consequence: given no write at an address, hold nothing there.
+> The failure it catches is the one [ADR-0004](0004-source-and-sink.md) recorded on its own prototype, a sink that answered for an omission with an explicit null, which read back as a value the plane never held.
+> **It reads one leaf and nothing else**, so a source that cannot list is asked nothing it cannot answer, and it reads the written leaf as well as the silent one, because a plane that stored nothing at all would otherwise pass for the wrong reason.
+>
+> **Nothing here is a new decision**, which is why this is a note rather than an ADR: both rules were published long before this amendment and neither had a check.
+> `MemPlane` satisfies both, and `driver/kv` and `driver/yaml` run both to a conclusion; `driver/env` and `driver/http` have no sink, so neither case is asked of them.
+> **The total is not restated anywhere but in [Consequences](#consequences)**, whose correction derives it from the amendments above rather than fixing a figure of its own: sixteen, seventeen, eighteen, nineteen, and twenty-one with these two.
+
 > **Amended under [#201](https://github.com/onhotpath/ferry/issues/201): a run says what it scaled to, and the description gains nothing.**
 >
 > #201 records that `Instance` carries capabilities as optional fields, that three of its four members mean a capability by being nil or not, and that a skipped case is indistinguishable from a passing one for any reporter that is not `*testing.T`.
@@ -848,7 +873,7 @@ That is weaker than a compile-time signal and it is the only shape available, be
 > Nothing here is a new decision, and no case, name or interface moves: what moves is the arithmetic.
 >
 > - **The optional interfaces are eight, not six.** The bullet above and the #201 amendment both read "six": `Releaser`, `Committer`, `Prober`, `Enumerator`, `Ensurer` and `Unsetter`. [ADR-0019](0019-the-concurrency-model.md) added `Concurrent`, which is discovered by assertion on the reader exactly like the other six, and [#135](https://github.com/onhotpath/ferry/issues/135) added `Preparer`, discovered on the writer the same way; `ferrytest`'s own scaling line names all eight.
-> - **The `Driver` list is nineteen cases, not fifteen.** The bullet above ends its parenthetical at fifteen; the amendments after it - the concurrency model's, [#220](https://github.com/onhotpath/ferry/issues/220)/[#221](https://github.com/onhotpath/ferry/issues/221)'s, [#135](https://github.com/onhotpath/ferry/issues/135)'s and [#306](https://github.com/onhotpath/ferry/issues/306)'s - carry the list to sixteen, seventeen, eighteen and then nineteen, and nineteen is what ships.
+> - **The `Driver` list is twenty-one cases, not fifteen.** The bullet above ends its parenthetical at fifteen; the amendments after it - the concurrency model's, [#220](https://github.com/onhotpath/ferry/issues/220)/[#221](https://github.com/onhotpath/ferry/issues/221)'s, [#135](https://github.com/onhotpath/ferry/issues/135)'s and [#306](https://github.com/onhotpath/ferry/issues/306)'s two - carry the list to sixteen, seventeen, eighteen, nineteen and then twenty-one, and twenty-one is what ships.
 > - **The exported-name count is the surface table's**, and the first bullet of this section - "Nineteen exported names in one package", raised to twenty in its parenthetical - predates [#175](https://github.com/onhotpath/ferry/issues/175)'s re-total. The table under [The surface](#the-surface) and its amendments are the authority, and this section states no figure of its own.
 > - **The registrant's sample no longer compiles as printed.** It reads `reg := ferry.NewRegistry(...)` in one assignment, and [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md), amended under [#299](https://github.com/onhotpath/ferry/issues/299), makes `NewRegistry` return `(*Registry, error)` and puts the panicking spelling under `MustRegistry`. A test writes `reg := ferry.MustRegistry(...)` and stays the length this ADR argues it has to be; a caller that wants the report writes the two-value form and checks it.
 

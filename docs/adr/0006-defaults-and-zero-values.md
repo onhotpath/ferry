@@ -767,6 +767,23 @@ Plane inspection does not need one, because the addresses come from the load tha
 Whether the observation is spelled as a callback, a recorder, or a returned report is an API question that belongs with the caller-facing lifecycle, which is [#25](https://github.com/onhotpath/ferry/issues/25)'s.
 What this ADR fixes is that the information survives the walk, which is the part ADR-0001 milestoned.
 
+> **Recorded under [#306](https://github.com/onhotpath/ferry/issues/306): the mechanism is built, it needs nothing from core, and this note says where it lives.**
+>
+> The closure table above marks this ask closed, and an audit read that as an over-claim on the ground that core exports no reporting surface and the walk keeps only its per-subtree `outcome`.
+> Core exports none, and it was never going to: the paragraph above hands the spelling to #25 and commits this ADR to the information surviving the walk and to nothing else.
+>
+> **It survives, and the reason is structural rather than something the walk had to be taught.**
+> A load asks the plane for every address it visits, and absence is a kind of the `Value` rather than a second return value, so a `Source` a caller wrapped sees the whole observation, `Absent` included, before any leaf decode.
+> The mechanism is that decorator: a `Bind` that hands the address set through, and a `Get` that keeps what came back.
+> It converts nothing, it is upstream of the one conversion engine, and it is roughly thirty lines a caller writes once.
+>
+> Evidence is core's own test, `TestPresenceSurvivesTheWalkAsAnObservationOfOneLoad` in `absence_test.go`, which is the three-row table above run through such a decorator: a key deleted and a key set to zero produce one struct and two observations.
+> It has been there since absence itself landed.
+>
+> **The one limit worth stating** is that what is observed is every address the load asked the plane about, which is what "an observation of a Load" means.
+> A member under a slice or a map exists only where the plane listed it, so a decorator sees the addresses that were realised rather than an address shape that was not.
+> That is the same tier boundary [a declaration attaches to the address shape](#a-declaration-attaches-to-the-address-shape-not-to-an-address) draws, and it is why the observation is a route to what the plane said and not to what it could have said.
+
 #### Presence is not a route to an indexed composite's length
 
 ADR-0003 asked whether a length is discoverable through enumeration ([#5](https://github.com/onhotpath/ferry/issues/5)) or through presence (this ticket).
@@ -925,6 +942,10 @@ Where a declaration attaches is decided here, not there: it attaches to the stat
 - An array element with a declaration behaves like a struct field and a slice element does not, which is the second place ADR-0005's static-against-dynamic difference surfaces as a behavioural difference between two types a user will treat as interchangeable.
 - `Absent` is a `Reader`-side kind only, so ferry's value model is asymmetric between the directions, and that asymmetry is a conformance case rather than a note.
   A sink is never handed an observation it has no honest answer for, which is the prototype defect ADR-0004 recorded on itself.
+  *(Built under [#306](https://github.com/onhotpath/ferry/issues/306), and it is two checks rather than one, because the rule has two halves with two owners.
+  That no `Set` call carries an `Absent` is core's, provable inside core with no plane in sight, and core's own tests count it.
+  What a driver can still get wrong is the consequence, so `Driver` case 20 is the plane-side half: an address a dump was silent at holds nothing afterwards, read back over a seed that has to survive.
+  [ADR-0014](0014-what-ferrytest-exports.md) records the case.)*
 - An omission is the absence of a `Set` call and not a deletion, so the plane is untouched at every address the dump was silent at.
   *(Amended under [#254](https://github.com/onhotpath/ferry/issues/254): as published this bullet read that a replacing sink and a patching sink give different results for one dump and both are correct, and that ferry has no delete verb and this ADR does not add one.
   Both halves are false now.

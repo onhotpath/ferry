@@ -581,6 +581,9 @@ ADR-0002 shipped it as the place this decision becomes executable, so this ADR s
   That test admits a wildcard shape, which is derivable from the type and has nothing at it, and the two prototype engines split on exactly that.
 - ferry's address is comparable and its ordering is segment-wise, so both the determinism invariant and the map-key use are satisfied by the same type.
   Sorting the rendering instead is a subtle bug that produces `0 1 10 11 2`, and it will be a conformance-suite case.
+  *(Discharged under [#306](https://github.com/onhotpath/ferry/issues/306), and it took eighteen cases to arrive: it is `Driver` case 19, recorded in [ADR-0014](0014-what-ferrytest-exports.md).
+  A sequence of twelve is what it needs, because the two orders agree to nine and every other fixture in that suite carries two members, so the promise could not have been kept by adding an assertion to a case that already existed.
+  What the case holds a driver to is only the order: which members came back is case 5's, which sorts the driver's answer before comparing it.)*
 - The address model does not consume ADR-0001's `go 1.27` fallback, verified by building it at `go 1.26` under `GOEXPERIMENT=nojsonv2`.
 - ferry is now committed to a path syntax of its own, which is a thing a reader will reasonably ask about.
   The answer has to be the measured one, that RFC 6901 cannot express a segment kind, rather than a preference.

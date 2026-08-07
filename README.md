@@ -88,6 +88,7 @@ Three things follow from that rather than being features bolted on top:
   A save through `driver/yaml` edits the document in place, so comments, key order and keys your struct does not map all survive.
 - **Plane-to-plane transfer is free.**
   Load from one source and dump to another sink, with no intermediate format: a YAML file into a KV store is two calls.
+  [`examples/planetransfer`](examples/planetransfer/) is the runnable version, and it names what the trip through the struct costs.
 - **A backend is two methods.**
   `Bind` is handed the address set your type determined, and the function it returns does the I/O.
   Nothing else is required, and the conformance suite that proves you got it right is one call.
