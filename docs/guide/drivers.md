@@ -570,7 +570,7 @@ That is the whole of the escape hatch, and it is what an address your key functi
 **One obligation, and it is the reason this is an interface rather than something core computes.**
 The name must be a function of the address and of your driver's own configuration, and of nothing the plane holds.
 ferry's own message text never repeats a value the plane supplied, and a name derived from one would put it straight back into the line.
-Conformance case 22 is that obligation made executable: your reader is asked to name the same address twice, and to name the same address set identically over an empty plane and a populated one.
+Conformance case 22 is that obligation made executable: your reader is asked to name the same address twice, and to name the same addresses identically over an empty plane and a populated one.
 
 **`Error.Address()` does not move.**
 It still returns the `ferry.Path`, and the report still sorts on it, so a report is ordered by address and displayed by name.
@@ -1141,7 +1141,7 @@ That is the same obligation your key function already carries.
 19. A sink whose writer declares no `Unsetter` is refused a schema holding a composite, at the open and before any write.
 20. A reader declaring `Enumerator` lists a sequence of twelve members by position: they come back where they were written, and not in the order their addresses render.
 21. An address a dump was silent at holds nothing afterwards: a value whose `omitzero` field is at its zero value is dumped, and a load over a seed reads the seed there.
-22. A reader declaring `PlaneNamer` names an address the same way twice, and names it identically over an empty plane and a populated one.
+22. A reader declaring `PlaneNamer` names an address the same way twice, and names the same addresses identically over an empty plane and a populated one.
 
 Case 14 is where a driver that keeps mutable state in the closure it handed back is found, and the case creates the concurrency rather than judging it: run your own suite under `go test -race`, which is what actually reports the defect.
 It opens the write half concurrently and walks nothing, because what the contract obligates is the open.
@@ -1170,7 +1170,8 @@ A sink that stores an explicit null at an address the dump never wrote turns "fe
 It reads one leaf and nothing else, so a source that cannot list is asked nothing it cannot answer.
 
 Case 22 is the third capability-scaled one, and it is skipped, out loud, for every reader that is no `PlaneNamer` - which is every plane keyed by the address itself, and correctly so.
-It asks the same address twice for the determinism, and asks the whole address set over an empty plane and over one carrying the fixture for the purity: what a report opens with may not depend on what the plane turned out to hold.
+It asks the same address twice for the determinism, and asks the same addresses over an empty plane and over one carrying a fixture for the purity: what a report opens with may not depend on what the plane turned out to hold.
+The addresses it asks about are not confined to the set your read half was bound to, because `PlaneName` takes a `ferry.Path` and core asks it about addresses a value minted.
 
 Cases 8 and 9 reach a value-minted address by dumping a one-entry map rather than by calling `Set` directly, because the address kinds are sealed and only the compiler mints one.
 Case 9 mints case 8's first key as well as its own: case 8 stops where a write is refused, correctly, and a store that cannot spell a hyphen would otherwise be asked by nothing.

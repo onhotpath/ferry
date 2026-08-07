@@ -103,7 +103,7 @@ func TestDriverCase22ReportsAReaderThatOnlyNamesAnEmptyPlane(t *testing.T) {
 	c := &capture{}
 
 	ferrytest.Driver(c, wrapPlane("half-named", func(inst *ferrytest.Instance) {
-		inst.Source = namingSource{inner: inst.Source, held: true, drops: true, name: pureName}
+		inst.Source = namingSource{inner: inst.Source, drops: true, name: pureName}
 	}))
 
 	if !anyLineContains(c.lines, "case 22") {
@@ -130,15 +130,15 @@ func TestDriverCase22ReportsAPlaneThatOnlyNamesWhatItHolds(t *testing.T) {
 	}
 }
 
-// TestDriverCase22SaysNothingOfItsOwnWhenTheDumpIsRefused is the case declining
-// to report twice: the dump it needs is the one case 1 already owns, so a sink
-// that refuses it leaves this case with nothing to compare and nothing to add.
-func TestDriverCase22SaysNothingOfItsOwnWhenTheDumpIsRefused(t *testing.T) {
+// TestDriverCase22ReportsTheDumpItCouldNotMake is the purity half with no
+// populated plane to compare against: the case says so rather than passing on
+// the determinism half alone.
+func TestDriverCase22ReportsTheDumpItCouldNotMake(t *testing.T) {
 	c := &capture{}
 
 	ferrytest.Driver(c, wrapPlane("unwritable", func(inst *ferrytest.Instance) {
 		inst.Source = namingSource{inner: inst.Source, name: pureName}
-		inst.Sink = refusingSink{inner: inst.Sink, when: isSpreadSet, err: errNoSpread}
+		inst.Sink = refusingSink{inner: inst.Sink, when: isLeafSet, err: errNoLeaf}
 	}))
 
 	if !anyLineContains(c.lines, "case 22") {
@@ -146,9 +146,59 @@ func TestDriverCase22SaysNothingOfItsOwnWhenTheDumpIsRefused(t *testing.T) {
 	}
 }
 
-// errNoSpread is the refusal the fixture above stages, distinct so that the
-// report can be traced back to it.
-var errNoSpread = errors.New("this plane will not take that schema")
+// errNoLeaf is the refusal the fixture above stages, distinct so that the report
+// can be traced back to it.
+var errNoLeaf = errors.New("this plane will not take that schema")
+
+// TestDriverCase22SaysNothingWithoutAReadHalf is the first of the two halves
+// this case cannot run without: a plane that mints no source is not asked, and
+// says nothing, because there is no reader for the interface to be on.
+func TestDriverCase22SaysNothingWithoutAReadHalf(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, wrapPlane("write-only", func(inst *ferrytest.Instance) {
+		inst.Source = nil
+	}))
+
+	if anyLineContains(c.lines, "case 22") || anyLineContains(c.logs, "case 22") {
+		t.Errorf("the suite said %q and %q about a plane with no read half at all", c.lines, c.logs)
+	}
+}
+
+// TestDriverCase22SkipsWithoutAWriteHalf is the second: a plane that names its
+// addresses and mints no sink runs the determinism half and says out loud that
+// the purity half had no populated plane to run against.
+func TestDriverCase22SkipsWithoutAWriteHalf(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, wrapPlane("read-only", func(inst *ferrytest.Instance) {
+		inst.Source = namingSource{inner: inst.Source, name: pureName}
+		inst.Sink = nil
+	}))
+
+	if !anyLineContains(c.logs, "case 22 skipped") {
+		t.Errorf("the suite logged %q, want case 22 saying which half it could not run", c.logs)
+	}
+
+	if anyLineContains(c.lines, "case 22") {
+		t.Errorf("the suite reported %q, want case 22 silent about a half the plane does not have", c.lines)
+	}
+}
+
+// TestDriverCase22SkipsAPlaneThatWillNotOpenOverWhatItHolds is the other open
+// this case makes: the plane took the fixture and would not be read back, which
+// is a broken open and is cases 4, 6 and 10's failure rather than this one's.
+func TestDriverCase22SkipsAPlaneThatWillNotOpenOverWhatItHolds(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, wrapPlane("shut", func(inst *ferrytest.Instance) {
+		inst.Source = namingSource{inner: inst.Source, shut: true, name: pureName}
+	}))
+
+	if !anyLineContains(c.logs, "case 22 skipped") {
+		t.Errorf("the suite logged %q, want case 22 saying it could not open the plane it had written", c.logs)
+	}
+}
 
 // namingSource wraps a plane's read half and gives it a name of its own for an
 // address.
@@ -163,6 +213,11 @@ type namingSource struct {
 	// drops makes the read half implement the interface only while the plane
 	// holds nothing, which is the same dependence expressed as a method set.
 	drops bool
+
+	// shut refuses the open once the plane holds something, which is the one
+	// shape that separates this case's two opens: the first succeeds and the
+	// second, over the plane the fixture was written to, does not.
+	shut bool
 
 	name func(addr ferry.Path, held bool) (string, bool)
 }
@@ -180,13 +235,30 @@ func (s namingSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 		}
 
 		named := namingReader{inner: r, set: addrs, consults: s.held, name: s.name}
-		if s.drops && named.holdsAnything() {
-			return plainReader{namingReader: named}, nil
+		if !named.holdsAnything() {
+			return named, nil
 		}
 
-		return named, nil
+		return s.overHeld(named)
 	}, nil
 }
+
+// overHeld is what this source hands back once the plane holds something, which
+// is where the two fixtures that depend on the contents differ from the honest
+// one.
+func (s namingSource) overHeld(named namingReader) (ferry.Reader, error) {
+	switch {
+	case s.shut:
+		return nil, errShutOverHeld
+	case s.drops:
+		return plainReader{namingReader: named}, nil
+	default:
+		return named, nil
+	}
+}
+
+// errShutOverHeld is the refusal the shut fixture stages at its second open.
+var errShutOverHeld = errors.New("this plane will not open once it holds anything")
 
 // plainReader is [namingReader] with the naming method hidden, which is how a
 // fixture drops one optional interface and keeps the rest.

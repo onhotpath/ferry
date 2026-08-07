@@ -703,12 +703,14 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 > [ADR-0004](0004-source-and-sink.md)'s amendment under the same issue ships `PlaneNamer`, a ninth optional capability, and [ADR-0011](0011-the-error-model.md)'s puts what it answers into every report a run produces.
 > Nothing above asks anything of it, and the obligation it carries is one core cannot check: the name is a string a driver computed, and core has no way to tell a name computed from the address from a name computed from what the plane held.
 >
-> 22. **A plane's own name for an address is a function of the address.** For a reader declaring `ferry.PlaneNamer`, one address named twice gives one string, and the whole address set named over an empty plane gives what it gives over a populated one ([ADR-0011](0011-the-error-model.md), [ADR-0004](0004-source-and-sink.md)).
+> 22. **A plane's own name for an address is a function of the address.** For a reader declaring `ferry.PlaneNamer`, one address named twice gives one string, and a set of addresses named over an empty plane gives what it gives over a populated one ([ADR-0011](0011-the-error-model.md), [ADR-0004](0004-source-and-sink.md)).
 >
-> **Purity is the half that matters and the plane already builds both states**, so the case costs one dump: the suite opens a fresh instance, names the fixture's addresses, dumps the fixture into a second instance and names them again.
+> **Purity is the half that matters and the plane already builds both states**, so the case costs one dump: the suite opens a fresh instance, names the addresses, dumps a fixture into a second instance and names them again.
 > Identical answers are the whole assertion, and a reader that names an address over one and not over the other fails it as loudly as one that renames it.
 > **It is skipped, out loud, for every reader that is no `PlaneNamer`**, which is the same scaling cases 16, 17, 18 and 19 have, and it is why `MemPlane` running it to a skip is correct rather than a hole: that plane keys by the canonical rendering of an address, so there is no second spelling for the case to be about.
-> **The fixture is `spread`**, which is leaf-only, so a plane that cannot enumerate and a sink that cannot forget are both asked nothing they cannot answer.
+> **The fixture it writes is the leaf-only one**, so a sink that cannot forget a composite and a source that cannot list are both asked nothing they cannot answer.
+> **The addresses it names are not confined to the set the read half was bound to**, and that is deliberate rather than sloppy: `PlaneName` takes a `Path`, and core asks it about an address a value minted, which is a member of no bound set.
+> So the case asks about the address the fixture writes, which is the one a flattening driver answers out of its own table, and about three the driver has to compute.
 > `driver/env`, `driver/http`, `driver/kv` and `driver/yaml` all run it to a conclusion.
 >
 > **The surface table does not move**: the case is internal, no exported name of this package changes, and `TestExportedSurface` locks the same twenty-six.

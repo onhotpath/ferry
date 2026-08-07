@@ -19,8 +19,8 @@ import (
 // a case rather than a sentence in the interface's doc comment.
 //
 // The two halves are asked of two planes: one freshly minted and empty, one
-// carrying the fixture, both named over the same address set. Identical answers
-// are the whole assertion, and the plane already builds both states, so the case
+// carrying a fixture, both asked about the same addresses. Identical answers are
+// the whole assertion, and the plane already builds both states, so the case
 // costs one dump.
 //
 // It is skipped, out loud, for a reader that is no [ferry.PlaneNamer], which is
@@ -29,33 +29,41 @@ import (
 func (d *driverRun) caseNamed() {
 	d.rep.Helper()
 
-	set, ok := fixtureSet[spread](d, caseNamedNo)
-	if !ok {
-		return
-	}
-
-	n, r, ok := d.namerOverEmpty(set)
+	n, r, ok := d.namerOverEmpty()
 	if !ok {
 		return
 	}
 
 	defer closeIf(r)
 
-	d.namesUnchanged(set, d.namesOf(n, set))
+	d.namesUnchanged(d.namesOf(n, namedAddrs()))
+}
+
+// namedAddrs is what this case asks the plane to name: the suite's own fixture
+// addresses, written out rather than derived, the same way every other address
+// in this package is.
+//
+// They are deliberately not confined to the set the read half was bound to.
+// [ferry.PlaneNamer] takes a [ferry.Path] and core asks it about an address a
+// value minted, which is a member of no bound set, so a name is a function of
+// the address rather than of the binding. The first is the address the fixture
+// below writes, which is the one a flattening driver answers out of its own
+// table; the rest are answered by whatever it computes with.
+func namedAddrs() []ferry.Path {
+	return []ferry.Path{addrLeaf, addrList.Elem(0), addrMap.At(fixtureKey), ferry.At("under", "five")}
 }
 
 // namerOverEmpty opens the read half of a fresh, empty instance and asks whether
 // it names anything, which is the same question core asks: on the reader an open
 // returned, and never on the [ferry.Source].
-func (d *driverRun) namerOverEmpty(set *ferry.AddressSet) (ferry.PlaneNamer, ferry.Reader, bool) {
+//
+// A plane that cannot be opened at all answers no here and is silent about it,
+// because a broken open is cases 4, 6 and 10's and this case has nothing to add
+// to what they already report.
+func (d *driverRun) namerOverEmpty() (ferry.PlaneNamer, ferry.Reader, bool) {
 	d.rep.Helper()
 
-	inst := d.plane.Open()
-	if inst.Source == nil {
-		return nil, nil, false
-	}
-
-	_, r, ok := d.openOver(inst.ctx(), inst, set, caseNamedNo)
+	r, ok := d.openedReader(d.plane.Open())
 	if !ok {
 		return nil, nil, false
 	}
@@ -72,21 +80,19 @@ func (d *driverRun) namerOverEmpty(set *ferry.AddressSet) (ferry.PlaneNamer, fer
 	return n, r, true
 }
 
-// namesOf is every address of the set named twice, and the determinism half: a
-// name that is not the same on the second call is not a name.
+// namesOf is every address named twice, and the determinism half: a name that is
+// not the same on the second call is not a name.
 //
 // An address the plane says it cannot name is not in the result, and that is the
 // documented answer rather than a failure: what the case compares afterwards is
-// the whole mapping, so an address named on one plane and refused on the other
-// is caught by the comparison and not by this loop.
-func (d *driverRun) namesOf(n ferry.PlaneNamer, set *ferry.AddressSet) map[ferry.Path]string {
+// the whole mapping, so an address named over one plane and refused over the
+// other is caught by the comparison and not by this loop.
+func (d *driverRun) namesOf(n ferry.PlaneNamer, addrs []ferry.Path) map[ferry.Path]string {
 	d.rep.Helper()
 
 	out := map[ferry.Path]string{}
 
-	for m := range set.Seq() {
-		at := m.Path()
-
+	for _, at := range addrs {
 		name, named := n.PlaneName(at)
 		if !named {
 			continue
@@ -107,16 +113,44 @@ func (d *driverRun) namesOf(n ferry.PlaneNamer, set *ferry.AddressSet) map[ferry
 }
 
 // namesUnchanged is the purity half: the same addresses, named over a plane
-// carrying the fixture, answer exactly what they answered over an empty one.
-func (d *driverRun) namesUnchanged(set *ferry.AddressSet, want map[ferry.Path]string) {
+// carrying a fixture, answer exactly what they answered over an empty one.
+//
+// The fixture is leaf-only, so a sink that cannot forget a composite and a
+// source that cannot list are both asked nothing they cannot answer, and the one
+// address it writes is the one [namedAddrs] leads with.
+func (d *driverRun) namesUnchanged(want map[ferry.Path]string) {
 	d.rep.Helper()
 
-	_, r, ok := dumpAndOpen(d, spreadFixture(), set, caseNamedNo)
+	inst := d.plane.Open()
+	if inst.Sink == nil {
+		d.skip(caseNamedNo, "the plane mints no sink, so there is no populated plane to name the same "+
+			"addresses over and the determinism half is the whole of what ran")
+
+		return
+	}
+
+	if err := ferry.Dump(inst.ctx(), onlyLeaf{Leaf: fixtureLeaf}, inst.Sink, d.opts...); err != nil {
+		d.fail(caseNamedNo, "dumping the fixture this case names addresses over: "+err.Error())
+
+		return
+	}
+
+	r, ok := d.openedReader(inst)
 	if !ok {
+		d.skip(caseNamedNo, "the plane that took the fixture could not be opened to read, which is cases 4, "+
+			"6 and 10's failure rather than this one's")
+
 		return
 	}
 
 	defer closeIf(r)
+
+	d.sameNames(r, want)
+}
+
+// sameNames is the comparison itself, on the read half over the populated plane.
+func (d *driverRun) sameNames(r ferry.Reader, want map[ferry.Path]string) {
+	d.rep.Helper()
 
 	n, named := r.(ferry.PlaneNamer)
 	if !named {
@@ -126,7 +160,7 @@ func (d *driverRun) namesUnchanged(set *ferry.AddressSet, want map[ferry.Path]st
 		return
 	}
 
-	if got := d.namesOf(n, set); !maps.Equal(got, want) {
+	if got := d.namesOf(n, namedAddrs()); !maps.Equal(got, want) {
 		d.fail(caseNamedNo, "the plane names these addresses differently once it holds something: "+
 			nameDiff(want, got)+". A name is a function of the address and of the driver's own "+
 			"configuration, and of nothing the plane holds, because it is printed in a report whose text "+
