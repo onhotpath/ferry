@@ -7,7 +7,7 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// CoreTypes is ferry's own supported type set, discharged: nineteen rows and 57
+// CoreTypes is ferry's own supported type set, discharged: nineteen rows and 58
 // cases, each row carrying the equality relation its type comes back under and
 // each case carrying the boundary [ferry.Value] ferry must produce for it.
 //
@@ -35,8 +35,8 @@ import (
 // historically break it. For floats that is 0, -0, 0.1, 1.0/3.0, the largest and
 // the smallest non-zero magnitude, both infinities and NaN; for integers the
 // zero and both bounds of the width; for strings the empty string, an embedded
-// NUL, non-UTF-8 bytes and text containing a separator; for composites nil and
-// empty.
+// NUL, non-UTF-8 bytes and text containing a separator; for composites nil,
+// empty, and one containing an empty element.
 func CoreTypes() []Proof {
 	out := make([]Proof, 0, coreRows)
 
@@ -301,15 +301,16 @@ func pinnedInstant() time.Time {
 // made a map key whose value minted nothing vanish entirely.
 //
 // The third value ADR-0005's composite list names, one containing an empty
-// element, has no row here because it has no golden to carry: a composite with
-// elements writes nothing at its own address, so the only [ferry.Value] this
-// harness could read for it is Absent, which is a plane reporting that it does
-// not hold an address rather than a representation ferry chose. It is a
-// round-trip case rather than a golden one, and it belongs to whichever suite
-// can read an element address.
+// element, is the case that needs an address of its own. A composite with
+// elements writes nothing at its own address, so a golden pinned there could
+// only be Absent, which is a plane reporting that it does not hold an address
+// rather than a representation ferry chose; pinned at the element instead, it is
+// an ordinary golden, and it is the one case in the table that separates an
+// empty element inside a composite from an empty composite.
 func compositeRow() Proof {
 	return Type("[]string", SliceEq(Eq[string]),
 		At([]string(nil), ferry.Null),
 		At([]string{}, ferry.Null),
+		Inside([]string{""}, ferry.Path{}.Elem(0), ferry.String("")),
 	)
 }

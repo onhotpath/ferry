@@ -115,16 +115,42 @@ func (p typeProof[T]) run(h *harness) {
 	}
 
 	for i, c := range p.cases {
-		// A narrowed proof runs the cases it was narrowed to and numbers them
-		// as [CoreTypes] wrote them. This is not RoundTrip consulting
-		// [Plane.Kinds] - it never does - it is RoundTrip running the proof it
-		// was handed, which is what [Driver] narrows before handing one over.
-		if !p.picked(c.Want) {
-			continue
-		}
-
-		p.runCase(h, i, c)
+		p.consider(h, i, c)
 	}
+}
+
+// consider is the two gates one case passes before it runs.
+//
+// The golden is checked here and not at [Type], because a [Case] is an exported
+// struct literal and a field left out is not a call that can refuse (ADR-0014's
+// "the golden is required, not optional", asserted where the case is reached
+// rather than promised where it is written).
+//
+// It is checked before the narrowing rather than after, because the zero
+// [ferry.Value] is Absent: a plane that does not declare KindAbsent would send a
+// case with no golden into [Driver]'s refusal half, where a forgotten field
+// becomes a demand that the driver refuse a dump nobody wrote.
+//
+// The narrowing itself is not RoundTrip consulting [Plane.Kinds] - it never does
+// - it is RoundTrip running the proof it was handed, which is what [Driver]
+// narrows before handing one over. A narrowed proof runs the cases it was
+// narrowed to and numbers them as [CoreTypes] wrote them.
+func (p typeProof[T]) consider(h *harness, i int, c Case[T]) {
+	h.rep.Helper()
+
+	if c.Want == (ferry.Value{}) {
+		h.rep.Errorf("%s: the case pins no golden, and absence is not one: a case states the boundary value "+
+			"ferry must produce at the address it names, and a composite carrying elements names an "+
+			"address inside itself", h.label(p.name, i))
+
+		return
+	}
+
+	if !p.picked(c.Want) {
+		return
+	}
+
+	p.runCase(h, i, c)
 }
 
 // runCase is one case, against a plane minted for it alone.
@@ -156,7 +182,9 @@ func (p typeProof[T]) runCase(h *harness, i int, c Case[T]) {
 		return
 	}
 
-	p.checkGolden(h, i, rec.seen[holderAddr], c.Want)
+	at := caseAddr(c.Addr)
+
+	p.checkGolden(h, i, at, encodedAt(rec.seen, at), c.Want)
 	p.checkTrip(h, i, inst, c)
 }
 
@@ -165,17 +193,17 @@ func (p typeProof[T]) runCase(h *harness, i int, c Case[T]) {
 // The comparison is ==, which [ferry.Value] supports because it is a comparable
 // 24-byte struct, so the kind is asserted along with the text and there is no
 // bespoke comparison to get wrong. An address ferry never wrote reads back as
-// the zero Value, which is Absent, and Absent is a plane reporting that it does
-// not hold an address - so "encoded absent" is a true and distinct report of a
-// dump that wrote nothing here.
-func (p typeProof[T]) checkGolden(h *harness, i int, got, want ferry.Value) {
+// the zero Value, which is Absent, so a case whose golden is pinned where
+// nothing was written reports "encoded absent" and names the address it looked
+// at.
+func (p typeProof[T]) checkGolden(h *harness, i int, at string, got, want ferry.Value) {
 	h.rep.Helper()
 
 	if got == want {
 		return
 	}
 
-	h.rep.Errorf("%s: ferry encoded %#v at %s, want %#v", h.label(p.name, i), got, holderAddr, want)
+	h.rep.Errorf("%s: ferry encoded %#v at %s, want %#v", h.label(p.name, i), got, at, want)
 }
 
 // checkTrip loads the case back and compares under the proof's relation.
@@ -219,6 +247,31 @@ type holder[T any] struct {
 	Value T `ferry:"value"`
 }
 
-// holderAddr is where a [holder]'s one field lands, and it is the address the
-// golden column is read at.
+// holderAddr is where a [holder]'s one field lands, and it is the address a
+// case's own golden is read at.
 var holderAddr = ferry.At("value")
+
+// caseAddr renders the address a case pins its golden at: the holder's own,
+// extended by the address the case named inside the value.
+//
+// It is text rather than a [ferry.Path] because a case's address is relative and
+// core exports no way to join two of them - ADR-0003 keeps a Path's construction
+// to At and Elem, and keeps the wrapper this harness supplies out of the
+// contract a proof is written to. The rendering identifies the address, so
+// joining two renderings joins two segment sequences and can do nothing else.
+func caseAddr(rel ferry.Path) string { return holderAddr.String() + rel.String() }
+
+// encodedAt is what ferry wrote at one rendered address, and the zero
+// [ferry.Value] where it wrote nothing.
+//
+// The scan is over one dump of one case's value, and it compares renderings
+// because two addresses render alike exactly when they are equal (ADR-0003).
+func encodedAt(seen map[ferry.Path]ferry.Value, at string) ferry.Value {
+	for addr, v := range seen {
+		if addr.String() == at {
+			return v
+		}
+	}
+
+	return ferry.Value{}
+}

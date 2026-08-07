@@ -1064,6 +1064,22 @@ A table is only as good as its values, which is the honest cost of ADR-0002's ru
 The mitigation is that the value list for each core type is part of this decision rather than left to whoever writes the test: every core entry carries its zero value, its extremes, and the values that historically break it.
 For floats that is `0`, `-0`, `0.1`, `1.0/3.0`, `MaxFloat64`, `SmallestNonzeroFloat64`, `+Inf`, `-Inf` and `NaN`; for integers the zero and both bounds of the width; for strings the empty string, an embedded NUL, non-UTF-8 bytes, and text containing a separator; for composites nil, empty, and one containing an empty element.
 
+> **Amended under [#114](https://github.com/onhotpath/ferry/issues/114): the composite list stands, and what its third value is for is written down.**
+>
+> This list is unchanged, and that is the ruling.
+> [#114](https://github.com/onhotpath/ferry/issues/114) reported that it could not be satisfied: the third composite value, one containing an empty element, had no golden it could carry, so the shipped table carried two composite values and spent the difference elsewhere.
+> The cause was the instrument and not the list.
+> A composite with elements writes its elements one address down and writes nothing at its own address - which is [this ADR's own rule](#a-nil-composite-and-an-empty-composite-are-one-value-and-the-collision-is-forced), stated earlier in this document - and a proof case could name only one address, the container's, so the only `ferry.Value` such a case could pin was `Absent`.
+> That is a plane reporting that it does not hold an address rather than a representation ferry chose, and it is not a golden.
+>
+> **A case now names the address it proves** ([ADR-0014](0014-what-ferrytest-exports.md) publishes the surface), so `[]string{""}` pins `string("")` at the element and is an ordinary golden.
+> **What the third value is for** is exactly the distinction the first two cannot make: an empty *element inside* a composite is a different write from an empty composite.
+> The first two write `Null` at the container address and are one observation through a plane; the third writes nothing there and writes an empty leaf one address down.
+> A table without it proves that ferry can spell an absent composite and never that it can spell a present one whose contents are empty, which is the shape a flat plane most easily loses.
+>
+> Nothing about the represented-value rules moves.
+> The count of cases in `ferrytest.CoreTypes()` does, from 57 to 58, and it is ADR-0014's figure and amended there.
+
 #### CI runs the same table against three planes, and the third one is the point
 
 ```go

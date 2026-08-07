@@ -27,7 +27,8 @@ import (
 // so a failure here is core's and never a driver's.
 //
 // This test used to run behind a skip list. #72 wrote ferrytest.CoreTypes
-// complete - nineteen rows and 57 cases - ahead of the compiler that admits
+// complete - nineteen rows, 57 cases then and 58 now (#114) - ahead of the
+// compiler that admits
 // their types, and named every row the engine could not yet carry against the
 // ticket that would land it. The list was a ratchet rather than a to-do: a row
 // that started round-tripping failed the suite as stale, so a widening ticket

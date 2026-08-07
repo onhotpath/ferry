@@ -391,6 +391,78 @@ func TestRoundTripRefusesAProofWithNoRelation(t *testing.T) {
 	}
 }
 
+// TestRoundTripRefusesACaseWithNoGolden is Case's own guarantee, made true.
+//
+// A Case is an exported struct, so a golden can be left out by writing a literal
+// instead of calling At or Inside, and the field's zero value is Absent. For a
+// leaf that always failed, because ferry writes a value at the leaf's address.
+// For a composite carrying elements it used to pass in silence: ferry writes
+// nothing at the container's own address, so the recorded value there was Absent
+// too and the comparison succeeded against a golden nobody wrote.
+func TestRoundTripRefusesACaseWithNoGolden(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		proof ferrytest.Proof
+	}{
+		{
+			name:  "leaf",
+			proof: ferrytest.Type("string", ferrytest.Eq[string], ferrytest.Case[string]{Value: "localhost"}),
+		},
+		{
+			name: "composite carrying elements",
+			proof: ferrytest.Type("[]string", ferrytest.SliceEq(ferrytest.Eq[string]),
+				ferrytest.Case[[]string]{Value: []string{"a", "b"}}),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &capture{}
+
+			ferrytest.RoundTrip(c, ferrytest.MemPlane(), []ferrytest.Proof{tc.proof})
+
+			if only := onlyLine(t, c); !strings.Contains(only, "pins no golden") {
+				t.Errorf("report = %q, want the missing golden named", only)
+			}
+		})
+	}
+}
+
+// TestRoundTripReadsAGoldenAtTheAddressTheCaseNames is what Inside buys.
+//
+// A composite with elements writes them one address down and writes nothing at
+// its own, so pinning the golden at the element is the only way to assert what
+// ferry encoded inside a list at all. The case is green, which is the assertion:
+// the harness looked at /value#1 and not at /value.
+func TestRoundTripReadsAGoldenAtTheAddressTheCaseNames(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.RoundTrip(c, ferrytest.MemPlane(), []ferrytest.Proof{
+		ferrytest.Type("[]string", ferrytest.SliceEq(ferrytest.Eq[string]),
+			ferrytest.Inside([]string{"a", "b"}, ferry.Path{}.Elem(1), ferry.String("b")),
+		),
+	})
+
+	if len(c.lines) != 0 {
+		t.Errorf("a golden pinned at an element address reported %q, want nothing", c.lines)
+	}
+}
+
+// TestRoundTripReportsAGoldenPinnedWhereNothingWasWritten is the other half:
+// the address a case names is looked up rather than assumed, so a case pinned
+// where the dump wrote nothing reports absence and names the address it read.
+func TestRoundTripReportsAGoldenPinnedWhereNothingWasWritten(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.RoundTrip(c, ferrytest.MemPlane(), []ferrytest.Proof{
+		ferrytest.Type("[]string", ferrytest.SliceEq(ferrytest.Eq[string]),
+			ferrytest.Inside([]string{"a"}, ferry.Path{}.Elem(3), ferry.String("d")),
+		),
+	})
+
+	if only := onlyLine(t, c); !strings.Contains(only, `ferry encoded absent at /value#3, want string("d")`) {
+		t.Errorf("report = %q, want the address the case named", only)
+	}
+}
+
 // onlyLine is the single report a case was expected to produce.
 func onlyLine(t *testing.T, c *capture) string {
 	t.Helper()

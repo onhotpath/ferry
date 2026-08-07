@@ -31,9 +31,10 @@ type Proof interface {
 	// so the name is never the key.
 	Type() reflect.Type
 
-	// columns hands back the two of the three columns a suite otherwise only
-	// reads while running: whether a relation was supplied at all, and the
-	// golden every case pins.
+	// columns hands back everything about a proof that is readable without a
+	// plane: whether a relation was supplied at all, the address every case
+	// pins its golden at, and the golden itself. The two slices are parallel
+	// and are one case per index.
 	//
 	// It exists because [CoreTypes] is a published artefact rather than a
 	// fixture (ADR-0013), so its shape has to be assertable without a plane in
@@ -44,7 +45,7 @@ type Proof interface {
 	//
 	// It is unexported for the same reason [Type] is the only constructor: the
 	// columns are the suites' to read, not a caller's to inspect.
-	columns() (hasRelation bool, goldens []ferry.Value)
+	columns() (hasRelation bool, addrs []ferry.Path, goldens []ferry.Value)
 
 	// run discharges the proof against one plane, and it is a method here
 	// rather than a loop inside [RoundTrip] because the cases are typed by a
@@ -108,35 +109,67 @@ func Type[T any](name string, eq func(a, b T) bool, cases ...Case[T]) Proof {
 	return typeProof[T]{name: name, eq: eq, cases: cases}
 }
 
-// Case is one value and the boundary [ferry.Value] ferry must produce for it.
-// [At] is the way to build one.
+// Case is one value, one address inside it, and the boundary [ferry.Value] ferry
+// must produce there. [At] and [Inside] are the ways to build one.
 //
 // Want is required and there is no way to omit it. It is what pins the
 // representation, which a round trip cannot: a codec writing a duration as
 // 30000000000 nanoseconds round-trips perfectly and is still the wrong thing to
 // leave in somebody's config file for the next ten years.
 //
-// A Case with no Want is a case with no golden, and it fails rather than
-// passing: the zero [ferry.Value] is Absent, which is a plane saying it does not
-// hold an address, and no value ferry writes is ever that.
+// A Case with no Want is a case with no golden, and every suite reports it
+// rather than running it: the zero [ferry.Value] is Absent, which is a plane
+// saying it does not hold an address, and no value ferry writes is ever that. A
+// Case is an exported struct, so leaving the field out is not a call anything can
+// refuse, and the report is what closes that.
+//
+// Addr is the address the golden is pinned at, and it names one address per case
+// because the golden is one representation: a case asserting several would report
+// which of them failed and not which value produced it.
 type Case[T any] struct {
 	// Value is the Go value that goes in.
 	Value T
 
-	// Want is the boundary Value ferry must produce for it.
+	// Addr is where inside Value the golden is pinned, relative to the value's
+	// own address. The zero Path is the value's own address, which is what [At]
+	// builds and where a leaf and an element-free composite land.
+	Addr ferry.Path
+
+	// Want is the boundary Value ferry must produce there.
 	Want ferry.Value
 }
 
-// At builds a [Case] out of a value and the golden it must produce: at this
-// value, this representation.
+// At builds a [Case] out of a value and the golden it must produce at the
+// value's own address: at this value, this representation.
 //
 //	ferrytest.At(netip.MustParseAddr("192.0.2.1"), ferry.String("192.0.2.1"))
 //
 // It is a different function from ferry.At, which builds an address out of
 // field names. The two appear side by side in a proof and are told apart by
 // their package.
+//
+// Use [Inside] for a composite that carries elements, which writes nothing at
+// its own address.
 func At[T any](value T, want ferry.Value) Case[T] {
 	return Case[T]{Value: value, Want: want}
+}
+
+// Inside builds a [Case] whose golden is pinned at an address inside the value
+// rather than at the value's own: at this address, this representation.
+//
+//	ferrytest.Inside([]string{""}, ferry.Path{}.Elem(0), ferry.String(""))
+//	ferrytest.Inside(map[string]string{"http": "1"}, ferry.At("http"), ferry.String("1"))
+//
+// The address is relative to the value, so it starts from the zero [ferry.Path]
+// and is extended with [ferry.Path.At] for a member and [ferry.Path.Elem] for a
+// position. The zero Path is the value's own address, which is what [At] builds.
+//
+// It is what makes a composite carrying elements provable. Such a composite
+// writes its elements one address down and writes nothing at its own address, so
+// a case pinned there has no representation to assert at all, and the round trip
+// alone cannot see what a driver wrote inside a list.
+func Inside[T any](value T, addr ferry.Path, want ferry.Value) Case[T] {
+	return Case[T]{Value: value, Addr: addr, Want: want}
 }
 
 // typeProof is the only implementation of [Proof]. It holds the three columns
@@ -160,15 +193,19 @@ func (p typeProof[T]) Name() string { return p.name }
 // comment said could not be recovered.
 func (typeProof[T]) Type() reflect.Type { return reflect.TypeFor[T]() }
 
-// columns reads the relation's presence and the golden column, which is the
-// whole of what a proof can say about itself without a plane to run against.
-func (p typeProof[T]) columns() (bool, []ferry.Value) {
+// columns reads the relation's presence, the address column and the golden
+// column, which is the whole of what a proof can say about itself without a
+// plane to run against.
+func (p typeProof[T]) columns() (bool, []ferry.Path, []ferry.Value) {
+	addrs := make([]ferry.Path, 0, len(p.cases))
 	goldens := make([]ferry.Value, 0, len(p.cases))
+
 	for _, c := range p.cases {
+		addrs = append(addrs, c.Addr)
 		goldens = append(goldens, c.Want)
 	}
 
-	return p.eq != nil, goldens
+	return p.eq != nil, addrs, goldens
 }
 
 // only copies the proof with a narrowing attached. The receiver is a value, so

@@ -112,7 +112,8 @@ func TestTimeEqualNeedsNoWrapper(t *testing.T) {
 }
 
 // TestAtBuildsACase pins the constructor: the golden is positional, so a case
-// cannot be written without stating what the value looks like on a plane.
+// cannot be written without stating what the value looks like on a plane, and
+// the address it pins it at is the value's own.
 func TestAtBuildsACase(t *testing.T) {
 	c := ferrytest.At(30*time.Second, ferry.String("30s"))
 
@@ -122,6 +123,29 @@ func TestAtBuildsACase(t *testing.T) {
 
 	if c.Want != ferry.String("30s") {
 		t.Errorf("Want = %#v, want string(\"30s\")", c.Want)
+	}
+
+	if c.Addr != (ferry.Path{}) {
+		t.Errorf("Addr = %q, want the value's own address", c.Addr)
+	}
+}
+
+// TestInsideBuildsACase pins the sibling: the address is positional too, so a
+// case that names one cannot be written without saying what is there.
+func TestInsideBuildsACase(t *testing.T) {
+	at := ferry.At("origins").Elem(1)
+	c := ferrytest.Inside(map[string][]string{"origins": {"a", "b"}}, at, ferry.String("b"))
+
+	if c.Addr != at {
+		t.Errorf("Addr = %q, want %q", c.Addr, at)
+	}
+
+	if c.Want != ferry.String("b") {
+		t.Errorf("Want = %#v, want string(\"b\")", c.Want)
+	}
+
+	if got := c.Value["origins"]; len(got) != 2 || got[1] != "b" {
+		t.Errorf("Value = %v, want the map the case was built with", c.Value)
 	}
 }
 
