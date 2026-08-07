@@ -87,20 +87,14 @@ func compareSegments(a, b ferry.Segment) int {
 // positions is the second dimension read as a sequence: the values a name holds,
 // one position each.
 //
-// Enumerating a name is also what settles the question [reader.Get] could not
-// answer, so the record it left is dropped here: something read this name as a
-// sequence, which is what it is.
+// The position is the offset into what the name holds, so the sequence is in the
+// request's own order and no rule is invented for it: net/url and net/http both
+// append under a name in the order the wire carried it, and ADR-0016 asks for
+// the plane's order where the plane has one.
 func (r *reader) positions(prefixKey string) map[ferry.Segment]struct{} {
 	out := map[ferry.Segment]struct{}{}
 
-	vs := r.vals[prefixKey]
-	if len(vs) == 0 {
-		return out
-	}
-
-	delete(r.hid, prefixKey)
-
-	for i := range vs {
+	for i := range r.vals[prefixKey] {
 		out[ferry.IndexSegment(uint(i))] = struct{}{}
 	}
 
@@ -111,10 +105,13 @@ func (r *reader) positions(prefixKey string) map[ferry.Segment]struct{} {
 // as the child address it names.
 //
 // A child both tiers name is the overlap, and it is refused here rather than
-// resolved. It is the one refusal this driver can make during the walk at all,
-// because being asked for children at an address is core saying that address is
-// a dynamic container (ADR-0003, amended under #207), and conformance case 3
-// forbids a refusal at a container's Get.
+// resolved. ADR-0015 places this refusal in Children because Children is where
+// these addresses are minted, and it says so in terms that have since changed
+// underneath it: it argued that Children was also the only call a multimap
+// driver could refuse in at all, because Get carried no kind and conformance
+// case 3 forbade failing at a container's Get. Neither holds now, and the
+// placement survives on the first reason alone, which is the one ADR-0015 said
+// it would keep even if #208 opened Get.
 //
 // The address the refusal carries is the container's, because core has one here
 // and core's wins. The position is in the message instead.
