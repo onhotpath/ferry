@@ -640,3 +640,120 @@ func dumpedTwice(t *testing.T, first, second replaceable) *fake {
 
 	return store
 }
+
+// TestUnsetRefusesWhatEveryOtherWriteRefuses holds the replacement half of the
+// contract to the two refusals the rest of this writer already makes: a
+// cancelled context, and an address this key space cannot name.
+func TestUnsetRefusesWhatEveryOtherWriteRefuses(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a cancelled context", unsetRefusesACancelledContext)
+	t.Run("an unnameable minted address", unsetRefusesAnUnnameableCompositeAddress)
+}
+
+func unsetRefusesACancelledContext(t *testing.T) {
+	t.Parallel()
+
+	set := addrsOf[replaceable](t)
+	w := openWriter(t, mustSink(t, newFake()), set)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := unsetter(t, w).Unset(ctx, compositeAt(t, set, ferry.At("tags")))
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Unset answered %v under a cancelled context, want the context's own error", err)
+	}
+}
+
+// nestedMaps is a mapping whose members are themselves composites, which is the
+// only shape whose *composite* address is minted from a map key rather than
+// determined by the type.
+type nestedMaps struct {
+	Groups map[string][]string `ferry:"groups"`
+}
+
+// unsetRefusesAnUnnameableCompositeAddress is the key function's own refusal,
+// reached through the address a value minted: a key holding a separator would be
+// forgotten as a folder of that name, which is a different address's.
+func unsetRefusesAnUnnameableCompositeAddress(t *testing.T) {
+	t.Parallel()
+
+	store := newFake()
+
+	v := nestedMaps{Groups: map[string][]string{"a/b": {"x"}}}
+
+	err := ferry.Dump(t.Context(), v, mustSink(t, store))
+	if err == nil {
+		t.Fatal("a dump naming a composite this store cannot spell reported success")
+	}
+
+	if !errors.Is(err, ferry.ErrPlane) {
+		t.Errorf("the refusal %v does not carry ferry.ErrPlane", err)
+	}
+
+	if got := store.putCount(); got != 0 {
+		t.Errorf("a dump refused at a composite wrote %d keys, want none", got)
+	}
+}
+
+// TestAListingThatFailsIsOneErrorAndNotOnePerKey is the removal half's own
+// failure: what could not be read is the folder, and the keys under it were
+// never learned, so there is nothing to report per key.
+func TestAListingThatFailsIsOneErrorAndNotOnePerKey(t *testing.T) {
+	t.Parallel()
+
+	store := newFake().failLists()
+	store.data["app/tags/1"] = []byte("b")
+
+	err := ferry.Dump(t.Context(), replaceable{Tags: []string{"x"}, Labels: map[string]string{"k": "v"}},
+		mustSink(t, store))
+	if err == nil {
+		t.Fatal("a save whose listing failed reported success")
+	}
+
+	if !errors.Is(err, errFakeRead) {
+		t.Errorf("the refusal %v does not carry the store's own error", err)
+	}
+
+	if got, found := store.data["app/tags/1"]; !found || string(got) != "b" {
+		t.Errorf("a save that could not list removed a key: the store holds %q, found %v", got, found)
+	}
+}
+
+// TestARemovalIsAskedTheSamePermissionQuestionAWriteIs is why removing goes
+// through the ACL: removing a key is writing at it, and a token allowed to do
+// neither should hear about both in one report rather than in two runs.
+func TestARemovalIsAskedTheSamePermissionQuestionAWriteIs(t *testing.T) {
+	t.Parallel()
+
+	store := newGuarded("app/tags/1")
+	store.data["app/tags/1"] = []byte("b")
+
+	err := ferry.Dump(t.Context(), replaceable{Tags: []string{"x"}, Labels: map[string]string{"k": "v"}},
+		mustSink(t, store))
+	if err == nil {
+		t.Fatal("a save whose removal was denied reported success")
+	}
+
+	if !errors.Is(err, errFakeDenied) {
+		t.Errorf("the refusal %v does not carry the client's own error", err)
+	}
+
+	if !slices.Contains(store.checked, "app/tags/1") {
+		t.Errorf("the client was asked about %q and never about the key the save removed", store.checked)
+	}
+}
+
+// unsetter asserts that an open writer can forget an address, which this
+// driver's can.
+func unsetter(t *testing.T, w ferry.Writer) ferry.Unsetter {
+	t.Helper()
+
+	u, ok := w.(ferry.Unsetter)
+	if !ok {
+		t.Fatalf("%T cannot forget an address, and a store can delete a key", w)
+	}
+
+	return u
+}

@@ -91,103 +91,100 @@ func TestProofIsSealed(t *testing.T) {
 // Close failure appears in the reported error set, and against a wrapper that
 // always answers yes it would be asserting about the wrapper.
 //
-// [ferry.Ensurer] is the third such interface (ADR-0016), and it is the one
-// with a consequence the other two do not have: a shell that dropped it would
-// turn every nil pointer in a dump into a refusal the driver never made. So the
-// table is all eight combinations rather than the four it was.
+// Two of the four have a consequence the others do not. A shell dropping
+// [ferry.Ensurer] turns every nil pointer in a dump into a refusal the driver
+// never made (ADR-0016), and one dropping [ferry.Unsetter] turns a driver whose
+// dumps replace into one whose dumps accumulate (ADR-0004). So the table is all
+// sixteen combinations.
+//
+// The inner writer of each row is built by [shells] itself, because the shells
+// are exactly the sixteen method sets this asserts over: writing sixteen bespoke
+// writers beside them would be a second spelling of the same list, and the one
+// that drifted would be the one nobody noticed.
 func TestWrapWriterKeepsTheOptionalInterfaces(t *testing.T) {
-	cases := []optionalCase{
-		{name: "none", inner: plainWriter{}},
-		{name: "commits", inner: committingWriter{}, commits: true},
-		{name: "releases", inner: releasingWriter{}, releases: true},
-		{name: "ensures", inner: ensuringWriter{}, ensures: true},
-		{name: "commits and releases", inner: bothWriter{}, commits: true, releases: true},
-		{name: "commits and ensures", inner: commitEnsuringWriter{}, commits: true, ensures: true},
-		{name: "releases and ensures", inner: releaseEnsuringWriter{}, releases: true, ensures: true},
-		{name: "all three", inner: allWriter{}, commits: true, releases: true, ensures: true},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, c.assert)
+	for i := range shells {
+		t.Run(combinationName(i), optionalCase{bits: i}.assert)
 	}
 }
 
-// optionalCase is one inner writer and the interface set its wrapper must have.
-type optionalCase struct {
-	name     string
-	inner    ferry.Writer
-	commits  bool
-	releases bool
-	ensures  bool
-}
+// optionalCase is one combination of the four optional interfaces, as the bits
+// [caps.combination] reads.
+type optionalCase struct{ bits int }
 
-// assert reads the three optional interfaces off the wrapper.
+// assert reads the four optional interfaces off the wrapper, and holds each of
+// them to the bit that built the writer underneath.
 func (c optionalCase) assert(t *testing.T) {
 	t.Helper()
 
-	w := wrapWriter(c.inner, map[ferry.Path]ferry.Value{})
+	w := wrapWriter(combinationOf(c.bits), map[ferry.Path]ferry.Value{})
 
-	if _, ok := w.(ferry.Committer); ok != c.commits {
-		t.Errorf("wrapped writer is a Committer = %v, want %v", ok, c.commits)
+	_, commits := w.(ferry.Committer)
+	_, releases := w.(ferry.Releaser)
+	_, ensures := w.(ferry.Ensurer)
+	_, unsets := w.(ferry.Unsetter)
+
+	got := caps{}.combination()
+
+	for bit, has := range map[int]bool{
+		hasCommit: commits, hasRelease: releases, hasEnsure: ensures, hasUnset: unsets,
+	} {
+		if has {
+			got |= bit
+		}
 	}
 
-	if _, ok := w.(ferry.Releaser); ok != c.releases {
-		t.Errorf("wrapped writer is a Releaser = %v, want %v", ok, c.releases)
-	}
-
-	if _, ok := w.(ferry.Ensurer); ok != c.ensures {
-		t.Errorf("wrapped writer is an Ensurer = %v, want %v", ok, c.ensures)
+	if got != c.bits {
+		t.Errorf("the wrapped writer carries %s, want %s", combinationName(got), combinationName(c.bits))
 	}
 }
 
-// The eight writers the table above wraps, which exist only to have the eight
-// combinations of the three optional interfaces, one per shell.
-type (
-	plainWriter           struct{}
-	committingWriter      struct{ plainCommits }
-	releasingWriter       struct{ plainReleases }
-	ensuringWriter        struct{ plainEnsures }
-	bothWriter            struct{ plainCommitsReleases }
-	commitEnsuringWriter  struct{ plainCommitsEnsures }
-	releaseEnsuringWriter struct{ plainReleasesEnsures }
-	allWriter             struct{ plainAll }
-)
+// combinationOf is a writer whose method set is exactly one combination, built
+// from the shell for it.
+func combinationOf(bits int) ferry.Writer {
+	return shells[bits](plainWriter{}, caps{
+		commit:  commits{},
+		release: releases{},
+		ensure:  ensures{},
+		unset:   unsets{},
+	})
+}
 
-// The three capabilities as embeddable pieces, so that eight writers are eight
-// declarations rather than eight sets of forwarding methods.
-type (
-	commits  struct{}
-	releases struct{}
-	ensures  struct{}
+// combinationName labels one combination, so that a failure names the
+// capabilities rather than a number.
+func combinationName(bits int) string {
+	named := []struct {
+		bit  int
+		name string
+	}{
+		{hasCommit, "commits"},
+		{hasRelease, "releases"},
+		{hasEnsure, "ensures"},
+		{hasUnset, "unsets"},
+	}
 
-	plainCommits struct {
-		plainWriter
-		commits
+	out := make([]string, 0, len(named))
+
+	for _, n := range named {
+		if bits&n.bit != 0 {
+			out = append(out, n.name)
+		}
 	}
-	plainReleases struct {
-		plainWriter
-		releases
+
+	if len(out) == 0 {
+		return "none"
 	}
-	plainEnsures struct {
-		plainWriter
-		ensures
-	}
-	plainCommitsReleases struct {
-		plainCommits
-		releases
-	}
-	plainCommitsEnsures struct {
-		plainCommits
-		ensures
-	}
-	plainReleasesEnsures struct {
-		plainReleases
-		ensures
-	}
-	plainAll struct {
-		plainCommitsReleases
-		ensures
-	}
+
+	return strings.Join(out, " and ")
+}
+
+// The four capabilities as stubs, which is all the sixteen combinations need:
+// what a shell carries is a method set, and these are the methods.
+type (
+	plainWriter struct{}
+	commits     struct{}
+	releases    struct{}
+	ensures     struct{}
+	unsets      struct{}
 )
 
 func (plainWriter) Set(context.Context, ferry.LeafAddr, ferry.Value) error { return nil }
@@ -197,6 +194,8 @@ func (commits) Commit(context.Context) error { return nil }
 func (releases) Close() error { return nil }
 
 func (ensures) Ensure(context.Context, ferry.Container, ferry.Presence) error { return nil }
+
+func (unsets) Unset(context.Context, ferry.CompositeAddr) error { return nil }
 
 // TestEveryAdmittedKindHasARepresentative is the drift the panic exists to
 // catch, asserted from inside because a table that agrees with itself has no
@@ -294,11 +293,17 @@ func TestCodecRefusesToRunWithoutTheSeam(t *testing.T) {
 // the case would be asserting about the wrapper. Which object the call reaches
 // has to be the front, or a wrapper that counts a Commit would count none.
 func TestShellWriterCallsTheFrontAndAnswersForTheInner(t *testing.T) {
+	t.Run("the call reaches the front", theFrontTakesTheCall)
+	t.Run("what it carries is the inner's answer", theInnerDecidesTheInterfaces)
+}
+
+// theFrontTakesTheCall is the second half of the shell's rule: which interfaces
+// it has is the inner writer's answer, and which object each call goes to is the
+// front's where the front has the method.
+func theFrontTakesTheCall(t *testing.T) {
 	counted := &countingWriter{}
 
-	shell := shellWriter(counted, bothWriter{})
-
-	c, ok := shell.(ferry.Committer)
+	c, ok := shellWriter(counted, combinationOf(hasCommit|hasRelease)).(ferry.Committer)
 	if !ok {
 		t.Fatal("the shell over a writer that commits is not a Committer")
 	}
@@ -311,6 +316,26 @@ func TestShellWriterCallsTheFrontAndAnswersForTheInner(t *testing.T) {
 		t.Errorf("the front was committed %d times, want once", counted.commitCount)
 	}
 
+	u, ok := shellWriter(counted, combinationOf(hasUnset)).(ferry.Unsetter)
+	if !ok {
+		t.Fatal("the shell over a writer that can forget an address is not an Unsetter")
+	}
+
+	if err := u.Unset(context.Background(), ferry.CompositeAddr{}); err != nil {
+		t.Fatalf("Unset: %v", err)
+	}
+
+	if counted.unsets != 1 {
+		t.Errorf("the front was asked to forget %d times, want once", counted.unsets)
+	}
+}
+
+// theInnerDecidesTheInterfaces is the first half, asked of the front that
+// declares every optional interface: a shell answering for the front would carry
+// all four over a writer that carries none.
+func theInnerDecidesTheInterfaces(t *testing.T) {
+	counted := &countingWriter{}
+
 	if _, ok := shellWriter(counted, plainWriter{}).(ferry.Committer); ok {
 		t.Error("the shell over a writer that does not commit is a Committer, so a suite asking a driver what " +
 			"it implements would be asking the wrapper")
@@ -319,6 +344,11 @@ func TestShellWriterCallsTheFrontAndAnswersForTheInner(t *testing.T) {
 	if _, ok := shellWriter(counted, plainWriter{}).(ferry.Ensurer); ok {
 		t.Error("the shell over a writer that cannot spell a container at its own address is an Ensurer, so " +
 			"core would hand it a write the driver never said it could take")
+	}
+
+	if _, ok := shellWriter(counted, plainWriter{}).(ferry.Unsetter); ok {
+		t.Error("the shell over a writer that cannot forget an address is an Unsetter, so a driver whose " +
+			"dumps accumulate would be reported as one whose dumps replace")
 	}
 }
 
@@ -330,6 +360,7 @@ type countingWriter struct {
 	commitCount int
 	closes      int
 	ensured     int
+	unsets      int
 }
 
 func (w *countingWriter) Commit(context.Context) error {
@@ -346,6 +377,12 @@ func (w *countingWriter) Close() error {
 
 func (w *countingWriter) Ensure(context.Context, ferry.Container, ferry.Presence) error {
 	w.ensured++
+
+	return nil
+}
+
+func (w *countingWriter) Unset(context.Context, ferry.CompositeAddr) error {
+	w.unsets++
 
 	return nil
 }

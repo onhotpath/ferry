@@ -95,13 +95,7 @@ func (s *Sink) opener(keys *ferry.Keys) ferry.OpenWriterFunc {
 			}
 		}
 
-		return &writer{
-			client: s.client,
-			acl:    acl,
-			key:    keys.Open(),
-			staged: map[string]staged{},
-			forgot: map[string]bool{},
-		}, nil
+		return &writer{client: s.client, acl: acl, key: keys.Open(), staged: map[string]staged{}}, nil
 	}
 }
 
@@ -147,12 +141,10 @@ type writer struct {
 	// in walk order and two identical dumps make identical sequences of calls.
 	order []string
 
-	// forget is the folders this dump replaced, in walk order and without
-	// repeats, each already carrying its trailing separator so that a listing
-	// under one cannot reach a sibling whose key merely starts with the same
-	// bytes.
+	// forget is the folders this dump replaced, in walk order, each already
+	// carrying its trailing separator so that a listing under one cannot reach
+	// a sibling whose key merely starts with the same bytes.
 	forget []string
-	forgot map[string]bool
 }
 
 var (
@@ -217,6 +209,11 @@ func (w *writer) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) er
 // written in Set: a walk that fails afterwards has to leave the store
 // byte-identical, and a delete that already happened is the one thing this
 // driver could not undo.
+//
+// A folder is recorded as often as it is named, with no check for one already
+// held, because one dump names one composite once and the address set is
+// injective over this key space. [writer.stale] collects each key once whatever
+// arrives here.
 func (w *writer) Unset(ctx context.Context, addr ferry.CompositeAddr) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -227,13 +224,7 @@ func (w *writer) Unset(ctx context.Context, addr ferry.CompositeAddr) error {
 		return err
 	}
 
-	under := folder(key)
-	if w.forgot[under] {
-		return nil
-	}
-
-	w.forgot[under] = true
-	w.forget = append(w.forget, under)
+	w.forget = append(w.forget, folder(key))
 
 	return nil
 }
