@@ -31,13 +31,13 @@ type extConf struct {
 // without.
 func mylibExt() KeyExtension {
 	return KeyExtension{TagKey: "mylib", Words: []Word{
-		{Name: "node", TakesVal: true},
+		{Name: "node", TakesValue: true},
 		{Name: "secret"},
 	}}
 }
 
 func docsExt() KeyExtension {
-	return KeyExtension{TagKey: "docs", Words: []Word{{Name: "desc", TakesVal: true}}}
+	return KeyExtension{TagKey: "docs", Words: []Word{{Name: "desc", TakesValue: true}}}
 }
 
 // extRegistry is a fresh registry per test, because a registry is complete at
@@ -342,7 +342,7 @@ func TestWhatADeclarationMayNotBe(t *testing.T) {
 		build: func() {
 			NewRegistry(WithTagKeys(KeyExtension{
 				TagKey: "mylib",
-				Words:  []Word{{Name: "node", TakesVal: true}, {Name: "node"}},
+				Words:  []Word{{Name: "node", TakesValue: true}, {Name: "node"}},
 			}))
 		},
 		want: []string{`"node" under tag key "mylib" is declared twice`},

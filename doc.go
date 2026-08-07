@@ -233,7 +233,7 @@
 //	var registry = ferry.NewRegistry(
 //	    ferry.WithTagKeys(ferry.KeyExtension{
 //	        TagKey: "docs",
-//	        Words:  []ferry.Word{{Name: "desc", TakesVal: true}},
+//	        Words:  []ferry.Word{{Name: "desc", TakesValue: true}},
 //	    }),
 //	)
 //

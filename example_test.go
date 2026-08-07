@@ -323,7 +323,7 @@ type Documented struct {
 func ExampleWithTagKeys() {
 	reg := ferry.NewRegistry(ferry.WithTagKeys(ferry.KeyExtension{
 		TagKey: "docs",
-		Words:  []ferry.Word{{Name: "desc", TakesVal: true}},
+		Words:  []ferry.Word{{Name: "desc", TakesValue: true}},
 	}))
 
 	table, err := ferry.ExtensionTable[Documented](ferry.WithRegistry(reg))

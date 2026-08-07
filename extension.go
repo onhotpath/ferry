@@ -41,7 +41,7 @@ import (
 //	func Extension() ferry.KeyExtension {
 //	    return ferry.KeyExtension{
 //	        TagKey: "yamlext",
-//	        Words:  []ferry.Word{{Name: "node", TakesVal: true}},
+//	        Words:  []ferry.Word{{Name: "node", TakesValue: true}},
 //	    }
 //	}
 //
@@ -73,10 +73,10 @@ type Word struct {
 	// equals sign in it.
 	Name string
 
-	// TakesVal says the word is written name=text. The text is read with the
+	// TakesValue says the word is written name=text. The text is read with the
 	// same token grammar ferry's own default= uses, so a value holding a comma
 	// is written in single quotes.
-	TakesVal bool
+	TakesValue bool
 }
 
 // WithTagKeys declares foreign struct tag keys for a registry to read beside
@@ -249,7 +249,7 @@ func (s *extSet) seal() {
 	for _, key := range s.keys {
 		for _, name := range slices.Sorted(maps.Keys(s.words[key])) {
 			part := key + ":" + name
-			if s.words[key][name].TakesVal {
+			if s.words[key][name].TakesValue {
 				part += equals
 			}
 
@@ -338,10 +338,10 @@ func (s extSet) readWord(key, raw string) (name, text string, err error) {
 	switch {
 	case !ok:
 		return "", "", s.unknownWord(key, head)
-	case w.TakesVal && !hasValue:
+	case w.TakesValue && !hasValue:
 		return "", "", fmt.Errorf("%s tag, word %q needs a value: it is declared with one, so write %s=<text>",
 			key, head, head)
-	case !w.TakesVal && hasValue:
+	case !w.TakesValue && hasValue:
 		return "", "", fmt.Errorf("%s tag, word %q takes no value: it is declared without one", key, head)
 	}
 
