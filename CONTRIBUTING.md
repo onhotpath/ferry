@@ -5,7 +5,7 @@ This file explains how the repository is organised and what the conventions mean
 `make help` lists the developer targets.
 `make check` and `make lint` are what CI runs, and both must be green before a pull request is opened.
 
-## The repository is four modules and one workspace
+## The repository is five modules and one workspace
 
 | module | what it is |
 | --- | --- |
@@ -13,6 +13,7 @@ This file explains how the repository is organised and what the conventions mean
 | `driver/env` | environment variables |
 | `driver/yaml` | a YAML file, edited in place |
 | `driver/kv` | a Consul-shaped key-value store |
+| `driver/http` | one HTTP request's query parameters or header fields, bound once and loaded through per request |
 
 `ferrytest` is a package inside core, not a module of its own.
 It ships from the same place as the rule it checks, because a conformance suite that ships from somewhere else binds nobody.
@@ -148,7 +149,7 @@ Whatever is published carries the machine, the Go toolchain version and every co
 
 ## The lint limits are fixed
 
-`make lint` runs golangci-lint over all four modules.
+`make lint` runs golangci-lint over every module in the workspace.
 Seven structural limits are set deliberately:
 
 ```

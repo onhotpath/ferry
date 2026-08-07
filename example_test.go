@@ -31,8 +31,8 @@ type DB struct {
 // Example loads an annotated struct from a plane.
 //
 // The plane here is [ferrytest.Static], a source of constants, so the example
-// is self-contained. Ordinary use names a driver instead: yaml.Source{Path:
-// "app.yaml"}, env.New(), and so on.
+// is self-contained. Ordinary use names a driver instead:
+// yaml.NewSource("app.yaml"), env.New(), and so on.
 func Example() {
 	src := ferrytest.Static(map[ferry.Path]ferry.Value{
 		ferry.At("host"):         ferry.String("db.internal"),
