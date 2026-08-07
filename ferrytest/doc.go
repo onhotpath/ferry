@@ -37,6 +37,10 @@
 // ferry's own tests run [CoreTypes] through the same [RoundTrip], which is what
 // makes these the suites everybody gets rather than a second opinion.
 //
+// A driver author who declares one of their plane's own spellings runs
+// [Spelling] over it, which holds the pair to the rules that keep what a plane
+// writes readable by the plane that wrote it.
+//
 // And an ordinary user, who is not testing ferry at all: [Static] fills a config
 // struct from a literal instead of from a file, and [Record] answers what a
 // struct actually maps to.
@@ -54,7 +58,8 @@
 // It ends up embedded in tests that are not about ferry, and it does not move
 // outside a major version.
 //
-// The suites - [Driver], [RoundTrip], [Codec], [Complete], [Injective] - may
+// The suites - [Driver], [RoundTrip], [Codec], [Complete], [Injective],
+// [Spelling] - may
 // gain cases in a minor release. So a minor upgrade of ferry can make a driver
 // that passed yesterday fail today, and that is intended: a new case does not
 // break a driver, it reports that the driver was already broken. Nothing in the

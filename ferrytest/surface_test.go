@@ -84,15 +84,15 @@ func TestCaptureIsAT(t *testing.T) {
 // that writes it and the types the engine cannot yet carry are named in a skip
 // list in core's own test rather than being absent from the artefact.
 //
-// The list below is ADR-0014's own, name for name (#175, and #114/#237 for
-// `Inside`). Why each of them ships is argued there and is not restated here: a
+// The list below is ADR-0014's own, name for name (#175, #114/#237 for
+// `Inside`, and #259 for `Spelling`). Why each of them ships is argued there and is not restated here: a
 // test comment explaining why the specification is wrong is a workaround, and
 // the specification is now right.
 func TestExportedSurface(t *testing.T) {
 	want := []string{
 		"Artefact", "At", "BitEq", "Case", "CheckErrors", "Codec", "Complete", "CoreTypes", "DiffErrors",
 		"Driver", "Eq", "Golden", "Injective", "Inside", "Instance", "MapEq", "MemPlane", "Plane", "Proof",
-		"PtrEq", "Record", "RoundTrip", "SliceEq", "Static", "T", "Type", "Want",
+		"PtrEq", "Record", "RoundTrip", "SliceEq", "Spelling", "Static", "T", "Type", "Want",
 	}
 
 	got := exportedNames(t)
