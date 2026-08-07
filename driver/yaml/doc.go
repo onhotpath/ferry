@@ -152,6 +152,43 @@
 // [ferry.ErrPlane], because what could not be promised is that the replacement
 // survives a crash, not that it happened.
 //
+// # A save refuses a file somebody else edited
+//
+// A save is a merge into the document that is already there, so it reads the
+// file, stages the replacement and renames it into place. An edit landing in
+// that window would be swapped away without a word, so the save compares the
+// file against what it read - one stat, before the rename - and reports
+// [ferry.ErrPlane] where it changed, leaving your file exactly as the other
+// writer left it. Load again, apply the same change to what the file holds now,
+// and save again.
+//
+// The check is the file's length and modification time, so the one edit it
+// cannot see is a rewrite in the same modification-time tick that leaves the
+// length alone.
+//
+// # Watching the file
+//
+// [Watch] calls you back when the file changes underneath a source, which is how
+// a process holding a loaded value learns to load a fresh one:
+//
+//	src := yaml.NewSource("config.yaml", yaml.Watch(ctx, time.Second, onChange))
+//
+//	func onChange(ctx context.Context) {
+//	    cfg, err := b.Load(ctx) // a reload is a load; publish it by replacement
+//	}
+//
+// It is opt-in and it is the only thing in this package that runs on a goroutine
+// of its own: a source built without it touches the file only when a load asks
+// it to. Cancelling the context you gave it is what stops it. Looking is a stat
+// every interval rather than a subscription, so watching a file costs this
+// module no dependency and the interval is yours to name.
+//
+// Read [Watch] before wiring one up. Two of its sharp edges bite immediately:
+// watching starts when the source is built, which is before [ferry.Bind] has
+// handed back the binding your callback wants to load through, and a panic in
+// the callback takes the process down exactly as it would on a goroutine you
+// started yourself.
+//
 // # One thing it cannot do
 //
 // A Go string can hold any bytes; a YAML string has to be valid text. So a

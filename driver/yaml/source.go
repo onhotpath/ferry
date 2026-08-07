@@ -53,11 +53,28 @@ type Source struct {
 
 // NewSource returns a source over the YAML file at path.
 //
-// It touches nothing. The file is read when a load starts, so a source over a
-// path that does not exist yet is legal to build, and a load through it sees a
-// file holding no keys: every field takes its default, and a required field
-// fails.
-func NewSource(path string) Source { return Source{path: path} }
+// It touches nothing, and starts nothing, unless it is given [Watch]. The file
+// is read when a load starts, so a source over a path that does not exist yet is
+// legal to build, and a load through it sees a file holding no keys: every field
+// takes its default, and a required field fails.
+//
+// Pass [Watch] to be called when the file changes underneath the source. That is
+// the one setting that does something before a load: it takes the file's current
+// state here and polls from a goroutine of its own until the context it was
+// given is done.
+func NewSource(path string, opts ...SourceOption) Source {
+	var c sourceConfig
+
+	for _, o := range opts {
+		o.applySource(&c)
+	}
+
+	if c.watch != nil {
+		c.watch.start(path)
+	}
+
+	return Source{path: path}
+}
 
 // Bind builds no flat key from the address set, because this driver walks a
 // document tree and two fields cannot collide on a path.

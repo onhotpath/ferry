@@ -81,6 +81,87 @@ func TestStagingLeavesThePlaneAloneOnFailure(t *testing.T) {
 	onlyPlane(t, dir)
 }
 
+// TestCommitRefusesAPlaneThatChangedUnderneath is optimistic concurrency on the
+// save path (ADR-0020).
+//
+// A save is a merge into the document it read, so an edit landing between the
+// read and the rename would be swapped away without a word. The window is opened
+// by hand here, because that is the only way to be inside it deterministically:
+// the writer is opened, the plane is edited, and the commit is the assertion.
+func TestCommitRefusesAPlaneThatChangedUnderneath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, planeName)
+
+	if err := os.WriteFile(path, []byte("port: 1\n"), 0o600); err != nil {
+		t.Fatalf("writing the plane: %v", err)
+	}
+
+	w := openWriter(t, path)
+
+	// The operator's own edit, landing inside the window. It is longer than what
+	// the save read, so the refusal does not rest on the clock's resolution.
+	edited := "# edited while the save was staged\nport: 2\n"
+	if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
+		t.Fatalf("editing the plane: %v", err)
+	}
+
+	c, ok := w.(ferry.Committer)
+	if !ok {
+		t.Fatal("the writer does not commit, and a staging sink that cannot commit holds nothing durable")
+	}
+
+	err := c.Commit(t.Context())
+	if err == nil {
+		t.Fatal("a save over a plane that changed underneath it reported that it committed, which is the " +
+			"operator's edit discarded in silence")
+	}
+
+	if !errors.Is(err, ferry.ErrPlane) {
+		t.Errorf("the refusal reported %v, want an error carrying ferry.ErrPlane", err)
+	}
+
+	if got := read(t, path); got != edited {
+		t.Errorf("the plane holds %q, want the %q the operator wrote: a save that refused must leave the plane "+
+			"as it found it", got, edited)
+	}
+
+	release(t, w)
+
+	onlyPlane(t, dir)
+}
+
+// TestCommitRefusesAPlaneThatAppearedUnderneath is the same rule at the other
+// end: a save that found no file cannot rename over one that has since arrived,
+// because whatever is in it was never merged into (ADR-0020).
+func TestCommitRefusesAPlaneThatAppearedUnderneath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, planeName)
+
+	w := openWriter(t, path)
+
+	if err := os.WriteFile(path, []byte("port: 2\n"), 0o600); err != nil {
+		t.Fatalf("writing the plane: %v", err)
+	}
+
+	c, ok := w.(ferry.Committer)
+	if !ok {
+		t.Fatal("the writer does not commit, and a staging sink that cannot commit holds nothing durable")
+	}
+
+	if err := c.Commit(t.Context()); !errors.Is(err, ferry.ErrPlane) {
+		t.Errorf("the save reported %v, want an error carrying ferry.ErrPlane: the file it would replace was "+
+			"written after the save read the path and holds a document nothing merged into", err)
+	}
+
+	if got, want := read(t, path), "port: 2\n"; got != want {
+		t.Errorf("the plane holds %q, want %q", got, want)
+	}
+
+	release(t, w)
+
+	onlyPlane(t, dir)
+}
+
 // TestDurableFlushFailureIsADumpThatDidNotCommit is the second sync's own
 // failure, seen from where a caller meets it (#187).
 //
@@ -1226,6 +1307,22 @@ func commit(t *testing.T, w ferry.Writer) {
 
 	if err := c.Commit(t.Context()); err != nil {
 		t.Fatalf("commit: %v", err)
+	}
+}
+
+// release closes the writer, which is what core does whether the walk succeeded
+// or failed, and it is what takes the staged file away from a save that did not
+// commit.
+func release(t *testing.T, w ferry.Writer) {
+	t.Helper()
+
+	c, ok := w.(ferry.Releaser)
+	if !ok {
+		t.Fatal("the writer does not release, and a staging sink that cannot release leaves its temporary behind")
+	}
+
+	if err := c.Close(); err != nil {
+		t.Errorf("closing the save: %v", err)
 	}
 }
 

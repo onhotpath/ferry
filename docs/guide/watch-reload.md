@@ -141,5 +141,40 @@ Coalesce, compare, or mark your own writes; the loop above deliberately does not
 Treat a signal as "the plane may have changed", nothing more.
 The reload reads the truth; a spurious wake costs one load.
 
-**yaml specifics.**
-File watching for the yaml driver is opt-in through a driver option, and a dump refuses at commit when the file changed underneath it between open and swap, so the dump that lost a race learns it lost instead of silently overwriting; re-dump after reloading.
+## The yaml driver, which is the one that announces changes
+
+Everything above is plane-independent: the loop is yours and the signal is the driver's.
+The yaml driver is the first first-party driver that has a signal to give, and it gives it as a callback rather than a channel, because there is no `Notifier` interface in core to shape one ([ADR-0020](../adr/0020-watch-and-reload.md) specifies that interface and deliberately does not ship it).
+
+```go
+onChange := func(ctx context.Context) {
+	cfg, err := b.Load(ctx) // a reload is a load
+	if err != nil {
+		alert(err)
+		return
+	}
+	current.Store(&cfg) // publish by replacement
+}
+
+src := yaml.NewSource(path, yaml.Watch(ctx, time.Second, onChange))
+b, err := ferry.Bind[Config](src)
+```
+
+Four things are worth knowing before you wire it up.
+
+**It is opt-in, and the context is the whole lifecycle.**
+A source built without the option touches the file only when a load asks it to.
+One built with it polls from a goroutine of its own, and cancelling the context you gave is what stops it - there is no `Stop`, because core has no watch lifecycle to hang one from.
+
+**Watching starts before `Bind` returns.**
+The option starts looking when the source is built, so a callback that loads through the binding is referring to a variable the surrounding code has not assigned yet.
+Publish the binding through something that orders the two - an atomic pointer, or a channel the callback reads first - which is what `ExampleWatch` in `driver/yaml` does.
+
+**Looking is a stat, not fsnotify.**
+The driver takes no dependency to watch a file, so the interval is yours to name and a rewrite that lands in the same modification-time tick without changing the file's length is not seen.
+
+**A save refuses a file that changed underneath it.**
+A dump reads the document, stages a replacement and renames it into place, and an edit landing in that window would be swapped away in silence.
+So the commit compares the file against what the open read and reports `ErrPlane` instead, leaving your file as the other writer left it.
+Load again, apply the same change to what the file holds now, and save again.
+That is optimistic concurrency, it costs one stat on the commit path, and it is [ADR-0020](../adr/0020-watch-and-reload.md)'s answer to a watcher and a dumper in one process.

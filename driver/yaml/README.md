@@ -239,6 +239,49 @@ Windows has no way to flush a directory: there the contents are flushed and the 
 A durable save has one case where a save that failed has still replaced your file, and it is the flush that fails once the rename has landed.
 It reports `ferry.ErrPlane`, because what could not be promised is that the replacement survives a crash, not that it happened.
 
+## A save refuses a file somebody else edited
+
+A save is a merge into the document that is already there, so it reads the file, stages the replacement and renames it into place.
+An edit that lands in that window would be swapped away without a word.
+
+So the save compares the file against what it read, one stat before the rename, and refuses with `ferry.ErrPlane` where it changed:
+
+```
+the plane changed after this save read it, and saving now would discard that change:
+load the plane again, apply the same edits to what it holds now, and save again
+```
+
+Your file is left exactly as the other writer left it.
+The one edit the check cannot see is a rewrite that lands in the same modification-time tick and leaves the file's length alone.
+
+## Watching the file
+
+Pass `yaml.Watch` to be called when the file changes underneath a source, which is how a process holding a loaded value learns to load a fresh one:
+
+```go
+src := yaml.NewSource(path, yaml.Watch(ctx, 10*time.Millisecond, onChange))
+
+b, err := ferry.Bind[config](src)
+
+// ... an operator edits the file ...
+
+func onChange(ctx context.Context) {
+	cfg, err := b.Load(ctx) // a reload is a load; publish it by replacement
+}
+```
+
+That is `ExampleWatch` in [`example_test.go`](example_test.go), trimmed of its setup and its plumbing.
+
+It is opt-in, and it is the only thing in this package that runs on a goroutine of its own.
+Cancelling the context you gave it is what stops it.
+Looking is a stat every interval rather than an fsnotify subscription, so that watching a file costs this module no dependency, and the interval is yours to name.
+
+Two sharp edges are worth reading before you wire it up, and the rest are in the [package documentation](https://pkg.go.dev/github.com/onhotpath/ferry/driver/yaml#Watch).
+Watching starts when the source is built, which is before `ferry.Bind` has handed back the binding your callback wants to load through, so publish that binding to the callback through something that orders the two.
+And a panic in the callback takes the process down, exactly as it would on a goroutine you started yourself.
+
+The loop this feeds, and the reasons ferry ships no watcher of its own, are in [the watch and reload guide](../../docs/guide/watch-reload.md).
+
 ## One thing it cannot do
 
 A Go `string` can hold any bytes; a YAML string has to be valid text.

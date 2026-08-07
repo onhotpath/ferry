@@ -151,6 +151,33 @@ It costs one stat, on the commit path, on a file the driver already has open.
 **File watching for YAML is opt-in through a driver Option.**
 The fsnotify machinery never runs unless it is asked for, which joins the driver's existing Option set rather than growing core's, and is [ADR-0018](0018-the-spelling-seam.md)'s rule that a plane's facts are declared where the plane is.
 
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13) as this Option was implemented: its shape is settled, and it is neither fsnotify-backed nor channel-shaped.**
+>
+> As published this paragraph named the Option and left two things unstated that the implementation could not leave open: what the Option hands the caller, and what it watches with.
+>
+> **The Option takes a callback, and the callback returns nothing.**
+>
+> ```go
+> func Watch(ctx context.Context, every time.Duration, onChange func(context.Context)) SourceOption
+> ```
+>
+> A channel would have been `Notifier`'s shape without `Notifier`'s name, and this ADR's own reason for not shipping that interface - core owning the semantics of a channel it never reads - applies to a driver publishing one just as squarely.
+> The context is the argument because it is what carries the caller's deadline, cancellation and values into the reload, and a reload is `Load(ctx)`.
+> There is no error return: the driver has nowhere to put one, since it has no logger and no reporting surface, and a "non-nil stops the watch" reading would smuggle in the lifecycle API this ADR refused.
+> Stopping rides the context the driver already has, which is the whole lifecycle: cancel it and the goroutine returns.
+>
+> **Watching is a stat per interval, not fsnotify.**
+> `driver/yaml` depends on `go.yaml.in/yaml/v3` and nothing else, and a watch is not a reason to widen that: the module rules say a driver's dependencies are argued for, and polling is the answer that needs no argument.
+> The cost is stated rather than hidden - the caller names the interval, and a rewrite landing in the same modification-time tick that leaves the file's length alone is not seen - and it is the same stamp the commit-time refusal above compares, so the two share one mechanism.
+> `Notifier`'s trigger is unchanged by this: a second watchable driver is still what would buy one name across drivers.
+>
+> **A panic in the callback is not fenced**, which is [ADR-0011](0011-the-error-model.md)'s rule read where it applies rather than extended by analogy.
+> That fence exists so one panicking call cannot kill an aggregate that had already collected every other address's answer, on a goroutine whose stack does not name the walk that started it.
+> Here there is no aggregate, no error the recovery could be delivered into, and the callback is the top of the watching goroutine's own stack - so the ground the amendment under [#254](https://github.com/onhotpath/ferry/issues/254) said had stopped being true is true again, and the published rule stands: a panic in user code is a bug, and recovering it would leave a process that has silently stopped reloading.
+>
+> **One sharp edge falls out of the Option starting the watch when the source is built**: the callback that loads through a `Binding` refers to a binding `ferry.Bind` has not returned yet, so the caller has to order the two.
+> It is in the Option's godoc, in the guide and in the driver's runnable example, because it is the first thing anyone wiring this up hits.
+
 ### `Notifier` is recorded as the upgrade path, and does not ship
 
 The one thing a watcher needs that is not a ferry concept is the change signal, and today it is the driver's own: a channel, an fsnotify loop, a Consul watch plan.
