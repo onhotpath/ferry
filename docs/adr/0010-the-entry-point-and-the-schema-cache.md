@@ -817,6 +817,24 @@ Read the rows rather than the summary.
 That is a rule the entry point's signature cannot express and only the compiler can, which is why it lands at schema compile rather than at `Load`.
 It is also why `ErrNotStruct` surviving, which the research and the ticket both predicted, is true in a narrower way than it sounds: the refusal is not "your Go kind is not struct", it is "what you gave me compiled to a leaf".
 
+> **Amended when the shipped compiler was found asking the Go kind after all ([#306](https://github.com/onhotpath/ferry/issues/306)).**
+>
+> This ADR as published is unchanged and is what ships now.
+> What was wrong was `compileRoot`, which asked `reflect.Kind` **before** the chain and the registry, which is the ordering this section rules out in the sentence above it.
+>
+> The rows of the table still read as published, and two of them read that way by accident.
+> `netip.Addr` was refused because it has no exported field and the maps-no-address backstop caught it, not because it compiled to a leaf, so the diagnosis named the wrong thing.
+> The row the table does not have is the one that made this a defect rather than a wording bug: a **struct with tagged fields** that a codec claims - `Endpoint{Host string; Port int}` with a text pair, or with a registration - compiled clean as a section at `/host` and `/port`, with the codec written nowhere, though the same type one field down was the single leaf its codec makes it.
+> One type, two answers, decided by whether it sat at the root.
+>
+> The fix is the ordering this section already specifies: `leafFor` and `pointerLeaf` are consulted at the root exactly as they are at every position below it, and a root that resolves to a leaf is refused by naming what it compiled to.
+> `int` and `*int` are refused by that rule now rather than by the not-a-struct rule, which is the same table row reached through the reason this ADR gives for it.
+>
+> **The refusal is interim in one respect and is not interim in any other.**
+> The ordering is fixed as this ADR ratified it.
+> Whether a root leaf should ever be a legal address is reopened as [#309](https://github.com/onhotpath/ferry/issues/309), carrying the driver-by-driver evidence this section only ever had for one sink: `driver/env` and `driver/http` refuse the empty address at `Bind` by their own published rule, `driver/yaml` reads a root scalar document and refuses to write one, and `driver/kv` reads one and writes zero keys with a nil error, which is this section's own measurement reproduced on a second plane.
+> Nothing in the code or in this ADR anticipates #309's answer.
+
 **What a root leaf actually does, with the check removed**, is the finding:
 
 ```
