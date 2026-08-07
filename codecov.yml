@@ -84,6 +84,17 @@ flags:
     carryforward: false
   driver-yaml:
     carryforward: false
+  # crossmodule is core and ferrytest as reached from outside them, one upload
+  # per non-core module under one flag because they all measure one thing.
+  #
+  # It carries no status above, on purpose. A core line proven only by a
+  # driver's test is not proven by core's own suite, and the `core` status is
+  # flag-scoped so it keeps saying exactly that. What this flag changes is the
+  # patch status, which carries no flag and so unions every upload: without it,
+  # a pull request that adds a core line only a driver can reach reports a gap
+  # that no test written inside core could close.
+  crossmodule:
+    carryforward: false
   # examples/ is a module and uploads like every other one, so its coverage is
   # visible, but it carries no status above. An example is written to be read,
   # and holding it to a coverage number would push it towards being written to

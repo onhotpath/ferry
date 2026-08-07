@@ -467,6 +467,30 @@ jobs:
           set -euo pipefail
           go test -covermode=atomic -coverprofile=cover.out ./...
 
+      # Every module outside core drives core and ferrytest as well, and none
+      # of that reaches core's own upload: -coverprofile without -coverpkg
+      # instruments only the packages of the module under test, so a core line
+      # a driver proves reports as unproven and lands in a pull request as a
+      # patch gap that no test written inside core could close.
+      #
+      # This pass instruments core and ferrytest and nothing else, so what it
+      # measures is exactly that: the core lines this module's tests reach. It
+      # goes up under a flag of its own, because the statuses in codecov.yml
+      # select on flags, and a module's own number must not start averaging
+      # core into itself (ADR-0002).
+      #
+      # The pattern is spelled out rather than written as .../..., which would
+      # match the driver modules themselves and put back the averaging this
+      # separation exists to prevent.
+      - name: go test -coverpkg core
+        if: matrix.module != '.'
+        working-directory: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          go test -covermode=atomic \
+            -coverpkg=github.com/onhotpath/ferry,github.com/onhotpath/ferry/ferrytest \
+            -coverprofile=cross.out ./...
+
       - name: Gate core at the codecov.yml threshold
         if: matrix.module == '.'
         run: |
@@ -552,6 +576,14 @@ jobs:
             echo "upload=true" >> "$GITHUB_OUTPUT"
           fi
 
+          # The cross-module profile is subject to the same REPORT_EMPTY rule,
+          # and it is absent for core, which is its own coverage already.
+          if [ -s "$m/cross.out" ] && [ "$(awk 'NR > 1' "$m/cross.out" | wc -l)" -gt 0 ]; then
+            echo "cross=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cross=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload to Codecov
         if: steps.flag.outputs.upload == 'true'
         uses: codecov/codecov-action@v7
@@ -562,4 +594,17 @@ jobs:
           # A pull request from a fork cannot read the token, and a contributor
           # cannot fix that. The gate above is what enforces the threshold, so
           # a failed upload reports nothing and blocks nothing.
+          fail_ci_if_error: false
+
+      # One flag for every module's cross-module profile, because what they
+      # measure is one thing: core, as reached from outside it. Codecov unions
+      # uploads sharing a flag, so they arrive as one report and no merge step
+      # is needed to combine them.
+      - name: Upload the cross-module profile to Codecov
+        if: steps.flag.outputs.cross == 'true'
+        uses: codecov/codecov-action@v7
+        with:
+          flags: crossmodule
+          files: ${{ matrix.module }}/cross.out
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
