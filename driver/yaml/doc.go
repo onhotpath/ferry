@@ -32,6 +32,13 @@
 // A file holding a stream of several documents is refused rather than
 // half-written, because an address names a place in one of them.
 //
+// So is a file that spells one mapping key twice, and in both directions. The
+// file says two things: a YAML reader takes the last spelling and a key is read
+// here as the first, so a load would answer with a value most readers of that
+// file do not see and a save would rewrite one occurrence and leave the other
+// behind. The refusal names the key and both lines, and it lands before anything
+// is written.
+//
 // # A list or a map is replaced whole
 //
 // The editing stops at a list or a map your struct maps, because what is in one
