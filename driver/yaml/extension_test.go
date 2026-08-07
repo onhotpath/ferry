@@ -315,3 +315,21 @@ func TestAWordOutsideTheDeclaredVocabularyIsRefused(t *testing.T) {
 		t.Errorf("the refusal reads %q, want it to hold %q", got, want)
 	}
 }
+
+// TestAnEmptyDeclaredTagIsRefusedAtCompile pins the invariant [nodeTags]
+// leans on: the one way an address could enter the view without the node word
+// is an empty annotation, and that never compiles, so every entry the driver
+// sees carries the word.
+func TestAnEmptyDeclaredTagIsRefusedAtCompile(t *testing.T) {
+	type sparse struct {
+		Wait string `ferry:"wait" yamlext:"node=!mycompany:duration"`
+		Port int    `ferry:"port" yamlext:""`
+	}
+
+	path := write(t, "wait: 30s\nport: 5432\n")
+
+	_, err := ferry.Load[sparse](t.Context(), yaml.NewSource(path), declared())
+	if err == nil || !strings.Contains(err.Error(), "empty word") {
+		t.Fatalf("an empty annotation loaded with error %v, want the empty-word compile refusal", err)
+	}
+}

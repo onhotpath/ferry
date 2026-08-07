@@ -116,10 +116,11 @@ func nodeTags(addrs *ferry.AddressSet) (map[ferry.Path]string, error) {
 	out := make(map[ferry.Path]string, len(view))
 
 	for addr, words := range view {
-		tag, declared := words[nodeWord]
-		if !declared {
-			continue
-		}
+		// The vocabulary holds one word and an empty tag is refused at
+		// compile, so an address in the view always carries it; were core
+		// ever to hand one without it, the empty tag refuses loudly below
+		// rather than being skipped (ADR-0021).
+		tag := words[nodeWord]
 
 		if err := checkNodeAddr(addr, tag, leaves); err != nil {
 			return nil, err
