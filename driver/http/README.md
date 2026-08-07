@@ -161,7 +161,7 @@ A single line holding a comma-separated list is one value, because `net/http` do
 A `Source` holds no request.
 It is built once and shared, which is what `net/http` running every handler in a goroutine of its own requires, and the request travels in the context instead.
 
-A load whose context never went through `WithQuery` or `WithHeaders` is refused before anything is read:
+A load whose context never went through `WithQuery` or `WithHeaders`, or went through one of them carrying a nil `url.Values` or `http.Header`, is refused before anything is read:
 
 ```
 ferry: opening the plane: plane error: http: no query parameters in the context: put it there with ferryhttp.WithQuery or ferryhttp.WithHeaders

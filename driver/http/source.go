@@ -12,7 +12,10 @@ import (
 )
 
 // ErrNoQuery reports a load through [NewQuerySource] whose context carries no
-// query parameters, which means [WithQuery] was not called.
+// query parameters, which means [WithQuery] was not called or was called with a
+// nil url.Values. A nil one carries nothing a request could have supplied, so it
+// is the same absence and is refused as one; an allocated url.Values holding no
+// parameters is a request that carries none, and loads.
 //
 // It is the handler's own defect and not the request's: a load that answered
 // from nothing instead would report every field missing, and a required field
@@ -24,8 +27,9 @@ import (
 var ErrNoQuery = errors.New("http: no query parameters in the context")
 
 // ErrNoHeaders reports a load through [NewHeaderSource] whose context carries no
-// header fields, which means [WithHeaders] was not called. It is [ErrNoQuery]'s
-// counterpart and is refused at the same moment for the same reason.
+// header fields, which means [WithHeaders] was not called or was called with a
+// nil http.Header. It is [ErrNoQuery]'s counterpart and is refused at the same
+// moment for the same reason.
 var ErrNoHeaders = errors.New("http: no header fields in the context")
 
 // queryCtxKey is this package's own key for the query plane: unexported, of its
@@ -47,7 +51,8 @@ type headerCtxKey struct{}
 // safe even though it is a fresh map on every call.
 //
 // A load whose context did not come through this call is refused with
-// [ErrNoQuery] rather than answered from nothing.
+// [ErrNoQuery] rather than answered from nothing, and so is one that came
+// through it carrying a nil url.Values.
 func WithQuery(ctx context.Context, v url.Values) context.Context {
 	return context.WithValue(ctx, queryCtxKey{}, v)
 }
@@ -58,7 +63,8 @@ func WithQuery(ctx context.Context, v url.Values) context.Context {
 //	t, err := ferry.Load[Tenant](ferryhttp.WithHeaders(r.Context(), r.Header), src)
 //
 // The fields are read and never written to. A load whose context did not come
-// through this call is refused with [ErrNoHeaders].
+// through this call, or came through it carrying a nil http.Header, is refused
+// with [ErrNoHeaders].
 func WithHeaders(ctx context.Context, h http.Header) context.Context {
 	return context.WithValue(ctx, headerCtxKey{}, h)
 }
@@ -112,18 +118,28 @@ func headerPlane() plane {
 	}
 }
 
+// queryFrom is the query plane taken out of the context, and a nil one is the
+// absence rather than an empty request.
+//
+// The type assertion alone is not the check. A nil url.Values boxes into a
+// non-nil interface, so a handler that called [WithQuery] with nothing passes it
+// and the load then answers every field from a map that holds nothing, which is
+// the outcome ADR-0012's per-request refusal exists to prevent. An empty but
+// allocated url.Values is a request that carries no parameters and loads.
 func queryFrom(ctx context.Context) (values, error) {
 	v, ok := ctx.Value(queryCtxKey{}).(url.Values)
-	if !ok {
+	if !ok || v == nil {
 		return nil, absentPlane(ErrNoQuery)
 	}
 
 	return v, nil
 }
 
+// headerFrom is [queryFrom] on the header plane, nil included for the same
+// reason.
 func headerFrom(ctx context.Context) (values, error) {
 	h, ok := ctx.Value(headerCtxKey{}).(http.Header)
-	if !ok {
+	if !ok || h == nil {
 		return nil, absentPlane(ErrNoHeaders)
 	}
 
