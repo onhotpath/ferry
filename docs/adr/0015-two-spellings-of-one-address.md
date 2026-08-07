@@ -204,10 +204,10 @@ first-spelling-wins      ferrytest.Driver failures: 0
 Nothing in ADR-0014's twelve cases forces it.
 Case 3 constrains `Get` at a container address, and `Children` is not asserted to be infallible anywhere, so the suite is silent by construction rather than by omission.
 
-> **Corrected: the `Driver` list is seventeen cases, and the sentence above still holds over all of them.**
+> **Corrected: the `Driver` list is eighteen cases, and the sentence above still holds over all of them.**
 >
-> As published [ADR-0014](0014-what-ferrytest-exports.md)'s list was twelve, and it has grown five times since under its own amendments.
-> None of the five asserts anything about which of two spellings wins at an overlapping key, so the point this section makes is unchanged: the rule is what refuses, and the suite is silent about it by construction.
+> As published [ADR-0014](0014-what-ferrytest-exports.md)'s list was twelve, and it has grown six times since under its own amendments.
+> None of the six asserts anything about which of two spellings wins at an overlapping key, so the point this section makes is unchanged: the rule is what refuses, and the suite is silent about it by construction.
 > **Case 3 is still the case named**, and it still constrains `Get` at a container address and nothing more.
 
 Two things follow, and both belong in the record.

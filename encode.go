@@ -3,6 +3,7 @@ package ferry
 import (
 	"context"
 	"reflect"
+	"slices"
 )
 
 // written is Dump's write policy, whole.
@@ -57,7 +58,56 @@ func written(ctx context.Context, w Writer, sch *schema, root reflect.Value) err
 		return err
 	}
 
+	if err := prepared(ctx, w, staged.minted); err != nil {
+		return err
+	}
+
 	return flush(ctx, w, staged.writes)
+}
+
+// prepared hands the sink every address this dump realised from the value,
+// before the first of the writes they belong to, and stops the dump where the
+// sink refuses one.
+//
+// It is the half of ADR-0004's two-tier collision rule that no interface
+// reached. Core owns the tier that asks whether an address was realised twice,
+// and refuses that at [collided]; the plane key an address renders to is the
+// driver's, and until this phase the driver could only compute one inside the
+// write that carried it. So a plane folding two minted addresses onto one key
+// learned it at the colliding write, with every write before it already landed,
+// and ADR-0011's untouched-plane property held for every failure except that
+// one.
+//
+// Only where the sink cannot stage, which is where this function already
+// stands. A Committer is written to as the walk runs, so there is no moment at
+// which core holds the whole realised set and the plane holds nothing, and
+// Commit-on-success is already the property this buys (ADR-0011).
+//
+// The moment is the walk's, for the reason [stagedWrite.play]'s is: the failure
+// is the plane refusing an address the walk realised, and a moment nothing else
+// uses would sort the same refusal differently depending on whether the sink
+// asked to see the set.
+func prepared(ctx context.Context, w Writer, minted map[Path]spot) error {
+	p, ok := w.(Preparer)
+	if !ok {
+		return nil
+	}
+
+	addrs := make([]Path, 0, len(minted))
+	for at := range minted {
+		addrs = append(addrs, at)
+	}
+
+	// Sorted, because Go's map iteration is randomised and a driver refusing
+	// two of these would otherwise report them in a different order per run,
+	// which is ADR-0001's determinism invariant seen from the driver's side.
+	slices.SortFunc(addrs, Path.Compare)
+
+	if err := p.Prepare(ctx, addrs); err != nil {
+		return fromDriver(momentWalk, Path{}, err)
+	}
+
+	return nil
 }
 
 // dumpWalk is one walk of one compiled schema in the Dump direction, against

@@ -106,8 +106,8 @@ type Reader interface {
 // null - goes to [Ensurer], because a plane that cannot spell either of those
 // should refuse rather than receive a write it will mis-store.
 //
-// A Writer may also implement [Ensurer], [Unsetter], [Committer] and
-// [Releaser]. All four are discovered by assertion and none is required.
+// A Writer may also implement [Ensurer], [Unsetter], [Preparer], [Committer]
+// and [Releaser]. All five are discovered by assertion and none is required.
 type Writer interface {
 	Set(ctx context.Context, addr LeafAddr, v Value) error
 }
@@ -261,4 +261,32 @@ type Ensurer interface {
 // and has nothing to implement.
 type Unsetter interface {
 	Unset(ctx context.Context, addr CompositeAddr) error
+}
+
+// Preparer is implemented by a [Writer] that wants to see the addresses a dump
+// determined from the value before the dump writes any of them.
+//
+// The set is the addresses that come from the value and not from the type: a
+// map key, a sequence index. Everything the type determined arrived at
+// [Sink.Bind] and is not repeated here. It is sorted, it is yours to keep, and
+// a value holding no slice and no map produces an empty one rather than no
+// call.
+//
+// Prepare runs once per dump, after every value has been encoded and before the
+// first write. Returning nil lets the writes proceed. Refusing stops the dump
+// where it stands, so nothing is written at all - which is what it is for: a
+// plane that renders two of these addresses to one key loses one of them, and
+// without this it can only say so from inside the write that carried the
+// second, by which time the writes before it have landed.
+//
+// Name the offending addresses with [ErrorAt], as a key function does, so that
+// each refusal is reported against the address it belongs to.
+//
+// It is optional, and a Writer without one is asked nothing and refused
+// nothing. It is also not asked of a [Committer], which already leaves the
+// plane untouched when a dump fails by not committing, and which is written to
+// as the walk runs - so there is no moment at which the whole set is known and
+// the plane still holds nothing.
+type Preparer interface {
+	Prepare(ctx context.Context, addrs []Path) error
 }

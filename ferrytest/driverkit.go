@@ -30,6 +30,7 @@ const (
 	caseSecondDumpNo = 15
 	caseEquivalentNo = 16
 	caseReplaceNo    = 17
+	casePreparedNo   = 18
 )
 
 // The suite's own fixtures, and their addresses.
@@ -80,6 +81,20 @@ type (
 	// dump of it is the only way to reach one.
 	justMap struct {
 		Map map[string]string `ferry:"map"`
+	}
+
+	// foldedPair is case 18's fixture: one leaf whose address the type
+	// determines, and a mapping whose two keys a flattening plane renders to
+	// one plane key.
+	//
+	// The leaf is the observable half. It is not the address that collides and
+	// it is written by the same dump, so what the plane holds at it afterwards
+	// is what says whether the refusal arrived before any of the writes or
+	// among them. Its address is [onlyLeaf]'s, which is how the case reads it
+	// back without asking a plane that cannot list to enumerate anything.
+	foldedPair struct {
+		Leaf string            `ferry:"leaf"`
+		Map  map[string]string `ferry:"map"`
 	}
 
 	// onlyLeaf is the fixture for the cases that must not depend on
@@ -269,6 +284,20 @@ func shrunkFixture() filled {
 	}
 }
 
+// foldedFixture is what case 18 dumps: the leaf, and the two map keys case 8
+// mints one per open.
+//
+// Both keys in one value is what makes it the case's fixture rather than case
+// 8's. A plane that renders them to one key holds one address where the value
+// has two, which is the refusal the case is about; a plane that keeps them apart
+// takes the dump, and the case says so and stops.
+func foldedFixture() foldedPair {
+	return foldedPair{
+		Leaf: "x",
+		Map:  map[string]string{retentionFirst: "1", retentionSecond: "2"},
+	}
+}
+
 // driverFixturesCompile resolves the caller's Option list against every fixture
 // the suite dumps, which is where an Option that cannot be honoured is reported.
 func driverFixturesCompile(opts []ferry.Option) error {
@@ -276,6 +305,7 @@ func driverFixturesCompile(opts []ferry.Option) error {
 		ferry.Compile[filled](opts...),
 		ferry.Compile[blanks](opts...),
 		ferry.Compile[onlyLeaf](opts...),
+		ferry.Compile[foldedPair](opts...),
 		ferry.Compile[spread](opts...),
 		ferry.Compile[demanded](opts...),
 		ferry.Compile[justSection](opts...),

@@ -182,6 +182,43 @@ Everything beyond that is opt-in.
 > **Two things moved and both are that amendment's, not this one's.** The address widened from `SectionAddr` to `Container`, because a composite has an own address to ensure exactly as a section does; and the `Presence` argument arrived, because what a value has to say at a container's own address is present-and-empty or null, and a call with no argument can say only one of them.
 > The two spellings are otherwise the same capability, and the earlier print is left in place as the record of what the capability looked like before it had a caller.
 
+> **Amended under [#135](https://github.com/onhotpath/ferry/issues/135): the dynamic tier's collision rule was a promise this contract had no way to keep, and an eighth optional capability is what makes it keepable.**
+>
+> As published, the section below reads that both collision rules run in two tiers, the second "as each is minted, before the write it belongs to".
+> That sentence is true of one address and false of a dump.
+> A key function mints and checks the address in hand before the write that carries it, and every write before that one has already happened, so a sink that renders two value-minted addresses to one plane key reports a failure with the plane already changed - and [ADR-0011](0011-the-error-model.md)'s untouched-plane property, which covers every failure ferry can find without the plane, does not reach it, because the plane key is the driver's and the value is what determines the address.
+>
+> Measured on a flat sink whose key function maps a hyphen to an underscore, dumping `{Name: "svc", Labels: {"a-b": 1, "a_b": 2}}`: the dump reports the collision at `/labels/a_b`, and the plane afterwards holds `LABELS_A_B` and `NAME`.
+> One of the two labels was lost, which is what the injectivity rule exists to prevent, and the save that reported failure changed the plane on its way there.
+>
+> **What ships is a capability, not a rule**, in exactly the `Releaser` idiom:
+>
+> ```go
+> type Preparer interface { Prepare(ctx context.Context, addrs []Path) error }
+> ```
+>
+> It is handed every address *the value* determined - a map key, a sequence index - sorted, once per dump, after every value is encoded and before the first write.
+> Refusing stops the dump there with nothing written.
+> The type's own addresses are not in it: those went to `Bind`, and a second copy would say nothing a driver holding its own table does not already know.
+>
+> **Core's side is a phase that already existed.**
+> The walk carries the addresses a value realised, because that is what lets core refuse an address two subtrees both realised; what it did not do was hand them to anybody.
+> This is that hand-off, and no walk, no key helper and no error class moves for it.
+>
+> **A `Committer` is not asked**, and that is the same argument ADR-0011 makes for giving one an interleaved walk rather than the encode phase.
+> A staging sink is written to as the walk runs, so there is no moment at which the whole realised set is known and the plane still holds nothing; and it does not need one, because a dump that fails is a `Commit` that does not happen.
+> A sink implementing both is therefore asked only to commit.
+>
+> **No driver in this repository implements it, and that is the honest position rather than an omission.**
+> `driver/kv` and `driver/yaml` both stage, so both are already immune; `driver/env` and `driver/http` ship no `Sink` at all.
+> The reachable case is a third party's flat sink that does not stage, which is an ordinary driver to write and the one shape nothing here has.
+> `MemPlane` does not implement it either: its key function is the identity, so no two addresses can fold, and a `Prepare` there would be the `return nil` this ADR refuses in a driver for `Close`.
+> The conformance case is written against the property rather than against an implementor, and it is [ADR-0014](0014-what-ferrytest-exports.md)'s.
+>
+> **The sentence above therefore reads four required interfaces and eight optional ones** - `Releaser`, `Committer`, `Enumerator`, `Unsetter`, `Ensurer`, `Concurrent`, `Prober` and `Preparer` - and the count getting larger is [#201](https://github.com/onhotpath/ferry/issues/201)'s standing objection, answered here the way it is answered everywhere else: each one is opt-in by method presence, absence changes nothing, and each has a conformance case that has to exist anyway.
+
+### `Bind` is a separate phase because the two halves have different lifetimes
+
 This is the one seam that survived every round of simplification, because it is the only thing carrying ADR-0003's before-any-I/O rule.
 
 Three pieces of state, three lifetimes:
@@ -654,9 +691,9 @@ The memory plane's column is empty on every axis, which is ADR-0002's own point 
 > `driver/http` ships, it is the query-parameter plane, and it asserts `Prober` and `Enumerator` on its reader.
 > The admission rule that put it there is unchanged and is the one this section states: it owns the per-request axis, which [ADR-0012](0012-the-caller-held-binding.md) named as the trigger for the held binding and which nothing else exercises.
 >
-> **The axis table above predates four of the seven optional interfaces**, and no row exists for `Prober`, `Ensurer`, `Unsetter` or `Concurrent`.
+> **The axis table above predates five of the eight optional interfaces**, and no row exists for `Prober`, `Ensurer`, `Unsetter`, `Concurrent` or `Preparer`.
 > Counted off the shipped drivers rather than off the prototype: `yaml` asserts `Prober`, `Enumerator`, `Ensurer`, `Unsetter`, `Committer` and `Releaser`; `kv` asserts `Prober`, `Enumerator`, `Concurrent`, `Committer` and `Unsetter`; `env` and `http` each assert `Prober` and `Enumerator`.
-> So "no driver implements all three optional interfaces" is true of a set of three that is now seven, and the sentence it supports - that a capability belongs on an interface a driver opts into rather than on `Reader` and `Writer` - is the reason the count kept growing without the contract moving.
+> So "no driver implements all three optional interfaces" is true of a set of three that is now eight, and the sentence it supports - that a capability belongs on an interface a driver opts into rather than on `Reader` and `Writer` - is the reason the count kept growing without the contract moving.
 >
 > **The line counts are the prototype's**, as this ADR's own preamble says of every number in it, and no shipped driver has been re-measured against them.
 > They were evidence for a bar, the bar held, and they are left as the record of the measurement rather than restated as a fact about `driver/`.
@@ -701,6 +738,7 @@ The contract above is indeed the same, exactly as this paragraph predicted.)*
   The conformance suite has to test for that, not just for the checks themselves.
 - Six optional interfaces mean six prose rules the compiler cannot enforce: implement `Committer` if your writes are not durable until the end, implement `Releaser` if you hold a resource, implement `Enumerator` if your plane can list, implement `Unsetter` if your plane can forget an address, implement `Ensurer` if it can hold an empty section, and implement `Concurrent` if it tolerates overlapping calls.
   *(Amended under [#182](https://github.com/onhotpath/ferry/issues/182): this bullet read **three** as published, before the three capabilities above joined the set, and [ADR-0016](0016-the-sealed-address-model.md)'s `Prober` makes it seven.
+  Amended again under [#135](https://github.com/onhotpath/ferry/issues/135), which makes it eight: implement `Preparer` if your plane can lose one of two addresses a value determined, and would rather say so before the writes than during them.
   The trade the rest of this bullet describes is unchanged and the count is the thing that keeps getting larger, which is [#201](https://github.com/onhotpath/ferry/issues/201)'s whole argument.)*
   Each failure mode is caught by a conformance case that has to exist anyway, and that is the entire argument for the trade.
   It is also the argument this ADR is least able to make in advance, because it depends on the suite being written well.

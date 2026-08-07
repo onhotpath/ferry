@@ -440,3 +440,88 @@ func mustDumpWhole(t *testing.T, s *storeSink, wantCommits int) {
 		t.Errorf("committed %d and closed %d times, want %d and 1", s.commits, s.closes, wantCommits)
 	}
 }
+
+// labelled is one map field, because a map and a slice are the only two shapes
+// whose addresses come from the value rather than from the type.
+type labelled struct {
+	Name   string            `ferry:"name"`
+	Labels map[string]string `ferry:"labels"`
+}
+
+// askedSink records what its writer was handed to prepare, and hands out a
+// writer that stages or one that does not.
+//
+// Staging is a second Writer type rather than a flag on one, for [storeSink]'s
+// reason: Committer is discovered by assertion, so a writer holding the method
+// cannot demonstrate what a writer without it does.
+type askedSink struct {
+	staging bool
+	asked   [][]Path
+}
+
+func (s *askedSink) Bind(*AddressSet) (OpenWriterFunc, error) {
+	return func(context.Context) (Writer, error) {
+		if s.staging {
+			return askedStager{askedWriter{s: s}}, nil
+		}
+
+		return askedWriter{s: s}, nil
+	}, nil
+}
+
+type askedWriter struct{ s *askedSink }
+
+func (askedWriter) Set(context.Context, LeafAddr, Value) error { return nil }
+
+func (w askedWriter) Prepare(_ context.Context, addrs []Path) error {
+	w.s.asked = append(w.s.asked, addrs)
+
+	return nil
+}
+
+type askedStager struct{ askedWriter }
+
+func (askedStager) Commit(context.Context) error { return nil }
+
+// TestWhatAPreparingSinkIsHanded is the capability's contract in three parts:
+// who is asked, when, and with what.
+//
+// The set is the addresses the value determined and none the type did, because
+// the type's went to Bind and a driver that already holds them has no use for a
+// second copy. It arrives sorted, so a driver refusing two of them reports them
+// in one order over repeated runs (ADR-0001). And a sink that stages is not
+// asked at all, because the phase that could ask it is the one ADR-0011 does not
+// run for a Committer.
+func TestWhatAPreparingSinkIsHanded(t *testing.T) {
+	t.Parallel()
+
+	v := labelled{Name: "svc", Labels: map[string]string{"b": "2", "a": "1"}}
+	realised := []Path{At("labels", "a"), At("labels", "b")}
+
+	for _, tc := range []struct {
+		name    string
+		staging bool
+		want    [][]Path
+	}{
+		{name: "a sink that cannot stage is handed the realised set", want: [][]Path{realised}},
+		{name: "a sink that stages is not asked", staging: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			mustAskToPrepare(t, v, tc.staging, tc.want)
+		})
+	}
+}
+
+func mustAskToPrepare(t *testing.T, v labelled, staging bool, want [][]Path) {
+	t.Helper()
+
+	sink := &askedSink{staging: staging}
+	if err := Dump(t.Context(), v, sink); err != nil {
+		t.Fatalf("dump: %+v", err)
+	}
+
+	if !slices.EqualFunc(sink.asked, want, slices.Equal) {
+		t.Errorf("the writer was asked to prepare %v, want %v", sink.asked, want)
+	}
+}
