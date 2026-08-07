@@ -462,7 +462,7 @@ func TestCompileRoot(t *testing.T) {
 	run(t, []compileCase{{
 		name:     "a root leaf mints the empty path, which is not an address",
 		run:      Compile[int],
-		want:     []string{"int is not a struct ferry walks", "wrapping it in one is the whole remedy"},
+		want:     []string{"int compiles to a leaf", "the empty path", "wrap it in a struct"},
 		elements: 1,
 	}, {
 		name:     "a root map",
@@ -482,7 +482,7 @@ func TestCompileRoot(t *testing.T) {
 	}, {
 		name:     "a pointer to a root leaf",
 		run:      Compile[*int],
-		want:     []string{"int is not a struct ferry walks"},
+		want:     []string{"*int compiles to a leaf"},
 		elements: 1,
 	}})
 }

@@ -3,7 +3,10 @@ package ferry
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -775,7 +778,7 @@ func TestTheRootMustBeAStructFerryWalks(t *testing.T) {
 	run(t, []compileCase{{
 		name:     "a root leaf",
 		run:      Compile[int],
-		want:     []string{"int is not a struct ferry walks", "wrapping it in one is the whole remedy"},
+		want:     []string{"int compiles to a leaf", "the empty path", "wrap it in a struct"},
 		elements: 1,
 	}, {
 		name:     "a root array",
@@ -795,7 +798,7 @@ func TestTheRootMustBeAStructFerryWalks(t *testing.T) {
 	}, {
 		name:     "and a root pointer to a leaf",
 		run:      Compile[*int],
-		want:     []string{"int is not a struct ferry walks"},
+		want:     []string{"*int compiles to a leaf"},
 		elements: 1,
 	}})
 
@@ -1095,5 +1098,174 @@ func TestAPointerToSomethingOtherThanAStruct(t *testing.T) {
 
 	if got.Bytes == nil || !slices.Equal(*got.Bytes, blob) {
 		t.Errorf("loaded %v, want %v", got.Bytes, blob)
+	}
+}
+
+// rootEndpoint is #306's shape: a struct with tagged fields that the codec
+// chain claims through its text pair, so it is one leaf wherever it sits.
+//
+// The fields are what made the defect silent. A struct with no exported field
+// was already refused for mapping no address, and this one walked its two tags
+// instead, compiled a section at /host and /port, and wrote the codec nowhere.
+type rootEndpoint struct {
+	Host string `ferry:"host"`
+	Port int    `ferry:"port"`
+}
+
+func (e rootEndpoint) MarshalText() ([]byte, error) {
+	return fmt.Appendf(nil, "%s:%d", e.Host, e.Port), nil
+}
+
+func (e *rootEndpoint) UnmarshalText(text []byte) error {
+	host, port, ok := strings.Cut(string(text), ":")
+	if !ok {
+		return errors.New("no colon")
+	}
+
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		return err
+	}
+
+	e.Host, e.Port = host, n
+
+	return nil
+}
+
+// holdsEndpoint is the same type one field down, which is the comparison the
+// rule is about: the codec is honoured identically at both positions, and only
+// the address the leaf would sit at differs.
+type holdsEndpoint struct {
+	E rootEndpoint `ferry:"e"`
+}
+
+// TestARootTypeACodecClaimsIsRefusedAsALeaf is #306: the registry and the chain
+// are consulted at the root in the order they are consulted below it, and what
+// the root compiled to is what the refusal names (ADR-0007, ADR-0010).
+func TestARootTypeACodecClaimsIsRefusedAsALeaf(t *testing.T) {
+	t.Parallel()
+
+	run(t, []compileCase{{
+		name:     "the chain claims it, and the tagged fields no longer hide that",
+		run:      Compile[rootEndpoint],
+		want:     []string{"ferry.rootEndpoint compiles to a leaf", "the empty path", "wrap it in a struct"},
+		elements: 1,
+	}, {
+		name:     "and a registration claims it at the root as it does anywhere else",
+		run:      Compile[rootEndpoint],
+		opts:     []Option{WithRegistry(MustRegistry(StringText[rootEndpoint]()))},
+		want:     []string{"ferry.rootEndpoint compiles to a leaf"},
+		elements: 1,
+	}, {
+		// netip.Addr has no exported field, so the maps-no-address backstop
+		// reached it first and named the wrong thing: being a struct is not
+		// what makes it refusable at the root.
+		name:     "and the refusal names what the type compiled to rather than its Go kind",
+		run:      Compile[netip.Addr],
+		want:     []string{"netip.Addr compiles to a leaf"},
+		elements: 1,
+	}})
+}
+
+// TestACodecdRootIsRefusedThroughLoad is the same refusal at the verb, and it
+// asserts the second half too: the refusal is a compile, so no driver is bound
+// and no plane is reached.
+func TestACodecdRootIsRefusedThroughLoad(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+
+	if _, err := Load[rootEndpoint](t.Context(), planeSource{p: p}); err == nil {
+		t.Fatal("Load of a codec'd root returned no error")
+	}
+
+	if p.bound != nil {
+		t.Error("a driver was bound for a type that names no address")
+	}
+}
+
+// TestACodecdRootIsRefusedThroughDump is the write half, against the sink shape
+// the empty path is silent on: before the refusal it wrote nothing and said so
+// with a nil error.
+func TestACodecdRootIsRefusedThroughDump(t *testing.T) {
+	t.Parallel()
+
+	sink := &treeSink{wrote: map[string]Value{}}
+
+	if err := Dump(t.Context(), rootEndpoint{Host: "h", Port: 8080}, sink); err == nil {
+		t.Fatal("Dump of a codec'd root returned no error")
+	}
+
+	if len(sink.wrote) != 0 {
+		t.Errorf("the sink was written %v for a schema that never compiled", sink.wrote)
+	}
+}
+
+// TestTheSameTypeOneFieldDownIsTheLeafItAlwaysWas is the other half of the
+// consistency #306 was about. The refusal is about the address the root has and
+// never about the codec, so the codec has to still carry the value below it.
+func TestTheSameTypeOneFieldDownIsTheLeafItAlwaysWas(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+
+	if err := Dump(t.Context(), holdsEndpoint{E: rootEndpoint{Host: "h", Port: 8080}}, planeSink{p: p}); err != nil {
+		t.Fatalf("dump: %+v", err)
+	}
+
+	// One address and not two: the codec collapsed the struct's own /host and
+	// /port to the single leaf the tag named.
+	mustBeMembers(t, kinded(p.bound), []string{"leaf /e"})
+
+	got, err := Load[holdsEndpoint](t.Context(), planeSource{p: p})
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if want := (rootEndpoint{Host: "h", Port: 8080}); got.E != want {
+		t.Errorf("loaded %v, want %v", got.E, want)
+	}
+}
+
+// rootOpaque carries no text pair, so nothing claims it unless a registry does.
+// It is what separates the two schemas the cache has to keep apart.
+type rootOpaque struct {
+	V string `ferry:"v"`
+}
+
+// TestTwoRegistriesDisagreeingAboutTheRootCompileTwoSchemas pins the cache key,
+// through Load rather than through Compile, because Compile discards its result
+// and takes no cache entry at all (ADR-0010).
+func TestTwoRegistriesDisagreeingAboutTheRootCompileTwoSchemas(t *testing.T) {
+	t.Parallel()
+
+	claims := WithRegistry(MustRegistry(StringValue(
+		func(o rootOpaque) (string, error) { return o.V, nil },
+		func(text string) (rootOpaque, error) { return rootOpaque{V: text}, nil },
+	)))
+
+	load := func(t *testing.T, opts ...Option) (rootOpaque, error) {
+		t.Helper()
+
+		return Load[rootOpaque](t.Context(), planeSource{p: newPlane(map[Path]Value{At("v"): String("x")})}, opts...)
+	}
+
+	got, err := load(t)
+	if err != nil {
+		t.Fatalf("with no registry the type is a section and must load: %+v", err)
+	}
+
+	if got.V != "x" {
+		t.Errorf("loaded %v, want the section's own leaf", got)
+	}
+
+	if _, err := load(t, claims); err == nil {
+		t.Fatal("the registry that holds the root's codec compiled the same schema as the one that does not")
+	}
+
+	// And the refusal did not land in the other registry's slot, which is the
+	// whole of what the registry component of the key buys.
+	if _, err := load(t); err != nil {
+		t.Errorf("the second load against the first registry: %+v", err)
 	}
 }
