@@ -189,6 +189,12 @@ func TestNearMissCoversTheExtensionAndLeavesFerrysAlone(t *testing.T) {
 		}](WithRegistry(reg)),
 		want: "the mylib tag key declares node, secret",
 	}, {
+		name: "an unknown word under a key declaring none",
+		err: Compile[struct {
+			Host string `ferry:"host" empty:"anything"`
+		}](WithRegistry(extRegistry(t, KeyExtension{TagKey: "empty"}))),
+		want: "the empty tag key is declared with no words at all",
+	}, {
 		name: "ferry's own near miss is undegraded",
 		err: Compile[struct {
 			Host string `ferry:"host,requird"`
@@ -252,6 +258,12 @@ func TestAWordIsWrittenTheWayItWasDeclared(t *testing.T) {
 			Host string `ferry:"host" mylib:"secret, node=a"`
 		}](WithRegistry(reg)),
 		want: "surrounding whitespace",
+	}, {
+		name: "an unterminated quoted value",
+		err: Compile[struct {
+			Host string `ferry:"host" mylib:"node='a"`
+		}](WithRegistry(reg)),
+		want: `value "'a" is not terminated`,
 	}}
 
 	for _, c := range cases {
