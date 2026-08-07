@@ -1005,14 +1005,14 @@ func TestChildrenReturnsKindedSegments(t *testing.T) {
 
 	r := treeReader{p: p}
 
-	kids, err := r.Children(t.Context(), compositeAt(At("tags")))
+	kids, err := r.Children(t.Context(), compositeOf(At("tags")))
 	if err != nil {
 		t.Fatalf("children: %v", err)
 	}
 
 	mustBeKind(t, kids, Index, []string{"0", "1"})
 
-	kids, err = r.Children(t.Context(), compositeAt(At("limits")))
+	kids, err = r.Children(t.Context(), compositeOf(At("limits")))
 	if err != nil {
 		t.Fatalf("children: %v", err)
 	}

@@ -437,14 +437,14 @@ func TestAddressSet(t *testing.T) {
 	// ADR-0003 puts in it, each typed by what can be asked at it, handed over
 	// out of order and with one repeat.
 	set := newAddressSet(
-		leafAt(At("tags").Elem(10)),
-		leafAt(At("db", "host")),
-		compositeAt(At("tags")),
-		leafAt(At("tags").Elem(2)),
-		leafAt(At("db", "auth", "user")),
-		leafAt(At("db", "host")),
-		leafAt(At("name")),
-		sectionAt(At("db")),
+		leafOf(At("tags").Elem(10)),
+		leafOf(At("db", "host")),
+		compositeOf(At("tags")),
+		leafOf(At("tags").Elem(2)),
+		leafOf(At("db", "auth", "user")),
+		leafOf(At("db", "host")),
+		leafOf(At("name")),
+		sectionOf(At("db")),
 	)
 
 	want := []string{
@@ -459,11 +459,11 @@ func TestAddressSet(t *testing.T) {
 		t.Errorf("Len() = %d, want %d", got, len(want))
 	}
 
-	if !set.Has(leafAt(At("tags").Elem(2))) {
+	if !set.Has(leafOf(At("tags").Elem(2))) {
 		t.Error("Has(leaf /tags#2) = false")
 	}
 
-	if set.Has(leafAt(At("tags", "2"))) {
+	if set.Has(leafOf(At("tags", "2"))) {
 		t.Error("Has(leaf /tags/2) = true, and it was never in the set")
 	}
 }
@@ -475,17 +475,17 @@ func TestAddressSet(t *testing.T) {
 func TestAddressSetPartitionsByKind(t *testing.T) {
 	t.Parallel()
 
-	set := newAddressSet(sectionAt(At("db")), leafAt(At("db", "host")))
+	set := newAddressSet(sectionOf(At("db")), leafOf(At("db", "host")))
 
-	if !set.Has(sectionAt(At("db"))) {
+	if !set.Has(sectionOf(At("db"))) {
 		t.Error("Has(section /db) = false, and the set was built with it")
 	}
 
-	if set.Has(compositeAt(At("db"))) {
+	if set.Has(compositeOf(At("db"))) {
 		t.Error("Has(composite /db) = true, and a section is not a composite")
 	}
 
-	if set.Has(leafAt(At("db"))) {
+	if set.Has(leafOf(At("db"))) {
 		t.Error("Has(leaf /db) = true, and a container address holds no value")
 	}
 }
@@ -493,10 +493,10 @@ func TestAddressSetPartitionsByKind(t *testing.T) {
 func TestAddressSetIsCopiedFromItsInput(t *testing.T) {
 	t.Parallel()
 
-	addrs := []Member{leafAt(At("b")), leafAt(At("a"))}
+	addrs := []Member{leafOf(At("b")), leafOf(At("a"))}
 
 	set := newAddressSet(addrs...)
-	addrs[0] = leafAt(At("z"))
+	addrs[0] = leafOf(At("z"))
 
 	if got := kinded(set); !slices.Equal(got, []string{"leaf /a", "leaf /b"}) {
 		t.Errorf("Seq() = %v after the caller reused its slice", got)
@@ -512,7 +512,7 @@ func TestEmptyAddressSet(t *testing.T) {
 		t.Errorf("Len() = %d, want 0", got)
 	}
 
-	if set.Has(leafAt(At("a"))) {
+	if set.Has(leafOf(At("a"))) {
 		t.Error("Has(leaf /a) = true on an empty set")
 	}
 
@@ -535,7 +535,7 @@ func TestANilAddressSetAnswersAsAnEmptyOne(t *testing.T) {
 		t.Errorf("Len() = %d on a nil set, want 0", got)
 	}
 
-	if set.Has(leafAt(At("a"))) {
+	if set.Has(leafOf(At("a"))) {
 		t.Error("Has(leaf /a) = true on a nil set")
 	}
 

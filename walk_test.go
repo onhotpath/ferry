@@ -334,11 +334,11 @@ func dumpVisitsTheAddressSet(t *testing.T) {
 func mustBeOneList(t *testing.T, bound *AddressSet, visited []Path) {
 	t.Helper()
 
-	if !bound.Has(leafAt(At("name"))) || bound.Has(leafAt(At("walkTop", "Name"))) {
+	if !bound.Has(leafOf(At("name"))) || bound.Has(leafOf(At("walkTop", "Name"))) {
 		t.Errorf("the address set promotes nothing: %v", kinded(bound))
 	}
 
-	if !bound.Has(sectionAt(At("db"))) {
+	if !bound.Has(sectionOf(At("db"))) {
 		t.Errorf("the nested struct names no section: %v", kinded(bound))
 	}
 

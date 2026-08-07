@@ -143,6 +143,36 @@ type Committer interface {
 	Commit(ctx context.Context) error
 }
 
+// LeafRedirect is what a [Reader.Get] returns when the plane holds a link at
+// this address and the value lives at another one.
+//
+// It is returned as an error and it is not a failure. It is a control answer,
+// in the shape fs.SkipDir has, so a value stays the six kinds it always was and
+// no caller has to handle a seventh that means "look over there". Match it with
+// errors.As:
+//
+//	func (r reader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
+//	    if to, linked := r.linkAt(addr); linked {
+//	        return ferry.Value{}, &ferry.LeafRedirect{Target: to}
+//	    }
+//	    ...
+//	}
+//
+// Report one hop. The chain is followed for you, the addresses already visited
+// are kept, and a cycle is refused naming the address it closes through.
+//
+// The target is an address you were handed, because nothing outside ferry
+// builds one, so a link whose target this schema does not name cannot be
+// reported and stays yours to resolve or to refuse.
+type LeafRedirect struct {
+	// Target is where the value lives.
+	Target LeafAddr
+}
+
+// Error names the address the value lives at. It reads as a statement rather
+// than as a failure, because it is one.
+func (r *LeafRedirect) Error() string { return "the value lives at " + r.Target.String() }
+
 // Prober is implemented by a [Reader] whose plane can say whether a container
 // is there. It answers about a [Container], which is a [SectionAddr] or a
 // [CompositeAddr] and never a leaf.
@@ -151,6 +181,10 @@ type Committer interface {
 // plane does not have the address at all, a null means it has it and holds its
 // own null there, and present means it has it and holds a container, which may
 // be an empty one.
+//
+// A plane with links has a fourth answer, [SectionAt], which says the address
+// names a place that lives somewhere else. Report one hop; the chain, the
+// addresses already visited and the refusal of a cycle are handled for you.
 //
 // It is optional, in the same idiom as [Releaser], because a plane that cannot
 // list often cannot answer this either. A source implementing neither this nor
