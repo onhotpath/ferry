@@ -190,6 +190,17 @@ Merging a slice or a map would mean deciding what an absent index or an absent k
 > That is the same asymmetry [refusing is the reversible direction](#refusing-is-the-reversible-direction) states for every other rule here: replacing is the loud behaviour, a merge is the permissive one, and the permissive one is not retractable once it is on by default.
 > A delta write is admissible under the same rule and on one further condition, which is that reconciliation is guaranteed: efficient, but never wrong.
 
+> **Corrected: a writer with no `Unsetter` is passed over in silence, and the amendment above says otherwise.**
+>
+> As published, the amendment reads "[ADR-0004](0004-source-and-sink.md) gains the optional `Unsetter` capability, **refused at open where the driver lacks it**".
+> ADR-0004's own amendment under [#220](https://github.com/onhotpath/ferry/issues/220) and [#221](https://github.com/onhotpath/ferry/issues/221) had already withdrawn that half, and this ADR did not pick it up.
+> A sink that implements no `Unsetter` is refused nothing: the dump writes what it speaks about and drops the retraction, silently.
+>
+> **The reason is the asymmetry this ADR is built on**, applied one step further out.
+> What a value has to say at a container's own address must be spellable, or the dump stores something misleading, so a missing `Ensurer` is refused - at the address, during the walk, and not at the open.
+> An unset is about what the plane already holds, which core cannot know anything about, so a missing `Unsetter` refuses nothing.
+> **Nothing else in the amendment moves**: deleting an address is still expressible, still a verb rather than a silence, and a `Null` at a container address still retracts the subtree.
+
 
 
 ### Absent and Null, per kind

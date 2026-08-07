@@ -89,7 +89,12 @@ github.com/onhotpath/ferry                 go.mod    core
   compat/, cmd/                                      reserved, unused today
 ```
 
-Drivers live under `driver/`, not flat at the root and not in separate repositories.
+> **Corrected: `examples/` is a fifth entry in this layout, and it is a module.**
+>
+> As published the diagram has no row for it, because there was nothing to put in one.
+> `examples/` now holds runnable programs that a guide page quotes, it carries its own `go.mod`, `go.work` uses it, and CI discovers it by the same glob that finds `driver/*/go.mod` - so it is built, vetted, tested and linted like any other module here.
+> It is a module for this ADR's own reason: an example that imports a driver would put that driver in core's dependency graph, and core's `require` block stays empty.
+> **Nothing in the layout rule moves**: one core module, one module per driver, and anything that needs a dependency core may not have gets a module of its own.
 
 Separate repositories are rejected because first-party drivers exist to be built against core's HEAD on every commit, which is the whole reason they exist at all.
 
@@ -119,6 +124,12 @@ The rule caps the set at roughly three and tells a contributor proposing a fourt
 It is also why ferry would ship YAML but not TOML: TOML exercises nothing YAML does not, and that is not a judgement about TOML.
 
 The list is deferred to [#5](https://github.com/onhotpath/ferry/issues/5), because which axes exist is a property of the source and sink signatures and those are not decided.
+
+> **Corrected: four drivers ship, and the fourth argued what this rule asked it to.**
+>
+> As published the rule "caps the set at roughly three and tells a contributor proposing a fourth exactly what to argue".
+> [ADR-0004](0004-source-and-sink.md) took the deferred list and named `yaml`, `kv` and `env`; `driver/http`, the query-parameter plane, is the fourth, and it is in on the axis this rule exists to test - a plane constructed per request, which nothing else exercises and which [ADR-0012](0012-the-caller-held-binding.md)'s held binding is shaped around.
+> **The rule is unchanged and it worked.** "Roughly three" was an estimate of how many axes the contract has, not a quota, and the fourth driver was admitted by making exactly the argument this paragraph demands of it.
 
 ### Core's dependency set is stdlib, unconditionally
 

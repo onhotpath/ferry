@@ -61,7 +61,7 @@ It sees through an `fmt.Errorf("loading config: %w", err)` wrapper.
 
 `errors.Is` on the aggregate keeps `errors.Join`'s meaning: it answers "at least one element is of this class".
 
-### The six sentinels
+### The seven sentinels
 
 | sentinel | what happened | what it means to do next |
 | --- | --- | --- |
@@ -70,7 +70,8 @@ It sees through an `fmt.Errorf("loading config: %w", err)` wrapper.
 | `ErrValue` | the plane spoke and what it said does not fit the type | fix the stored value |
 | `ErrPlane` | ferry could not talk to the plane, or a driver refused the address set | fix the plane or the connection |
 | `ErrReadOnly` | the plane is writable in principle but not now | fix the permission |
-| `ErrDriver` | **provenance**, and it crosses the four above | the failure came from driver code rather than from core |
+| `ErrPanic` | a codec panicked rather than returning, and ferry recovered it at the address that reached it | fix the codec; the recovered value is in the message |
+| `ErrDriver` | **provenance**, and it crosses the classes above | the failure came from driver code rather than from core |
 
 Cancellation gets no ferry class: `errors.Is(err, context.Canceled)` is the match, and a ferry class for it would be a second spelling of a standard library one.
 
@@ -95,8 +96,8 @@ There is no free `ferry.Address(err)` and none is planned: it would have to retu
 
 Note that `Error` is on the pointer receiver, so `errors.AsType[*ferry.Error]` is the spelling and `ferry.Error` alone does not implement `error`.
 
-At schema compile the address is the **Go field path**, because a field with no tag has no address and the whole error is that it never named one.
-Everywhere else it is the plane address.
+The location is the **plane address wherever the position has one**, and the **Go field path only where it has none**, because a field with no tag never named an address and the whole error is that it never did.
+The space is decided by whether the position has an address and never by the moment: most schema-compile refusals already locate at the plane address, because the field they refuse is tagged.
 
 ### A driver's own error stays reachable
 
@@ -177,9 +178,16 @@ A sink implementing `ferry.Committer` is exempt, because staging already gives i
 
 ## Panics
 
-ferry itself never panics outside a `Must`-named function, and ferry never recovers a panic from third-party code.
+ferry itself never panics outside a `Must`-named function.
 `ferry.MustRegistry` is the whole of that family: it panics with the `*ferry.Error` `ferry.NewRegistry` would have returned, so a caller who recovers one reads the ordinary report.
-A driver or a codec that panics panics through ferry, with its own stack intact.
+
+ferry recovers a panic from exactly one place, and it is a narrow one: **the call into a codec**.
+A codec half that panics is recovered at the address it was called for and reported as `ErrPanic`, beside every other failure the same run found, so one broken codec costs one address rather than the whole report.
+The recovered value is in the message.
+
+Nothing else is fenced.
+A driver that panics panics through ferry, with its own stack intact, and so does a panic from ferry's own walk.
+A fence wide enough to swallow those would hide the defects it was added to survive.
 
 `ferry.ErrorAt` returns `error` and not `*Error`, which is what closes the typed-nil trap: there is no concrete return type to smuggle a nil through, so `return ferry.ErrorAt(addr, f())` is safe to write.
 

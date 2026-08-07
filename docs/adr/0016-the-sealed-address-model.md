@@ -448,6 +448,12 @@ The rule taken is the loud refusal scoped to exactly the planes that cannot spel
 - **A driver's `Bind` classifies once, from one iterator over a sealed sum**, which is what [#239](https://github.com/onhotpath/ferry/issues/239)'s identical address sets made impossible.
   The cost is a type switch in every flattening driver's `Bind`, on the cold path, and a tree driver still pays nothing.
 - **Three methods on `AddressSet` rather than three per kind**, chosen on surface count after both were proven to build the identical key table.
+
+  > **Corrected: `AddressSet` carries four methods, and the choice this bullet records is unchanged.**
+  >
+  > As published the set is `Seq`, `Has` and `Len`, and three was the number the surface-count argument was made on.
+  > [ADR-0021](0021-the-multi-key-extension-mechanism.md) added `Extension`, which reads a foreign tag key's table off the set a driver already holds, and it is a fourth method rather than a fourth per kind - so the alternative this bullet rejected would now be twelve.
+  > **Nothing about the decision moves**: the argument was one method that takes a kind over one method per kind, and every method added since has taken that shape.
 - **`SectionInfo` with three sentinel values and one constructor** follows `fs.FileInfo` and `io.EOF`, and inherits `io.EOF`'s reassignability hazard, which is disclosed rather than designed away.
 - **Core resolves schema-addressable references and refuses cycles once**, instead of every driver doing it.
   It does not replace driver-side resolution and cannot: an unmapped target has no address to report.
