@@ -60,6 +60,14 @@ const indent = 2
 // everything has been written, and a save that fails leaves your file byte for
 // byte as it was with no temporary left behind.
 //
+// A save that started before somebody else edited the file refuses rather than
+// overwriting them. Because a save is a merge into the document it read, an edit
+// that lands between the read and the rename would be silently dropped, so the
+// save reports [ferry.ErrPlane] and leaves your file as it was: load again,
+// apply your changes to what the file holds now, and save again. The check is
+// the file's length and modification time, so the one edit it cannot see is a
+// rewrite in the same modification-time tick that leaves the length alone.
+//
 // It is not durable unless you ask. Pass [Durable] to flush the replacement to
 // the disk before the save returns, and read that option before you do: it is
 // the most expensive thing a save can be told to do.
@@ -142,6 +150,7 @@ func open(ctx context.Context, path string, cfg config, nodes map[ferry.Path]str
 		doc:     doc,
 		tmp:     tmp,
 		nodes:   nodes,
+		found:   planeStamp(path),
 		shared:  hasAlias(doc),
 		durable: cfg.durable,
 	}, nil
@@ -178,6 +187,11 @@ func open(ctx context.Context, path string, cfg config, nodes map[ferry.Path]str
 // subtracted at the commit rather than at the moment core asks, for the reason
 // [writer.Unset] gives, and both stay empty for a dump over a value with no
 // slice and no map in it (ADR-0004, #220).
+//
+// found is the plane as the open read it, and it is what [writer.settle]
+// compares the plane against before the swap: a save merges into the document
+// it read, so a file somebody else edited in between is a save that would drop
+// their edit (ADR-0020).
 type writer struct {
 	path   string
 	doc    *yamlv3.Node
@@ -186,6 +200,7 @@ type writer struct {
 	nodes  map[ferry.Path]string
 	forget []ferry.Path
 	wrote  map[string]bool
+	found  stamp
 
 	shared  bool
 	durable bool
@@ -557,11 +572,53 @@ func (w *writer) Commit(_ context.Context) error {
 		return err
 	}
 
-	if err := w.inheritMode(); err != nil {
+	if err := w.settle(); err != nil {
 		return err
 	}
 
 	return w.swap()
+}
+
+// settle reads the plane one last time and does the two things that answer to
+// that read: refuse a plane that changed since the open, and give the
+// replacement the mode the plane already had.
+//
+// It is one stat, and it is the whole cost of the refusal (ADR-0020). The mode
+// inheritance needed the same call already, so the two share it rather than
+// stat the same file twice on the commit path.
+//
+// A stat that fails is read as a plane that is not there, which is what
+// [planeStamp] answered at the open for the same failure: the two compare equal
+// when nothing moved, and a plane that went away between the open and here is a
+// change like any other.
+func (w *writer) settle() error {
+	fi, err := os.Stat(w.path)
+	if err != nil {
+		return w.unchanged(stamp{})
+	}
+
+	if err := w.unchanged(stampOf(fi)); err != nil {
+		return err
+	}
+
+	return w.inheritMode(fi)
+}
+
+// unchanged refuses a save whose plane is no longer the one it merged into.
+//
+// This is optimistic concurrency and it is deliberately not a lock: a save
+// reads, stages and swaps, and the window in between is where a watcher's whole
+// point - somebody else edits this file - lands. Swapping anyway would report
+// success for a save that silently discarded the operator's edit, so the loser
+// of the race is told it lost and the plane is left byte for byte as it was
+// (ADR-0020).
+func (w *writer) unchanged(now stamp) error {
+	if w.found == now {
+		return nil
+	}
+
+	return fmt.Errorf("%w: the plane changed after this save read it, and saving now would discard that change: "+
+		"load the plane again, apply the same edits to what it holds now, and save again", ferry.ErrPlane)
 }
 
 // swap renames the staged file over the plane and makes the rename itself
@@ -657,14 +714,12 @@ func (w *writer) flushAndClose() error {
 // carries its own mode over. Where there is no plane yet, that 0600 stands: a
 // file ferry creates may hold whatever the struct held, and the narrow mode is
 // the one to be wrong in the safe direction with.
-func (w *writer) inheritMode() error {
-	// A plane that is not there yet has no mode to inherit, and the stat
-	// failing for any other reason is a question the rename is about to ask
-	// again and answer better.
-	if fi, err := os.Stat(w.path); err == nil {
-		if err := os.Chmod(w.tmp.Name(), fi.Mode().Perm()); err != nil {
-			return fmt.Errorf("%w: the staged document could not take the plane's mode: %w", ferry.ErrPlane, err)
-		}
+//
+// It is handed the plane's own stat rather than taking one, because [settle]
+// took it: a plane that is not there reaches neither.
+func (w *writer) inheritMode(fi os.FileInfo) error {
+	if err := os.Chmod(w.tmp.Name(), fi.Mode().Perm()); err != nil {
+		return fmt.Errorf("%w: the staged document could not take the plane's mode: %w", ferry.ErrPlane, err)
 	}
 
 	return nil
