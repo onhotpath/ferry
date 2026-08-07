@@ -140,7 +140,10 @@ The guides under [`docs/guide/`](docs/guide/) are the long-form documentation:
 - [Tags, defaults and absence](docs/guide/tags.md) - the whole tag grammar, and what `Absent` and `Null` mean to a Go field.
 - [Errors](docs/guide/errors.md) - what a failed call carries, how to match on it, and why the message text is not API.
 - [Plane compatibility](docs/guide/compatibility.md) - the second promise ferry makes, its three tiers, and what a representation change costs.
+- [The dump lifecycle](docs/guide/dump-lifecycle.md) - the seven stages of a `Dump` call, and the ladder of what refuses where.
 - [Writing a driver](docs/guide/drivers.md) - the two required methods, the three optional interfaces, and the one-call conformance suite.
+- [Concurrency](docs/guide/concurrency.md) - the two axes, the one budget both layers honour, and what stays serial.
+- [Watch and reload](docs/guide/watch-reload.md) - why a reload is a `Load`, and the sharp edges a watch loop inherits.
 
 The design records behind every one of these decisions are in [`docs/adr/`](docs/adr/).
 The ADRs are the specification: where a guide and an ADR disagree, the ADR wins and the guide is wrong.
