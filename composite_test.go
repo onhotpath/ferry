@@ -981,7 +981,7 @@ func anUnparseablePointedLeaf(t *testing.T) {
 	}
 
 	report := reportOf(err)
-	if want := "/port: the plane's value is not a valid int"; !strings.Contains(report, want) {
+	if want := "/port: what is set here is not a valid int"; !strings.Contains(report, want) {
 		t.Errorf("report\n\t%s\ndoes not contain\n\t%s", report, want)
 	}
 

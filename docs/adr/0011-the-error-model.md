@@ -790,6 +790,13 @@ A leaf's own `Error()` carries it; inside the aggregate's report the header alre
 The accepted ADRs quote strings like `ferry: /A: main.encOnly implements encoding.TextMarshaler but not ...`, which makes them look canonical, and somebody will write `strings.Contains` against one.
 The stated position is to match on the sentinels and the address, and to get precision from the test helper rather than from string matching.
 
+> **Amended under [#159](https://github.com/onhotpath/ferry/issues/159): a message quoted in an accepted ADR is what was measured then, and the shipped text may since have moved.**
+>
+> As published this section says message text is not API and leaves it there, which settles what a *caller* may rely on and says nothing about the strings this record and its neighbours quote.
+> [#159](https://github.com/onhotpath/ferry/issues/159) reworded the user-facing messages core authors, so quotes across ADR-0005, ADR-0006, ADR-0008, ADR-0009, ADR-0010 and this one now differ from what runs.
+> They are left as published on purpose: an ADR quotes the text as it was measured at the time, and rewriting the quote would falsify the measurement the page is the record of.
+> Read a quoted message as evidence for the decision it sits under, and read the shipped text out of the code or the guide.
+
 ### ferry yields no value it built
 
 > When a Load fails, ferry returns no value **it built**.

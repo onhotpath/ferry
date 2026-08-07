@@ -66,7 +66,7 @@ func TestDiffErrors(t *testing.T) {
 			},
 			diff: []string{
 				"got /rate: invalid value, and nothing wanted it: " +
-					"ferry: /rate: the plane's value is not a valid int",
+					"ferry: /rate: what is set here is not a valid int",
 			},
 		},
 		{
@@ -88,7 +88,7 @@ func TestDiffErrors(t *testing.T) {
 			},
 			diff: []string{
 				"got /rate: invalid value, and nothing wanted it: " +
-					"ferry: /rate: the plane's value is not a valid int",
+					"ferry: /rate: what is set here is not a valid int",
 				"want /rate: missing, and nothing reported it",
 			},
 		},
@@ -100,18 +100,18 @@ func TestDiffErrors(t *testing.T) {
 			},
 			diff: []string{
 				"got /port: missing, and nothing wanted it: " +
-					"ferry: /port: required, and the plane holds nothing at this address",
+					"ferry: /port: required, and nothing is set here",
 			},
 		},
 		{
 			name: "no Want at all is every failure unexpected",
 			diff: []string{
 				"got /host: missing, and nothing wanted it: " +
-					"ferry: /host: required, and the plane holds nothing at this address",
+					"ferry: /host: required, and nothing is set here",
 				"got /port: missing, and nothing wanted it: " +
-					"ferry: /port: required, and the plane holds nothing at this address",
+					"ferry: /port: required, and nothing is set here",
 				"got /rate: invalid value, and nothing wanted it: " +
-					"ferry: /rate: the plane's value is not a valid int",
+					"ferry: /rate: what is set here is not a valid int",
 			},
 		},
 		{
@@ -234,9 +234,9 @@ func TestDiffErrorsOrdersSegmentWise(t *testing.T) {
 	got := ferrytest.DiffErrors(err)
 	want := []string{
 		"got /workers#7: invalid value, and nothing wanted it: " +
-			"ferry: /workers#7: the plane's value is not a valid int",
+			"ferry: /workers#7: what is set here is not a valid int",
 		"got /workers#10: invalid value, and nothing wanted it: " +
-			"ferry: /workers#10: the plane's value is not a valid int",
+			"ferry: /workers#10: what is set here is not a valid int",
 	}
 
 	if !slices.Equal(got, want) {
@@ -273,9 +273,9 @@ func TestCheckErrors(t *testing.T) {
 
 		want := []string{
 			"got /port: missing, and nothing wanted it: " +
-				"ferry: /port: required, and the plane holds nothing at this address",
+				"ferry: /port: required, and nothing is set here",
 			"got /rate: invalid value, and nothing wanted it: " +
-				"ferry: /rate: the plane's value is not a valid int",
+				"ferry: /rate: what is set here is not a valid int",
 		}
 
 		if !slices.Equal(c.lines, want) {

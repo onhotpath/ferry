@@ -28,9 +28,9 @@ loaded from a plane holding only `/db/port = "not-a-number"`:
 %v    ferry: 3 errors: /db/host, /db/port, /name
 
 %+v   ferry: 3 errors:
-        /db/host: required, and the plane holds nothing at this address
-        /db/port: the plane's value is not a valid int
-        /name: required, and the plane holds nothing at this address
+        /db/host: required, and nothing is set here
+        /db/port: what is set here is not a valid int
+        /name: required, and nothing is set here
 ```
 
 `Error()` is one line, and `%+v` is the report.
@@ -138,7 +138,7 @@ ferrytest.CheckErrors(t, err,
 A difference is one line per expectation nothing matched and one line per failure nothing expected, each naming the address and the class, so you learn which failure moved rather than that a count did:
 
 ```
-got /name: missing, and nothing wanted it: ferry: /name: required, and the plane holds nothing at this address
+got /name: missing, and nothing wanted it: ferry: /name: required, and nothing is set here
 want /name: invalid value, and nothing reported it
 ```
 

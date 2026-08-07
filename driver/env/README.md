@@ -94,7 +94,7 @@ A field tagged `db_host` and a nested `db.host` both want `DB_HOST`.
 When that happens the load fails immediately, before reading anything, and names both:
 
 ```
-ferry: /db_host: env renders this address and /db/host to one plane key, "DB_HOST", so one of the two would be lost
+ferry: /db_host: env gives this and /db/host the same name, "DB_HOST", so one of the two would be lost
 ```
 
 Rename one of the fields, or change the separator: `env.Separator("__")` joins nested fields with `__`, so `DB__HOST` and `DB_HOST` stay apart.

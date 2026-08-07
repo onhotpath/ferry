@@ -140,7 +140,7 @@ Hand it the address set, your driver's short name for diagnostics, and your key 
 It computes every static key once, checks both properties over the whole set, and returns an error naming every offending address:
 
 ```
-ferry: /db_port: flat renders this address and /db/port to one plane key, "db_port",
+ferry: /db_port: flat gives this and /db/port the same name, "db_port",
        so one of the two would be lost
 ```
 
@@ -551,7 +551,7 @@ type PlaneNamer interface {
 }
 ```
 
-Implement it and a report opens with your plane's own name for the address instead of ferry's rendering of it: `ferry: DB_HOST: required, and the plane holds nothing at this address` rather than `ferry: /db/host: ...`.
+Implement it and a report opens with your plane's own name for the address instead of ferry's rendering of it: `ferry: DB_HOST: required, and nothing is set here` rather than `ferry: /db/host: ...`.
 The line then names the thing the person reading it can go and change.
 
 **A flattening driver already has the answer.**
@@ -1033,7 +1033,7 @@ type bad struct {
 	A string `ferry:"db_port"`
 	B DB     `ferry:"db"`
 }
-ferry: /db_port: flat renders this address and /db/port to one plane key, "db_port",
+ferry: /db_port: flat gives this and /db/port the same name, "db_port",
        so one of the two would be lost
 
 ferry.Dump(ctx, cfg{M: map[string]string{"a=b": "x"}}, flat.NewSink(store))

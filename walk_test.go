@@ -632,8 +632,8 @@ func TestLoadRefusesAKindAStringCannotTake(t *testing.T) {
 
 	report := reportOf(err)
 	for _, want := range []string{
-		"/env: the plane holds number and string cannot take one",
-		"/name: the plane holds null and string cannot take one",
+		"/env: what is set here is number, and string cannot take one",
+		"/name: what is set here is null, and string cannot take one",
 	} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report\n\t%s\ndoes not contain\n\t%s", report, want)
