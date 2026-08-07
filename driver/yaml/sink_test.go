@@ -1233,6 +1233,68 @@ func TestModeSurvives(t *testing.T) {
 	}
 }
 
+// TestAStagedFileThatWentAwayRefusesTheCommit asserts the commit reports rather
+// than swapping when the mode the plane already had cannot be given to the
+// replacement.
+//
+// Taking the staged file away underneath the dump is how the environment is
+// made to refuse: the commit reads the plane, finds it unchanged, and then has
+// nothing left to give the mode to. What matters is that it says so and leaves
+// the plane byte-identical, because the alternative is a rename that silently
+// re-permissions a file somebody else set up.
+func TestAStagedFileThatWentAwayRefusesTheCommit(t *testing.T) {
+	before := "port: 1\n"
+	path := write(t, before)
+
+	w := openWriter(t, path)
+
+	a := addressesOf[scalars](t)
+	if err := w.Set(t.Context(), a.leaf(t, ferry.At("port")), ferry.String("2")); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	if err := os.Remove(stagedFile(t, filepath.Dir(path))); err != nil {
+		t.Fatalf("removing the staged file: %v", err)
+	}
+
+	if err := commitOf(t, w).Commit(t.Context()); !errors.Is(err, ferry.ErrPlane) {
+		t.Errorf("the commit reported %v, want an error carrying ferry.ErrPlane", err)
+	}
+
+	if got := read(t, path); got != before {
+		t.Errorf("the plane holds %q, want %q: a commit that failed leaves the plane byte-identical", got, before)
+	}
+}
+
+// stagedFile is the temporary the open put beside the plane, which every dump
+// has exactly one of until the rename takes it.
+func stagedFile(t *testing.T, dir string) string {
+	t.Helper()
+
+	staged, err := filepath.Glob(filepath.Join(dir, planeName+".ferry-*"))
+	if err != nil {
+		t.Fatalf("looking for the staged file: %v", err)
+	}
+
+	if len(staged) != 1 {
+		t.Fatalf("the files staged beside the plane are %v, want exactly one", staged)
+	}
+
+	return staged[0]
+}
+
+// commitOf is the writer as a committer, which a staging sink always is.
+func commitOf(t *testing.T, w ferry.Writer) ferry.Committer {
+	t.Helper()
+
+	c, ok := w.(ferry.Committer)
+	if !ok {
+		t.Fatal("the writer does not commit, and a staging sink that cannot commit holds nothing durable")
+	}
+
+	return c
+}
+
 // read is the plane's contents as a string.
 func read(t *testing.T, path string) string {
 	t.Helper()

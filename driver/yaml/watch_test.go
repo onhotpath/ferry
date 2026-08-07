@@ -99,6 +99,49 @@ func TestWatchStopsWithItsContext(t *testing.T) {
 	}
 }
 
+// TestWatchWithNoIntervalLooksAnyway asserts the documented default: an interval
+// of zero or less is a look every second rather than a watch that does not run.
+//
+// The call arriving is the whole assertion. A ticker takes no interval that is
+// not positive, so a watch that passed the caller's zero on would take the
+// process down on its own goroutine before the first look (ADR-0020).
+func TestWatchWithNoIntervalLooksAnyway(t *testing.T) {
+	path := write(t, "port: 1\n")
+	called := make(chan context.Context, 1)
+
+	yaml.NewSource(path, yaml.Watch(t.Context(), 0, sendTo(called)))
+
+	edit(t, path, "# the edit a default interval has to catch\nport: 2\n")
+
+	awaitCall(t, called)
+}
+
+// TestWatchWithNoCallbackWatchesNothing asserts the other end of the same
+// guard: a watch with nothing to call is a source that simply does not watch.
+//
+// The test surviving the change is the assertion. Without the guard the look
+// after this edit would call a nil function, and a panic on the watching
+// goroutine is not recoverable from here - it is the process (ADR-0020).
+func TestWatchWithNoCallbackWatchesNothing(t *testing.T) {
+	path := write(t, "port: 1\n")
+
+	src := yaml.NewSource(path, yaml.Watch(t.Context(), tick, nil))
+
+	edit(t, path, "# the edit nothing is listening for\nport: 2\n")
+
+	<-time.After(quiet)
+
+	got, err := ferry.Load[watched](t.Context(), src)
+	if err != nil {
+		t.Fatalf("loading through a source watching with no callback: %v", err)
+	}
+
+	if got.Port != 2 {
+		t.Errorf("the load holds %d, want 2: a source that watches nothing still loads what the file holds",
+			got.Port)
+	}
+}
+
 // TestWatchIsOptIn asserts the plain source is what it always was: no option, no
 // goroutine, and the file untouched until a load asks for it (ADR-0020).
 func TestWatchIsOptIn(t *testing.T) {
