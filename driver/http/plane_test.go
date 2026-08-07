@@ -242,6 +242,25 @@ func (*standInWriter) Ensure(_ context.Context, addr ferry.Container, p ferry.Pr
 		ferry.ErrPlane, p))
 }
 
+// Unset forgets what a composite's name holds, which is what makes a dump of a
+// sequence a replacement of it rather than an addition to it: a request already
+// carrying tags=a&tags=b&tags=c, dumped over with one element, would otherwise
+// come back as three.
+//
+// It is the same clearing [standInWriter.replaceOnce] does and it is recorded
+// the same way, so a name forgotten here is not cleared a second time by the
+// first write beneath it.
+func (w *standInWriter) Unset(_ context.Context, addr ferry.CompositeAddr) error {
+	key, err := w.keys(addr.Path())
+	if err != nil {
+		return err
+	}
+
+	w.replaceOnce(key)
+
+	return nil
+}
+
 // put writes one value at a name of its own.
 func (w *standInWriter) put(addr ferry.Path, text string) error {
 	key, err := w.keys(addr)

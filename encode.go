@@ -118,7 +118,12 @@ func prepared(ctx context.Context, w Writer, minted map[Path]spot) error {
 // and every encode it staged. Both came from this value, and the next dump has
 // another, so neither outlives the call (ADR-0012).
 func dumpWalk(ctx context.Context, w Writer, sch *schema, root reflect.Value) (outcome, error) {
-	dir := dumpTo{w: w, addrs: sch.addrs}
+	// The capability is resolved here for the reason [flush] resolves it there:
+	// once per walk rather than once per composite, and never absent on a schema
+	// that needs it (ADR-0004).
+	u, _ := w.(Unsetter)
+
+	dir := dumpTo{w: w, u: u, addrs: sch.addrs}
 
 	// Serial always: nothing in ADR-0019 fans out the write path, because the
 	// staging decision is already the sink's and a sink that batches does it at
@@ -155,10 +160,10 @@ type stagedWrite struct {
 // plane refusing one address, which is what an interleaved dump reports at
 // exactly the same address, and a moment nothing else uses would sort the same
 // errors differently depending on whether the sink could stage.
-func (s *stagedWrite) play(ctx context.Context, w Writer) error {
+func (s *stagedWrite) play(ctx context.Context, w Writer, u Unsetter) error {
 	switch {
 	case s.forget:
-		return forgotten(ctx, w, s.comp)
+		return forgotten(ctx, u, s.comp)
 	case s.at != nil:
 		return ensured(ctx, w, s.at, s.p)
 	}
@@ -170,20 +175,13 @@ func (s *stagedWrite) play(ctx context.Context, w Writer) error {
 	return nil
 }
 
-// forgotten replays a composite's replacement, and says nothing to a plane that
-// cannot forget an address.
+// forgotten replays a composite's replacement.
 //
-// Silence is the whole difference from [ensured], and it is not an oversight
-// (ADR-0004). A container write is something the value has to say and a plane
-// that cannot spell it must refuse; an unset is about what the plane already
-// holds, which core cannot know, so a sink without the capability is additive
-// at a composite rather than a dump that fails.
-func forgotten(ctx context.Context, w Writer, at CompositeAddr) error {
-	u, ok := w.(Unsetter)
-	if !ok {
-		return nil
-	}
-
+// It takes the capability rather than asking for it, because by the time a
+// staged unset is replayed the question has already been answered: a schema
+// holding a composite was refused at the open against a writer with no
+// [Unsetter], so every writer that reaches here has one (ADR-0004).
+func forgotten(ctx context.Context, u Unsetter, at CompositeAddr) error {
 	if err := u.Unset(ctx, at); err != nil {
 		return fromDriver(momentWalk, at.Path(), err)
 	}
@@ -216,8 +214,13 @@ func ensured(ctx context.Context, w Writer, at Container, p Presence) error {
 func flush(ctx context.Context, w Writer, writes []stagedWrite) error {
 	errs := make([]error, 0, len(writes))
 
+	// Asked once for the whole replay rather than per staged unset. A missing
+	// one cannot arrive here at all, because the open refused every schema that
+	// holds a composite against a writer without it (ADR-0004).
+	u, _ := w.(Unsetter)
+
 	for i := range writes {
-		errs = append(errs, writes[i].play(ctx, w))
+		errs = append(errs, writes[i].play(ctx, w, u))
 	}
 
 	return join(errs...)

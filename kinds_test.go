@@ -322,3 +322,8 @@ func (s *kindsSink) Set(_ context.Context, addr LeafAddr, _ Value) error {
 }
 
 func (*kindsSink) Ensure(context.Context, Container, Presence) error { return nil }
+
+// Unset is what lets this sink be handed a schema holding a map at all: a plane
+// that cannot forget an address is refused at the open, and what this fixture is
+// about is a key the walk mints and not the capability check.
+func (*kindsSink) Unset(context.Context, CompositeAddr) error { return nil }

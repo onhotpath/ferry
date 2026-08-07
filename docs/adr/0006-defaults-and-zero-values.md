@@ -201,6 +201,15 @@ Merging a slice or a map would mean deciding what an absent index or an absent k
 > An unset is about what the plane already holds, which core cannot know anything about, so a missing `Unsetter` refuses nothing.
 > **Nothing else in the amendment moves**: deleting an address is still expressible, still a verb rather than a silence, and a `Null` at a container address still retracts the subtree.
 
+> **Corrected under [#306](https://github.com/onhotpath/ferry/issues/306): the correction above is withdrawn, and the amendment it corrected was right the first time.**
+>
+> As published, the block above reads "**a writer with no `Unsetter` is passed over in silence**", and it was written to bring this ADR into line with an interim amendment on [ADR-0004](0004-source-and-sink.md) that had itself never been ratified.
+> The write-session grammar the first design board settled says the opposite, and it is what the sentence it corrected already said: a schema that needs a retraction against a writer that lacks one refuses at the open, before any I/O.
+> [ADR-0004](0004-source-and-sink.md)'s own correction under the same issue restores the rule, states the predicate - the address set holds a composite, the opened writer implements no `Unsetter` - and records why the interim reading's ground dissolved once both shipped sinks implemented the capability.
+>
+> **So the amendment two blocks above stands as published**, "refused at open where the driver lacks it" included, and nothing else on this page moves: omission is still no statement, deletion is still a verb nobody reaches by accident, and a `Null` at a container address still retracts the subtree.
+> The asymmetry this ADR is built on survives too, restated where it belongs: what a value has to say at a container's own address depends on the value, so a missing `Ensurer` is refused at the address; whether a schema can need a retraction is the schema's own property, so a missing `Unsetter` is refused at the open.
+
 
 
 ### Absent and Null, per kind

@@ -14,23 +14,24 @@ import (
 // labels by proof and case, and case 3 is the only one that reports from more
 // than one method.
 const (
-	caseBindNo       = 2
-	caseContainerNo  = 3
-	caseGetErrorNo   = 4
-	caseChildrenNo   = 5
-	caseLifecycleNo  = 6
-	caseInjectiveNo  = 7
-	caseRetentionNo  = 8
-	caseDynamicNo    = 9
-	casePerRequestNo = 10
-	caseGoldenNo     = 11
-	caseNullNo       = 12
-	caseForeignNo    = 13
-	caseConcurrentNo = 14
-	caseSecondDumpNo = 15
-	caseEquivalentNo = 16
-	caseReplaceNo    = 17
-	casePreparedNo   = 18
+	caseBindNo          = 2
+	caseContainerNo     = 3
+	caseGetErrorNo      = 4
+	caseChildrenNo      = 5
+	caseLifecycleNo     = 6
+	caseInjectiveNo     = 7
+	caseRetentionNo     = 8
+	caseDynamicNo       = 9
+	casePerRequestNo    = 10
+	caseGoldenNo        = 11
+	caseNullNo          = 12
+	caseForeignNo       = 13
+	caseConcurrentNo    = 14
+	caseSecondDumpNo    = 15
+	caseEquivalentNo    = 16
+	caseReplaceNo       = 17
+	casePreparedNo      = 18
+	caseUnforgettableNo = 19
 )
 
 // The suite's own fixtures, and their addresses.

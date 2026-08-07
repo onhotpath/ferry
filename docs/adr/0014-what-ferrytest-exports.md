@@ -626,6 +626,21 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 > **It is skipped, out loud, twice over.** A sink declaring neither capability is obliged nothing and is not asked; and a plane that takes both keys renders no two of them to one key, which is the ordinary answer for a tree plane and for any flat plane that folds nothing, so there is no refusal to hold it to.
 > **No plane in this repository runs it to a conclusion, and the case ships anyway.** `driver/kv` and `driver/yaml` stage and fold nothing, `driver/env` and `driver/http` have no sink, and `MemPlane`'s key function is the identity - so the case is written against the property rather than against an implementor, which is what a conformance suite is for when the reachable driver is a third party's.
 
+> **Amended under [#306](https://github.com/onhotpath/ferry/issues/306): the list is nineteen cases, and the nineteenth is case 17 scaled the other way round.**
+>
+> [ADR-0004](0004-source-and-sink.md)'s correction under the same issue restores the ratified rule that a schema holding a composite is refused at the open against a writer with no `Unsetter`.
+> Case 17 runs where the capability is declared; nothing ran where it is not, and what happens there is now a refusal rather than a dump that accumulates.
+>
+> 19. **A sink that cannot forget an address is refused a schema holding one.** For a sink whose opened writer does not declare `ferry.Unsetter`, a dump of a mapping is refused at the open, before any write ([ADR-0004](0004-source-and-sink.md)).
+>
+> **It is skipped, out loud, for every sink that does declare the capability**, which is the same scaling as case 17 with the condition inverted, so the two are never both silent and never both run.
+> A write half that could not be opened skips as well, and says which cases own an open that fails: reading a failed open as a plane that cannot forget would report the wrong defect.
+> **What it fails is a sink whose declaration follows the address set** - one handing back a writer with the capability for one schema and without it for another - because what a single open declares would then answer for nothing but that open.
+> Otherwise the case is a statement rather than a verdict: it names, once, that this plane carries schemas of leaves and sections and that a slice or a map needs a capability it has not declared.
+>
+> **What it deliberately does not do is rescale the cases that dump the suite's composite-bearing fixtures.** Cases 1, 3, 5, 9, 11, 12 and 18 dump a slice or a map, so against such a sink they now report the open's refusal too, and whether they should instead skip is a question about what this suite certifies for a plane that can hold no composite at all.
+> That is a decision this amendment does not take.
+
 > **Amended under [#201](https://github.com/onhotpath/ferry/issues/201): a run says what it scaled to, and the description gains nothing.**
 >
 > #201 records that `Instance` carries capabilities as optional fields, that three of its four members mean a capability by being nil or not, and that a skipped case is indistinguishable from a passing one for any reporter that is not `*testing.T`.
@@ -833,7 +848,7 @@ That is weaker than a compile-time signal and it is the only shape available, be
 > Nothing here is a new decision, and no case, name or interface moves: what moves is the arithmetic.
 >
 > - **The optional interfaces are eight, not six.** The bullet above and the #201 amendment both read "six": `Releaser`, `Committer`, `Prober`, `Enumerator`, `Ensurer` and `Unsetter`. [ADR-0019](0019-the-concurrency-model.md) added `Concurrent`, which is discovered by assertion on the reader exactly like the other six, and [#135](https://github.com/onhotpath/ferry/issues/135) added `Preparer`, discovered on the writer the same way; `ferrytest`'s own scaling line names all eight.
-> - **The `Driver` list is eighteen cases, not fifteen.** The bullet above ends its parenthetical at fifteen; the amendments after it - the concurrency model's, [#220](https://github.com/onhotpath/ferry/issues/220)/[#221](https://github.com/onhotpath/ferry/issues/221)'s and [#135](https://github.com/onhotpath/ferry/issues/135)'s - carry the list to sixteen, seventeen and then eighteen, and eighteen is what ships.
+> - **The `Driver` list is nineteen cases, not fifteen.** The bullet above ends its parenthetical at fifteen; the amendments after it - the concurrency model's, [#220](https://github.com/onhotpath/ferry/issues/220)/[#221](https://github.com/onhotpath/ferry/issues/221)'s, [#135](https://github.com/onhotpath/ferry/issues/135)'s and [#306](https://github.com/onhotpath/ferry/issues/306)'s - carry the list to sixteen, seventeen, eighteen and then nineteen, and nineteen is what ships.
 > - **The exported-name count is the surface table's**, and the first bullet of this section - "Nineteen exported names in one package", raised to twenty in its parenthetical - predates [#175](https://github.com/onhotpath/ferry/issues/175)'s re-total. The table under [The surface](#the-surface) and its amendments are the authority, and this section states no figure of its own.
 > - **The registrant's sample no longer compiles as printed.** It reads `reg := ferry.NewRegistry(...)` in one assignment, and [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md), amended under [#299](https://github.com/onhotpath/ferry/issues/299), makes `NewRegistry` return `(*Registry, error)` and puts the panicking spelling under `MustRegistry`. A test writes `reg := ferry.MustRegistry(...)` and stays the length this ADR argues it has to be; a caller that wants the report writes the two-value form and checks it.
 

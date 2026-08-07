@@ -217,6 +217,10 @@ func (w writeOnceWriter) Ensure(ctx context.Context, addr ferry.Container, p fer
 	return ensureThrough(ctx, w.inner, addr, p)
 }
 
+func (w writeOnceWriter) Unset(ctx context.Context, addr ferry.CompositeAddr) error {
+	return unsetThrough(ctx, w.inner, addr)
+}
+
 // TestDriverCase15SkipsASinkWhoseFirstDumpFailed is the attribution rule, which
 // is what keeps one defect from being reported by three cases.
 //
@@ -303,6 +307,10 @@ func (w droppingWriter) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Va
 
 func (w droppingWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error {
 	return ensureThrough(ctx, w.inner, addr, p)
+}
+
+func (w droppingWriter) Unset(ctx context.Context, addr ferry.CompositeAddr) error {
+	return unsetThrough(ctx, w.inner, addr)
 }
 
 // TestDriverCase9ReportsASinkThatCannotSpellOneDynamicKey is the hole case 8

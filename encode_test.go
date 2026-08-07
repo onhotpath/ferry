@@ -473,6 +473,12 @@ type askedWriter struct{ s *askedSink }
 
 func (askedWriter) Set(context.Context, LeafAddr, Value) error { return nil }
 
+// Unset takes the call and does nothing, which is what a fixture about the
+// realised set owes the open: a schema holding a mapping is refused there
+// against a writer that cannot forget an address, and this one is about what
+// Prepare is handed rather than about that rung.
+func (askedWriter) Unset(context.Context, CompositeAddr) error { return nil }
+
 func (w askedWriter) Prepare(_ context.Context, addrs []Path) error {
 	w.s.asked = append(w.s.asked, addrs)
 

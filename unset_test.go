@@ -3,6 +3,7 @@ package ferry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -152,27 +153,80 @@ func TestAnEmptyCompositeIsForgottenBeforeItIsNulled(t *testing.T) {
 	})
 }
 
-// TestAPlaneThatCannotForgetIsRefusedNothing is the one place this capability
-// differs from [Ensurer], and the difference is deliberate.
+// TestASchemaHoldingACompositeIsRefusedAtTheOpen is the other half of the
+// clause: a dump that cannot replace is refused before it writes anything.
 //
-// What a value has to say at a container's own address must be spellable, so a
-// plane that cannot spell it refuses the dump. What a plane already holds is
-// beyond core's knowledge, so a sink with no Unsetter is additive at a composite
-// rather than a dump that fails - which is what lets a sink replacing its whole
-// plane on every dump implement nothing.
-func TestAPlaneThatCannotForgetIsRefusedNothing(t *testing.T) {
+// The refusal is at the open because that is where both halves of the question
+// are answered - the schema has held a composite since it compiled, and the
+// writer is the first thing core sees that says whether the plane can forget an
+// address. It is addressed at the composite, so the message names the field
+// whose earlier members would have been kept.
+//
+// It is asked of a staging sink too, and that is the point of the second
+// subtest: a plane that resolves what to remove at Commit still says so by
+// implementing Unsetter, which is what both shipped sinks do. Committer is not
+// an exemption from it.
+func TestASchemaHoldingACompositeIsRefusedAtTheOpen(t *testing.T) {
 	t.Parallel()
 
-	sink := newStoreSink(false)
+	t.Run("a sink that does not stage", func(t *testing.T) {
+		t.Parallel()
+		refusedAtOpen(t, newStoreSink(false))
+	})
+
+	t.Run("a sink that stages", func(t *testing.T) {
+		t.Parallel()
+		refusedAtOpen(t, newStoreSink(true))
+	})
+}
+
+// refusedAtOpen dumps a schema holding two composites into a plane that cannot
+// forget an address, and reads the refusal.
+func refusedAtOpen(t *testing.T, sink *storeSink) {
+	t.Helper()
 
 	v := shrinkable{Tags: []string{"a"}, Labels: map[string]string{"k": "v"}, Leaf: "x"}
-	if err := Dump(t.Context(), v, sink); err != nil {
-		t.Fatalf("a dump into a sink that cannot forget an address was refused: %v", err)
+
+	err := Dump(t.Context(), v, sink)
+	if err == nil {
+		t.Fatal("a dump of a schema holding a composite into a sink that cannot forget an address succeeded")
 	}
 
-	if got := len(sink.accepted); got != 3 {
-		t.Errorf("the plane took %d writes, want 3: a sink with no Unsetter is asked for the same writes as "+
-			"one with it", got)
+	if !errors.Is(err, ErrPlane) {
+		t.Errorf("the refusal %v is not a plane refusal", err)
+	}
+
+	if got := fmt.Sprintf("%+v", err); !strings.Contains(got, "open, plane error") {
+		t.Errorf("the refusal reads %s, and it has to be the open's", got)
+	}
+
+	if !strings.Contains(err.Error(), "/labels") || !strings.Contains(err.Error(), "ferry.Unsetter") {
+		t.Errorf("the refusal %v names neither the composite it is about nor the capability it wanted", err)
+	}
+
+	if len(sink.attempts) != 0 {
+		t.Errorf("the plane was asked for %v, want nothing: a refusal at the open is before any write",
+			sink.attempts)
+	}
+}
+
+// TestASchemaHoldingNoCompositeNeedsNoUnsetter is the boundary the refusal above
+// has to have: the capability is wanted where the schema can need it and nowhere
+// else, so a type of leaves and sections dumps into the same plane.
+func TestASchemaHoldingNoCompositeNeedsNoUnsetter(t *testing.T) {
+	t.Parallel()
+
+	type flat struct {
+		Leaf string `ferry:"leaf"`
+	}
+
+	sink := newStoreSink(false)
+	if err := Dump(t.Context(), flat{Leaf: "x"}, sink); err != nil {
+		t.Fatalf("a schema with no composite was refused a plane that cannot forget an address: %v", err)
+	}
+
+	if got := len(sink.accepted); got != 1 {
+		t.Errorf("the plane took %d writes, want 1", got)
 	}
 }
 

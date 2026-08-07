@@ -2,6 +2,7 @@ package ferrytest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -780,6 +781,21 @@ func (w brokenWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.
 	}
 
 	return ensureThrough(ctx, w.inner, addr, p)
+}
+
+// Unset forwards for the reason Ensure does: the shell drops no capability the
+// plane underneath has, so it fails at the step it was built to fail at.
+func (w brokenWriter) Unset(ctx context.Context, addr ferry.CompositeAddr) error {
+	if w.err != nil {
+		return w.err
+	}
+
+	u, ok := w.inner.(ferry.Unsetter)
+	if !ok {
+		return errors.New("the plane underneath cannot forget an address")
+	}
+
+	return u.Unset(ctx, addr)
 }
 
 // TestTheCodecCasesReportAWalkThatFailed is the arm every case has and no

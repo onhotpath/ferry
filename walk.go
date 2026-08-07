@@ -1101,6 +1101,12 @@ type dumpTo struct {
 	// direction and without a buffer the whole walk shares.
 	w Writer
 
+	// u is w's retraction capability, resolved once at the walk's start rather
+	// than at each composite. It is nil exactly where w is, and where w is a
+	// writer that cannot forget an address - which is a state no schema holding
+	// a composite reaches, because the open refused it there (ADR-0004).
+	u Unsetter
+
 	// addrs is the address set the type determined. An address minted from a
 	// map key or a sequence index is checked against it and against what the
 	// rest of the walk realised, which is ADR-0003's dynamic tier: the check is
@@ -1203,16 +1209,18 @@ func (d dumpTo) ensure(ctx context.Context, at Container, p Presence) (outcome, 
 // whose members wrote nothing has still written nothing, and an unset can never
 // materialise a section above it (ADR-0006).
 //
-// A writer with no [Unsetter] is passed over in silence, which is the one place
-// this differs from [dumpTo.ensure] and is the same distinction [forgotten]
-// records: what the value has to say must be spellable, and what the plane
-// already holds is beyond core's knowledge.
+// It never asks whether the plane can forget an address, which is the one place
+// this differs from [dumpTo.ensure]. What the value has to say at a container's
+// own address depends on the value, so a missing [Ensurer] is knowable no
+// earlier than the address it is needed at; whether a schema can need a
+// retraction is the schema's own property, so a writer with no [Unsetter] was
+// refused at the open and never reaches here (ADR-0004).
 func (d dumpTo) unset(ctx context.Context, at CompositeAddr) (outcome, error) {
 	if d.w == nil {
 		return outcome{writes: []stagedWrite{{forget: true, comp: at}}}, nil
 	}
 
-	return outcome{}, forgotten(ctx, d.w, at)
+	return outcome{}, forgotten(ctx, d.u, at)
 }
 
 // replacing opens a composite's own writes with the unset that makes the rest of
@@ -1232,6 +1240,15 @@ func unspellableMsg(p Presence, w Writer) string {
 	return fmt.Sprintf("the value says this container is %s, and %T cannot spell a container at its own "+
 		"address: a sink that does not implement ferry.Ensurer writes the addresses beneath a container "+
 		"and never the container itself, which is a property of that plane rather than of this schema", p, w)
+}
+
+// unforgettableMsg refuses, at the open, a dump of a schema holding a composite
+// against a plane that cannot forget an address, and is the retraction half of
+// [unspellableMsg]: the same two capabilities, worded once each.
+func unforgettableMsg(w Writer) string {
+	return fmt.Sprintf("this schema holds a composite at this address and a dump replaces one, and %T cannot "+
+		"forget an address: a sink that does not implement ferry.Unsetter would keep whatever an earlier "+
+		"dump left under this address, which loads back as a value nobody wrote", w)
 }
 
 // atNullable writes a null where the pointer is nil and descends where it is

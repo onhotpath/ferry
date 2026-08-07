@@ -186,6 +186,15 @@ type boundSink struct {
 	// batches at Commit can spend it there, which is the only place a dump has
 	// left to spend anything (ADR-0019).
 	budget int
+
+	// forget is the first composite this schema determines and whether it
+	// determines one at all, which is the whole of "does a dump of this type
+	// need a retraction" (ADR-0004). It is decided once, off the address set,
+	// because the answer is the schema's and not the value's: a dump replaces
+	// every composite it speaks about, so a type holding one needs the
+	// capability whatever this call's value turns out to hold.
+	forget  CompositeAddr
+	forgets bool
 }
 
 // newBoundSink is [BindSink] with the type as a value.
@@ -217,7 +226,34 @@ func newBoundSink(t reflect.Type, sink Sink, opts []Option) (*boundSink, error) 
 		return nil, driverNil(momentBind, nilOpenWriterMsg)
 	}
 
-	return &boundSink{sch: sch, open: open, budget: cfg.budget}, nil
+	at, forgets := sch.addrs.firstComposite()
+
+	return &boundSink{sch: sch, open: open, budget: cfg.budget, forget: at, forgets: forgets}, nil
+}
+
+// replaceable refuses, at the open and before anything is written, a schema that
+// needs a retraction against a writer that cannot make one (ADR-0004, ADR-0006).
+//
+// The moment is the open because both halves of the question are answered there
+// and neither is answered earlier: the schema knows at compile time that it
+// holds a composite, and the writer is the value whose method set says whether
+// the plane can forget an address, which Bind never sees. Failing here costs the
+// plane nothing, where failing mid-walk has already written part of a dump that
+// was never going to be a replacement.
+//
+// It is addressed at a composite rather than at the plane, because the address
+// is what makes the message actionable: it names the field whose members the
+// plane would have kept.
+func (b *boundSink) replaceable(w Writer) error {
+	if !b.forgets {
+		return nil
+	}
+
+	if _, ok := w.(Unsetter); ok {
+		return nil
+	}
+
+	return newError(momentOpen, ErrPlane, b.forget.Path(), unforgettableMsg(w))
 }
 
 // dump is the per-dump half: refuse a nil root, open, encode and write, commit,
@@ -245,6 +281,10 @@ func (b *boundSink) dump(ctx context.Context, v reflect.Value) (err error) {
 	}
 
 	defer func() { err = join(err, released(w)) }()
+
+	if err := b.replaceable(w); err != nil {
+		return err
+	}
 
 	walked := written(ctx, w, b.sch, root)
 	if walked == nil {

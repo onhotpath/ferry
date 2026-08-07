@@ -930,6 +930,10 @@ func (w pickyWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.P
 	return ensureThrough(ctx, w.inner, addr, p)
 }
 
+func (w pickyWriter) Unset(ctx context.Context, addr ferry.CompositeAddr) error {
+	return unsetThrough(ctx, w.inner, addr)
+}
+
 // valueFor is the Value a container-level write carried when it was a Set, so
 // that a predicate written about a kind still reads. A presence carries no
 // value of its own, and no predicate here matches the zero one.
@@ -942,6 +946,19 @@ func valueFor(p ferry.Presence) ferry.Value {
 }
 
 // ensureThrough forwards a container write to a writer that can take one.
+// unsetThrough is [ensureThrough] for the retraction half: a decorator over a
+// plane that can forget an address has to carry the capability through, because
+// core refuses at the open a schema holding a composite against a writer that
+// does not declare it.
+func unsetThrough(ctx context.Context, w ferry.Writer, addr ferry.CompositeAddr) error {
+	u, ok := w.(ferry.Unsetter)
+	if !ok {
+		return errors.New("the plane underneath cannot forget an address")
+	}
+
+	return u.Unset(ctx, addr)
+}
+
 func ensureThrough(ctx context.Context, w ferry.Writer, addr ferry.Container, p ferry.Presence) error {
 	e, ok := w.(ferry.Ensurer)
 	if !ok {
@@ -994,6 +1011,10 @@ func (w unclosableWriter) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.
 
 func (w unclosableWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error {
 	return ensureThrough(ctx, w.inner, addr, p)
+}
+
+func (w unclosableWriter) Unset(ctx context.Context, addr ferry.CompositeAddr) error {
+	return unsetThrough(ctx, w.inner, addr)
 }
 
 func (w unclosableWriter) Close() error { return w.err }
