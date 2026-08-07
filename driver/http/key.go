@@ -44,6 +44,9 @@ var ErrRepeated = errors.New("http: this name occurs more than once")
 // would be lost. Only an overlap is refused: ?tags=a&tags=b&tags.2=z extends the
 // sequence rather than contradicting it, and loads as three elements.
 //
+// A request claiming several positions twice is one refusal and not several, and
+// it names the lowest of them, so the same request always reads the same way.
+//
 // It wraps [ferry.ErrPlane] and stays reachable under ferry's wrapper.
 var ErrTwoSpellings = errors.New("http: this name carries a sequence in two spellings at once")
 
@@ -205,7 +208,9 @@ func atContainer(n int) error {
 }
 
 // twoSpellings states the refusal an overlap between the two sequence spellings
-// earns, and names the position both of them spell.
+// earns, and names the position both of them spell. Where more than one position
+// is claimed twice, [reader.fromNames] hands over the lowest, so the text does
+// not move between runs of one request.
 //
 // The position is structure rather than text the plane supplied, so ADR-0011's
 // rule permits it, and it is the one fact this refusal cannot get from the
