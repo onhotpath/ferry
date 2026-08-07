@@ -199,6 +199,34 @@ That is a programming error at a program's birth, in the same family as `regexp.
 > The change is source-compatible for a caller who passes codecs one by one, which is every spelling this ADR shows.
 > It is not source-compatible for a caller who spreads a `[]ferry.Codec`, since Go does not convert a slice's element type: such a call site changes its slice to `[]ferry.Registration`, and the only ones in this repository were inside `ferrytest`'s own probes.
 
+> **Amended under [#299](https://github.com/onhotpath/ferry/issues/299): a panic lives under a `Must` name and nowhere else, so `NewRegistry` returns its refusals.**
+>
+> As published this section reads **a nil half panics at composition**, and the amendment above it generalises that to every refusal: "`NewRegistry` has one result, so every refusal it makes is a panic", argued in `regexp.MustCompile`'s family against "an error return on a line nobody checks".
+> Nine sites shipped on that argument: the nil-registration arm and the four `add` refusals, `textCodec`'s value-receiver `UnmarshalText` refusal, `NullValue`'s three, and the declaration error `keyDecl` re-raised.
+>
+> The ruling, and it is the owner's:
+>
+> > **`func NewRegistry(items ...Registration) (*Registry, error)`**, reporting every item that was wrong rather than the first.
+> > **`func MustRegistry(items ...Registration) *Registry`** panics with exactly what that returns.
+> > **No exported constructor panics.** A refusal a constructor finds eagerly is carried in the registration it returns, and surfaces at the build.
+>
+> What moved is where the panic lives, not what is refused: the list of refusals is unchanged, each is still an `*ferry.Error` of `ErrSchema`'s class at the register moment, and construction is still the freeze.
+>
+> The argument as published had the shape of the choice wrong.
+> `regexp.MustCompile` is not the sole spelling of its own idiom; it is the panicking half of a pair whose other half is `regexp.Compile`, and Go's convention is that the `Must` name is what carries the panic.
+> "One result, therefore a panic" reasons from a signature this ADR chose to a property it then defended, and the honest reading is that the signature was the decision.
+> ferry's own error model already answers the same question the other way for a caller-supplied list: `newConfig` reports **every** `Option` that was wrong, and a codec list is the same kind of thing.
+> The cost this ADR named - "a caller cannot build a registry from a codec set it does not already trust" - is now paid off rather than accepted, and the case it was dismissed on, a package-level var, keeps its one-line spelling under `MustRegistry`.
+>
+> **A constructor's own refusal becomes inert rather than eager-or-nothing.**
+> A constructor has one result and it is a registration, so there is nowhere to put an error and a second result would put a `, err` on every line of a codec list.
+> It carries the refusal in the value instead, and `NewRegistry` opens it - which is exactly what `TagKey` already does with a tag key it checked eagerly and cannot report until an `Option` list is resolved.
+> The check still happens where the mistake was written, which was the whole of what the panic bought.
+>
+> **The refusals aggregate.**
+> As published there was exactly one report because a panic can only be raised once; there is no such limit on a return, so a list holding two bad codecs reports both, ordered by ADR-0011's own sort and therefore identical run to run.
+> A registry is built or it is not: nothing half succeeds, and the constructor returns a nil `*Registry` on any refusal.
+
 ### `NullValue` is one modifier over any registration
 
 A registration says how a `T` crosses the boundary.
@@ -257,7 +285,7 @@ It is pinned by its own test and it becomes a `ferrytest` case, which is [ADR-00
 - **`NewRegistry` is the whole registry API and there are no mutators**, so the mutable window that [#227](https://github.com/onhotpath/ferry/issues/227) and [#262](https://github.com/onhotpath/ferry/issues/262) live in is gone rather than guarded.
   This supersedes [ADR-0009](0009-typed-codec-registration.md)'s freeze mechanics and keeps every argument it made for a long-lived, scoped registry.
   A builder was refused because a builder is the window with a type in front of it.
-- **A nil half panics at the composition site**, which is a departure from ferry's own "accessors return errors and never panic" and is deliberately scoped to a program's construction rather than to its boundary.
+- **A nil half is refused at the composition site**, which is where the mistake was written, and the refusal is reported by the build rather than raised: under [#299](https://github.com/onhotpath/ferry/issues/299) `NewRegistry` returns its refusals and `MustRegistry` is the one function in ferry that panics, so ferry's own "return errors and never panic" holds everywhere else without a scoped exception.
 - **`NullValue` is the escape hatch for null-as-a-value-of-`T`**, one modifier over any registration, with `isNull(load())` as a documented law and a `ferrytest` case.
   The cost is that it merges `null` and the zero by design, which is exactly its contract, and `*T` remains the way to keep them apart.
 - **This ADR replaces a shipped surface rather than extending one**, so nothing here lands piecemeal: the `Value` layout, the constructors and the registry are one change with one set of proving tests, and the issues it retires close on that merge.

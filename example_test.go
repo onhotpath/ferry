@@ -220,7 +220,7 @@ type Peers struct {
 func ExampleWithRegistry() {
 	fmt.Println(errors.Is(ferry.Compile[Peers](), ferry.ErrSchema))
 
-	reg := ferry.NewRegistry(ferry.StringText[netip.Addr]().AsMapKey())
+	reg := ferry.MustRegistry(ferry.StringText[netip.Addr]().AsMapKey())
 
 	fmt.Println(ferry.Compile[Peers](ferry.WithRegistry(reg)))
 	// Output:
@@ -321,7 +321,7 @@ type Documented struct {
 // none of them. A driver reads the same view at its own Bind, through
 // [ferry.AddressSet.Extension], so nothing is plumbed through the caller.
 func ExampleWithTagKeys() {
-	reg := ferry.NewRegistry(ferry.WithTagKeys(ferry.KeyExtension{
+	reg := ferry.MustRegistry(ferry.WithTagKeys(ferry.KeyExtension{
 		TagKey: "docs",
 		Words:  []ferry.Word{{Name: "desc", TakesValue: true}},
 	}))

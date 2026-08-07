@@ -828,6 +828,12 @@ It is still not recovered: a panic is a bug, not a failure mode, and converting 
 
 **ferry itself never panics.**
 ADR-0004 already required it of `Value`'s accessors, on the ground that ferry's callers are third-party driver authors.
+
+> **Amended under [#299](https://github.com/onhotpath/ferry/issues/299): the rule holds, with `Must` named as the one exception it always had.**
+>
+> As published this rule reads flatly, and the registration machinery [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md) shipped broke it in nine places.
+> Those are gone: `ferry.NewRegistry` returns its refusals, and `ferry.MustRegistry` panics with exactly what that would have returned.
+> The rule now reads **ferry itself never panics outside a `Must`-named function**, which is Go's own convention for where a panic is allowed to live, and `MustRegistry` is the whole of that family.
 ADR-0009 measured two live violations, an `interface conversion` on a nil interface and a `reflect.Value.Set` on a zero `Value`, and this is the rule they are fixed against.
 
 > **Amended under [#254](https://github.com/onhotpath/ferry/issues/254): the first rule is reversed for user code, narrowly, and the second is unchanged.**

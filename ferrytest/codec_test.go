@@ -32,7 +32,7 @@ func TestCodecIsGreenOverARegistryThatIsRight(t *testing.T) {
 // against this package's own probes and are unaffected, which is the whole point
 // of where they get their types from.
 func TestCodecIsGreenOverAnEmptyRegistry(t *testing.T) {
-	for name, reg := range map[string]*ferry.Registry{"empty": ferry.NewRegistry(), "nil": nil} {
+	for name, reg := range map[string]*ferry.Registry{"empty": ferry.MustRegistry(), "nil": nil} {
 		t.Run(name, func(t *testing.T) {
 			c := &capture{}
 
@@ -130,7 +130,7 @@ type wandering string
 func TestCodecReportsThroughT(t *testing.T) {
 	c := &capture{}
 
-	ferrytest.Codec(c, ferry.NewRegistry())
+	ferrytest.Codec(c, ferry.MustRegistry())
 
 	if c.helpers == 0 {
 		t.Error("Codec never called Helper, so every failure it reports is attributed to a line in ferrytest")
@@ -147,14 +147,14 @@ func TestCodecReportsThroughT(t *testing.T) {
 func TestCodecRefusesAnOptionListItCannotHonour(t *testing.T) {
 	cases := map[string]ferry.Option{
 		"a tag key":      ferry.TagKey("cfg"),
-		"a registry too": ferry.WithRegistry(ferry.NewRegistry()),
+		"a registry too": ferry.WithRegistry(ferry.MustRegistry()),
 	}
 
 	for name, opt := range cases {
 		t.Run(name, func(t *testing.T) {
 			c := &capture{}
 
-			ferrytest.Codec(c, ferry.NewRegistry(), opt)
+			ferrytest.Codec(c, ferry.MustRegistry(), opt)
 
 			if only := onlyLine(t, c); !strings.Contains(only, "unable to compile the struct it dumps a probe in") {
 				t.Errorf("report = %q, want the Option list named once", only)

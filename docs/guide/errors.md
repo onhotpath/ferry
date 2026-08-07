@@ -177,7 +177,8 @@ A sink implementing `ferry.Committer` is exempt, because staging already gives i
 
 ## Panics
 
-ferry itself never panics, and ferry never recovers a panic from third-party code.
+ferry itself never panics outside a `Must`-named function, and ferry never recovers a panic from third-party code.
+`ferry.MustRegistry` is the whole of that family: it panics with the `*ferry.Error` `ferry.NewRegistry` would have returned, so a caller who recovers one reads the ordinary report.
 A driver or a codec that panics panics through ferry, with its own stack intact.
 
 `ferry.ErrorAt` returns `error` and not `*Error`, which is what closes the typed-nil trap: there is no concrete return type to smuggle a nil through, so `return ferry.ErrorAt(addr, f())` is safe to write.

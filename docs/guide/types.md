@@ -157,7 +157,7 @@ The named-duration case is the one with a one-line fix, because a named type is 
 ```go
 type Poll time.Duration
 
-var registry = ferry.NewRegistry(ferry.DurationLike[Poll]())
+var registry = ferry.MustRegistry(ferry.DurationLike[Poll]())
 ```
 
 Matching on the underlying type instead would capture every ordinary `type Port int`, which is why the remedy is `DurationLike` rather than a wider rule.
@@ -321,7 +321,7 @@ A registered codec claims a type ferry does not own, and the guarantee about tha
 Registering without proving is permitted and forfeits the guarantee.
 
 ```go
-var registry = ferry.NewRegistry(
+var registry = ferry.MustRegistry(
 	ferry.StringText[netip.AddrPort]().AsMapKey(),
 	ferry.DurationLike[PollInterval](),
 	ferry.NumberValue(encodeBigInt, decodeBigInt),
@@ -346,14 +346,15 @@ A registration is named after the kind it writes, so there is no kind argument, 
 Only `NumberKey`, `StringKey`, `NumberText` and `StringText` return the type carrying `.AsMapKey()`, so a bytes-keyed map is a build error rather than a refusal.
 
 Each constructor takes both halves at once, so a half pair, two halves swapped and two halves over different types are build errors rather than run-time refusals.
-A nil half panics at the constructor.
+A nil half is found at the constructor and refused when the registry is built.
 
 `NewRegistry` runs each codec against the zero value of its type before accepting it.
 That catches one class of wrong codec out of three, and it is the class that matters: the one-line registration a user is most likely to write is not an inverse at the zero value for `netip.Addr`, `netip.AddrPort` and `netip.Prefix`.
 What it does not catch is a lossy codec and a constant codec, and those are what a proof in `ferrytest` is for.
 
 A registry is complete when it is built.
-There are no mutators, so there is no window in which one is reachable and incomplete and no ordering rule between building it and using it, and every refusal above is a panic at construction rather than an error on a line nobody checks.
+There are no mutators, so there is no window in which one is reachable and incomplete and no ordering rule between building it and using it, and every refusal above is what `NewRegistry` returns.
+`MustRegistry` is the same constructor for a package-level var, and panics rather than returning: panics live under a `Must` name and nowhere else.
 Core's own type set is always underneath, so registering one type never costs you `string`, `int`, `bool` or `time.Duration`; a codec claiming a type core owns is refused like any duplicate.
 
 ### Proving your codec
@@ -362,7 +363,7 @@ Three calls, and a green `Codec` on its own is not enough:
 
 ```go
 func TestMyCodecs(t *testing.T) {
-	reg := ferry.NewRegistry(ferry.StringText[netip.Addr]().AsMapKey())
+	reg := ferry.MustRegistry(ferry.StringText[netip.Addr]().AsMapKey())
 
 	proofs := append(ferrytest.CoreTypes(), ferrytest.Type("netip.Addr", ferrytest.Eq[netip.Addr],
 		ferrytest.At(netip.MustParseAddr("192.0.2.1"), ferry.String("192.0.2.1")),

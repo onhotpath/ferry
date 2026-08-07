@@ -341,10 +341,10 @@ func TestANullPolicyThatPanicsIsFencedLikeAnyOtherCodec(t *testing.T) {
 func TestANullPolicyOverNoRegistrationIsRefused(t *testing.T) {
 	t.Parallel()
 
-	mustRefuseAtConstruction(t, func() {
+	mustRefuseAtConstruction(t, []Registration{
 		NullValue[plainCount](nil,
 			func() (plainCount, error) { return 0, nil },
-			func(c plainCount) bool { return c == 0 })
+			func(c plainCount) bool { return c == 0 }),
 	}, "was given no registration to wrap")
 }
 
@@ -362,21 +362,19 @@ func TestANullPolicyOverNoRegistrationIsRefused(t *testing.T) {
 func TestANullPolicyOverAKeyRegistrationIsRefused(t *testing.T) {
 	t.Parallel()
 
-	mustRefuseAtConstruction(t, func() {
+	mustRefuseAtConstruction(t, []Registration{
 		NullValue(
 			StringKey(countText, parseCount).AsMapKey(),
 			func() (plainCount, error) { return 0, nil },
-			func(c plainCount) bool { return c == 0 })
+			func(c plainCount) bool { return c == 0 }),
 	}, "may not be grafted onto a registration declared usable as a map key")
 
 	// The same policy over the same codec without the claim is legal, which is
 	// what makes the refusal about the combination rather than about either half.
-	if err := refusalFrom(func() {
-		NewRegistry(NullValue(
-			StringValue(countText, parseCount),
-			func() (plainCount, error) { return 0, nil },
-			func(c plainCount) bool { return c == 0 }))
-	}); err != nil {
+	if err := refusalFrom(NullValue(
+		StringValue(countText, parseCount),
+		func() (plainCount, error) { return 0, nil },
+		func(c plainCount) bool { return c == 0 })); err != nil {
 		t.Errorf("the same policy over a registration that is not a key was refused: %+v", err)
 	}
 }

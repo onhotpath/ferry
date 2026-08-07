@@ -63,7 +63,7 @@ Nothing in this ADR may land before that is fixed, and it is worth fixing regard
 ### Declarations register at `NewRegistry`, beside the codecs
 
 > ```go
-> var Registry = ferry.NewRegistry(
+> var Registry = ferry.MustRegistry(
 >     ferry.NumberText[big.Int](),
 >     ferry.WithTagKeys(
 >         yamlext.Extension(),   // ferry.KeyExtension{TagKey: "yamlext", Words: ...}
@@ -95,6 +95,11 @@ Nothing in this ADR may land before that is fixed, and it is worth fixing regard
 > A field under a slice or a map is the same case for [ADR-0003](0003-how-a-leaf-addresses-a-plane.md)'s reason - what is compiled there is an address shape, which joins no address set - so its words are held to the declaration and recorded nowhere, which is what "a driver sees extension data only for addresses it was bound to" means when the two rules meet.
 >
 > `Word`'s boolean field shipped as `TakesValue`, not `TakesVal` as first published, and every snippet above is corrected to match.
+
+> **Amended under [#299](https://github.com/onhotpath/ferry/issues/299): the package-level var above is spelled `ferry.MustRegistry`.**
+>
+> As published the snippet reads `var Registry = ferry.NewRegistry(...)`, which no longer compiles: [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md)'s constructor returns `(*Registry, error)` now, and `MustRegistry` is the panicking half a `var` declaration has to use.
+> What a declaration is refused for, and the `*ferry.Error` it is refused with, are unchanged; a declaration's refusals are simply returned beside the codecs' rather than raised.
 
 The registry is already the **outer level of the schema cache**, so a declaration joins the cache key with no new machinery.
 [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md)'s construction-is-the-freeze applies here too: the declarations are complete at the registry's birth and there is no window in which they are not.

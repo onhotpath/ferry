@@ -16,19 +16,17 @@ import (
 // per test because a registry is complete at birth and a registration claims its
 // type only within one registry - so two tests over one type cannot share.
 //
-// [ferry.NewRegistry] refuses by panicking, having no error to return, and a
-// probe this package can no longer register is a change to core's rules rather
+// A probe this package can no longer register is a change to core's rules rather
 // than a failure of the test that names it.
 func registryWith(t *testing.T, codecs ...ferry.Registration) *ferry.Registry {
 	t.Helper()
 
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("registering the probe: %v", r)
-		}
-	}()
+	reg, err := ferry.NewRegistry(codecs...)
+	if err != nil {
+		t.Fatalf("registering the probe: %v", err)
+	}
 
-	return ferry.NewRegistry(codecs...)
+	return reg
 }
 
 // addrProof discharges netip.Addr, which is the type ADR-0014's registrant call

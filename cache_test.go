@@ -85,7 +85,7 @@ func addressesOf(t *testing.T, a *AddressSet) []string {
 func TestOneTypeUnderTwoTagKeysIsTwoEntries(t *testing.T) {
 	t.Parallel()
 
-	reg := NewRegistry()
+	reg := MustRegistry()
 	ferryPlane, libPlane := newPlane(map[Path]Value{}), newPlane(map[Path]Value{})
 
 	if _, err := Load[cacheKeyed](t.Context(), planeSource{p: ferryPlane}, WithRegistry(reg)); err != nil {
@@ -126,7 +126,7 @@ func TestTwoRegistriesThatDisagreeAreTwoEntries(t *testing.T) {
 	t.Parallel()
 
 	value := cacheIntervalConf{Poll: cacheInterval(90 * time.Second)}
-	plain, timed := NewRegistry(), registryWith(t, DurationLike[cacheInterval]())
+	plain, timed := MustRegistry(), registryWith(t, DurationLike[cacheInterval]())
 
 	kind := dumpedValue(t, value, At("poll"), WithRegistry(plain))
 	if want := Number("90000000000"); kind != want {
@@ -322,7 +322,7 @@ type cacheUntagged struct {
 func TestACompileErrorIsMemoisedAndReplayed(t *testing.T) {
 	t.Parallel()
 
-	reg := NewRegistry()
+	reg := MustRegistry()
 
 	first := loadRefusal(t, reg, newPlane(map[Path]Value{}))
 	second := loadRefusal(t, reg, newPlane(map[Path]Value{}))
@@ -373,7 +373,7 @@ func loadRefusal(t *testing.T, reg *Registry, p *plane) error {
 func TestOneMemoisedErrorIsOneRendering(t *testing.T) {
 	t.Parallel()
 
-	err := loadRefusal(t, NewRegistry(), newPlane(map[Path]Value{}))
+	err := loadRefusal(t, MustRegistry(), newPlane(map[Path]Value{}))
 	got := make([]string, herdSize)
 
 	var wg sync.WaitGroup
@@ -463,7 +463,7 @@ type cacheAddrs struct {
 func TestTheAddressSetHandedToBindIsOnePointer(t *testing.T) {
 	t.Parallel()
 
-	reg := NewRegistry()
+	reg := MustRegistry()
 	first, second := newPlane(map[Path]Value{}), newPlane(map[Path]Value{})
 
 	for _, p := range []*plane{first, second} {
@@ -490,7 +490,7 @@ func TestTheAddressSetHandedToBindIsOnePointer(t *testing.T) {
 // It is serial because testing.AllocsPerRun refuses to run in a parallel test,
 // which is the same reason the compile-counting tests are.
 func TestAWarmLookupBuildsNothing(t *testing.T) {
-	reg := NewRegistry()
+	reg := MustRegistry()
 	opts := []Option{WithRegistry(reg)}
 
 	if _, err := schemaOf(reflect.TypeFor[cacheAddrConf](), opts, retained); err != nil {
