@@ -10,10 +10,10 @@ import (
 // this plane was found to be able to do, and therefore how much of the suite is
 // going to run against it.
 //
-// The suite scales to a driver rather than demanding one shape of it. Six of the
-// contract's interfaces are optional and are discovered by assertion, and every
-// case that needs one skips where it is absent, so two conformant drivers can
-// have very different numbers of cases actually execute. Without this line the
+// The suite scales to a driver rather than demanding one shape of it. Seven of
+// the contract's interfaces are optional and are discovered by assertion, and
+// every case that needs one skips where it is absent, so two conformant drivers
+// can have very different numbers of cases actually execute. Without this line the
 // difference is invisible: a case that quietly did nothing reads exactly like a
 // case that passed, and a driver author has no way to see that the obligation
 // their design does carry went unmeasured.
@@ -121,6 +121,7 @@ func (d *driverRun) writeCapabilities(inst Instance) []string {
 
 	return declaredBy(w,
 		implemented[ferry.Ensurer]("ensures a container's own address"),
+		implemented[ferry.Unsetter]("forgets a composite and everything under it"),
 		implemented[ferry.Committer]("commits"),
 		implemented[ferry.Releaser]("releases its writer"),
 	)

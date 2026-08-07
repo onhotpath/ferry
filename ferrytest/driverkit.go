@@ -29,6 +29,7 @@ const (
 	caseConcurrentNo = 14
 	caseSecondDumpNo = 15
 	caseEquivalentNo = 16
+	caseReplaceNo    = 17
 )
 
 // The suite's own fixtures, and their addresses.
@@ -253,6 +254,20 @@ func secondFixture() filled {
 // secondLeaf is the value the second dump leaves at the fixture's leaf, and it
 // is what the plane must hold afterwards.
 const secondLeaf = "y"
+
+// shrunkFixture is [filledFixture] with a shorter list, and it is what case 17
+// saves the second time.
+//
+// Only the shape moves. The map and the leaf hold what the first dump wrote, so
+// a plane that fails the case fails it for the one reason the case is about: a
+// position the second dump did not write, still there afterwards.
+func shrunkFixture() filled {
+	return filled{
+		List: []string{"z"},
+		Map:  map[string]string{fixtureKey: "v"},
+		Leaf: "x",
+	}
+}
 
 // driverFixturesCompile resolves the caller's Option list against every fixture
 // the suite dumps, which is where an Option that cannot be honoured is reported.

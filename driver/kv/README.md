@@ -13,19 +13,22 @@ go get github.com/onhotpath/ferry/driver/kv
 ## Bring your own client
 
 There is no Consul, etcd or Redis dependency here.
-You implement three methods and the package works against whatever you have:
+You implement four methods and the package works against whatever you have:
 
 ```go
 type Client interface {
 	Get(ctx context.Context, key string) (value []byte, found bool, err error)
 	List(ctx context.Context, prefix string) (map[string][]byte, error)
 	Put(ctx context.Context, key string, value []byte) error
+	Delete(ctx context.Context, key string) error
 }
 ```
 
+`Delete` is what makes a save a replacement rather than an addition, and it has to be idempotent: a key the store does not hold is nothing to remove and not a failure.
+
 ## Loading
 
-The example below implements those three over a plain Go map, so it runs anywhere.
+The example below implements those four over a plain Go map, so it runs anywhere.
 It is `Example` in [`example_test.go`](example_test.go), which `go test` compiles and runs.
 
 ```go
@@ -51,6 +54,12 @@ func (m memory) List(_ context.Context, prefix string) (map[string][]byte, error
 
 func (m memory) Put(_ context.Context, key string, value []byte) error {
 	m[key] = value
+
+	return nil
+}
+
+func (m memory) Delete(_ context.Context, key string) error {
+	delete(m, key)
 
 	return nil
 }
@@ -90,6 +99,49 @@ func Example() {
 
 Keys come from the tags, joined with `/`, so the nested `db.host` field reads `db/host`.
 `kv.NewSink` is the other direction: `ferry.Dump` writes the same struct back to the same keys.
+
+## A save replaces what it wrote last time
+
+A store holds whatever was put in it, so a list that loses an element and a map that loses a key would otherwise leave the previous save's keys behind, and the next load would read them back as though they were still configured.
+
+They do not.
+Before a save writes a list or a map, it tells the store to forget everything under that address, and at commit time the keys it did not write are removed.
+It is `ExampleSink_replace` in [`example_test.go`](example_test.go), over the same `memory` client as above:
+
+```go
+func ExampleSink_replace() {
+	type Config struct {
+		Tags []string `ferry:"tags"`
+	}
+
+	store := memory{}
+
+	sink, err := kv.NewSink(store, kv.WithPrefix("app"))
+	if err != nil {
+		panic(err)
+	}
+
+	ctx := context.Background()
+
+	if err := ferry.Dump(ctx, Config{Tags: []string{"a", "b", "c"}}, sink); err != nil {
+		panic(err)
+	}
+
+	if err := ferry.Dump(ctx, Config{Tags: []string{"x"}}, sink); err != nil {
+		panic(err)
+	}
+
+	for _, key := range slices.Sorted(maps.Keys(store)) {
+		fmt.Printf("%s = %s\n", key, store[key])
+	}
+
+	// Output:
+	// app/tags/0 = x
+}
+```
+
+Only a list or a map is replaced this way.
+A field your value omits is not written and is not removed either: silence never deletes anything.
 
 ## Prefixes
 

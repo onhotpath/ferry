@@ -12,7 +12,7 @@
 //
 // # Bring your own client
 //
-// There is no Consul, etcd or Redis dependency here. Implement [Client]'s three
+// There is no Consul, etcd or Redis dependency here. Implement [Client]'s four
 // methods over whatever store you have, and this package works against it.
 //
 //	src, err := kv.NewSource(store, kv.WithPrefix("app"))
@@ -23,6 +23,20 @@
 //
 // Keys come from the tags, joined with "/", so a nested db.host field reads
 // app/db/host under that prefix.
+//
+// # A save replaces what it wrote last time
+//
+// A store holds whatever was put in it, so a list that lost an element and a map
+// that lost a key would otherwise leave the previous save's keys behind, and the
+// next load would read them back as though they were still configured.
+//
+// They do not. Before a save writes a list or a map, it tells the store to
+// forget everything under that address, and at commit time the keys it did not
+// write are removed. Saving a one-element Tags over a store holding app/tags/0,
+// app/tags/1 and app/tags/2 leaves app/tags/0 and nothing else.
+//
+// Only a list or a map is replaced this way. A field your value omits is not
+// written and is not removed either, so silence never deletes anything.
 //
 // # Everything is bytes
 //

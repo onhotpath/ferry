@@ -719,3 +719,45 @@ func TestMemPlaneYieldsNoContents(t *testing.T) {
 		t.Errorf("MemPlane mints Source %v and Sink %v, want both halves", inst.Source, inst.Sink)
 	}
 }
+
+// memNested is a mapping whose members are themselves composites, which is the
+// only shape that puts a container's own answer *underneath* another container.
+type memNested struct {
+	Groups map[string][]string `ferry:"groups"`
+}
+
+// TestMemPlaneForgetsTheMarksUnderACompositeToo is the half of forgetting that a
+// scan over the stored values alone does not reach.
+//
+// A nil member of a mapping writes a null at its own address, and this plane
+// keeps that as a mark rather than as an entry, so a dump that replaced the
+// mapping and dropped only the entries would leave the mark behind. What the
+// next load then sees is a member the value no longer has, reported as present
+// and null, which is the residue the whole capability exists to remove.
+func TestMemPlaneForgetsTheMarksUnderACompositeToo(t *testing.T) {
+	inst := ferrytest.MemPlane().Open()
+
+	b, err := ferry.BindSink[memNested](inst.Sink)
+	if err != nil {
+		t.Fatalf("BindSink: %v", err)
+	}
+
+	if err := b.Dump(t.Context(), memNested{Groups: map[string][]string{"gone": nil, "kept": {"a"}}}); err != nil {
+		t.Fatalf("the first dump failed: %v", err)
+	}
+
+	if err := b.Dump(t.Context(), memNested{Groups: map[string][]string{"kept": {"b"}}}); err != nil {
+		t.Fatalf("the second dump failed: %v", err)
+	}
+
+	back, err := ferry.Load[memNested](t.Context(), inst.Source)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if _, held := back.Groups["gone"]; held {
+		t.Errorf("the plane loads back %+v: the member the second value dropped was written as a null at its "+
+			"own address, and a mark the replacement did not forget is a member that outlived its value",
+			back.Groups)
+	}
+}

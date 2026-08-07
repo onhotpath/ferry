@@ -481,3 +481,279 @@ func openWriter(t *testing.T, sink *kv.Sink, set *ferry.AddressSet) ferry.Writer
 
 	return w
 }
+
+// replaceable is a list and a map beside a leaf, which is the shape a save has
+// to replace rather than add to.
+type replaceable struct {
+	Tags   []string          `ferry:"tags"`
+	Labels map[string]string `ferry:"labels"`
+	Leaf   string            `ferry:"leaf"`
+}
+
+// TestASaveReplacesTheCompositeItWrites is the defect this driver shipped with:
+// a store holds whatever was put in it, so a shorter list left the previous
+// save's later positions behind and the next load read them back with a nil
+// error.
+//
+// It is asserted through Load rather than over the store's keys, because that is
+// where the residue was invisible: nothing about the store says which save a key
+// came from, so a stale key is a configured value until something reads it.
+func TestASaveReplacesTheCompositeItWrites(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a list that lost elements", replacesAShorterList)
+	t.Run("a map that lost a key", replacesAMapThatLostAKey)
+	t.Run("what the save did write survives", keepsWhatThisSaveWrote)
+	t.Run("an address the value omits is untouched", forgetsNothingItWasNotAsked)
+	t.Run("a failed save deletes nothing", deletesNothingAfterAFailedWalk)
+}
+
+func replacesAShorterList(t *testing.T) {
+	t.Parallel()
+
+	store := dumpedTwice(t, replaceable{Tags: []string{"a", "b", "c"}, Labels: map[string]string{"k": "v"}},
+		replaceable{Tags: []string{"x"}, Labels: map[string]string{"k": "v"}})
+
+	got, err := ferry.Load[replaceable](t.Context(), mustSource(t, store))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if want := []string{"x"}; !slices.Equal(got.Tags, want) {
+		t.Errorf("after saving a three-element list and then a one-element one the store loads back %v, want "+
+			"%v: the keys the second save did not write are the first save's, and nothing in the store "+
+			"says so", got.Tags, want)
+	}
+}
+
+func replacesAMapThatLostAKey(t *testing.T) {
+	t.Parallel()
+
+	store := dumpedTwice(t, replaceable{Tags: []string{"a"}, Labels: map[string]string{"one": "1", "two": "2"}},
+		replaceable{Tags: []string{"a"}, Labels: map[string]string{"one": "1"}})
+
+	got, err := ferry.Load[replaceable](t.Context(), mustSource(t, store))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if len(got.Labels) != 1 || got.Labels["one"] != "1" {
+		t.Errorf("after saving a two-key map and then a one-key one the store loads back %v, want one entry",
+			got.Labels)
+	}
+}
+
+// keepsWhatThisSaveWrote is the other half of the same rule, and the one a
+// delete-then-put implementation gets wrong: a key under an address the save
+// forgot, which the save then wrote, is the save's own and stays.
+func keepsWhatThisSaveWrote(t *testing.T) {
+	t.Parallel()
+
+	store := dumpedTwice(t, replaceable{Tags: []string{"a", "b"}, Labels: map[string]string{"k": "v"}, Leaf: "one"},
+		replaceable{Tags: []string{"x", "y"}, Labels: map[string]string{"k": "v"}, Leaf: "two"})
+
+	got, err := ferry.Load[replaceable](t.Context(), mustSource(t, store))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if want := []string{"x", "y"}; !slices.Equal(got.Tags, want) || got.Leaf != "two" {
+		t.Errorf("the second save loads back as %v and %q, want %v and %q", got.Tags, got.Leaf, want, "two")
+	}
+}
+
+// forgetsNothingItWasNotAsked is ADR-0006's omission rule seen from the store:
+// deleting is what an unset does, and silence is not an unset.
+func forgetsNothingItWasNotAsked(t *testing.T) {
+	t.Parallel()
+
+	store := newFake()
+	store.data["app/other/0"] = []byte("kept")
+
+	err := ferry.Dump(t.Context(), replaceable{Tags: []string{"x"}, Labels: map[string]string{"k": "v"}},
+		mustSink(t, store))
+	if err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	if got, found := store.data["app/other/0"]; !found || string(got) != "kept" {
+		t.Errorf("a save removed a key under no address it wrote: the store holds %q, found %v", got, found)
+	}
+}
+
+// deletesNothingAfterAFailedWalk is the staging rule extended to the removals: a
+// walk that fails leaves the store byte-identical, and a delete that already
+// happened is the one thing this driver could not undo.
+func deletesNothingAfterAFailedWalk(t *testing.T) {
+	t.Parallel()
+
+	store := newFake()
+	store.data["app/tags/1"] = []byte("b")
+
+	err := ferry.Dump(t.Context(), replaceable{Tags: []string{"x"}}, mustSink(t, store))
+	if err == nil {
+		t.Fatal("a dump of an empty map through a plane with no null reported success")
+	}
+
+	if got, found := store.data["app/tags/1"]; !found || string(got) != "b" {
+		t.Errorf("a dump that failed removed a key: the store holds %q, found %v", got, found)
+	}
+}
+
+// TestARemovalThatFailsIsReported keeps the removals inside the same aggregate
+// the writes are in: an operator fixing a store wants every key it could not
+// reach in one report.
+func TestARemovalThatFailsIsReported(t *testing.T) {
+	t.Parallel()
+
+	store := newFake()
+	store.data["app/tags/1"] = []byte("b")
+	store.failDeletes("app/tags/1")
+
+	err := ferry.Dump(t.Context(), replaceable{Tags: []string{"x"}, Labels: map[string]string{"k": "v"}},
+		mustSink(t, store))
+	if err == nil {
+		t.Fatal("a save whose removal failed reported success")
+	}
+
+	if !errors.Is(err, errFakeWrite) {
+		t.Errorf("the refusal %v does not carry the store's own error", err)
+	}
+}
+
+// dumpedTwice saves two values through one sink over one store, which is the
+// shape every replacement case is about: the second save is the one under test
+// and the first is what it has to replace.
+func dumpedTwice(t *testing.T, first, second replaceable) *fake {
+	t.Helper()
+
+	store := newFake()
+	sink := mustSink(t, store)
+
+	if err := ferry.Dump(t.Context(), first, sink); err != nil {
+		t.Fatalf("the first dump: %v", err)
+	}
+
+	if err := ferry.Dump(t.Context(), second, sink); err != nil {
+		t.Fatalf("the second dump: %v", err)
+	}
+
+	return store
+}
+
+// TestUnsetRefusesWhatEveryOtherWriteRefuses holds the replacement half of the
+// contract to the two refusals the rest of this writer already makes: a
+// cancelled context, and an address this key space cannot name.
+func TestUnsetRefusesWhatEveryOtherWriteRefuses(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a cancelled context", unsetRefusesACancelledContext)
+	t.Run("an unnameable minted address", unsetRefusesAnUnnameableCompositeAddress)
+}
+
+func unsetRefusesACancelledContext(t *testing.T) {
+	t.Parallel()
+
+	set := addrsOf[replaceable](t)
+	w := openWriter(t, mustSink(t, newFake()), set)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := unsetter(t, w).Unset(ctx, compositeAt(t, set, ferry.At("tags")))
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Unset answered %v under a cancelled context, want the context's own error", err)
+	}
+}
+
+// nestedMaps is a mapping whose members are themselves composites, which is the
+// only shape whose *composite* address is minted from a map key rather than
+// determined by the type.
+type nestedMaps struct {
+	Groups map[string][]string `ferry:"groups"`
+}
+
+// unsetRefusesAnUnnameableCompositeAddress is the key function's own refusal,
+// reached through the address a value minted: a key holding a separator would be
+// forgotten as a folder of that name, which is a different address's.
+func unsetRefusesAnUnnameableCompositeAddress(t *testing.T) {
+	t.Parallel()
+
+	store := newFake()
+
+	v := nestedMaps{Groups: map[string][]string{"a/b": {"x"}}}
+
+	err := ferry.Dump(t.Context(), v, mustSink(t, store))
+	if err == nil {
+		t.Fatal("a dump naming a composite this store cannot spell reported success")
+	}
+
+	if !errors.Is(err, ferry.ErrPlane) {
+		t.Errorf("the refusal %v does not carry ferry.ErrPlane", err)
+	}
+
+	if got := store.putCount(); got != 0 {
+		t.Errorf("a dump refused at a composite wrote %d keys, want none", got)
+	}
+}
+
+// TestAListingThatFailsIsOneErrorAndNotOnePerKey is the removal half's own
+// failure: what could not be read is the folder, and the keys under it were
+// never learned, so there is nothing to report per key.
+func TestAListingThatFailsIsOneErrorAndNotOnePerKey(t *testing.T) {
+	t.Parallel()
+
+	store := newFake().failLists()
+	store.data["app/tags/1"] = []byte("b")
+
+	err := ferry.Dump(t.Context(), replaceable{Tags: []string{"x"}, Labels: map[string]string{"k": "v"}},
+		mustSink(t, store))
+	if err == nil {
+		t.Fatal("a save whose listing failed reported success")
+	}
+
+	if !errors.Is(err, errFakeRead) {
+		t.Errorf("the refusal %v does not carry the store's own error", err)
+	}
+
+	if got, found := store.data["app/tags/1"]; !found || string(got) != "b" {
+		t.Errorf("a save that could not list removed a key: the store holds %q, found %v", got, found)
+	}
+}
+
+// TestARemovalIsAskedTheSamePermissionQuestionAWriteIs is why removing goes
+// through the ACL: removing a key is writing at it, and a token allowed to do
+// neither should hear about both in one report rather than in two runs.
+func TestARemovalIsAskedTheSamePermissionQuestionAWriteIs(t *testing.T) {
+	t.Parallel()
+
+	store := newGuarded("app/tags/1")
+	store.data["app/tags/1"] = []byte("b")
+
+	err := ferry.Dump(t.Context(), replaceable{Tags: []string{"x"}, Labels: map[string]string{"k": "v"}},
+		mustSink(t, store))
+	if err == nil {
+		t.Fatal("a save whose removal was denied reported success")
+	}
+
+	if !errors.Is(err, errFakeDenied) {
+		t.Errorf("the refusal %v does not carry the client's own error", err)
+	}
+
+	if !slices.Contains(store.checked, "app/tags/1") {
+		t.Errorf("the client was asked about %q and never about the key the save removed", store.checked)
+	}
+}
+
+// unsetter asserts that an open writer can forget an address, which this
+// driver's can.
+func unsetter(t *testing.T, w ferry.Writer) ferry.Unsetter {
+	t.Helper()
+
+	u, ok := w.(ferry.Unsetter)
+	if !ok {
+		t.Fatalf("%T cannot forget an address, and a store can delete a key", w)
+	}
+
+	return u
+}

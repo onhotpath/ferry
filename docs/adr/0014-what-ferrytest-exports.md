@@ -546,6 +546,19 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 > Every load mints its own destination, which is this ADR's fresh-destination rule and ADR-0019's own named trap: a shared destination is what makes a broken second walk pass.
 > **What a driver declares is what runs**, so the capability joins the line a run says about itself under [#201](https://github.com/onhotpath/ferry/issues/201): a reader that tolerates overlap says so before any case runs.
 
+> **Amended under [#220](https://github.com/onhotpath/ferry/issues/220) and [#221](https://github.com/onhotpath/ferry/issues/221): the list is seventeen cases, and the seventeenth is dump-is-replace.**
+>
+> As published the list ends at sixteen, and case 15 says in as many words that whether a sink handles an address the *new* value no longer has is a different question and is not asked here.
+> [ADR-0004](0004-source-and-sink.md)'s amendment ships `Unsetter` and makes that question answerable, so the case it named is written.
+>
+> 17. **A shorter dump replaces a longer one.** For a sink declaring `ferry.Unsetter`, a value whose sequence lost members, dumped over one that had them, loads back as the second value and only the second ([ADR-0004](0004-source-and-sink.md)).
+>
+> **The shape shrinks and the values do not**, so a plane that fails the case fails it for the one reason the case is about, and the report names the list it found rather than a field that differs.
+> It is read back through `Load`, because that is where the residue was invisible: nothing in a plane says which dump a member came from.
+> **It is skipped, out loud, for every sink that does not declare the capability**, which is every plane that replaces its contents wholesale and has nothing to forget as well as every plane that genuinely cannot - so it cannot turn a driver's CI red for a claim its author never made.
+> The read half needs `Enumerator`, since a member the second dump did not write is exactly what no load can see without one, and a source that cannot list is asked nothing and says so.
+> `MemPlane` implements `Unsetter`, because the reference implementation is the one plane whose whole job is to demonstrate the contract, and a capability no plane in this repository carried would leave the case unexercised.
+
 > **Amended under [#201](https://github.com/onhotpath/ferry/issues/201): a run says what it scaled to, and the description gains nothing.**
 >
 > #201 records that `Instance` carries capabilities as optional fields, that three of its four members mean a capability by being nil or not, and that a skipped case is indistinguishable from a passing one for any reporter that is not `*testing.T`.

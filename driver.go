@@ -106,8 +106,8 @@ type Reader interface {
 // null - goes to [Ensurer], because a plane that cannot spell either of those
 // should refuse rather than receive a write it will mis-store.
 //
-// A Writer may also implement [Ensurer], [Committer] and [Releaser]. All three
-// are discovered by assertion and none is required.
+// A Writer may also implement [Ensurer], [Unsetter], [Committer] and
+// [Releaser]. All four are discovered by assertion and none is required.
 type Writer interface {
 	Set(ctx context.Context, addr LeafAddr, v Value) error
 }
@@ -233,4 +233,32 @@ type Enumerator interface {
 // one to a [Writer] without it is refused, naming the address and the plane.
 type Ensurer interface {
 	Ensure(ctx context.Context, addr Container, p Presence) error
+}
+
+// Unsetter is implemented by a [Writer] whose plane can forget an address and
+// everything held beneath it.
+//
+// [Dump] calls it at a slice's or a map's own address, and it is what makes a
+// dump a replacement of that composite rather than an addition to it: a list
+// that lost its third element, or a map that lost a key, leaves nothing of the
+// previous dump behind for the next load to read back. It is the only deletion
+// a dump ever performs. A field the value omits is not written and is not
+// removed either, so silence never deletes anything.
+//
+// Unset arrives before the writes beneath that address, so a member this dump
+// does write is written after it was forgotten and survives. A sink that stages
+// has to keep that order across its own Commit, which for a store that deletes
+// by key means resolving what to forget against what the dump staged rather
+// than deleting first and hoping the ordering holds.
+//
+// It is idempotent and takes no view of what is there: an address the plane
+// does not hold is not a failure.
+//
+// It is optional, and a Writer without one is refused nothing. Such a plane is
+// additive at a composite, which is a property of that plane rather than of the
+// value. A sink that replaces its whole plane on every dump - a file written
+// through a temporary and swapped into place - already forgets by construction
+// and has nothing to implement.
+type Unsetter interface {
+	Unset(ctx context.Context, addr CompositeAddr) error
 }

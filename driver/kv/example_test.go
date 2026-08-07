@@ -3,6 +3,8 @@ package kv_test
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/onhotpath/ferry"
@@ -10,7 +12,8 @@ import (
 )
 
 // memory is a [kv.Client] over an ordinary Go map, and the whole of what this
-// driver needs from a backend: read one key, list a folder, write one key.
+// driver needs from a backend: read one key, list a folder, write one key,
+// remove one key.
 //
 // It is here so the example runs, and so a reader can see the shape a real
 // adapter over consul/api, etcd or a two-column table has to fill.
@@ -36,6 +39,12 @@ func (m memory) List(_ context.Context, prefix string) (map[string][]byte, error
 
 func (m memory) Put(_ context.Context, key string, value []byte) error {
 	m[key] = value
+
+	return nil
+}
+
+func (m memory) Delete(_ context.Context, key string) error {
+	delete(m, key)
 
 	return nil
 }
@@ -71,4 +80,37 @@ func Example() {
 
 	// Output:
 	// checkout db.internal:5432
+}
+
+// ExampleSink_replace shows what a second save does to a list that lost an
+// element: the keys the save did not write are removed, so a load afterwards
+// reads the value that was saved rather than the union of both saves.
+func ExampleSink_replace() {
+	type Config struct {
+		Tags []string `ferry:"tags"`
+	}
+
+	store := memory{}
+
+	sink, err := kv.NewSink(store, kv.WithPrefix("app"))
+	if err != nil {
+		panic(err)
+	}
+
+	ctx := context.Background()
+
+	if err := ferry.Dump(ctx, Config{Tags: []string{"a", "b", "c"}}, sink); err != nil {
+		panic(err)
+	}
+
+	if err := ferry.Dump(ctx, Config{Tags: []string{"x"}}, sink); err != nil {
+		panic(err)
+	}
+
+	for _, key := range slices.Sorted(maps.Keys(store)) {
+		fmt.Printf("%s = %s\n", key, store[key])
+	}
+
+	// Output:
+	// app/tags/0 = x
 }

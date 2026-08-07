@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/onhotpath/ferry"
@@ -106,6 +107,14 @@ func (s *Sink) opener(keys *ferry.Keys) ferry.OpenWriterFunc {
 // noise: in the source it is indistinguishable from a driver that should have
 // rolled back and did not, and nothing in the type system tells the two apart.
 //
+// It implements [ferry.Unsetter], because a store can forget a key and that is
+// the whole of what dump-is-replace needs here. What it forgets is resolved at
+// Commit against what this dump staged, rather than by deleting at the moment
+// core asks: a staged write arrives after the unset that covers it, so deleting
+// first and putting afterwards would be right only while nothing else shared a
+// key, and one listing per forgotten folder answers the question exactly
+// (ADR-0004).
+//
 // It implements no [ferry.Ensurer], and that absence is the declaration
 // ADR-0016 asks for rather than an omission. A store holds bytes at keys and has
 // no way to say that a container is there and holds nothing, so a plane with no
@@ -131,9 +140,17 @@ type writer struct {
 	// order is the keys in the order the walk produced them, so a commit writes
 	// in walk order and two identical dumps make identical sequences of calls.
 	order []string
+
+	// forget is the folders this dump replaced, in walk order, each already
+	// carrying its trailing separator so that a listing under one cannot reach
+	// a sibling whose key merely starts with the same bytes.
+	forget []string
 }
 
-var _ ferry.Committer = (*writer)(nil)
+var (
+	_ ferry.Committer = (*writer)(nil)
+	_ ferry.Unsetter  = (*writer)(nil)
+)
 
 // staged is one pending write: the bytes, and the address they came from, which
 // is what lets a failed commit name the address rather than the key.
@@ -184,6 +201,34 @@ func (w *writer) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) er
 	return nil
 }
 
+// Unset records that this dump replaces everything the store holds under one
+// composite, which is what stops a save of a shorter list from leaving the
+// previous save's later positions behind.
+//
+// Nothing is listed and nothing is deleted here, for the reason nothing is
+// written in Set: a walk that fails afterwards has to leave the store
+// byte-identical, and a delete that already happened is the one thing this
+// driver could not undo.
+//
+// A folder is recorded as often as it is named, with no check for one already
+// held, because one dump names one composite once and the address set is
+// injective over this key space. [writer.stale] collects each key once whatever
+// arrives here.
+func (w *writer) Unset(ctx context.Context, addr ferry.CompositeAddr) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	key, err := w.key(addr.Path())
+	if err != nil {
+		return err
+	}
+
+	w.forget = append(w.forget, folder(key))
+
+	return nil
+}
+
 // permits asks the client whether these credentials may write at one key, and
 // says nothing for a client that answers no permission questions.
 func (w *writer) permits(ctx context.Context, key string) error {
@@ -211,11 +256,47 @@ func (w *writer) permits(ctx context.Context, key string) error {
 // in one report. The whole aggregate reaches ferry as one element, because core
 // cannot attribute addresses inside a third party's error tree and does not
 // rewrite one, so each element names its own address in its own text.
+// The removals run first, and they are resolved against what this dump staged
+// rather than applied blind, so a key the walk wrote is never deleted and then
+// written back.
 func (w *writer) Commit(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
+	errs := append(w.replaced(ctx), w.written(ctx)...)
+
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("kv: writing the store: %w", err)
+	}
+
+	return nil
+}
+
+// replaced removes every key under a forgotten folder that this dump did not
+// write, which is the half of a commit that makes a save a replacement.
+//
+// A listing that fails is one error and not one per key: what could not be read
+// is the folder, and the keys under it were never learned.
+func (w *writer) replaced(ctx context.Context) []error {
+	stale, err := w.stale(ctx)
+	if err != nil {
+		return []error{err}
+	}
+
+	errs := make([]error, 0, len(stale))
+
+	for _, key := range stale {
+		if err := w.remove(ctx, key); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errs
+}
+
+// written puts everything this dump staged, in the order the walk produced it.
+func (w *writer) written(ctx context.Context) []error {
 	errs := make([]error, 0, len(w.order))
 
 	for _, key := range w.order {
@@ -225,8 +306,59 @@ func (w *writer) Commit(ctx context.Context) error {
 		}
 	}
 
-	if err := errors.Join(errs...); err != nil {
-		return fmt.Errorf("kv: writing the store: %w", err)
+	return errs
+}
+
+// stale is every key under a forgotten folder that this dump did not write,
+// sorted, which is the set difference that makes a save a replacement.
+//
+// Sorted because two identical dumps must make identical sequences of calls, and
+// a store's listing is a map: ADR-0001's determinism invariant reaches the call
+// order and not only the answer.
+func (w *writer) stale(ctx context.Context) ([]string, error) {
+	out := make([]string, 0, len(w.forget))
+	seen := map[string]bool{}
+
+	for _, under := range w.forget {
+		held, err := w.client.List(ctx, under)
+		if err != nil {
+			return nil, fmt.Errorf("listing %q, which this save replaces: %w", under, err)
+		}
+
+		out = w.superseded(held, seen, out)
+	}
+
+	slices.Sort(out)
+
+	return out, nil
+}
+
+// superseded adds the keys of one listing that this dump did not write and has
+// not already collected.
+func (w *writer) superseded(held map[string][]byte, seen map[string]bool, out []string) []string {
+	for key := range held {
+		if _, written := w.staged[key]; written || seen[key] {
+			continue
+		}
+
+		seen[key] = true
+
+		out = append(out, key)
+	}
+
+	return out
+}
+
+// remove deletes one key this save replaced, asking the same permission question
+// a write asks: removing a key is writing at it, and a token allowed to do
+// neither should hear about both in one report.
+func (w *writer) remove(ctx context.Context, key string) error {
+	if err := w.permits(ctx, key); err != nil {
+		return err
+	}
+
+	if err := w.client.Delete(ctx, key); err != nil {
+		return fmt.Errorf("removing %q, which this save replaces: %w", key, err)
 	}
 
 	return nil

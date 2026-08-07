@@ -85,30 +85,60 @@ func dumpWalk(ctx context.Context, w Writer, sch *schema, root reflect.Value) (o
 // addresses beneath it are not interchangeable.
 type stagedWrite struct {
 	// leaf and v are a value write. Where at is non-nil this is a container
-	// write instead, and p is what it says there.
+	// write instead, and p is what it says there. Where forget is set it is
+	// neither, and comp is the composite the plane is told to let go of.
 	leaf LeafAddr
 	v    Value
 
 	at Container
 	p  Presence
+
+	forget bool
+	comp   CompositeAddr
 }
 
-// play hands one staged write to the plane it was staged for.
+// play hands one staged write to the plane it was staged for. The receiver is a
+// pointer because a staged write is three writes in one struct and copying it
+// per replay is the one cost this phase has no reason to pay.
 //
 // The moment is the walk's rather than a phase of its own. The failure is the
 // plane refusing one address, which is what an interleaved dump reports at
 // exactly the same address, and a moment nothing else uses would sort the same
 // errors differently depending on whether the sink could stage.
-func (s stagedWrite) play(ctx context.Context, w Writer) error {
-	if s.at == nil {
-		if err := w.Set(ctx, s.leaf, s.v); err != nil {
-			return fromDriver(momentWalk, s.leaf.Path(), err)
-		}
+func (s *stagedWrite) play(ctx context.Context, w Writer) error {
+	switch {
+	case s.forget:
+		return forgotten(ctx, w, s.comp)
+	case s.at != nil:
+		return ensured(ctx, w, s.at, s.p)
+	}
 
+	if err := w.Set(ctx, s.leaf, s.v); err != nil {
+		return fromDriver(momentWalk, s.leaf.Path(), err)
+	}
+
+	return nil
+}
+
+// forgotten replays a composite's replacement, and says nothing to a plane that
+// cannot forget an address.
+//
+// Silence is the whole difference from [ensured], and it is not an oversight
+// (ADR-0004). A container write is something the value has to say and a plane
+// that cannot spell it must refuse; an unset is about what the plane already
+// holds, which core cannot know, so a sink without the capability is additive
+// at a composite rather than a dump that fails.
+func forgotten(ctx context.Context, w Writer, at CompositeAddr) error {
+	u, ok := w.(Unsetter)
+	if !ok {
 		return nil
 	}
 
-	return ensured(ctx, w, s.at, s.p)
+	if err := u.Unset(ctx, at); err != nil {
+		return fromDriver(momentWalk, at.Path(), err)
+	}
+
+	return nil
 }
 
 // ensured replays a container-level write, refusing a plane that cannot spell
@@ -136,8 +166,8 @@ func ensured(ctx context.Context, w Writer, at Container, p Presence) error {
 func flush(ctx context.Context, w Writer, writes []stagedWrite) error {
 	errs := make([]error, 0, len(writes))
 
-	for _, write := range writes {
-		errs = append(errs, write.play(ctx, w))
+	for i := range writes {
+		errs = append(errs, writes[i].play(ctx, w))
 	}
 
 	return join(errs...)

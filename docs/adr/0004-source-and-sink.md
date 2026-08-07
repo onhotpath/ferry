@@ -141,6 +141,33 @@ Everything beyond that is opt-in.
 > **The sentence above therefore reads four required interfaces and six optional ones** - `Releaser`, `Committer`, `Enumerator`, `Unsetter`, `Ensurer` and `Concurrent` - and every one of them is still opt-in.
 > `Prober` joins them in ADR-0016 and brings it to seven; that count is stated there, with the split it belongs to.
 
+> **Amended under [#220](https://github.com/onhotpath/ferry/issues/220) and [#221](https://github.com/onhotpath/ferry/issues/221): `Unsetter` ships, and one sentence above it was wrong about where a missing one is refused.**
+>
+> As published, `Unsetter` was specified in the block above and nothing implemented it or called it, so the plan's dump-is-replace promise was a sentence with no mechanism under it.
+> Measured against `driver/kv`'s own fake: a store holding `app/tags/0`, `app/tags/1` and `app/tags/2` from one save, saved over with a one-element slice, returns a nil error and then loads back as three elements.
+> The same holds for a map that loses a key.
+> A store carries no document a human inspects, so the residue is invisible until it comes back through `Load`, which is ADR-0001's silent-divergence case committed on the write path.
+>
+> **Core calls `Unset` at a composite's own address, before the writes beneath it.**
+> A slice and a map are the two places membership comes from the value rather than from the type, so they are the two places a plane can hold a member this dump does not.
+> The empty arm is called too: a composite that lost every element writes `Ensure(addr, PresenceNull)`, and what the plane held beneath it goes with the unset that precedes it.
+> A section is not unset, because its membership is the type's and the address set is what a schema change moves.
+> The order is the contract rather than an artefact: a member this dump does write arrives after the unset covering it and survives, which for a staging sink means resolving what to forget against what the dump staged rather than deleting first.
+>
+> **A sink without `Unsetter` is refused nothing, and the sentence above saying otherwise is wrong.**
+> As published this section reads "Both are refused at open where the driver lacks them, before any write happens", of `Unsetter` and `Ensurer` together, and neither half of that shipped.
+> `Ensurer` is refused at the address and not at the open, because what needs one is a property of the value and not of the schema, so `Bind` cannot know and the open cannot either.
+> `Unsetter` is refused nowhere at all, and the asymmetry is the decision rather than an omission: what a value has to say at a container's own address must be spellable or the dump is storing something misleading, where an unset is about what the plane *already holds*, which core cannot know anything about.
+> A sink that replaces its whole plane on every dump - `driver/yaml`, which emits a fresh document and swaps the file - already forgets by construction, and refusing it for want of a method would be refusing the driver that has least need of one.
+> So a plane without it is additive at a composite, and that is a property of the plane, stated in its own documentation.
+>
+> **`Delete` joins the kv client's interface**, which is the breaking change this costs and the one the published text already anticipated in "`Delete` stays the kv **client's** verb, one layer below".
+> It is idempotent, and the sink resolves what to remove at `Commit` by listing each forgotten folder and subtracting what the dump staged.
+> One listing per forgotten composite is the price, on the commit path, on a store the driver already holds a client for.
+>
+> **The suite gains the case**, capability-scaled in the ordinary way: it runs for a sink asserting `Unsetter` and skips, out loud, for every sink that does not, so a driver cannot fail a case for a claim its author never made.
+> That is [ADR-0014](0014-what-ferrytest-exports.md)'s list and the amendment is there.
+
 ### `Bind` is a separate phase because the two halves have different lifetimes
 
 This is the one seam that survived every round of simplification, because it is the only thing carrying ADR-0003's before-any-I/O rule.
