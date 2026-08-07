@@ -110,8 +110,13 @@ It is a load-time option, and `NewSink` rejects it rather than quietly ignoring 
 A store key carries no type, so `8080` in an `int` field and `"8080"` in a `string` field are both stored as `8080`, and each field parses what it reads.
 
 There is also no way to store "nothing", as distinct from an empty value.
-So a nil pointer, a nil slice and an empty map cannot be saved here, and saving one fails and names the field rather than writing an empty string that would read back as something else.
-A struct with all three reports all three, and the store is left untouched.
+So four shapes cannot be saved here: a nil pointer, a nil slice, an empty map, and a non-nil pointer to a struct whose every field was omitted.
+Saving one fails and names the field rather than writing an empty string that would read back as something else.
+A struct with all four reports all four, and the store is left untouched.
+
+The failures are two classes, and a caller matching on one of them misses the other.
+A null at a leaf is this package's own refusal and carries `ferry.ErrValue`.
+The other three are a container speaking at its own address, which this package supplies no way to write, so ferry refuses them for it and they carry `ferry.ErrPlane`.
 
 ## Whether you can write is discovered when you open, not before
 

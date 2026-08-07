@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"strconv"
+	"strings"
 )
 
 // KeyFunc maps a ferry address to a key in one plane's own key space: the join
@@ -11,7 +12,10 @@ import (
 // hyphen join that spells an HTTP header name.
 //
 // A driver supplies one to [NewKeys] and gets one back from [Keys.Open], so the
-// shape is the same at both ends: an address in, a checked plane key out.
+// shape is the same at both ends: an address in, a checked plane key out. It
+// takes the address with its kind dropped, because a plane key is a function of
+// the segments and never of the kind: read one off a typed address with
+// [Member.Path].
 //
 // A KeyFunc answers legality and never injectivity. Legality is what it returns
 // an error for: whether the plane can name this address at all. An empty
@@ -55,6 +59,14 @@ type Keys struct {
 	// leaves NewKeys and never again.
 	static map[Path]string
 	owner  map[string]Path
+
+	// leaves and containers are owner split by what the key is for, and the
+	// split is the check rather than bookkeeping (ADR-0003). A flat driver reads
+	// a leaf's key and only ever uses a container's as a prefix, so two
+	// addresses of different kinds landing on one key lose nothing, and
+	// refusing them refuses a schema the plane can hold.
+	leaves     map[string]Path
+	containers map[string]Path
 }
 
 // NewKeys computes a driver's plane keys for one schema and checks them. It is
@@ -91,23 +103,25 @@ func NewKeys(a *AddressSet, name string, f KeyFunc) (*Keys, error) {
 		return nil, newError(momentBind, ErrPlane, Path{}, "the driver supplied no key function")
 	}
 
-	if a == nil {
-		a = &AddressSet{}
-	}
-
 	k := &Keys{
-		name:   cmp.Or(name, "the driver"),
-		f:      f,
-		static: make(map[Path]string, a.Len()),
-		owner:  make(map[string]Path, a.Len()),
+		name:       cmp.Or(name, "the driver"),
+		f:          f,
+		static:     make(map[Path]string, a.Len()),
+		owner:      make(map[string]Path, a.Len()),
+		leaves:     make(map[string]Path, a.Len()),
+		containers: make(map[string]Path, a.Len()),
 	}
 
 	errs := make([]error, 0, a.Len())
-	for addr := range a.All() {
-		errs = append(errs, k.record(addr))
+	for m := range a.Seq() {
+		errs = append(errs, k.record(m))
 	}
 
 	if err := join(errs...); err != nil {
+		return nil, err
+	}
+
+	if err := k.enumerable(a); err != nil {
 		return nil, err
 	}
 
@@ -115,12 +129,21 @@ func NewKeys(a *AddressSet, name string, f KeyFunc) (*Keys, error) {
 }
 
 // record computes one static address's key and files it, refusing an address
-// the plane cannot name and one whose key another address has already taken.
+// the plane cannot name and one whose key another address of its own kind has
+// already taken.
+//
+// The kind is part of the question, because it is part of what the key is for.
+// A flat driver reads a value at a leaf's key and never at a container's, and it
+// uses a container's key as the prefix its members are named under, so a leaf
+// and a container landing on one key are two addresses the plane still tells
+// apart. What a container's key does reserve is checked by [Keys.enumerable].
 //
 // The set arrives sorted segment-wise, so the address a collision is reported
 // against is always the later of the pair and the report is the same on every
 // run, which is ADR-0001's determinism invariant applied rather than re-decided.
-func (k *Keys) record(addr Path) error {
+func (k *Keys) record(m Member) error {
+	addr := m.Path()
+
 	key, err := k.f(addr)
 	if err != nil {
 		// The driver said why, so ferry says where and lets the driver's own
@@ -128,12 +151,90 @@ func (k *Keys) record(addr Path) error {
 		return fromDriver(momentBind, addr, err)
 	}
 
-	if other, taken := takenBy(key, k.owner); taken {
+	kind := k.namespace(m)
+
+	if other, taken := takenBy(key, kind); taken {
 		return newError(momentBind, ErrPlane, addr, k.collision(other, key))
 	}
 
 	k.static[addr] = key
 	k.owner[key] = addr
+	kind[key] = addr
+
+	return nil
+}
+
+// namespace is the one-key-per-address table this member's kind belongs to.
+func (k *Keys) namespace(m Member) map[string]Path {
+	if _, leaf := m.(LeafAddr); leaf {
+		return k.leaves
+	}
+
+	return k.containers
+}
+
+// enumerable refuses an address whose key lies inside the key space a composite
+// is enumerated out of.
+//
+// A composite's members come from the value, so a flat driver has no table to
+// check them against: it lists every plane key beginning with the composite's
+// own and reads what it finds as a member. An address of this schema that is not
+// under the composite and whose key begins with the composite's key would
+// therefore be enumerated as one of its members, which is one value read at two
+// addresses and the same loss the injectivity check exists to prevent
+// (ADR-0003).
+//
+// A section reserves nothing, because its members come from the type and a
+// driver can ask about exactly those.
+func (k *Keys) enumerable(a *AddressSet) error {
+	scans := k.composites(a)
+	if len(scans) == 0 {
+		return nil
+	}
+
+	errs := make([]error, 0, a.Len())
+	for m := range a.Seq() {
+		errs = append(errs, k.reachable(m, scans))
+	}
+
+	return join(errs...)
+}
+
+// scan is one composite's address and the key its members are listed under.
+type scan struct {
+	at  Path
+	key string
+}
+
+// composites is every composite in the set with the key it enumerates under. A
+// composite whose key is empty names the whole plane and reserves nothing, since
+// every key would lie inside it and no schema could be written at all.
+func (k *Keys) composites(a *AddressSet) []scan {
+	var out []scan
+
+	for m := range a.Seq() {
+		if _, ok := m.(CompositeAddr); ok && k.static[m.Path()] != "" {
+			out = append(out, scan{at: m.Path(), key: k.static[m.Path()]})
+		}
+	}
+
+	return out
+}
+
+// reachable refuses this member where some composite would enumerate its key.
+func (k *Keys) reachable(m Member, scans []scan) error {
+	key := k.static[m.Path()]
+
+	for _, s := range scans {
+		if s.at == m.Path() || !strings.HasPrefix(key, s.key) || s.at.isPrefixOf(m.Path()) {
+			continue
+		}
+
+		return newError(momentBind, ErrPlane, m.Path(), k.name+
+			" lists the members of "+s.at.String()+" out of every plane key beginning with "+
+			strconv.Quote(s.key)+", and this address renders to "+strconv.Quote(key)+
+			", so its value would be read back as a member of that composite")
+	}
 
 	return nil
 }

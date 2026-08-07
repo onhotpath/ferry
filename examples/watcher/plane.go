@@ -91,6 +91,6 @@ func (p *MemPlane) notify() {
 // with no error, which is exactly what the contract asks for.
 type snapshot map[ferry.Path]ferry.Value
 
-func (s snapshot) Get(_ context.Context, addr ferry.Path) (ferry.Value, error) {
-	return s[addr], nil
+func (s snapshot) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
+	return s[addr.Path()], nil
 }

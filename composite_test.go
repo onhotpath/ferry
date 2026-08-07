@@ -52,8 +52,9 @@ type (
 	}
 )
 
-// boundBy is the address set a driver's Bind was handed for one dump.
-func boundBy(t *testing.T, dump func(context.Context, Sink) error) []Path {
+// boundBy is the address set a driver's Bind was handed for one dump, rendered
+// kind by kind, because the kind is half of what a member is (ADR-0016).
+func boundBy(t *testing.T, dump func(context.Context, Sink) error) []string {
 	t.Helper()
 
 	p := newPlane(map[Path]Value{})
@@ -61,7 +62,17 @@ func boundBy(t *testing.T, dump func(context.Context, Sink) error) []Path {
 		t.Fatalf("dump: %+v", err)
 	}
 
-	return slices.Collect(p.bound.All())
+	return kinded(p.bound)
+}
+
+// mustBeMembers is mustBeAddresses at the typed set: the golden list names each
+// member's kind as well as its address.
+func mustBeMembers(t *testing.T, got, want []string) {
+	t.Helper()
+
+	if !slices.Equal(got, want) {
+		t.Errorf("the address set is\n\t%v\nand the golden set is\n\t%v", got, want)
+	}
 }
 
 func mustBeAddresses(t *testing.T, got []Path, want []string) {
@@ -94,35 +105,36 @@ func TestTheStaticAddressSetPerTypeShape(t *testing.T) {
 	}{{
 		name: "a struct mints one Name segment per exported field",
 		dump: func(ctx context.Context, s Sink) error { return Dump(ctx, plainStruct{}, s) },
-		want: []string{"/plain/pass", "/plain/user"},
+		want: []string{"section /plain", "leaf /plain/pass", "leaf /plain/user"},
 	}, {
-		name: "a pointer mints none of its own, and one container address",
+		name: "a pointer mints none of its own, and one section address",
 		dump: func(ctx context.Context, s Sink) error { return Dump(ctx, pointerStruct{}, s) },
-		want: []string{"/opt", "/opt/pass", "/opt/user"},
+		want: []string{"section /opt", "leaf /opt/pass", "leaf /opt/user"},
 	}, {
-		name: "an array mints exactly N Index segments",
+		name: "an array is a section minting exactly N Index segments",
 		dump: func(ctx context.Context, s Sink) error { return Dump(ctx, arrayOfLeaves{}, s) },
-		want: []string{"/ports#0", "/ports#1", "/ports#2"},
+		want: []string{"section /ports", "leaf /ports#0", "leaf /ports#1", "leaf /ports#2"},
 	}, {
 		name: "an array of bytes is one leaf address, because it is a leaf",
 		dump: func(ctx context.Context, s Sink) error { return Dump(ctx, arrayOfBytes{}, s) },
-		want: []string{"/key"},
+		want: []string{"leaf /key"},
 	}, {
 		name: "and the four together, segment-wise",
 		dump: func(ctx context.Context, s Sink) error { return Dump(ctx, everyShape{}, s) },
 		want: []string{
-			"/a/plain/pass", "/a/plain/user",
-			"/b/opt", "/b/opt/pass", "/b/opt/user",
-			"/c/ports#0", "/c/ports#1", "/c/ports#2",
-			"/d/key",
-			"/e#0/pass", "/e#0/user", "/e#1/pass", "/e#1/user",
+			"section /a", "section /a/plain", "leaf /a/plain/pass", "leaf /a/plain/user",
+			"section /b", "section /b/opt", "leaf /b/opt/pass", "leaf /b/opt/user",
+			"section /c", "section /c/ports", "leaf /c/ports#0", "leaf /c/ports#1", "leaf /c/ports#2",
+			"section /d", "leaf /d/key",
+			"section /e", "section /e#0", "leaf /e#0/pass", "leaf /e#0/user",
+			"section /e#1", "leaf /e#1/pass", "leaf /e#1/user",
 		},
 	}}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			mustBeAddresses(t, boundBy(t, c.dump), c.want)
+			mustBeMembers(t, boundBy(t, c.dump), c.want)
 		})
 	}
 }
@@ -147,9 +159,9 @@ func (w *withHidden) Touch() { w.nested, w.boxed, w.arr = cred{}, nil, [2]string
 func TestUnexportedFieldsAreSkipped(t *testing.T) {
 	t.Parallel()
 
-	mustBeAddresses(t, boundBy(t, func(ctx context.Context, s Sink) error {
+	mustBeMembers(t, boundBy(t, func(ctx context.Context, s Sink) error {
 		return Dump(ctx, withHidden{}, s)
-	}), []string{"/name"})
+	}), []string{"leaf /name"})
 }
 
 // starNamed is a field whose segment text genuinely is "*", which under ferry's
@@ -177,14 +189,17 @@ func TestNoWildcardShapeCrossesTheDriverBoundary(t *testing.T) {
 		t.Fatalf("load: %+v", err)
 	}
 
-	bound := slices.Collect(p.bound.All())
-	mustBeAddresses(t, bound, []string{"/*", "/opt", "/opt/pass", "/opt/user"})
+	mustBeMembers(t, kinded(p.bound), []string{"leaf /*", "section /opt", "leaf /opt/pass", "leaf /opt/user"})
 
 	asked := slices.Clone(p.got)
 	slices.SortFunc(asked, Path.Compare)
 
-	if !slices.Equal(asked, bound) {
-		t.Errorf("the walk asked about\n\t%v\nand the driver was bound to\n\t%v", asked, bound)
+	if want := leavesOf(p.bound); !slices.Equal(asked, want) {
+		t.Errorf("the walk asked about\n\t%v\nand the driver's leaf addresses are\n\t%v", asked, want)
+	}
+
+	if want := []Path{At("opt")}; !slices.Equal(p.probed, want) {
+		t.Errorf("the walk probed\n\t%v\nand the driver's section addresses are\n\t%v", p.probed, want)
 	}
 }
 
@@ -206,11 +221,19 @@ type leafOverSubtree struct {
 	Deep cred   `ferry:"db"`
 }
 
-// boxedTwice is a container address and a leaf address at one place. The outer
-// pointer takes a container address, and the inner one is a pointer to a leaf,
-// which takes a leaf address at the same place.
+// boxedTwice is two pointers over one leaf. Neither mints a segment and neither
+// takes a container address, because a pointer to a leaf is a leaf: the two of
+// them add a null to one address rather than a second address (ADR-0016).
 type boxedTwice struct {
 	P **int `ferry:"p"`
+}
+
+// compositeOverLeaf is a container address and a leaf address at one place: the
+// map takes /p as a composite and the string takes /p as a leaf, so a value
+// would sit where the plane is only ever asked whether the container is there.
+type compositeOverLeaf struct {
+	M    map[string]string `ferry:"p"`
+	Flat string            `ferry:"p"`
 }
 
 // TestPrefixFreenessIsOverTheLeafAddresses is ADR-0003's rule as amended: taken
@@ -226,6 +249,20 @@ func TestPrefixFreenessIsOverTheLeafAddresses(t *testing.T) {
 		}
 	})
 
+	// Two pointers over one leaf are one address, so the type compiles: a
+	// pointer to a leaf is a leaf and takes no container address of its own.
+	t.Run("and two pointers over one leaf are one leaf address", func(t *testing.T) {
+		t.Parallel()
+
+		if err := Compile[boxedTwice](); err != nil {
+			t.Fatalf("%+v", err)
+		}
+
+		mustBeMembers(t, boundBy(t, func(ctx context.Context, s Sink) error {
+			return Dump(ctx, boxedTwice{}, s)
+		}), []string{"leaf /p"})
+	})
+
 	run(t, []compileCase{{
 		name:     "a leaf and a subtree at one segment is still rejected, naming every clash",
 		run:      Compile[leafOverSubtree],
@@ -233,7 +270,7 @@ func TestPrefixFreenessIsOverTheLeafAddresses(t *testing.T) {
 		elements: 2,
 	}, {
 		name:     "and a container address must be distinct from every leaf address",
-		run:      Compile[boxedTwice],
+		run:      Compile[compositeOverLeaf],
 		want:     []string{"/p:", "a container address and a leaf address at once", "nowhere to be"},
 		elements: 1,
 	}})
@@ -397,74 +434,61 @@ func TestAnArrayIsStaticSoItLoadsFromASourceThatCannotEnumerate(t *testing.T) {
 	}
 }
 
-// listing is a plane that can list what it holds, which is what it takes to see
-// an index an array cannot hold: the elements themselves are read by name.
+// listing is a plane that can list what it holds, which is what it takes to
+// load a composite whose members come from the value.
+//
+// It is never asked to list a section: an array's children come from the type,
+// so a section address reaches no Children call at all (ADR-0016).
 type listing struct {
 	values   map[Path]Value
-	children map[Path][]Path
+	children map[Path][]Segment
 	listErr  error
 
-	// got is every address the walk asked about, which is how "a length comes
-	// from enumeration and never from probing" is asserted: what a probe would
-	// have asked for is what this never holds.
-	got []Path
+	// got is every leaf the walk asked about, and listed is every composite it
+	// asked to enumerate.
+	got    []Path
+	listed []Path
 }
 
 func (l *listing) Bind(*AddressSet) (OpenFunc, error) {
 	return func(context.Context) (Reader, error) { return l, nil }, nil
 }
 
-func (l *listing) Get(_ context.Context, addr Path) (Value, error) {
-	l.got = append(l.got, addr)
+func (l *listing) Get(_ context.Context, addr LeafAddr) (Value, error) {
+	l.got = append(l.got, addr.Path())
 
-	return l.values[addr], nil
+	return l.values[addr.Path()], nil
 }
 
-func (l *listing) Children(_ context.Context, prefix Path) ([]Path, error) {
-	return l.children[prefix], l.listErr
+func (l *listing) Children(_ context.Context, addr CompositeAddr) ([]Segment, error) {
+	l.listed = append(l.listed, addr.Path())
+
+	return l.children[addr.Path()], l.listErr
 }
 
-// TestAnIndexTheArrayCannotHoldIsLoud is the other half of the array rule.
-// Padding or truncating would be the silent loss the whole design rules out, so
-// the plane holding a fourth element of a three-element array is an error naming
-// the index and the length.
-func TestAnIndexTheArrayCannotHoldIsLoud(t *testing.T) {
+// TestAnArrayIsNeverEnumerated is the other half of the array rule, and it is a
+// property of the address model rather than a check the walk performs.
+//
+// An array is a section, so its address is a SectionAddr and Children takes a
+// CompositeAddr: there is no call by which a plane could offer an index the
+// array cannot hold, and none by which it could offer a name (ADR-0016, #264).
+func TestAnArrayIsNeverEnumerated(t *testing.T) {
 	t.Parallel()
 
-	t.Run("every index the array holds is accepted", func(t *testing.T) {
-		t.Parallel()
+	src := &listing{values: map[Path]Value{At("ports").Elem(1): String("b")}}
 
-		src := &listing{
-			values:   map[Path]Value{At("ports").Elem(1): String("b")},
-			children: map[Path][]Path{At("ports"): {At("ports").Elem(0), At("ports").Elem(1)}},
-		}
+	got, err := Load[arrayConf](t.Context(), src)
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
 
-		got, err := Load[arrayConf](t.Context(), src)
-		if err != nil {
-			t.Fatalf("load: %+v", err)
-		}
+	if want := [3]string{"", "b", ""}; got.Ports != want {
+		t.Errorf("loaded %q, want %q", got.Ports, want)
+	}
 
-		if want := [3]string{"", "b", ""}; got.Ports != want {
-			t.Errorf("loaded %q, want %q", got.Ports, want)
-		}
-	})
-
-	t.Run("and one it does not is refused, naming the index and the length", func(t *testing.T) {
-		t.Parallel()
-
-		src := &listing{
-			children: map[Path][]Path{At("ports"): {At("ports").Elem(0), At("ports").Elem(7)}},
-		}
-
-		_, err := Load[arrayConf](t.Context(), src)
-
-		report := reportOf(err)
-		if want := "/ports: the plane holds index 7 and [3]string holds 3"; !strings.Contains(report, want) {
-			t.Errorf("report\n\t%s\ndoes not contain\n\t%s", report, want)
-		}
-
-		mustBeClass(t, err, ErrValue)
-	})
+	if len(src.listed) != 0 {
+		t.Errorf("the walk asked to enumerate %v, and an array's children come from its type", src.listed)
+	}
 }
 
 // optConf is a pointer to a composite beside a leaf, which is the shape ADR-0006
@@ -494,8 +518,8 @@ func aNilPointerDumpsANull(t *testing.T) {
 		t.Fatalf("dump: %+v", err)
 	}
 
-	if got := p.values[At("opt")]; got != Null {
-		t.Errorf("/opt holds %v, want a null", got)
+	if got := p.presence[At("opt")]; got != PresenceNull {
+		t.Errorf("/opt is %v, want a null", got)
 	}
 
 	if slices.Contains(p.set, At("opt", "user")) {
@@ -513,8 +537,8 @@ func aSetPointerDumpsWhatIsBeneathIt(t *testing.T) {
 		t.Fatalf("dump: %+v", err)
 	}
 
-	if slices.Contains(p.set, At("opt")) {
-		t.Errorf("the walk wrote %v, and a realised container competes with its own children", p.set)
+	if slices.Contains(p.ensured, At("opt")) {
+		t.Errorf("the walk answered at %v, and a realised container competes with its own children", p.ensured)
 	}
 
 	if got := p.values[At("opt", "user")]; got != String("u") {
@@ -574,28 +598,35 @@ func mustBeCred(t *testing.T, got, want *cred) {
 	}
 }
 
-// TestAContainerAddressCarriesAbsenceOrANullAndNothingElse is what makes the
-// container address safe to admit to the set: both of its observations mean
-// "there is nothing under here", so it can never compete with a child.
-func TestAContainerAddressCarriesAbsenceOrANullAndNothingElse(t *testing.T) {
+// TestAContainerAddressIsNeverAskedForAValue is what makes the container
+// address safe to admit to the set, and it is now a property of the types
+// rather than a refusal the walk makes.
+//
+// A container's own address is a SectionAddr, and Get takes a LeafAddr, so a
+// plane that happens to hold something under a section's own name cannot have
+// that something mistaken for the section's value: the question does not
+// compile. The refusal this test used to assert - "the plane holds string at a
+// container address" - has no call left to fire on (ADR-0016, #219).
+func TestAContainerAddressIsNeverAskedForAValue(t *testing.T) {
 	t.Parallel()
 
 	p := newPlane(map[Path]Value{At("opt"): String("everything")})
 
-	_, err := Load[optConf](t.Context(), planeSource{p: p})
-
-	report := reportOf(err)
-	want := "/opt: the plane holds string at a container address, which holds absence or a null"
-
-	if !strings.Contains(report, want) {
-		t.Errorf("report\n\t%s\ndoes not contain\n\t%s", report, want)
+	if _, err := Load[optConf](t.Context(), planeSource{p: p}); err != nil {
+		t.Fatalf("load: %+v", err)
 	}
 
-	if strings.Contains(report, "everything") {
-		t.Errorf("report\n\t%s\nrepeats a value the plane supplied", report)
+	if slices.Contains(p.got, At("opt")) {
+		t.Errorf("the walk asked for a value at %v, and a section is asked whether it is there", p.got)
 	}
 
-	mustBeClass(t, err, ErrValue)
+	if !slices.Contains(p.probed, At("opt")) {
+		t.Errorf("the walk probed %v, want the section's own address among them", p.probed)
+	}
+
+	if !p.bound.Has(sectionAt(At("opt"))) || p.bound.Has(leafAt(At("opt"))) {
+		t.Errorf("the driver was bound to %v, want /opt as a section and not as a leaf", kinded(p.bound))
+	}
 }
 
 // seeded is the seed every case below is handed, fresh per call, because a seed
@@ -708,7 +739,7 @@ func mustRoundTripAPointedLeaf(t *testing.T, v *int, want Value) {
 		t.Fatalf("dump: %+v", err)
 	}
 
-	mustBeAddresses(t, slices.Collect(p.bound.All()), []string{"/port"})
+	mustBeMembers(t, kinded(p.bound), []string{"leaf /port"})
 
 	if got := p.values[At("port")]; got != want {
 		t.Errorf("/port holds %v, want %v", got, want)
@@ -809,7 +840,21 @@ func (s *treeSink) Bind(*AddressSet) (OpenWriterFunc, error) {
 // put a value nowhere has done exactly what it was asked. That is the whole
 // failure mode, and it is why the root rule is a refusal rather than a
 // documented edge.
-func (s *treeSink) Set(_ context.Context, addr Path, v Value) error {
+func (s *treeSink) Set(_ context.Context, addr LeafAddr, v Value) error {
+	return s.write(addr.Path(), v)
+}
+
+// Ensure is the same write at a container's own address, which is where the
+// null a nil composite says lands.
+func (s *treeSink) Ensure(_ context.Context, addr Container, p Presence) error {
+	if p != PresenceNull {
+		return nil
+	}
+
+	return s.write(addr.Path(), Null)
+}
+
+func (s *treeSink) write(addr Path, v Value) error {
 	segs := slices.Collect(addr.Segments())
 	if len(segs) == 0 {
 		return nil
@@ -864,7 +909,7 @@ func mustWriteNothingAtTheEmptyPath(t *testing.T, sink *treeSink, v Value) {
 	t.Helper()
 
 	before := len(sink.wrote)
-	if err := sink.Set(t.Context(), At(), v); err != nil {
+	if err := sink.Set(t.Context(), leafAt(At()), v); err != nil {
 		t.Fatalf("the sink refused the empty path with %v, which is not the failure mode", err)
 	}
 
@@ -918,7 +963,7 @@ func aRefusedListing(t *testing.T) {
 
 	src := &listing{listErr: errors.New("no list capability on this token")}
 
-	_, err := Load[arrayConf](t.Context(), src)
+	_, err := Load[sliceConf](t.Context(), src)
 	mustBeClass(t, err, ErrPlane, ErrDriver)
 }
 
@@ -977,8 +1022,9 @@ func bothSectionsRoundTrip(t *testing.T) {
 		t.Fatalf("dump: %+v", err)
 	}
 
-	mustBeAddresses(t, slices.Collect(p.bound.All()), []string{
-		"/name", "/sect", "/sect/arr#0", "/sect/arr#1", "/sect/cred", "/sect/cred/pass", "/sect/cred/user",
+	mustBeMembers(t, kinded(p.bound), []string{
+		"leaf /name", "section /sect", "section /sect/arr", "leaf /sect/arr#0", "leaf /sect/arr#1",
+		"section /sect/cred", "leaf /sect/cred/pass", "leaf /sect/cred/user",
 	})
 
 	got, err := Load[deepOuter](t.Context(), planeSource{p: p})
@@ -1034,9 +1080,9 @@ func TestAPointerToSomethingOtherThanAStruct(t *testing.T) {
 		t.Fatalf("dump: %+v", err)
 	}
 
-	// The array takes a container address and its two positions; the byte slice
+	// The array takes a section address and its two positions; the byte slice
 	// is a leaf, so its pointer adds a null to one address rather than a second.
-	mustBeAddresses(t, slices.Collect(p.bound.All()), []string{"/arr", "/arr#0", "/arr#1", "/bytes"})
+	mustBeMembers(t, kinded(p.bound), []string{"section /arr", "leaf /arr#0", "leaf /arr#1", "leaf /bytes"})
 
 	got, err := Load[boxedComposites](t.Context(), planeSource{p: p})
 	if err != nil {

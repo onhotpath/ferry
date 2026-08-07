@@ -10,7 +10,7 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// Driver is the driver conformance suite: twelve cases over one plane, and the
+// Driver is the driver conformance suite: thirteen cases over one plane, and the
 // whole of what a driver author writes.
 //
 //	func TestConformance(t *testing.T) {
@@ -87,13 +87,13 @@ type driverRun struct {
 	carry map[ferry.VKind]bool
 }
 
-// run is the twelve cases, in the order ADR-0014 lists them.
+// run is the thirteen cases, in the order ADR-0014 lists them.
 func (d *driverRun) run() {
 	d.rep.Helper()
 
 	d.caseKinds()
 	d.caseBind()
-	d.caseContainerGet()
+	d.caseProbe()
 	d.caseGetError()
 	d.caseChildren()
 	d.caseLifecycle()
@@ -103,6 +103,7 @@ func (d *driverRun) run() {
 	d.casePerRequestPlane()
 	d.caseGolden()
 	d.caseNullAtContainer()
+	d.caseForeign()
 }
 
 // caseKinds is case 1: every value the plane can express, and a loud refusal for
@@ -228,7 +229,11 @@ func (d *driverRun) caseBind() {
 	d.rep.Helper()
 
 	inst := d.plane.Open()
-	set := ferry.NewAddressSet(addrLeaf)
+
+	set, ok := fixtureSet[onlyLeaf](d, caseBindNo)
+	if !ok {
+		return
+	}
 
 	if inst.Source != nil {
 		if _, err := inst.Source.Bind(set); err != nil {
@@ -247,108 +252,190 @@ func (d *driverRun) caseBind() {
 	}
 }
 
-// caseContainerGet is case 3: Get at a container address answers with a nil
-// error and reports what the plane holds there (ADR-0004, ADR-0014 amended
-// under #136).
+// caseProbe is case 3: a plane that can answer about a container's own address
+// reports what it holds there (ADR-0016, amending what this case was before).
 //
-// A composite is read one element at a time under ADR-0003's structured
-// addresses, so there is no group value for the container itself to hold, and a
-// driver answering one is a driver core cannot interpret.
+// It used to be "Get at a container address answers Absent or Null", and under
+// the sealed address model that question does not compile: [ferry.Reader.Get]
+// takes a [ferry.LeafAddr] and a container's own address is a
+// [ferry.SectionAddr] or a [ferry.CompositeAddr]. So the case is the same
+// obligation asked through the method that now owns it, and a driver refusing
+// at a leaf whose plane holds two values for it is no longer refusing something
+// this suite calls illegal (#208).
 //
-// Which of the two empty answers a row demands follows from what was written
-// there. A populated list and a missing address hold Absent, because nothing
-// was ever written at either. An empty composite holds Null, because ADR-0005
-// writes a Null at a composite's own address when it has no elements, and a
-// driver reports what the plane holds: answering Absent for a stored Null
-// deletes an observation rather than renaming one, and takes a LoadOver's
-// clearing of the field with it.
-func (d *driverRun) caseContainerGet() {
+// [ferry.Prober] is optional, so a reader that cannot answer is skipped rather
+// than failed: a plane that cannot list often cannot say whether a container is
+// there either.
+func (d *driverRun) caseProbe() {
 	d.rep.Helper()
 
-	set := ferry.NewAddressSet(addrList, addrMap, addrLeaf, addrMissing)
-
-	if ctx, r, ok := dumpAndOpen(d, filledFixture(), set, caseContainerNo); ok {
-		d.holdsNothing(ctx, r, addrList)
-		d.holdsNothing(ctx, r, addrMap)
-		d.holdsNothing(ctx, r, addrMissing)
-		closeIf(r)
-	}
-
-	// The empty composites write a Null, so on a plane with no null they are
-	// never written at all and there is no stored answer to read back. Such a
-	// plane is asked only the half of this case it can be asked, and case 1 is
-	// where its refusal of the other half is asserted.
-	if !d.carry[ferry.KindNull] {
+	set, ok := fixtureSet[filled](d, caseContainerNo)
+	if !ok {
 		return
 	}
 
-	blankSet := ferry.NewAddressSet(addrNilList, addrEmptyMap, addrSection)
+	ctx, r, ok := dumpAndOpen(d, filledFixture(), set, caseContainerNo)
+	if !ok {
+		return
+	}
 
-	ctx, r, ok := dumpAndOpen(d, blanksFixture(), blankSet, caseContainerNo)
+	probes := d.probeFilled(ctx, r, set)
+
+	closeIf(r)
+
+	// The blanks write a null at their own address, so on a plane with no null
+	// they are never written at all and there is no stored answer to read back.
+	// Such a plane is asked only the half of this case it can be asked, and
+	// case 1 is where its refusal of the other half is asserted.
+	//
+	// Whether the plane probes at all is settled here, before the blanks are
+	// dumped, and that ordering is the fix rather than a tidy-up: a plane with
+	// no Prober and no Ensurer failed that dump, and this case reported it as
+	// its own where it is case 12's.
+	if probes && d.carry[ferry.KindNull] {
+		d.probeBlanks()
+	}
+}
+
+// probeFilled is the populated half: a container with members under it is
+// present, which is the answer a plane holding only leaves can still infer.
+//
+// It reports whether the plane probes at all, which is what the halves after it
+// are gated on.
+func (d *driverRun) probeFilled(ctx context.Context, r ferry.Reader, set *ferry.AddressSet) bool {
+	d.rep.Helper()
+
+	pr, ok := r.(ferry.Prober)
+	if !ok {
+		d.skip(caseContainerNo, "the plane's reader does not probe, which is optional for the same reason "+
+			"enumeration is")
+
+		return false
+	}
+
+	for _, at := range []ferry.Path{addrList, addrMap} {
+		if a, found := compositeIn(set, at); found {
+			d.probeIs(ctx, caseContainerNo, pr, a, ferry.PresencePresent)
+		}
+	}
+
+	return true
+}
+
+// caseForeign is case 13: a plane key that belongs to no address of this schema
+// says nothing about a container whose key space it shares.
+//
+// A section's members come from the type, so the question a plane is asked at
+// one is exactly whether it holds those members. A flat plane that answered out
+// of every key beginning with the section's own would fabricate the section out
+// of somebody else's variable, which is the defect the typed address exists to
+// retire, moved one method over: a required field under the fabricated section
+// then fails a load that should have left the pointer nil.
+//
+// The neighbour is written through this plane's own sink, so the case makes no
+// assumption about how the plane spells a key. A tree plane writes it beside the
+// section and a flat plane writes it inside the section's prefix, and the
+// required answer is the same for both.
+func (d *driverRun) caseForeign() {
+	d.rep.Helper()
+
+	set, ok := fixtureSet[justSection](d, caseForeignNo)
+	if !ok {
+		return
+	}
+
+	a, found := sectionIn(set, addrSection)
+	if !found {
+		d.fail(caseForeignNo, "the address set Bind received does not hold "+addrSection.String()+
+			" as a section address, so there is no container to ask about")
+
+		return
+	}
+
+	d.probeForeign(set, a)
+}
+
+// probeForeign dumps the neighbour and asks about the section beside it.
+func (d *driverRun) probeForeign(set *ferry.AddressSet, a ferry.SectionAddr) {
+	d.rep.Helper()
+
+	ctx, r, ok := dumpAndOpen(d, neighbour{Beside: "v"}, set, caseForeignNo)
 	if !ok {
 		return
 	}
 
 	defer closeIf(r)
 
-	d.holdsNull(ctx, r, addrNilList)
-	d.holdsNull(ctx, r, addrEmptyMap)
-}
+	pr, ok := r.(ferry.Prober)
+	if !ok {
+		d.skip(caseForeignNo, "the plane's reader does not probe, which is optional for the same reason "+
+			"enumeration is")
 
-// holdsNothing reads one container address nothing was ever written at, and
-// reports a driver that answered with a value, or with an error where there is
-// nothing to fail at.
-//
-// Absent is the only answer here, because a composite is read one element at a
-// time and no Set ever reached the address.
-func (d *driverRun) holdsNothing(ctx context.Context, r ferry.Reader, addr ferry.Path) {
-	d.rep.Helper()
-
-	v, ok := d.containerGet(ctx, r, addr)
-	if !ok || v.Kind() == ferry.KindAbsent {
 		return
 	}
 
-	d.fail(caseContainerNo, fmt.Sprintf("Get at the container address %s answered %#v, where nothing was ever "+
-		"written: a composite is read one element at a time, so there is no group value for the container "+
-		"itself to hold", addr, v))
+	d.probeIs(ctx, caseForeignNo, pr, a, ferry.PresenceAbsent)
 }
 
-// holdsNull reads one container address an empty composite was dumped to, and
-// reports a driver that answered anything but the Null it was handed.
+// probeBlanks is the empty half: a nil composite, an empty composite and a nil
+// optional section were each told their own address holds a null, and a driver
+// reports what the plane holds.
 //
-// ADR-0005 writes a Null at a composite's own address when it has no elements,
-// and a driver reports what the plane holds. Absent means the plane does not
-// hold the address, so answering it here deletes an observation rather than
-// renaming one: the field a LoadOver should clear keeps its seeded value, and
-// nothing reports why.
-func (d *driverRun) holdsNull(ctx context.Context, r ferry.Reader, addr ferry.Path) {
+// Absence would delete an observation rather than rename one: the field a
+// LoadOver should clear keeps its seeded value, and nothing reports why.
+func (d *driverRun) probeBlanks() {
 	d.rep.Helper()
 
-	v, ok := d.containerGet(ctx, r, addr)
-	if !ok || v.Kind() == ferry.KindNull {
+	set, ok := fixtureSet[blanks](d, caseContainerNo)
+	if !ok {
 		return
 	}
 
-	d.fail(caseContainerNo, fmt.Sprintf("Get at the container address %s answered %#v, where an empty composite "+
-		"was dumped and a Null landed: a driver reports what the plane holds, and Absent says the plane does "+
-		"not hold the address at all", addr, v))
+	ctx, r, ok := dumpAndOpen(d, blanksFixture(), set, caseContainerNo)
+	if !ok {
+		return
+	}
+
+	defer closeIf(r)
+
+	pr, ok := r.(ferry.Prober)
+	if !ok {
+		return
+	}
+
+	for _, at := range []ferry.Path{addrNilList, addrEmptyMap} {
+		if a, found := compositeIn(set, at); found {
+			d.probeIs(ctx, caseContainerNo, pr, a, ferry.PresenceNull)
+		}
+	}
+
+	if a, found := sectionIn(set, addrSection); found {
+		d.probeIs(ctx, caseContainerNo, pr, a, ferry.PresenceNull)
+	}
 }
 
-// containerGet is the read both container assertions share, and the one failure
-// they share with it: a container address holds no value to fail at.
-func (d *driverRun) containerGet(ctx context.Context, r ferry.Reader, addr ferry.Path) (ferry.Value, bool) {
+// probeIs reads one container address and compares what the plane answered with
+// what was written there.
+func (d *driverRun) probeIs(ctx context.Context, n int, pr ferry.Prober, addr ferry.Container,
+	want ferry.Presence,
+) {
 	d.rep.Helper()
 
-	v, err := r.Get(ctx, addr)
+	got, err := pr.Probe(ctx, addr)
 	if err != nil {
-		d.fail(caseContainerNo, fmt.Sprintf("Get at the container address %s failed with %v, where a container "+
-			"address holds no value and so has nothing to fail at", addr, err))
+		d.fail(n, fmt.Sprintf("Probe at the container address %s failed with %v, where the "+
+			"fixture had just been written through this plane's own sink", addr, err))
 
-		return ferry.Value{}, false
+		return
 	}
 
-	return v, true
+	if got.Presence() == want {
+		return
+	}
+
+	d.fail(n, fmt.Sprintf("Probe at the container address %s answered %s, want %s: a driver "+
+		"reports what the plane holds at a container's own address, and the three answers are three "+
+		"different things to a reload", addr, got.Presence(), want))
 }
 
 // caseGetError is case 4: a Get returning a non-nil error reaches the caller as
@@ -388,14 +475,13 @@ func (d *driverRun) caseGetError() {
 	}
 }
 
-// caseChildren is case 5: Children at a container address returns the element
-// addresses, kinded (ADR-0004).
+// caseChildren is case 5: Children at a composite address returns the segments
+// the plane holds immediately under it, kinded (ADR-0016).
 //
-// Addresses and not names, because an address carries its segment kind, so the
-// plane says whether the container is a mapping or a sequence instead of the
-// caller guessing it from base-10 text. Comparing whole [ferry.Path] values is
-// what asserts the kind: two addresses are equal exactly when they render alike,
-// and an Index segment renders differently from a Name one.
+// Segments and not addresses, because the driver says how the plane spells its
+// members and the schema types the child. The kind is the assertion: a position
+// under a sequence and a name under a mapping are different answers, and core
+// refuses each under the other.
 //
 // [ferry.Enumerator] is optional in both directions - a Vault token with read
 // and no list is ordinary - so a reader that does not enumerate is skipped
@@ -403,7 +489,10 @@ func (d *driverRun) caseGetError() {
 func (d *driverRun) caseChildren() {
 	d.rep.Helper()
 
-	set := ferry.NewAddressSet(addrList, addrMap, addrLeaf)
+	set, ok := fixtureSet[filled](d, caseChildrenNo)
+	if !ok {
+		return
+	}
 
 	ctx, r, ok := dumpAndOpen(d, filledFixture(), set, caseChildrenNo)
 	if !ok {
@@ -419,31 +508,38 @@ func (d *driverRun) caseChildren() {
 		return
 	}
 
-	d.childrenAre(ctx, e, addrList, []ferry.Path{addrList.Elem(0), addrList.Elem(1)})
-	d.childrenAre(ctx, e, addrMap, []ferry.Path{addrMap.At(fixtureKey)})
+	if a, found := compositeIn(set, addrList); found {
+		d.childrenAre(ctx, e, a, []ferry.Segment{ferry.IndexSegment(0), ferry.IndexSegment(1)})
+	}
+
+	if a, found := compositeIn(set, addrMap); found {
+		d.childrenAre(ctx, e, a, []ferry.Segment{ferry.NameSegment(fixtureKey)})
+	}
 }
 
-// childrenAre reads one container's children and compares them against the
-// addresses the fixture put there, sorted segment-wise so that the comparison is
-// about the set rather than about the order a driver happens to answer in.
-func (d *driverRun) childrenAre(ctx context.Context, e ferry.Enumerator, prefix ferry.Path, want []ferry.Path) {
+// childrenAre reads one composite's members and compares them against the
+// segments the fixture put there, sorted so that the comparison is about the
+// set rather than about the order a driver happens to answer in.
+func (d *driverRun) childrenAre(ctx context.Context, e ferry.Enumerator,
+	addr ferry.CompositeAddr, want []ferry.Segment,
+) {
 	d.rep.Helper()
 
-	got, err := e.Children(ctx, prefix)
+	got, err := e.Children(ctx, addr)
 	if err != nil {
-		d.fail(caseChildrenNo, fmt.Sprintf("Children at %s failed with %v", prefix, err))
+		d.fail(caseChildrenNo, fmt.Sprintf("Children at %s failed with %v", addr, err))
 
 		return
 	}
 
-	slices.SortFunc(got, ferry.Path.Compare)
+	slices.SortFunc(got, compareSegments)
 
 	if slices.Equal(got, want) {
 		return
 	}
 
-	d.fail(caseChildrenNo, fmt.Sprintf("Children at %s answered %v, want %v: an address carries its segment "+
-		"kind, so a sequence element and a mapping member are different answers", prefix, got, want))
+	d.fail(caseChildrenNo, fmt.Sprintf("Children at %s answered %v, want %v: a segment carries its kind, so a "+
+		"sequence element and a mapping member are different answers", addr, got, want))
 }
 
 // caseKeyInjectivity is case 7: a driver producing a plane key refuses a
@@ -464,7 +560,11 @@ func (d *driverRun) caseKeyInjectivity() {
 	d.rep.Helper()
 
 	inst := d.plane.Open()
-	set := ferry.NewAddressSet(collidingAddrs()...)
+
+	set, ok := fixtureSet[colliding](d, caseInjectiveNo)
+	if !ok {
+		return
+	}
 
 	if inst.Source != nil {
 		_, err := inst.Source.Bind(set)
@@ -549,18 +649,18 @@ func (d *driverRun) caseRetention() {
 		return
 	}
 
-	open, err := inst.Sink.Bind(ferry.NewAddressSet(addrMap))
+	b, err := ferry.BindSink[justMap](inst.Sink, d.opts...)
 	if err != nil {
-		d.fail(caseRetentionNo, fmt.Sprintf("Sink.Bind: %v", err))
+		d.fail(caseRetentionNo, fmt.Sprintf("BindSink: %v", err))
 
 		return
 	}
 
-	if !d.mints(inst.ctx(), open, addrMap.At("a-b"), caseRetentionNo) {
+	if !d.mints(inst.ctx(), b, "a-b", caseRetentionNo) {
 		return
 	}
 
-	if d.mints(inst.ctx(), open, addrMap.At("a_b"), caseRetentionNo) {
+	if d.mints(inst.ctx(), b, "a_b", caseRetentionNo) {
 		return
 	}
 
@@ -585,14 +685,14 @@ func (d *driverRun) caseDynamic() {
 		return
 	}
 
-	open, err := inst.Sink.Bind(ferry.NewAddressSet(addrMap))
+	b, err := ferry.BindSink[justMap](inst.Sink, d.opts...)
 	if err != nil {
-		d.fail(caseDynamicNo, fmt.Sprintf("Sink.Bind: %v", err))
+		d.fail(caseDynamicNo, fmt.Sprintf("BindSink: %v", err))
 
 		return
 	}
 
-	if d.mints(inst.ctx(), open, addrMap.At(fixtureKey), caseDynamicNo) {
+	if d.mints(inst.ctx(), b, fixtureKey, caseDynamicNo) {
 		return
 	}
 
@@ -600,22 +700,33 @@ func (d *driverRun) caseDynamic() {
 		"minted from the value rather than from the type, so it was never going to be in the static set")
 }
 
-// mints opens a writer and writes one address through it, reporting whether the
-// write was taken. The open is closed either way, because a suite that leaked a
-// file handle per case would fail a driver for the suite's own reason.
-func (d *driverRun) mints(ctx context.Context, open ferry.OpenWriterFunc, addr ferry.Path, n int) bool {
+// mints dumps a one-entry map through the binding and reports whether the write
+// was taken.
+//
+// It goes through a dump rather than through the [ferry.Writer] directly,
+// because a value-minted address is one only the walk can produce: the three
+// address kinds are sealed and the compiler is the only thing that mints one
+// (ADR-0016). Each dump is one open of the binding, which is what makes this
+// the retention question.
+func (d *driverRun) mints(ctx context.Context, b *ferry.SinkBinding[justMap], key string, n int) bool {
 	d.rep.Helper()
 
-	w, err := open(ctx)
-	if err != nil {
-		d.fail(n, fmt.Sprintf("opening a writer: %v", err))
-
-		return false
+	err := b.Dump(ctx, justMap{Map: map[string]string{key: "v"}})
+	if err == nil {
+		return true
 	}
 
-	defer closeIf(w)
+	d.note(n, err)
 
-	return w.Set(ctx, addr, ferry.String("v")) == nil
+	return false
+}
+
+// note is where a refused write's own text reaches the report, so that a driver
+// author sees why rather than only that.
+func (d *driverRun) note(n int, err error) {
+	d.rep.Helper()
+
+	d.skip(n, "the write was refused with: "+err.Error())
 }
 
 // casePerRequestPlane is case 10: a driver reading its plane from the context
@@ -673,7 +784,12 @@ func (d *driverRun) readProbe(src ferry.Source) openProbe {
 		return nil
 	}
 
-	open, err := src.Bind(ferry.NewAddressSet(addrLeaf))
+	set, ok := fixtureSet[onlyLeaf](d, casePerRequestNo)
+	if !ok {
+		return nil
+	}
+
+	open, err := src.Bind(set)
 	if err != nil {
 		d.fail(casePerRequestNo, fmt.Sprintf("Source.Bind refused a legal address set with %v, and no plane "+
 			"had been supplied: Bind takes no context, so it cannot see that absence, and a plane that is "+
@@ -700,7 +816,12 @@ func (d *driverRun) writeProbe(sink ferry.Sink) openProbe {
 		return nil
 	}
 
-	open, err := sink.Bind(ferry.NewAddressSet(addrLeaf))
+	set, ok := fixtureSet[onlyLeaf](d, casePerRequestNo)
+	if !ok {
+		return nil
+	}
+
+	open, err := sink.Bind(set)
 	if err != nil {
 		d.fail(casePerRequestNo, fmt.Sprintf("Sink.Bind refused a legal address set with %v, and no plane had "+
 			"been supplied: Bind takes no context, so it cannot see that absence, and a plane that is not "+
@@ -874,18 +995,68 @@ func (d *driverRun) caseNullAtContainer() {
 		return
 	}
 
-	for _, addr := range []ferry.Path{addrNilList, addrEmptyMap, addrSection} {
-		if spy.set != nil && spy.set.Has(addr) {
-			continue
-		}
+	d.boundContainers(spy.set)
+}
 
-		d.fail(caseNullNo, fmt.Sprintf("the address set Bind received does not hold the container address %s, "+
-			"which the walk then wrote a Null at", addr))
+// boundContainers is the assertion itself: the three container addresses the
+// walk just wrote a null at were in the set the sink's Bind received, each at
+// the kind the walk wrote it as.
+func (d *driverRun) boundContainers(set *ferry.AddressSet) {
+	d.rep.Helper()
+
+	if set == nil {
+		d.fail(caseNullNo, "the sink's Bind was never handed an address set")
+
+		return
+	}
+
+	for _, at := range []ferry.Path{addrNilList, addrEmptyMap} {
+		if _, ok := compositeIn(set, at); !ok {
+			d.missingContainer(at, "composite")
+		}
+	}
+
+	if _, ok := sectionIn(set, addrSection); !ok {
+		d.missingContainer(addrSection, "section")
 	}
 }
 
+// missingContainer reports a container address the compiler did not put in the
+// set the driver was bound to, at the kind the walk then wrote at.
+func (d *driverRun) missingContainer(at ferry.Path, kind string) {
+	d.rep.Helper()
+
+	d.fail(caseNullNo, fmt.Sprintf("the address set Bind received does not hold %s as a %s address, which the "+
+		"walk then wrote a null at", at, kind))
+}
+
+// fixtureSet is the address set of one of the suite's own fixtures, and whether
+// there was one.
+//
+// It cannot fail from here. [Driver] resolves the caller's Option list against
+// every fixture before any case runs and returns without running one where that
+// fails, so a case reaching this has already been told the fixture compiles.
+// The error is reported rather than dropped, because a suite that swallowed one
+// would report the case as having passed - and it is reported at one site
+// rather than at eight, because eight copies of an unreachable arm are eight
+// places for the message to drift.
+// It is a function rather than a method because the fixture's type is a
+// parameter, which is [dumpAndOpen]'s reason too.
+func fixtureSet[T any](d *driverRun, n int) (*ferry.AddressSet, bool) {
+	d.rep.Helper()
+
+	set, err := setOf[T](d.opts)
+	if err != nil {
+		d.fail(n, "compiling the suite's own fixture: "+err.Error())
+
+		return nil, false
+	}
+
+	return set, true
+}
+
 // fail is what every case reports through, and it names the plane and the case
-// so that a driver author reading their own CI output knows which of twelve went
+// so that a driver author reading their own CI output knows which of thirteen went
 // red.
 func (d *driverRun) fail(n int, msg string) {
 	d.rep.Helper()

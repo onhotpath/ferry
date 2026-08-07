@@ -67,6 +67,73 @@ func seeded() *fake {
 	return store
 }
 
+// The section holding one of each kind under it, which is what a section's
+// presence has to be answered from.
+type (
+	deepOpts struct {
+		Root  string            `ferry:"root"`
+		Inner innerOpts         `ferry:"inner"`
+		Tags  map[string]string `ferry:"tags"`
+	}
+
+	innerOpts struct {
+		Deep string `ferry:"deep"`
+	}
+
+	deepConfig struct {
+		Opts *deepOpts `ferry:"opts"`
+	}
+)
+
+// TestASectionIsPresentFromItsOwnMembers is the scoping this driver shares with
+// every flat plane.
+//
+// A section's members come from the type, so a key in the same folder that
+// belongs to no address of this schema is somebody else's key and says nothing.
+// A composite under the section is the case a table of keys cannot answer,
+// because its own members come from the store, so its folder is listed and
+// everything in it is one of them.
+func TestASectionIsPresentFromItsOwnMembers(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]deepCase{
+		"a leaf under a nested section":    {key: "app/opts/inner/deep", there: true},
+		"a member of a composite under it": {key: "app/opts/tags/a", there: true},
+		"a key this schema does not name":  {key: "app/opts_extra"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			checkDeepOpts(t, tc)
+		})
+	}
+}
+
+// deepCase is one key the store holds and whether the section is there with it.
+type deepCase struct {
+	key   string
+	there bool
+}
+
+// checkDeepOpts loads one store holding one key and reports whether the section
+// came back.
+func checkDeepOpts(t *testing.T, tc deepCase) {
+	t.Helper()
+
+	store := newFake()
+	store.data[tc.key] = []byte("v")
+
+	got, err := ferry.Load[deepConfig](t.Context(), mustSource(t, store))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if (got.Opts != nil) != tc.there {
+		t.Errorf("Opts = %+v, want a section there = %v", got.Opts, tc.there)
+	}
+}
+
 // TestGetFailureIsNeverAbsent is ADR-0014's conformance case 4 asserted against
 // this driver directly rather than only through the suite, because the failure
 // it rules out is one a driver can commit on its own: a survey found a real
@@ -104,6 +171,8 @@ func TestGetAtAMissingAddressIsAbsent(t *testing.T) {
 	store := newFake()
 	store.data["app/empty"] = []byte{}
 
+	set := addrsOf[emptyMissing](t)
+
 	for _, tc := range []struct {
 		name string
 		addr ferry.Path
@@ -114,14 +183,14 @@ func TestGetAtAMissingAddressIsAbsent(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assertGet(t, openReader(t, mustSource(t, store), tc.addr), tc.addr, tc.want)
+			assertGet(t, openReader(t, mustSource(t, store), set), leafAt(t, set, tc.addr), tc.want)
 		})
 	}
 }
 
 // assertGet reads one address and compares what came back, kind included: a
 // [ferry.Value] is comparable, so == asserts the kind and the text at once.
-func assertGet(t *testing.T, r ferry.Reader, addr ferry.Path, want ferry.Value) {
+func assertGet(t *testing.T, r ferry.Reader, addr ferry.LeafAddr, want ferry.Value) {
 	t.Helper()
 
 	got, err := r.Get(t.Context(), addr)
@@ -152,36 +221,40 @@ func TestChildrenReadTheSegmentKindOffTheText(t *testing.T) {
 	store.data["app/labels/01"] = []byte("not a position")
 	store.data["app/labels/99999999999999999999999"] = []byte("no position is this large")
 
+	set := addrsOf[tagsLabels](t)
+
 	for _, tc := range []struct {
 		name string
 		at   ferry.Path
-		want []ferry.Path
+		want []ferry.Segment
 	}{
 		{
 			name: "base-10 names a position",
 			at:   ferry.At("tags"),
-			want: []ferry.Path{ferry.At("tags").Elem(0), ferry.At("tags").Elem(1)},
+			want: []ferry.Segment{ferry.IndexSegment(0), ferry.IndexSegment(1)},
 		},
 		{
 			name: "everything else names a member, and a deeper key names its folder",
 			at:   ferry.At("labels"),
-			want: []ferry.Path{
-				ferry.At("labels", "01"), ferry.At("labels", "99999999999999999999999"),
-				ferry.At("labels", "env"), ferry.At("labels", "team"),
+			want: []ferry.Segment{
+				ferry.NameSegment("01"), ferry.NameSegment("99999999999999999999999"),
+				ferry.NameSegment("env"), ferry.NameSegment("team"),
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assertChildren(t, enumerator(t, mustSource(t, store), tc.at), tc.at, tc.want)
+
+			e := enumerator(t, mustSource(t, store), set)
+			assertChildren(t, e, compositeAt(t, set, tc.at), tc.want)
 		})
 	}
 }
 
-// assertChildren compares whole addresses rather than segment text, which is
-// what asserts the segment kind: two addresses are equal exactly when they
-// render alike, and an Index segment renders differently from a Name one.
-func assertChildren(t *testing.T, e ferry.Enumerator, at ferry.Path, want []ferry.Path) {
+// assertChildren compares whole segments rather than their text, which is what
+// asserts the kind: a driver mints a position or a member and the two are
+// different answers even where the text is alike.
+func assertChildren(t *testing.T, e ferry.Enumerator, at ferry.CompositeAddr, want []ferry.Segment) {
 	t.Helper()
 
 	got, err := e.Children(t.Context(), at)
@@ -196,10 +269,10 @@ func assertChildren(t *testing.T, e ferry.Enumerator, at ferry.Path, want []ferr
 
 // enumerator opens a reader and asserts that it lists, which this driver's does
 // because a store lists trivially.
-func enumerator(t *testing.T, src *kv.Source, addrs ...ferry.Path) ferry.Enumerator {
+func enumerator(t *testing.T, src *kv.Source, set *ferry.AddressSet) ferry.Enumerator {
 	t.Helper()
 
-	r := openReader(t, src, addrs...)
+	r := openReader(t, src, set)
 
 	e, ok := r.(ferry.Enumerator)
 	if !ok {
@@ -223,9 +296,10 @@ func TestPrefixPrependsSegments(t *testing.T) {
 		t.Fatalf("kv.NewSource: %v", err)
 	}
 
-	addr := ferry.At("db", "host")
+	set := addrsOf[dbSection](t)
+	addr := leafAt(t, set, ferry.At("db", "host"))
 
-	got, err := openReader(t, src, addr).Get(t.Context(), addr)
+	got, err := openReader(t, src, set).Get(t.Context(), addr)
 	if err != nil {
 		t.Fatalf("Get(%s): %v", addr, err)
 	}
@@ -235,83 +309,48 @@ func TestPrefixPrependsSegments(t *testing.T) {
 	}
 }
 
-// TestBindRefusesACollisionBeforeAnyCall is ADR-0003's injectivity obligation,
-// discharged through core's helper.
+// TestBindRefusesAnUnnameableAddress is the legality half of ADR-0003's rule: a
+// segment the store has no name for is refused rather than written somewhere
+// else, as the plane's own class, and before the store is touched.
 //
-// The colliding pair is the one this key space actually has: a store key
-// carries no segment kind, so the position 0 under /tags and the member "0"
-// under /tags are one key, and one of the two would be lost. The refusal names
-// both addresses, is a plane refusal, and lands before the store is touched -
-// which is what lets a plane-to-plane transfer be refused after zero backend
-// calls rather than after reading the whole source.
-func TestBindRefusesACollisionBeforeAnyCall(t *testing.T) {
-	t.Parallel()
-
-	store := newFake()
-	position, member := ferry.At("tags").Elem(0), ferry.At("tags", "0")
-	addrs := ferry.NewAddressSet(position, member)
-
-	_, err := mustSource(t, store).Bind(addrs)
-	if err == nil {
-		t.Fatal("Bind accepted an address set whose two members render to one store key")
-	}
-
-	if !errors.Is(err, ferry.ErrPlane) {
-		t.Errorf("Bind refused with %v, which is not a plane refusal", err)
-	}
-
-	for _, addr := range []ferry.Path{position, member} {
-		if !strings.Contains(err.Error(), addr.String()) {
-			t.Errorf("the refusal %q does not name %s, and one of the two is the address the author has to move",
-				err, addr)
-		}
-	}
-
-	if got := store.calls(); got != 0 {
-		t.Errorf("Bind made %d backend calls, want none: both checks run before any I/O", got)
-	}
-}
-
-// TestBindRefusesAnUnnameableAddress is the legality half of the same
-// obligation: a segment the store has no name for is refused rather than
-// written somewhere else.
+// The injectivity half is not here, and its absence is a fact rather than a
+// gap: the one many-to-one step this key space has is the segment kind, and
+// both spellings at once need one address to be two containers, which the
+// compiler now refuses from the type alone. TestTheOneCollisionThisKeySpaceHas-
+// IsCaughtBeforeTheDriver is where that is asserted.
 func TestBindRefusesAnUnnameableAddress(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct {
-		name string
-		addr ferry.Path
-	}{
-		{name: "an empty segment", addr: ferry.At("db", "")},
-		{name: "a segment holding the separator", addr: ferry.At("db/host")},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			assertUnnameable(t, tc.addr)
-		})
-	}
-}
-
-// assertUnnameable holds one address to the legality half of ADR-0003's rule:
-// refused, as the plane's own class, and before the store is touched.
-func assertUnnameable(t *testing.T, addr ferry.Path) {
-	t.Helper()
-
 	store := newFake()
 
-	_, err := mustSource(t, store).Bind(ferry.NewAddressSet(addr))
+	_, err := mustSource(t, store).Bind(addrsOf[separatorInSegment](t))
 	if err == nil {
-		t.Fatalf("Bind accepted %s, which a store cannot name", addr)
+		t.Fatal("Bind accepted a segment holding the store's own separator, which a store cannot name")
 	}
 
 	if !errors.Is(err, ferry.ErrPlane) {
 		t.Errorf("Bind refused with %v, which is not a plane refusal", err)
+	}
+
+	if !strings.Contains(err.Error(), separator) {
+		t.Errorf("the refusal %q does not say what it is about", err)
 	}
 
 	if got := store.calls(); got != 0 {
 		t.Errorf("Bind made %d backend calls, want none", got)
 	}
 }
+
+// separatorInSegment names one address whose segment text holds the store's own
+// separator, which is ordinary segment text to ferry and another step in the
+// hierarchy to a store.
+type separatorInSegment struct {
+	Odd string `ferry:"db/host"`
+}
+
+// separator is the store's own, spelled here so the assertion above reads
+// against the same byte the driver joins with.
+const separator = "/"
 
 // TestCancellationIsHonoured is the driver's half of what a cancelled context
 // means. What ferry does when a cancellation races a driver error is #20's and
@@ -330,8 +369,9 @@ func cancelledBeforeTheCall(t *testing.T) {
 	t.Parallel()
 
 	store := seeded()
-	addr := ferry.At("host")
-	r := openReader(t, mustSource(t, store), addr)
+	set := addrsOf[hostOnly](t)
+	addr := leafAt(t, set, ferry.At("host"))
+	r := openReader(t, mustSource(t, store), set)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -456,7 +496,7 @@ func listFailsAtTheOpen(t *testing.T) {
 
 	src := mustSource(t, newFake().failLists(), kv.WithBatch())
 
-	open, err := src.Bind(ferry.NewAddressSet(ferry.At("host")))
+	open, err := src.Bind(addrsOf[hostOnly](t))
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
@@ -469,26 +509,12 @@ func listFailsAtTheOpen(t *testing.T) {
 func listFailsAtChildren(t *testing.T) {
 	t.Parallel()
 
-	at := ferry.At("labels")
-	e := enumerator(t, mustSource(t, newFake().failLists()), at)
+	set := addrsOf[tagsLabels](t)
+	at := compositeAt(t, set, ferry.At("labels"))
+	e := enumerator(t, mustSource(t, newFake().failLists()), set)
 
 	if _, err := e.Children(t.Context(), at); !errors.Is(err, errFakeRead) {
 		t.Errorf("Children over an unreadable store failed with %v, want the client's own error", err)
-	}
-}
-
-// TestReadsRefuseAnUnnameableMintedAddress is the dynamic tier of the legality
-// check: an address that came from a value is checked as it is asked for, not
-// only at Bind, because a map key does not exist until there is a value.
-func TestReadsRefuseAnUnnameableMintedAddress(t *testing.T) {
-	t.Parallel()
-
-	at := ferry.At("labels")
-	minted := at.At("a/b")
-	r := openReader(t, mustSource(t, newFake()), at)
-
-	if _, err := r.Get(t.Context(), minted); err == nil {
-		t.Errorf("Get accepted %s, whose segment the store has no name for", minted)
 	}
 }
 
@@ -497,9 +523,10 @@ func TestReadsRefuseAnUnnameableMintedAddress(t *testing.T) {
 func TestChildrenRefusesACancelledContext(t *testing.T) {
 	t.Parallel()
 
-	at := ferry.At("labels")
+	set := addrsOf[tagsLabels](t)
+	at := compositeAt(t, set, ferry.At("labels"))
 	store := newFake()
-	r := openReader(t, mustSource(t, store), at)
+	r := openReader(t, mustSource(t, store), set)
 
 	e, ok := r.(ferry.Enumerator)
 	if !ok {
@@ -525,7 +552,7 @@ func TestOpenRefusesACancelledContext(t *testing.T) {
 
 	store := newFake()
 
-	open, err := mustSource(t, store, kv.WithBatch()).Bind(ferry.NewAddressSet(ferry.At("host")))
+	open, err := mustSource(t, store, kv.WithBatch()).Bind(addrsOf[hostOnly](t))
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
@@ -543,10 +570,10 @@ func TestOpenRefusesACancelledContext(t *testing.T) {
 }
 
 // openReader binds one address and opens a reader over it.
-func openReader(t *testing.T, src *kv.Source, addrs ...ferry.Path) ferry.Reader {
+func openReader(t *testing.T, src *kv.Source, set *ferry.AddressSet) ferry.Reader {
 	t.Helper()
 
-	open, err := src.Bind(ferry.NewAddressSet(addrs...))
+	open, err := src.Bind(set)
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}

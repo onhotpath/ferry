@@ -507,7 +507,7 @@ func (k fakeSource) Bind(*ferry.AddressSet) (ferry.OpenFunc, error) {
 
 type fakeReader struct{ s *fakeStore }
 
-func (r fakeReader) Get(_ context.Context, addr ferry.Path) (ferry.Value, error) {
+func (r fakeReader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
 	if r.s.of.getErr != nil {
 		return ferry.Value{}, r.s.of.getErr
 	}
@@ -528,7 +528,7 @@ func (k fakeSink) Bind(*ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 
 type fakeWriter struct{ s *fakeStore }
 
-func (w fakeWriter) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
+func (w fakeWriter) Set(_ context.Context, addr ferry.LeafAddr, v ferry.Value) error {
 	if w.s.of.setErr != nil {
 		return w.s.of.setErr
 	}

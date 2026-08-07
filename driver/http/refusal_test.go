@@ -33,8 +33,6 @@ func TestANameNeitherPlaneCanSpellIsRefused(t *testing.T) {
 		src *Source
 		key string
 	}{
-		"an empty map key on the query plane":     {NewQuerySource(), ""},
-		"an empty map key on the header plane":    {NewHeaderSource(), ""},
 		"a map key no header field name may hold": {NewHeaderSource(), "a b"},
 	}
 
@@ -49,6 +47,41 @@ func TestANameNeitherPlaneCanSpellIsRefused(t *testing.T) {
 
 			assertWraps(t, err, ErrIllegalName, ferry.ErrPlane)
 		})
+	}
+}
+
+// TestAnEmptyMapKeyNeverReachesEitherPlane is the row that moved out of the test
+// above, and it moved because the refusal did.
+//
+// An empty segment names no address in ferry's own model, so a map key rendering
+// to empty text is refused at the mapping before any plane is asked for a name
+// for it (#258). This driver's key function still refuses an empty part, and
+// what changed is that nothing can reach it that way any more: the fact worth
+// pinning here is that the value never arrives, whichever plane is underneath.
+func TestAnEmptyMapKeyNeverReachesEitherPlane(t *testing.T) {
+	t.Parallel()
+
+	for name, src := range map[string]*Source{
+		"query":  NewQuerySource(),
+		"header": NewHeaderSource(),
+	} {
+		t.Run(name, func(t *testing.T) { refusesTheEmptyKey(t, src) })
+	}
+}
+
+// refusesTheEmptyKey is one plane's row, lifted out of its table so that the
+// table stays a table: a subtest body counts against the enclosing function's
+// complexity.
+func refusesTheEmptyKey(t *testing.T, src *Source) {
+	t.Parallel()
+
+	err := dumpKey(t, src, "")
+	if err == nil {
+		t.Fatal("a map key rendering to empty text was written anyway")
+	}
+
+	if !errors.Is(err, ferry.ErrValue) {
+		t.Errorf("the refusal is not a value refusal: %v", err)
 	}
 }
 

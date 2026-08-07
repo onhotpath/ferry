@@ -70,7 +70,102 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 		return nil, err
 	}
 
-	return s.opener(keys), nil
+	sections, err := declaredSections(addrs, keys)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.opener(keys, sections), nil
+}
+
+// sectionScope is what a declared section's presence is decided from: the store
+// keys of the leaves the type puts under it, and the folders of the composites
+// it puts under it, whose own members come from the store instead.
+//
+// A section's children come from the type (ADR-0016), so the store can be asked
+// about exactly those keys, and a key that merely lies in the same folder stays
+// a key of somebody else's. A key-value folder is namespaced by the caller's own
+// prefix, so this is a narrower hole than the same one on a process
+// environment, and it is the same hole.
+type sectionScope struct {
+	keys    []string
+	folders []string
+}
+
+// declaredSections is the presence table Bind builds, one entry per section the
+// type determined.
+//
+// A section a value minted - one under a composite - is in no address set and in
+// no entry here, and [reader.Probe] falls back to asking whether the folder
+// holds anything. That is exact too: everything under a composite's own folder
+// is one of its members by construction, because its members are whatever the
+// store holds there.
+func declaredSections(addrs *ferry.AddressSet, keys *ferry.Keys) (map[ferry.SectionAddr]sectionScope, error) {
+	out := make(map[ferry.SectionAddr]sectionScope, addrs.Len())
+	key := keys.Open()
+
+	for m := range addrs.Seq() {
+		section, ok := m.(ferry.SectionAddr)
+		if !ok {
+			continue
+		}
+
+		scope, err := scopeOf(addrs, key, section.Path())
+		if err != nil {
+			return nil, err
+		}
+
+		out[section] = scope
+	}
+
+	return out, nil
+}
+
+// scopeOf collects one section's leaves and composites out of the address set.
+//
+// It ranges the whole set per section rather than exploiting the set's ordering,
+// because this runs once per Bind, before any backend call.
+func scopeOf(addrs *ferry.AddressSet, key ferry.KeyFunc, at ferry.Path) (sectionScope, error) {
+	var scope sectionScope
+
+	for m := range addrs.Seq() {
+		if !under(at, m.Path()) {
+			continue
+		}
+
+		k, err := key(m.Path())
+		if err != nil {
+			// Unreachable: NewKeys computed a key for every address in this set
+			// already. It is returned rather than ignored because a driver that
+			// swallows an error here would be deciding that core was wrong.
+			return sectionScope{}, err
+		}
+
+		switch m.(type) {
+		case ferry.LeafAddr:
+			scope.keys = append(scope.keys, k)
+		case ferry.CompositeAddr:
+			scope.folders = append(scope.folders, folder(k))
+		default:
+			// A section under a section contributes nothing of its own: its
+			// members are in this set too, and they are what the store is asked
+			// about.
+		}
+	}
+
+	return scope, nil
+}
+
+// under reports whether p lies strictly below prefix, at a segment boundary.
+//
+// The canonical renderings decide it. ADR-0003's escaping leaves no bare
+// delimiter inside a segment, so a rendering that continues past another one
+// continues at a boundary and never in the middle of a segment, which is why /ab
+// is not under /a while /a/b and /a#0 both are.
+func under(prefix, p ferry.Path) bool {
+	rest, ok := strings.CutPrefix(p.String(), prefix.String())
+
+	return ok && rest != "" && (rest[0] == '/' || rest[0] == '#')
 }
 
 // opener is the [ferry.OpenFunc] one Bind hands back, and the one place the
@@ -81,7 +176,7 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 // address. Both hand back the same [ferry.Reader] type, because the difference
 // is data rather than behaviour and nothing above this function can tell which
 // it was given.
-func (s *Source) opener(keys *ferry.Keys) ferry.OpenFunc {
+func (s *Source) opener(keys *ferry.Keys, sections map[ferry.SectionAddr]sectionScope) ferry.OpenFunc {
 	root := rootKey(s.prefix)
 
 	return func(ctx context.Context) (ferry.Reader, error) {
@@ -89,7 +184,7 @@ func (s *Source) opener(keys *ferry.Keys) ferry.OpenFunc {
 			return nil, err
 		}
 
-		r := &reader{client: s.client, key: keys.Open()}
+		r := &reader{client: s.client, key: keys.Open(), sections: sections}
 		if !s.batch {
 			return r, nil
 		}
@@ -107,9 +202,11 @@ func (s *Source) opener(keys *ferry.Keys) ferry.OpenFunc {
 
 // reader is one open read side.
 //
-// It implements [ferry.Enumerator] because a store lists trivially, and not
-// [ferry.Releaser], because it holds no resource: the client is the source's
-// and outlives every open of it.
+// It implements [ferry.Enumerator] because a store lists trivially, and
+// [ferry.Prober] for the same reason: a container is present here exactly when
+// the store holds something below it. It does not implement [ferry.Releaser],
+// because it holds no resource: the client is the source's and outlives every
+// open of it.
 type reader struct {
 	client Client
 
@@ -120,6 +217,10 @@ type reader struct {
 	// outlives one (ADR-0012).
 	key ferry.KeyFunc
 
+	// sections is the presence table Bind built, and it is read and never
+	// written, so one binding's opens share it.
+	sections map[ferry.SectionAddr]sectionScope
+
 	// pairs is the whole plane, and batched is what tells "fetched and empty"
 	// from "not fetched". A store that holds nothing answers List with an empty
 	// map, and the two must not be one state.
@@ -129,6 +230,7 @@ type reader struct {
 
 var (
 	_ ferry.Reader     = (*reader)(nil)
+	_ ferry.Prober     = (*reader)(nil)
 	_ ferry.Enumerator = (*reader)(nil)
 )
 
@@ -147,16 +249,14 @@ var (
 // context.Canceled either way; which of the two a race resolves to is #20's
 // question and is not answered here.
 //
-// At a container address the answer is Absent, always: this plane has no null,
-// so a composite with no elements was refused at the write rather than stored,
-// and a composite with elements holds them at their own addresses and nothing
-// at its own.
-func (r *reader) Get(ctx context.Context, addr ferry.Path) (ferry.Value, error) {
+// It is asked only about a leaf, so a container's own key is never read as a
+// value: what is asked there is [reader.Probe].
+func (r *reader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
 	if err := ctx.Err(); err != nil {
 		return ferry.Value{}, err
 	}
 
-	key, err := r.key(addr)
+	key, err := r.key(addr.Path())
 	if err != nil {
 		return ferry.Value{}, err
 	}
@@ -231,36 +331,143 @@ func held(value []byte) ferry.Value { return ferry.String(string(value)) }
 // position, dumped and then loaded back: the load reports that the plane holds
 // /m#0 under a mapping and refuses it, which is core's own check, so the entry
 // is never quietly turned into something else.
-func (r *reader) Children(ctx context.Context, at ferry.Path) ([]ferry.Path, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	key, err := r.key(at)
+func (r *reader) Children(ctx context.Context, addr ferry.CompositeAddr) ([]ferry.Segment, error) {
+	under, err := r.folderOf(ctx, addr.Path())
 	if err != nil {
 		return nil, err
 	}
 
-	pairs := r.pairs
-	if !r.batched {
-		if pairs, err = r.client.List(ctx, folder(key)); err != nil {
-			return nil, fmt.Errorf("kv: listing the store: %w", err)
+	pairs, err := r.pairsIn(ctx, under)
+	if err != nil {
+		return nil, err
+	}
+
+	return children(under, pairs), nil
+}
+
+// Probe answers whether the store holds anything this schema addresses below a
+// container's own key.
+//
+// A key-value store has no null, so a container is present or absent and never
+// null: an empty composite has nothing to be stored as here, which is what
+// [Sink] refuses at the write rather than storing a zero-length value that would
+// be indistinguishable from empty text.
+//
+// The members are what the question is scoped to, and that is the sharp edge. A
+// section's members come from the type, so a key that merely lies in the same
+// folder and belongs to nothing this schema addresses does not make the section
+// present. A composite is the other way round, because its members are whatever
+// the store holds below its key, so everything there is one of them.
+func (r *reader) Probe(ctx context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	at, err := r.folderOf(ctx, addr.Path())
+	if err != nil {
+		return ferry.SectionInfo{}, err
+	}
+
+	pairs, err := r.pairsIn(ctx, at)
+	if err != nil {
+		return ferry.SectionInfo{}, err
+	}
+
+	if r.holds(addr, at, pairs) {
+		return ferry.SectionPresent, nil
+	}
+
+	return ferry.SectionAbsent, nil
+}
+
+// holds reports whether these pairs hold anything the container owns: exactly
+// its declared members where the type determined them, and the whole folder
+// where the value does.
+func (r *reader) holds(addr ferry.Container, at string, pairs map[string][]byte) bool {
+	if section, ok := addr.(ferry.SectionAddr); ok {
+		if scope, declared := r.sections[section]; declared {
+			return scope.holdsIn(pairs)
 		}
 	}
 
-	return children(at, folder(key), pairs), nil
+	for key := range pairs {
+		if strings.HasPrefix(key, at) {
+			return true
+		}
+	}
+
+	return false
 }
 
-// children is the immediate members of one folder, as addresses, sorted
-// segment-wise.
+// holdsIn reports whether the pairs hold one of the section's own members: a
+// declared leaf at its key, or anything at all inside a declared composite.
+func (s sectionScope) holdsIn(pairs map[string][]byte) bool {
+	for _, key := range s.keys {
+		if _, ok := pairs[key]; ok {
+			return true
+		}
+	}
+
+	for _, folder := range s.folders {
+		if anyUnder(pairs, folder) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// anyUnder reports whether the pairs hold anything inside one folder.
+func anyUnder(pairs map[string][]byte, folder string) bool {
+	for key := range pairs {
+		if strings.HasPrefix(key, folder) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// folderOf is the store folder one container address names, and it is where a
+// cancelled context and an address the store cannot name are refused before
+// anything is read.
+func (r *reader) folderOf(ctx context.Context, at ferry.Path) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	key, err := r.key(at)
+	if err != nil {
+		return "", err
+	}
+
+	return folder(key), nil
+}
+
+// pairsIn is whatever the store holds in one folder: out of the snapshot a
+// batch open already has, or out of one List.
+//
+// It is the one place the two container questions reach the store, so a batch
+// open makes no call for either and a lazy one makes exactly one.
+func (r *reader) pairsIn(ctx context.Context, under string) (map[string][]byte, error) {
+	if r.batched {
+		return r.pairs, nil
+	}
+
+	pairs, err := r.client.List(ctx, under)
+	if err != nil {
+		return nil, fmt.Errorf("kv: listing the store: %w", err)
+	}
+
+	return pairs, nil
+}
+
+// children is the immediate members of one folder, as segments, sorted the way
+// core orders the addresses they name.
 //
 // The sort is not decoration: Go's map iteration is randomised, so an unsorted
 // answer would make a test that reads a plane's contents depend on iteration
 // order, and ADR-0003 requires the enumeration to be segment-wise rather than
 // over the rendering.
-func children(at ferry.Path, under string, pairs map[string][]byte) []ferry.Path {
+func children(under string, pairs map[string][]byte) []ferry.Segment {
 	seen := make(map[string]struct{}, len(pairs))
-	out := make([]ferry.Path, 0, len(pairs))
+	out := make([]ferry.Segment, 0, len(pairs))
 
 	for key := range pairs {
 		name, ok := childName(key, under)
@@ -273,12 +480,26 @@ func children(at ferry.Path, under string, pairs map[string][]byte) []ferry.Path
 		}
 
 		seen[name] = struct{}{}
-		out = append(out, extend(at, name))
+		out = append(out, segmentOf(name))
 	}
 
-	slices.SortFunc(out, ferry.Path.Compare)
+	slices.SortFunc(out, compareSegments)
 
 	return out
+}
+
+// compareSegments orders two members the way core orders the addresses they
+// name: by kind first, and a position numerically rather than as text.
+func compareSegments(a, b ferry.Segment) int {
+	if a.Kind() != b.Kind() {
+		return int(a.Kind()) - int(b.Kind())
+	}
+
+	if a.Kind() == ferry.Index && len(a.Text()) != len(b.Text()) {
+		return len(a.Text()) - len(b.Text())
+	}
+
+	return strings.Compare(a.Text(), b.Text())
 }
 
 // childName is the first step of key below under, and whether key lies strictly
@@ -295,14 +516,14 @@ func childName(key, under string) (string, bool) {
 	return name, name != ""
 }
 
-// extend builds one child address out of the text the store spelled, reading
-// the segment kind off the text because the store carries none.
-func extend(at ferry.Path, name string) ferry.Path {
+// segmentOf builds one member out of the text the store spelled, reading the
+// segment kind off the text because the store carries none.
+func segmentOf(name string) ferry.Segment {
 	if i, ok := position(name); ok {
-		return at.Elem(i)
+		return ferry.IndexSegment(i)
 	}
 
-	return at.At(name)
+	return ferry.NameSegment(name)
 }
 
 // position is the sequence index a child name spells, if it spells one.

@@ -262,7 +262,7 @@ func TestANumberKeyAddressesAMapAndCarriesAsANumber(t *testing.T) {
 	// the codec's decode half a segment.
 	src := &listing{
 		values:   p.values,
-		children: map[Path][]Path{At("pinned"): {At("pinned").At("3"), At("pinned").At("11")}},
+		children: map[Path][]Segment{At("pinned"): {NameSegment("3"), NameSegment("11")}},
 	}
 
 	back, err := Load[conf](t.Context(), src, WithRegistry(reg))

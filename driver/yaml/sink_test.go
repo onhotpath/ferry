@@ -238,7 +238,7 @@ func TestUnwritableDirectoryRefusesInsideTheOpen(t *testing.T) {
 
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-	open, err := yaml.NewSink(filepath.Join(dir, "plane.yaml")).Bind(ferry.NewAddressSet(ferry.At("port")))
+	open, err := yaml.NewSink(filepath.Join(dir, "plane.yaml")).Bind(addressesOf[scalars](t).set)
 	if err != nil {
 		t.Fatalf("Bind refused before any I/O, where it cannot yet know the plane is unwritable: %v", err)
 	}
@@ -670,6 +670,64 @@ func TestTwoAddressesUnderOneAnchorAreRefused(t *testing.T) {
 	onlyPlane(t, filepath.Dir(path))
 }
 
+// TestTwoAddressesAtOneAnchorAreRefusedAtAContainerWrite is the same collision
+// where one of the two addresses is a container's own.
+//
+// A container write is the first thing that can change the kind of an anchored
+// node, so it is the one write an alias to that node is not followed through
+// (#198). The two addresses then landed on two different nodes, the collision
+// was never seen, and the dump destroyed the alias in silence and returned nil -
+// with which of the two happened depending on the order of the struct's fields.
+func TestTwoAddressesAtOneAnchorAreRefusedAtAContainerWrite(t *testing.T) {
+	type opts struct {
+		Host string `ferry:"host,omitzero"`
+	}
+
+	type baseFirst struct {
+		Base *opts  `ferry:"base"`
+		Use  string `ferry:"use"`
+	}
+
+	type useFirst struct {
+		Use  string `ferry:"use"`
+		Base *opts  `ferry:"base"`
+	}
+
+	const doc = "base: &b hello\nuse: *b\n"
+
+	t.Run("the container is written first", func(t *testing.T) {
+		refusesAnchor(t, doc, baseFirst{Base: &opts{}, Use: "z"})
+	})
+
+	t.Run("the leaf is written first", func(t *testing.T) {
+		refusesAnchor(t, doc, useFirst{Use: "z", Base: &opts{}})
+	})
+}
+
+// refusesAnchor dumps one value over one document and asserts that the shared
+// anchor was refused and the plane left as it was.
+func refusesAnchor[T any](t *testing.T, doc string, v T) {
+	t.Helper()
+
+	path := write(t, doc)
+
+	err := ferry.Dump(t.Context(), v, yaml.NewSink(path))
+	if err == nil {
+		t.Fatal("two addresses were written to one anchored value with different values, and the file can hold " +
+			"only one of them")
+	}
+
+	if !errors.Is(err, ferry.ErrPlane) {
+		t.Errorf("the refusal was %v, want an error carrying ferry.ErrPlane", err)
+	}
+
+	if got := read(t, path); got != doc {
+		t.Errorf("the plane holds %q, want %q: a dump that failed leaves the plane byte-identical", got, doc)
+	}
+
+	onlyPlane(t, filepath.Dir(path))
+}
+
 // TestTwoAddressesAtOneAnchorAgreeing is the other side of that guard: the
 // document says the two are one value and the destination agrees, so there is
 // nothing to refuse.
@@ -992,11 +1050,13 @@ func TestSinkRefusesAnAbsent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plane.yaml")
 	w := openWriter(t, path)
 
-	if err := w.Set(t.Context(), ferry.At("kept"), ferry.String("here")); err != nil {
+	a := addressesOf[scalars](t)
+
+	if err := w.Set(t.Context(), a.leaf(t, ferry.At("kept")), ferry.String("here")); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 
-	err := w.Set(t.Context(), ferry.At("gone"), ferry.Value{})
+	err := w.Set(t.Context(), a.leaf(t, ferry.At("gone")), ferry.Value{})
 	if err == nil {
 		t.Fatal("a Set of an Absent was taken, and an absent address written as a value is the conflation this " +
 			"driver refuses")
@@ -1135,7 +1195,7 @@ func onlyPlane(t *testing.T, dir string) {
 func openWriter(t *testing.T, path string) ferry.Writer {
 	t.Helper()
 
-	open, err := yaml.NewSink(path).Bind(ferry.NewAddressSet(ferry.At("unused")))
+	open, err := yaml.NewSink(path).Bind(addressesOf[scalars](t).set)
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
@@ -1211,14 +1271,25 @@ type shellWriter struct {
 	sink  *shell
 }
 
-func (w shellWriter) Set(ctx context.Context, addr ferry.Path, v ferry.Value) error {
-	w.sink.seen = append(w.sink.seen, record{addr: addr, val: v})
+func (w shellWriter) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) error {
+	w.sink.seen = append(w.sink.seen, record{addr: addr.Path(), val: v})
 
-	if addr == w.sink.stop {
+	if addr.Path() == w.sink.stop {
 		return errStop
 	}
 
 	return w.inner.Set(ctx, addr, v)
+}
+
+// Ensure forwards the container-level write, so a shell over a sink that can
+// spell one does not silently take the capability away (ADR-0016).
+func (w shellWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error {
+	e, ok := w.inner.(ferry.Ensurer)
+	if !ok {
+		return nil
+	}
+
+	return e.Ensure(ctx, addr, p)
 }
 
 func (w shellWriter) Commit(ctx context.Context) error {

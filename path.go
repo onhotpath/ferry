@@ -3,7 +3,6 @@ package ferry
 import (
 	"cmp"
 	"iter"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -45,6 +44,22 @@ func (k SegmentKind) String() string {
 type Segment struct {
 	kind SegmentKind
 	text string
+}
+
+// NameSegment is one member of a mapping: a struct field, an object member, a
+// map key, spelled exactly as the plane spells it.
+//
+// It is what [Enumerator.Children] returns for a mapping. The text is the
+// plane's own, byte for byte, and core neither folds nor normalises it.
+func NameSegment(text string) Segment { return Segment{kind: Name, text: text} }
+
+// IndexSegment is one position in a sequence, which is what
+// [Enumerator.Children] returns for a list.
+//
+// The position is unsigned because a negative one has no meaning, so the
+// constraint is in the type rather than in a check a driver can trip over.
+func IndexSegment(i uint) Segment {
+	return Segment{kind: Index, text: strconv.FormatUint(uint64(i), base10)}
 }
 
 // Kind reports whether this step names a member or a position.
@@ -408,44 +423,16 @@ func canonicalSegment(s Segment) bool {
 	return true
 }
 
-// AddressSet is the set of addresses a compiled schema determines, and it is
-// what [Source.Bind] and [Sink.Bind] are handed. Holding it before any I/O is
-// what lets a driver precompute its plane keys once per schema and check them:
-// see [NewKeys].
+// child extends the address with one segment, keeping the kind the segment
+// carries.
 //
-// It contains every leaf address the type determines plus every container
-// address, so every member is one a driver can fetch, write, name and check. It
-// is sorted segment-wise, and [AddressSet.All] enumerates it in that order.
-//
-// It does not contain the addresses a value mints - a map key, a sequence index
-// - because those do not exist until there is a value. A driver that treats its
-// precomputed table as a closed set will refuse a legal write, which is why
-// [Keys.Open] hands back a function rather than a map.
-type AddressSet struct {
-	// addrs is sorted by Path.Compare and holds no duplicates.
-	addrs []Path
-}
+// It is how core builds the address of a member a driver enumerated: the driver
+// mints the segment and the schema types the child, so the two halves of a
+// dynamic address are contributed by the two parties that know them (ADR-0016).
+func (p Path) child(s Segment) Path {
+	if s.kind == Index {
+		return Path{rendered: p.rendered + string(indexSep) + s.text}
+	}
 
-// NewAddressSet builds a set from the addresses given, sorting them
-// segment-wise. It copies what it is handed, so the caller may keep and reuse
-// the slice, and equal addresses collapse, because this is a set.
-func NewAddressSet(addrs ...Path) *AddressSet {
-	sorted := slices.Clone(addrs)
-	slices.SortFunc(sorted, Path.Compare)
-
-	return &AddressSet{addrs: slices.Compact(sorted)}
-}
-
-// Len is how many addresses the set holds.
-func (a *AddressSet) Len() int { return len(a.addrs) }
-
-// All enumerates the set segment-wise. The order is stable across builds of the
-// same schema, so a driver may key a table by position.
-func (a *AddressSet) All() iter.Seq[Path] { return slices.Values(a.addrs) }
-
-// Has reports whether the set holds this address.
-func (a *AddressSet) Has(addr Path) bool {
-	_, ok := slices.BinarySearchFunc(a.addrs, addr, Path.Compare)
-
-	return ok
+	return p.At(s.text)
 }

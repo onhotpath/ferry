@@ -17,6 +17,7 @@ import (
 var (
 	_ ferry.Sink      = Sink{}
 	_ ferry.Writer    = (*writer)(nil)
+	_ ferry.Ensurer   = (*writer)(nil)
 	_ ferry.Committer = (*writer)(nil)
 	_ ferry.Releaser  = (*writer)(nil)
 )
@@ -164,13 +165,55 @@ type claim struct {
 // written as an explicit null and read back as Null - the Absent-versus-Null
 // conflation ferry criticises xload for, committed on the write path, where a
 // later load cannot tell it from a null the operator wrote.
-func (w *writer) Set(_ context.Context, addr ferry.Path, v ferry.Value) error {
+func (w *writer) Set(_ context.Context, addr ferry.LeafAddr, v ferry.Value) error {
 	spelled, err := spell(v)
 	if err != nil {
-		return ferry.ErrorAt(addr, err)
+		return ferry.ErrorAt(addr.Path(), err)
 	}
 
-	at, err := place(w.doc, addr)
+	return w.put(addr.Path(), spelled, yamlv3.ScalarNode)
+}
+
+// Ensure writes what a container has to say at its own address: the plane's null
+// where the value is nil or empty, and an empty mapping where the value is a
+// section that is there and holds nothing.
+//
+// The empty mapping is what closes the round trip Go can express and ADR-0006's
+// replace rule would otherwise lose: a non-nil pointer whose every field is
+// omitted writes no child, and without one section-level write the reload sees
+// an absent key and hands back nil (ADR-0016).
+func (w *writer) Ensure(_ context.Context, addr ferry.Container, p ferry.Presence) error {
+	node, kind, err := container(p)
+	if err != nil {
+		return ferry.ErrorAt(addr.Path(), err)
+	}
+
+	return w.put(addr.Path(), node, kind)
+}
+
+// container is the node one presence is written as, and the kind an alias at the
+// address has to name for the write to go through it.
+//
+// Absent never reaches here: an address ferry omits gets no call at all rather
+// than a call saying nothing, which is the same rule that keeps [ferry.Value]'s
+// absent kind off the write side entirely (ADR-0006).
+func container(p ferry.Presence) (*yamlv3.Node, yamlv3.Kind, error) {
+	switch p {
+	case ferry.PresenceNull:
+		return leaf(nullTag, nullText), yamlv3.ScalarNode, nil
+	case ferry.PresencePresent:
+		return &yamlv3.Node{Kind: yamlv3.MappingNode, Tag: mapTag}, yamlv3.MappingNode, nil
+	default:
+		return nil, 0, fmt.Errorf("%w: an absent container has nothing to write, and an address ferry omits "+
+			"gets no call rather than an explicit one", ferry.ErrValue)
+	}
+}
+
+// put is the write both halves share: find or build the node at the address,
+// check that no other address has already claimed it, and replace it while
+// keeping what belongs to the operator.
+func (w *writer) put(addr ferry.Path, spelled *yamlv3.Node, kind yamlv3.Kind) error {
+	at, err := place(w.doc, addr, kind)
 	if err != nil {
 		return ferry.ErrorAt(addr, err)
 	}
@@ -221,7 +264,9 @@ func (w *writer) claim(addr ferry.Path, at, spelled *yamlv3.Node) error {
 		return nil
 	}
 
-	held, taken := w.claims[at]
+	node := anchored(at)
+
+	held, taken := w.claims[node]
 	if taken && (held.tag != spelled.Tag || held.text != spelled.Value) {
 		return fmt.Errorf("%w: this address and %s are one value in the plane, which shares it through an alias, "+
 			"and the dump gave them different values", ferry.ErrPlane, held.addr)
@@ -232,10 +277,31 @@ func (w *writer) claim(addr ferry.Path, at, spelled *yamlv3.Node) error {
 			w.claims = make(map[*yamlv3.Node]claim, 1)
 		}
 
-		w.claims[at] = claim{addr: addr, tag: spelled.Tag, text: spelled.Value}
+		w.claims[node] = claim{addr: addr, tag: spelled.Tag, text: spelled.Value}
 	}
 
 	return nil
+}
+
+// anchored is the node a write is recorded against: the node an alias names, and
+// the node in hand where it is not one.
+//
+// Recording the node written would make the refusal depend on the order the walk
+// went in. [through] follows an alias only where the node it names is already
+// the kind the address needs, and a container write is the first thing that can
+// change that kind, so whichever of two addresses arrived first decided whether
+// the second one followed - and where it did not follow, the two never met and
+// the collision went unseen. Resolving the alias here makes both arrive at one
+// node whichever order they were written in (#198).
+//
+// A chain too long to resolve is recorded against the node in hand, which is
+// where the write is going anyway.
+func anchored(n *yamlv3.Node) *yamlv3.Node {
+	if named := deref(n); named != nil {
+		return named
+	}
+
+	return n
 }
 
 // Commit emits the document into the staged file and renames it over the plane.

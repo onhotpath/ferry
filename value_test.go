@@ -234,6 +234,65 @@ func TestKindSetIsClosedAtSix(t *testing.T) {
 	}
 }
 
+// TestPresenceRendersItself is [TestKindSetIsClosedAtSix] for the container side
+// of the boundary.
+//
+// The rendering is what a driver author reads in a failing assertion, and a
+// presence outside the set has to render as itself rather than borrow a
+// neighbour's name.
+func TestPresenceRendersItself(t *testing.T) {
+	t.Parallel()
+
+	want := []struct {
+		presence Presence
+		name     string
+	}{
+		{PresenceAbsent, "absent"},
+		{PresencePresent, "present"},
+		{PresenceNull, "null"},
+	}
+
+	if len(want) != len(presenceName) {
+		t.Fatalf("the presence set has %d members and this table names %d", len(presenceName), len(want))
+	}
+
+	for i, w := range want {
+		if int(w.presence) != i {
+			t.Fatalf("%s is presence %d, want %d", w.name, w.presence, i)
+		}
+
+		if got := w.presence.String(); got != w.name {
+			t.Errorf("presence %d renders as %q, want %q", i, got, w.name)
+		}
+	}
+
+	if got, name := Presence(len(presenceName)).String(), "Presence("+strconv.Itoa(len(presenceName))+")"; got != name {
+		t.Errorf("a presence past the end renders as %q, want %q", got, name)
+	}
+}
+
+// TestSectionInfoRendersItself is the same for what a probe answers, which is
+// what a driver's own test prints with %#v when it fails.
+func TestSectionInfoRendersItself(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		info SectionInfo
+		want string
+	}{
+		{SectionAbsent, "absent"},
+		{SectionPresent, "present"},
+		{SectionNull, "null"},
+		{SectionInfo{}, "absent"},
+	}
+
+	for _, c := range cases {
+		if got := c.info.GoString(); got != c.want {
+			t.Errorf("the probe answer renders as %q, want %q", got, c.want)
+		}
+	}
+}
+
 // TestQuotingSurvives is the property a stringly-typed boundary destroys:
 // `port: 8080` and `port: "8080"` are two observations, and each round-trips to
 // its own spelling.

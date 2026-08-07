@@ -107,6 +107,13 @@ Evidence: `X4=6..11` on [`proto/tip`](https://github.com/onhotpath/ferry/tree/pr
 *(Under [#56](https://github.com/onhotpath/ferry/issues/56): what that list **contains** is settled in [An address is a place a `Value` can be](#an-address-is-a-place-a-value-can-be-and-a-container-has-one).
 It is every leaf address the type determines plus every container address, and it is never a wildcard shape.)*
 
+> **Amended under [ADR-0016](0016-the-sealed-address-model.md): the set is typed, and "every container address" is more addresses than it was.**
+>
+> As published, a container address was one a composite that can be nil occupies, so a plain nested struct and an array took none: only a pointer, a slice and a map contributed one.
+> Under the sealed address model an address carries what kind of place it names, and a plane is asked whether a section is there, so a section with no address of its own is a question that cannot be asked.
+> Every nested struct and every array now contributes a `SectionAddr`, a slice and a map contribute a `CompositeAddr`, and a pointer contributes at the kind of what it points at.
+> The set is otherwise unchanged: it is still sorted segment-wise, still holds nothing a value mints, and still never holds a wildcard shape.
+
 ### The case rule: core never folds, confirmed
 
 Core compares segment text by exact byte equality.
@@ -301,6 +308,26 @@ It relocates them to the only place that has the information to resolve them, an
 
 *(Clarified under [#56](https://github.com/onhotpath/ferry/issues/56): "the address set" here is the whole static set, container addresses included, and it is **not** narrowed the way the core-side prefix rule above is.
 Two containers rendering to one plane key return one merged subtree from `Children`, which is the same silent merge this rule exists to catch.)*
+
+> **Amended under [ADR-0016](0016-the-sealed-address-model.md): injectivity is per kind, and a composite reserves the key space below its own key.**
+>
+> As published, and as shipped when the address set grew, the rule ran over every address at once: one key per address, whatever kind of place the address named.
+> That is the right rule while a container address is only ever a container, and it became the wrong one when a section took an address of its own.
+> Measured on the shipped `NewKeys`, `struct { A Leafy "a"; B string "A" }` was refused on the env plane with "renders this address and /A to one plane key", and nothing would have been lost: the leaf is read at `A`, the section is only ever scanned at `A_`, and the plane still tells the two apart.
+>
+> **What a key is for is part of the question.**
+> A flat driver reads a value at a leaf's key and never at a container's, and it uses a container's key as the prefix its members are named under.
+> So the check now runs within a kind: leaf against leaf, container against container.
+>
+> **The same widening hid a collision that is real, and closing it is a new refusal class.**
+> A composite's members come from the value, so a flat driver has no table to check them against: it lists every plane key beginning with the composite's own and reads what it finds as a member.
+> A leaf of the same schema whose key begins with a composite's key, and which is not under that composite, is enumerated as one of its members - one value at two addresses, which is the loss this rule exists to prevent, and the old check never looked for it.
+> A composite therefore reserves the key space its own key begins, and an address of the schema rendering into it is refused at `Bind`, naming both.
+> A section reserves nothing, because its members come from the type and a driver can ask about exactly those.
+>
+> The new refusal is conservative on one point, stated rather than hidden: core cannot see a driver's separator, so it reserves the whole byte prefix.
+> A composite at `TAGS` and an unrelated leaf at `TAGSMODE` are refused although no separator join would confuse them.
+> Rename one, or nest it under the composite where the model would put it.
 
 The conformance suite ADR-0002 puts in core checks it, which is what stops it being prose.
 This one rule covers separator collisions, case folding, and any normalization a driver invents, because all three are the same failure: a non-injective map out of the address set.

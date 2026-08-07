@@ -59,6 +59,8 @@ func TestIOTakesContext(t *testing.T) {
 		{name: "Writer.Set", typ: methodOf(t, reflect.TypeFor[Writer](), "Set"), want: 1},
 		{name: "Committer.Commit", typ: methodOf(t, reflect.TypeFor[Committer](), "Commit"), want: 1},
 		{name: "Enumerator.Children", typ: methodOf(t, reflect.TypeFor[Enumerator](), "Children"), want: 1},
+		{name: "Prober.Probe", typ: methodOf(t, reflect.TypeFor[Prober](), "Probe"), want: 1},
+		{name: "Ensurer.Ensure", typ: methodOf(t, reflect.TypeFor[Ensurer](), "Ensure"), want: 1},
 		{name: "Releaser.Close", typ: methodOf(t, reflect.TypeFor[Releaser](), "Close"), want: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,10 +99,11 @@ func countParams(fn, want reflect.Type) int {
 // where the optional interfaces are exercised the way core exercises them,
 // which is by assertion and never by requirement.
 type probe struct {
-	values map[Path]Value
-	bound  *AddressSet
-	closed bool
-	commit bool
+	values   map[Path]Value
+	presence map[Path]Presence
+	bound    *AddressSet
+	closed   bool
+	commit   bool
 }
 
 func (p *probe) Bind(addrs *AddressSet) (OpenFunc, error) {
@@ -109,14 +112,30 @@ func (p *probe) Bind(addrs *AddressSet) (OpenFunc, error) {
 	return func(context.Context) (Reader, error) { return p, nil }, nil
 }
 
-func (p *probe) Get(_ context.Context, addr Path) (Value, error) { return p.values[addr], nil }
-
-func (*probe) Children(_ context.Context, prefix Path) ([]Path, error) {
-	return []Path{prefix.Elem(0)}, nil
+func (p *probe) Get(_ context.Context, addr LeafAddr) (Value, error) {
+	return p.values[addr.Path()], nil
 }
 
-func (p *probe) Set(_ context.Context, addr Path, v Value) error {
-	p.values[addr] = v
+func (*probe) Children(context.Context, CompositeAddr) ([]Segment, error) {
+	return []Segment{IndexSegment(0)}, nil
+}
+
+func (p *probe) Probe(_ context.Context, addr Container) (SectionInfo, error) {
+	if p.presence[addr.Path()] == PresenceNull {
+		return SectionNull, nil
+	}
+
+	return SectionAbsent, nil
+}
+
+func (p *probe) Set(_ context.Context, addr LeafAddr, v Value) error {
+	p.values[addr.Path()] = v
+
+	return nil
+}
+
+func (p *probe) Ensure(_ context.Context, addr Container, held Presence) error {
+	p.presence[addr.Path()] = held
 
 	return nil
 }
@@ -137,12 +156,12 @@ func (p *probe) Close() error {
 // will: bind before any I/O, open, use, then discover the optional interfaces
 // by assertion rather than by demanding them.
 func TestContractIsImplementable(t *testing.T) {
-	addr := At("db", "host")
-	p := &probe{values: map[Path]Value{}}
+	addr := leafAt(At("db", "host"))
+	p := &probe{values: map[Path]Value{}, presence: map[Path]Presence{}}
 
 	src, sink := Source(p), Sink(&sinkOnly{probe: p})
 
-	open, err := sink.Bind(NewAddressSet(addr))
+	open, err := sink.Bind(newAddressSet(addr))
 	if err != nil {
 		t.Fatalf("Sink.Bind: %v", err)
 	}
@@ -197,10 +216,10 @@ func commitAndClose(t *testing.T, w Writer) {
 	}
 }
 
-func readBack(t *testing.T, src Source, addr Path) {
+func readBack(t *testing.T, src Source, addr LeafAddr) {
 	t.Helper()
 
-	open, err := src.Bind(NewAddressSet(addr))
+	open, err := src.Bind(newAddressSet(addr))
 	if err != nil {
 		t.Fatalf("Source.Bind: %v", err)
 	}
@@ -219,15 +238,16 @@ func readBack(t *testing.T, src Source, addr Path) {
 		t.Errorf("Get(%s) = %#v, want %#v", addr, got, String("localhost"))
 	}
 
-	missing, err := r.Get(t.Context(), At("nope"))
+	missing, err := r.Get(t.Context(), leafAt(At("nope")))
 	if err != nil || missing.Kind() != KindAbsent {
 		t.Errorf("Get at a missing address = %#v, %v, want absent and no error", missing, err)
 	}
 
-	enumerate(t, r, addr)
+	enumerate(t, r, compositeAt(At("tags")))
+	probeSection(t, r, sectionAt(At("db")))
 }
 
-func enumerate(t *testing.T, r Reader, addr Path) {
+func enumerate(t *testing.T, r Reader, addr CompositeAddr) {
 	t.Helper()
 
 	e, ok := r.(Enumerator)
@@ -236,8 +256,24 @@ func enumerate(t *testing.T, r Reader, addr Path) {
 	}
 
 	kids, err := e.Children(t.Context(), addr)
-	if err != nil || len(kids) != 1 || kids[0] != addr.Elem(0) {
+	if err != nil || len(kids) != 1 || kids[0] != IndexSegment(0) {
 		t.Errorf("Children(%s) = %v, %v", addr, kids, err)
+	}
+}
+
+// probeSection is the third optional interface, discovered the same way the
+// other two are: by assertion, never by requirement.
+func probeSection(t *testing.T, r Reader, addr SectionAddr) {
+	t.Helper()
+
+	pr, ok := r.(Prober)
+	if !ok {
+		t.Fatalf("%T does not implement Prober", r)
+	}
+
+	got, err := pr.Probe(t.Context(), addr)
+	if err != nil || got != SectionAbsent {
+		t.Errorf("Probe(%s) = %#v, %v, want absent and no error", addr, got, err)
 	}
 }
 
@@ -248,7 +284,7 @@ func enumerate(t *testing.T, r Reader, addr Path) {
 func TestReadOnlyRefusalLandsInTheOpen(t *testing.T) {
 	var s Sink = readOnly{}
 
-	open, err := s.Bind(NewAddressSet(At("x")))
+	open, err := s.Bind(newAddressSet(leafAt(At("x"))))
 	if err != nil {
 		t.Fatalf("Bind refused before any I/O: %v", err)
 	}

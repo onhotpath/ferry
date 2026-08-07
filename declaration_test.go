@@ -164,7 +164,7 @@ func mustHoldNoDeclarationKey(t *testing.T, p *plane) {
 	t.Helper()
 
 	for _, realised := range []Path{At("servers", "a", "port"), At("pool").Elem(0).At("port")} {
-		if p.bound.Has(realised) {
+		if p.bound.Has(leafAt(realised)) {
 			t.Errorf("%s is in the compiled schema, and an address minted from a value never is", realised)
 		}
 	}
@@ -184,8 +184,10 @@ func TestTheAddressShapeNeverReachesADriver(t *testing.T) {
 		t.Fatalf("dump: %+v", err)
 	}
 
-	bound := slices.Collect(p.bound.All())
-	mustBeAddresses(t, bound, []string{"/pool", "/servers"})
+	bound := slices.Collect(p.bound.Seq())
+	if got, want := kinded(p.bound), []string{"composite /pool", "composite /servers"}; !slices.Equal(got, want) {
+		t.Errorf("the driver was bound to %v, want %v", got, want)
+	}
 
 	for _, addr := range bound {
 		if strings.Contains(addr.String(), wildcard) {

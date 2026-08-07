@@ -2,6 +2,7 @@ package ferrytest
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/onhotpath/ferry"
 )
@@ -116,18 +117,50 @@ func wrapWriter(w ferry.Writer, seen map[ferry.Path]ferry.Value) ferry.Writer {
 // goes to is front's where front has the method, so a wrapper that counts a
 // Commit still leaves the driver deciding whether there is one to count.
 func shellWriter(front, w ferry.Writer) ferry.Writer {
-	c, commits := commitsThrough(front, w)
-	r, releases := releasesThrough(front, w)
+	var c caps
+
+	c.commit, _ = commitsThrough(front, w)
+	c.release, _ = releasesThrough(front, w)
+	c.ensure, _ = ensuresThrough(front, w)
+
+	if c.ensure != nil {
+		return ensuringShell(front, c)
+	}
 
 	switch {
-	case commits && releases:
-		return shellBoth{Writer: front, commit: c, release: r}
-	case commits:
-		return shellCommitter{Writer: front, commit: c}
-	case releases:
-		return shellReleaser{Writer: front, release: r}
+	case c.commit != nil && c.release != nil:
+		return shellBoth{Writer: front, Committer: c.commit, Releaser: c.release}
+	case c.commit != nil:
+		return shellCommitter{Writer: front, Committer: c.commit}
+	case c.release != nil:
+		return shellReleaser{Writer: front, Releaser: c.release}
 	default:
 		return shellPlain{Writer: front}
+	}
+}
+
+// caps is which of the three optional interfaces the shell carries, and which
+// object each call goes to. A nil member is a capability the wrapped writer
+// does not have, so the shell must not claim it either.
+type caps struct {
+	commit  ferry.Committer
+	release ferry.Releaser
+	ensure  ferry.Ensurer
+}
+
+// ensuringShell is [shellWriter]'s other four arms, split out because the three
+// optional interfaces make eight combinations and one function listing all
+// eight is over the nesting the linter allows.
+func ensuringShell(front ferry.Writer, c caps) ferry.Writer {
+	switch {
+	case c.commit != nil && c.release != nil:
+		return shellAll{Writer: front, Committer: c.commit, Releaser: c.release, Ensurer: c.ensure}
+	case c.commit != nil:
+		return shellCommitEnsurer{Writer: front, Committer: c.commit, Ensurer: c.ensure}
+	case c.release != nil:
+		return shellReleaseEnsurer{Writer: front, Releaser: c.release, Ensurer: c.ensure}
+	default:
+		return shellEnsurer{Writer: front, Ensurer: c.ensure}
 	}
 }
 
@@ -160,6 +193,23 @@ func releasesThrough(front, w ferry.Writer) (ferry.Releaser, bool) {
 	return inner, true
 }
 
+// ensuresThrough is [commitsThrough] for [ferry.Ensurer], which is the
+// capability a container's own address is written through (ADR-0016). A shell
+// that dropped it would turn every nil pointer in a dump into a refusal the
+// driver never made.
+func ensuresThrough(front, w ferry.Writer) (ferry.Ensurer, bool) {
+	inner, ok := w.(ferry.Ensurer)
+	if !ok {
+		return nil, false
+	}
+
+	if outer, ok := front.(ferry.Ensurer); ok {
+		return outer, true
+	}
+
+	return inner, true
+}
+
 // recWriter is the recording itself: it is what [wrapWriter] puts in front of a
 // driver's writer, and the shells above are what give it the driver's own
 // answer to the two optional interfaces.
@@ -174,10 +224,36 @@ type recWriter struct {
 // about the plane: a driver that refuses the write still had that Value handed
 // to it, and a golden column that went blank whenever a plane said no would
 // report the wrong half of the failure.
-func (w recWriter) Set(ctx context.Context, addr ferry.Path, v ferry.Value) error {
-	w.seen[addr] = v
+func (w recWriter) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) error {
+	w.seen[addr.Path()] = v
 
 	return w.inner.Set(ctx, addr, v)
+}
+
+// Ensure keeps what a container's own address was told and then forwards it.
+//
+// A null at a container address used to arrive here as a Set carrying
+// ferry.Null, so it is recorded as one and a caller reading a dump sees exactly
+// what it saw before (ADR-0016). A section written as present carries no value,
+// so there is nothing for the map to hold and it is forwarded and not recorded.
+func (w recWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error {
+	if p == ferry.PresenceNull {
+		w.seen[addr.Path()] = ferry.Null
+	}
+
+	return ensureThrough(ctx, w.inner, addr, p)
+}
+
+// ensureThrough forwards a container write to a writer that can take one, and
+// refuses for a writer that cannot, in the same words core uses.
+func ensureThrough(ctx context.Context, w ferry.Writer, addr ferry.Container, p ferry.Presence) error {
+	e, ok := w.(ferry.Ensurer)
+	if !ok {
+		return ferry.ErrorAt(addr.Path(), fmt.Errorf("%w: this plane cannot spell a container at its own "+
+			"address", ferry.ErrPlane))
+	}
+
+	return e.Ensure(ctx, addr, p)
 }
 
 // shellPlain is the shell for a writer that neither stages nor holds a
@@ -193,40 +269,60 @@ type shellPlain struct {
 	ferry.Writer
 }
 
-// shellCommitter is the shell for a staging sink.
-type shellCommitter struct {
-	ferry.Writer
+// The seven shells that carry at least one optional interface.
+//
+// Each embeds the interfaces its combination has, so the promoted method is the
+// one [shellWriter] resolved and there is no forwarding body to get wrong. The
+// three optional interfaces make eight combinations and every one of them has a
+// name here, because a combination with no shell is a capability silently
+// dropped from a wrapped driver.
+type (
+	// shellCommitter is the shell for a staging sink.
+	shellCommitter struct {
+		ferry.Writer
+		ferry.Committer
+	}
 
-	commit ferry.Committer
-}
+	// shellReleaser is the shell for a sink holding a resource.
+	shellReleaser struct {
+		ferry.Writer
+		ferry.Releaser
+	}
 
-// Commit is the wrapped writer's, unchanged.
-func (w shellCommitter) Commit(ctx context.Context) error { return w.commit.Commit(ctx) }
+	// shellEnsurer is the shell for a sink that can spell a container at its
+	// own address.
+	shellEnsurer struct {
+		ferry.Writer
+		ferry.Ensurer
+	}
 
-// shellReleaser is the shell for a sink holding a resource.
-type shellReleaser struct {
-	ferry.Writer
+	// shellBoth is the shell for a sink that stages and holds a resource, which
+	// is the ordinary shape of a file sink writing through a temporary.
+	shellBoth struct {
+		ferry.Writer
+		ferry.Committer
+		ferry.Releaser
+	}
 
-	release ferry.Releaser
-}
+	shellCommitEnsurer struct {
+		ferry.Writer
+		ferry.Committer
+		ferry.Ensurer
+	}
 
-// Close is the wrapped writer's, unchanged.
-func (w shellReleaser) Close() error { return w.release.Close() }
+	shellReleaseEnsurer struct {
+		ferry.Writer
+		ferry.Releaser
+		ferry.Ensurer
+	}
 
-// shellBoth is the shell for a sink that stages and holds a resource, which is
-// the ordinary shape of a file sink writing through a temporary.
-type shellBoth struct {
-	ferry.Writer
-
-	commit  ferry.Committer
-	release ferry.Releaser
-}
-
-// Commit is the wrapped writer's, unchanged.
-func (w shellBoth) Commit(ctx context.Context) error { return w.commit.Commit(ctx) }
-
-// Close is the wrapped writer's, unchanged.
-func (w shellBoth) Close() error { return w.release.Close() }
+	shellAll struct {
+		ferry.Writer
+		ferry.Committer
+		ferry.Releaser
+		ferry.Ensurer
+	}
+)
 
 // nowhere is the sink with no plane behind it: it accepts every address and
 // keeps none of them.
@@ -247,4 +343,8 @@ func (nowhere) Bind(*ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 }
 
 // Set discards. The recorder above it is what kept the value.
-func (nowhere) Set(context.Context, ferry.Path, ferry.Value) error { return nil }
+func (nowhere) Set(context.Context, ferry.LeafAddr, ferry.Value) error { return nil }
+
+// Ensure discards, so that a value with a nil section in it records rather than
+// refusing for want of a plane that was never there.
+func (nowhere) Ensure(context.Context, ferry.Container, ferry.Presence) error { return nil }

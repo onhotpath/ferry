@@ -171,17 +171,27 @@ func spellBytes(v ferry.Value) (*yamlv3.Node, error) {
 
 // valueOf is the read half of the boundary: what the plane holds at one node.
 //
-// A mapping or a sequence answers Absent, and so does a node that is not there
-// at all. ADR-0003 reads a composite one element at a time, so there is no
-// group value for a container to hold, and a driver answering one is a driver
-// core cannot interpret.
+// A node that is not there at all answers Absent. A mapping or a sequence is a
+// refusal, because this node sits at an address the schema types as a leaf and
+// the document holds a container there: the two disagree about the shape of the
+// data, and that is a fact about the plane rather than an absence.
 //
-// The kind comes from [kindOf], so the read and the guard [carryTag] applies
-// on the way out cannot drift apart: a tag is carried across a save exactly
-// where the kind it reads as has not changed.
+// Answering Absent for it was #252. Core writes nothing at an absent address,
+// so the walk filled the field with the Go zero and the load returned nil:
+// measured, `limits: {http: {port: 1}, rps: "9"}` into a map[string]string
+// loaded {"http": "", "rps": "9"} with no error, and the port was gone.
+//
+// The kind of a scalar comes from [kindOf], so the read and the guard [carryTag]
+// applies on the way out cannot drift apart: a tag is carried across a save
+// exactly where the kind it reads as has not changed.
 func valueOf(n *yamlv3.Node) (ferry.Value, error) {
-	if n == nil || n.Kind != yamlv3.ScalarNode {
+	if n == nil {
 		return ferry.Value{}, nil
+	}
+
+	if n.Kind != yamlv3.ScalarNode {
+		return ferry.Value{}, fmt.Errorf("%w: the plane holds %s here and the destination takes a single "+
+			"value: model the field as a map or a struct, or change the document", ferry.ErrValue, shapeOf(n))
 	}
 
 	switch kindOf(n.Tag) {
@@ -263,6 +273,49 @@ func carryTag(at, spelled *yamlv3.Node) {
 	}
 
 	spelled.Tag, spelled.Style = at.Tag, spelled.Style|yamlv3.TaggedStyle
+}
+
+// presenceOf is the container half of the read boundary: what the plane holds
+// at an address whose children come from the type or from the document, rather
+// than a value of its own (ADR-0016).
+//
+// The four observations are four answers and they are the ones this plane can
+// actually make. A key that is not there is absent. An explicit `~` or `null` is
+// the document saying the section is there and is nothing. A mapping or a
+// sequence is present, including an empty one: `opts: {}` is what makes a
+// present-but-empty section survive a reload, which is the whole reason the
+// probe exists. A scalar is the document and the destination disagreeing, and it
+// is refused for the reason [valueOf] refuses the mirror of it.
+func presenceOf(n *yamlv3.Node) (ferry.SectionInfo, error) {
+	switch {
+	case n == nil:
+		return ferry.SectionAbsent, nil
+	case n.Kind == yamlv3.MappingNode, n.Kind == yamlv3.SequenceNode:
+		return ferry.SectionPresent, nil
+	case n.Kind == yamlv3.ScalarNode && n.Tag == nullTag:
+		return ferry.SectionNull, nil
+	default:
+		return ferry.SectionAbsent, fmt.Errorf("%w: the plane holds a single value here and the destination "+
+			"takes a container: model the field as a leaf, or change the document", ferry.ErrValue)
+	}
+}
+
+// shapeOf names what a node is, in the words a reader of the message thinks in
+// rather than the parser's.
+//
+// It names no value the plane supplied, which ADR-0011 makes a total rule: the
+// shape is structure, and the address core attaches says where.
+func shapeOf(n *yamlv3.Node) string {
+	switch n.Kind {
+	case yamlv3.MappingNode:
+		return "a mapping"
+	case yamlv3.SequenceNode:
+		return "a sequence"
+	case yamlv3.AliasNode:
+		return "an alias that resolves to nothing"
+	default:
+		return "a document"
+	}
 }
 
 // boolOf reads a !!bool, refusing a spelling YAML's own resolution would never

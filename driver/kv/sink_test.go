@@ -34,7 +34,7 @@ func readOnlyRefusesAtTheOpen(t *testing.T) {
 
 	store := newGuarded("")
 
-	open, err := mustSink(t, store).Bind(ferry.NewAddressSet(ferry.At("host")))
+	open, err := mustSink(t, store).Bind(addrsOf[hostOnly](t))
 	if err != nil {
 		t.Fatalf("Bind refused a legal address set against a plane it has not reached: %v", err)
 	}
@@ -172,9 +172,10 @@ func commitsNothingAfterAFailedWalk(t *testing.T) {
 func writesNothingBeforeCommit(t *testing.T) {
 	t.Parallel()
 
-	addr := ferry.At("host")
+	set := addrsOf[hostOnly](t)
+	addr := leafAt(t, set, ferry.At("host"))
 	store := newFake()
-	w := openWriter(t, mustSink(t, store), addr)
+	w := openWriter(t, mustSink(t, store), set)
 
 	if err := w.Set(t.Context(), addr, ferry.String("h")); err != nil {
 		t.Fatalf("Set: %v", err)
@@ -215,7 +216,7 @@ func committer(t *testing.T, w ferry.Writer) ferry.Committer {
 func TestWriterCommitsWithNothingToRelease(t *testing.T) {
 	t.Parallel()
 
-	w := openWriter(t, mustSink(t, newFake()), ferry.At("host"))
+	w := openWriter(t, mustSink(t, newFake()), addrsOf[hostOnly](t))
 
 	if _, ok := w.(ferry.Committer); !ok {
 		t.Errorf("%T does not implement ferry.Committer, and it stages every write until the walk succeeds", w)
@@ -239,9 +240,12 @@ type nils struct {
 // rather than a plane that quietly has one.
 //
 // The refusal is per address and the run reports all three, which is the same
-// aggregation the denied-path case turns on. The class is ErrValue: nothing is
-// wrong with the store, the value has no representation here, and retrying it
-// is pointless in the way an ErrValue promises.
+// aggregation the denied-path case turns on. The class is ErrPlane and it moved
+// there with the address kinds: a container's own address is no longer written
+// through Set, so what this sink refuses is not a value it was handed but a
+// capability it does not have, and the absence of [ferry.Ensurer] is how it
+// says so (ADR-0016). The refusal still names each address and still leaves the
+// store untouched, which is what the case was ever about.
 func TestNullIsRefusedRatherThanMangled(t *testing.T) {
 	t.Parallel()
 
@@ -275,8 +279,8 @@ func assertRefused(t *testing.T, v nils, want int) {
 	}
 
 	for i, e := range got {
-		if !errors.Is(e, ferry.ErrValue) {
-			t.Errorf("element %d is %v, which does not declare ErrValue", i, e)
+		if !errors.Is(e, ferry.ErrPlane) {
+			t.Errorf("element %d is %v, which does not declare ErrPlane", i, e)
 		}
 	}
 
@@ -292,8 +296,9 @@ func assertRefused(t *testing.T, v nils, want int) {
 func TestASecondWriteAtOneKeyIsRefused(t *testing.T) {
 	t.Parallel()
 
-	addr := ferry.At("host")
-	w := openWriter(t, mustSink(t, newFake()), addr)
+	set := addrsOf[hostOnly](t)
+	addr := leafAt(t, set, ferry.At("host"))
+	w := openWriter(t, mustSink(t, newFake()), set)
 
 	if err := w.Set(t.Context(), addr, ferry.String("first")); err != nil {
 		t.Fatalf("the first Set: %v", err)
@@ -344,16 +349,17 @@ func TestCommitReportsEveryWriteThatFailed(t *testing.T) {
 func TestWritesRefuseACancelledContext(t *testing.T) {
 	t.Parallel()
 
-	addr := ferry.At("host")
+	set := addrsOf[hostOnly](t)
+	addr := leafAt(t, set, ferry.At("host"))
 	store := newFake()
 	sink := mustSink(t, store)
 
-	open, err := sink.Bind(ferry.NewAddressSet(addr))
+	open, err := sink.Bind(set)
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 
-	w := openWriter(t, sink, addr)
+	w := openWriter(t, sink, set)
 	c := committer(t, w)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -376,23 +382,28 @@ func TestWritesRefuseACancelledContext(t *testing.T) {
 	}
 }
 
-// TestSinkBindRefusesACollision is the injectivity obligation on the write
-// side, where it is the one that matters most: two addresses rendering to one
-// key would leave the store holding whichever was written last, with no error
-// anywhere.
-func TestSinkBindRefusesACollision(t *testing.T) {
+// TestTheOneCollisionThisKeySpaceHasIsCaughtBeforeTheDriver is the injectivity
+// obligation on the write side, and where it now lands.
+//
+// This key space joins segments with a separator it refuses inside one, so the
+// only many-to-one step left is the segment kind: /tags#0 and a map key "0"
+// under /tags are one store key. Both spellings at once need one address to be
+// two containers, and the compiler refuses that from the type alone (ADR-0016),
+// so the schema never reaches a Bind. The driver's own check stays as the
+// backstop for a key function that folds harder than this one.
+func TestTheOneCollisionThisKeySpaceHasIsCaughtBeforeTheDriver(t *testing.T) {
 	t.Parallel()
 
-	store := newFake()
-	addrs := ferry.NewAddressSet(ferry.At("tags").Elem(0), ferry.At("tags", "0"))
-
-	if _, err := mustSink(t, store).Bind(addrs); err == nil {
-		t.Fatal("Bind accepted an address set whose two members render to one store key")
+	if err := ferry.Compile[tagsTwice](); err == nil {
+		t.Fatal("a schema naming one address as two containers compiled, and the two would be one store key")
 	}
+}
 
-	if got := store.calls(); got != 0 {
-		t.Errorf("Bind made %d backend calls, want none", got)
-	}
+// tagsTwice is a sequence and a mapping at one address, which is the shape whose
+// two members would render to one store key.
+type tagsTwice struct {
+	Positions [1]string         `ferry:"tags"`
+	Members   map[string]string `ferry:"tags"`
 }
 
 // TestSetRefusesAnUnnameableMintedAddress is the dynamic tier of the legality
@@ -401,17 +412,24 @@ func TestSinkBindRefusesACollision(t *testing.T) {
 func TestSetRefusesAnUnnameableMintedAddress(t *testing.T) {
 	t.Parallel()
 
-	at := ferry.At("labels")
 	store := newFake()
-	w := openWriter(t, mustSink(t, store), at)
 
-	if err := w.Set(t.Context(), at.At("a/b"), ferry.String("v")); err == nil {
-		t.Error("Set accepted a minted address whose segment the store has no name for")
+	// The address is minted by the value rather than by the type, which is why
+	// it reaches the driver for the first time at the write it belongs to: the
+	// map key holds the store's own separator, and only a value produces one.
+	err := ferry.Dump(t.Context(), labelsMap{Labels: map[string]string{"a/b": "v"}}, mustSink(t, store))
+	if err == nil {
+		t.Error("the dump accepted a minted address whose segment the store has no name for")
 	}
 
 	if got := store.putCount(); got != 0 {
 		t.Errorf("a refused Set reached the store %d times, want none", got)
 	}
+}
+
+// labelsMap is the mapping whose keys are minted by the value.
+type labelsMap struct {
+	Labels map[string]string `ferry:"labels"`
 }
 
 // TestBytesAndBoolsAreStoredAsTheirOwnText pins what this plane does to the
@@ -421,12 +439,18 @@ func TestBytesAndBoolsAreStoredAsTheirOwnText(t *testing.T) {
 	t.Parallel()
 
 	store := newFake()
-	addrs := []ferry.Path{ferry.At("flag"), ferry.At("raw"), ferry.At("port")}
-	w := openWriter(t, mustSink(t, store), addrs...)
+	set := addrsOf[threeKinds](t)
+	w := openWriter(t, mustSink(t, store), set)
 
-	values := []ferry.Value{ferry.Bool(true), ferry.Bytes([]byte("\x00\xffA")), ferry.Number("8080")}
-	for i, addr := range addrs {
-		if err := w.Set(t.Context(), addr, values[i]); err != nil {
+	values := map[string]ferry.Value{
+		"flag": ferry.Bool(true),
+		"raw":  ferry.Bytes([]byte("\x00\xffA")),
+		"port": ferry.Number("8080"),
+	}
+
+	for _, name := range []string{"flag", "port", "raw"} {
+		addr := leafAt(t, set, ferry.At(name))
+		if err := w.Set(t.Context(), addr, values[name]); err != nil {
 			t.Fatalf("Set(%s): %v", addr, err)
 		}
 	}
@@ -442,10 +466,10 @@ func TestBytesAndBoolsAreStoredAsTheirOwnText(t *testing.T) {
 }
 
 // openWriter binds one address and opens a writer over it.
-func openWriter(t *testing.T, sink *kv.Sink, addrs ...ferry.Path) ferry.Writer {
+func openWriter(t *testing.T, sink *kv.Sink, set *ferry.AddressSet) ferry.Writer {
 	t.Helper()
 
-	open, err := sink.Bind(ferry.NewAddressSet(addrs...))
+	open, err := sink.Bind(set)
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}

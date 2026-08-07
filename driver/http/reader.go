@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/onhotpath/ferry"
 )
@@ -36,10 +37,15 @@ func newReader(p plane, sep string, keys ferry.KeyFunc, static map[string]ferry.
 // The optional interfaces this reader carries. Enumeration is one of them
 // because listing a request's parameters is trivial, and it is what makes a
 // map-typed or slice-typed field loadable from this plane at all (ADR-0004).
-// [ferry.Releaser] is the second, because this plane's one refusal that cannot
-// be made during the walk is made at Close (#193, #208).
+// [ferry.Prober] is the second, and on this plane it exists for its refusal
+// rather than for its answers: a request has no spelling for a container at the
+// container's own name, so what it can say there is that the name holds a value
+// the destination has nowhere to put (ADR-0016). [ferry.Releaser] is the third,
+// because this plane's one refusal that cannot be made during the walk is made
+// at Close (#193, #208).
 var (
 	_ ferry.Reader     = (*reader)(nil)
+	_ ferry.Prober     = (*reader)(nil)
 	_ ferry.Enumerator = (*reader)(nil)
 	_ ferry.Releaser   = (*reader)(nil)
 )
@@ -58,21 +64,70 @@ var (
 // occurrence and two are the same name asked for once. So the name is recorded,
 // enumerating it clears the record, and a record still standing when the load
 // closes is a sequence nothing read as one (ADR-0011's aggregation carries it).
-func (r *reader) Get(_ context.Context, addr ferry.Path) (ferry.Value, error) {
-	key, err := r.keys(addr)
+func (r *reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
+	at := addr.Path()
+
+	key, err := r.keys(at)
 	if err != nil {
 		return ferry.Value{}, err
 	}
 
 	if vs := r.vals[key]; len(vs) > 0 {
-		return r.atName(addr, key, vs), nil
+		return r.atName(at, key, vs), nil
 	}
 
-	if v, ok := r.atPosition(addr); ok {
+	if v, ok := r.atPosition(at); ok {
 		return v, nil
 	}
 
 	return ferry.Value{}, nil
+}
+
+// Probe answers whether the request holds a container at one address.
+//
+// A request has no null, so the answer is present or absent and never null: a
+// container is here when the request holds something that belongs to it, and
+// absent when it holds nothing.
+//
+// What belongs to it depends on which kind of container it is, and the two are
+// different questions rather than one question asked twice. A container whose
+// members come from the value owns both the names under its own name and the
+// repetitions of that name, because a name occurring more than once is the
+// sequence it carries. A container whose members come from the type owns only
+// the names under it, so a value at its own name is the request and the
+// destination disagreeing, and it is refused rather than dropped.
+func (r *reader) Probe(_ context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
+	at := addr.Path()
+
+	key, err := r.keys(at)
+	if err != nil {
+		return ferry.SectionAbsent, err
+	}
+
+	own := len(r.vals[key])
+
+	if _, dynamic := addr.(ferry.CompositeAddr); !dynamic && own > 0 {
+		return ferry.SectionAbsent, ferry.ErrorAt(at, atContainer(own))
+	}
+
+	if own > 0 || r.anyUnder(key) {
+		return ferry.SectionPresent, nil
+	}
+
+	return ferry.SectionAbsent, nil
+}
+
+// anyUnder reports whether any name lies strictly under this one, which is the
+// same cut [reader.Children] makes and is what makes a probe and an enumeration
+// agree about whether a container is there.
+func (r *reader) anyUnder(key string) bool {
+	for name := range r.vals {
+		if rest, ok := strings.CutPrefix(name, key+r.sep); ok && rest != "" {
+			return true
+		}
+	}
+
+	return false
 }
 
 // atName is the answer at a name the request holds values at.

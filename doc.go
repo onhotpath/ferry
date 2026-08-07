@@ -225,13 +225,27 @@
 //
 // # Addresses
 //
-// Every place a plane can be asked for a value has an address: a [Path], an
-// ordered sequence of segments each carrying a kind and a text. /db/host is two
-// name segments, /tags#0 is a name segment followed by an index.
+// Every place a plane holds something has an address: a [Path], an ordered
+// sequence of segments each carrying a kind and a text. /db/host is two name
+// segments, /tags#0 is a name segment followed by an index.
+//
+// An address also carries what kind of place it names, and the three kinds are
+// separate types. A [LeafAddr] is a place a [Value] can be, a [SectionAddr] is
+// a place whose children are known from the type, and a [CompositeAddr] is a
+// place whose children come from the value. They partition the address space
+// and they are not interchangeable, so /db as a section and /db as a composite
+// are different addresses.
+//
+// Only ferry mints one, which is what puts the wrong question out of reach: a
+// driver's [Reader.Get] takes a leaf, [Prober.Probe] takes a container and
+// [Enumerator.Children] takes a composite, so asking a plane for the value of a
+// section is a compile error rather than something to guard against at run
+// time.
 //
 // Core never joins segments into a plane key, because a separator is plane
 // knowledge. A driver is handed the whole [AddressSet] before any I/O and does
-// the flattening itself. [NewKeys] is the helper for that, and it checks two
+// the flattening itself, classifying once with one range over [AddressSet.Seq]
+// and one type switch. [NewKeys] is the helper for that, and it checks two
 // things about the result: that the plane can name every address, and that no
 // two addresses collapse onto one plane key. Both refusals land before any
 // backend call.
