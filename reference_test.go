@@ -74,6 +74,12 @@ type refPlane struct {
 	// is not checked.
 	lost bool
 
+	// lostLeaf is the same bug one method over, on a helper returning
+	// (LeafAddr, bool). It is a flag of its own rather than a second use of
+	// lost, because the two arms are reached by different calls and a plane
+	// staging both at once could not say which one the refusal came from.
+	lostLeaf bool
+
 	got  []Path
 	set  []Path
 	kept []Path
@@ -122,6 +128,10 @@ func (p *refPlane) section(at Path) (Container, bool) {
 
 // leaf finds a leaf target the same way.
 func (p *refPlane) leaf(at Path) (LeafAddr, bool) {
+	if p.lostLeaf {
+		return LeafAddr{}, true
+	}
+
 	for m := range p.bound.Seq() {
 		if l, ok := m.(LeafAddr); ok && l.Path() == at {
 			return l, true
@@ -421,6 +431,59 @@ func TestALeafLinkIsAControlAnswerAndNotAKind(t *testing.T) {
 
 	if !slices.Contains(p.got, At("there")) {
 		t.Errorf("the plane was asked %v, and following a link means asking the target", p.got)
+	}
+}
+
+// TestALeafLinkThatNamesNowhereIsRefused is the leaf twin of
+// [TestALinkThatNamesNowhereIsRefused], staged by the same driver bug one
+// method over: a helper returning (LeafAddr, bool) whose second result is not
+// checked reports a link to the address no schema names.
+//
+// It is the case the refusal's wording exists for. The zero address renders as
+// nothing, so a message quoting it plainly would read as a sentence with a hole
+// in it, and a driver author would be told their link named an address without
+// being told which one it could not be.
+func TestALeafLinkThatNamesNowhereIsRefused(t *testing.T) {
+	t.Parallel()
+
+	p := newRefPlane(nil, map[Path]Path{At("here"): At("there")})
+	p.lostLeaf = true
+
+	_, err := Load[refLeaves](t.Context(), refSource{p: p})
+	if err == nil {
+		t.Fatal("a leaf link naming no address loaded cleanly, so core followed it to the address no schema " +
+			"names")
+	}
+
+	if !strings.Contains(refText(err), "the empty address, which is no address") {
+		t.Errorf("the refusal reads %q, and a target that renders as nothing has to be named as one",
+			refText(err))
+	}
+
+	if !strings.Contains(refText(err), "resolve or to refuse") {
+		t.Errorf("the refusal reads %q, and it has to name whose job the case is", refText(err))
+	}
+
+	if !errors.Is(err, ErrPlane) {
+		t.Error("the refusal is not an ErrPlane, and an answer no plane should have given is the plane's fault")
+	}
+}
+
+// TestALeafRedirectReadsAsAStatement is the one piece of this control answer a
+// driver author sees in their own words rather than in core's.
+//
+// Core replaces the wording wherever it refuses a link, so nothing else
+// exercises what the redirect itself says. It is a statement about where the
+// value lives and not a report of a failure, and the text is what carries that:
+// an Error method reading like a fault would tell a driver author their correct
+// answer was a mistake.
+func TestALeafRedirectReadsAsAStatement(t *testing.T) {
+	t.Parallel()
+
+	err := &LeafRedirect{Target: leafOf(At("db", "host"))}
+
+	if got, want := err.Error(), "the value lives at /db/host"; got != want {
+		t.Errorf("the redirect reads %q, want %q", got, want)
 	}
 }
 
