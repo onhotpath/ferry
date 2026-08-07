@@ -86,8 +86,8 @@ type kindHolder struct {
 
 // kindCodecs is one registration per constructor, and kindWanted is the kind
 // each one must land at. They are two halves of one table and are read together.
-func kindCodecs() []ferry.Codec {
-	return []ferry.Codec{
+func kindCodecs() []ferry.Registration {
+	return []ferry.Registration{
 		ferry.BoolValue(
 			func(k kindBool) (bool, error) { return bool(k), nil },
 			func(b bool) (kindBool, error) { return kindBool(b), nil }),

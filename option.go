@@ -89,6 +89,11 @@ func newConfig(opts []Option) (config, error) {
 		errs = append(errs, o.apply(&c))
 	}
 
+	// Asked once the whole list is resolved, because it is a question about two
+	// settings at once: the key ferry reads is this call's, and the keys it also
+	// reads are the registry's (ADR-0021).
+	errs = append(errs, c.registry.exts.claims(c.tagKey))
+
 	return c, join(errs...)
 }
 

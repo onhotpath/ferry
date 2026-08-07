@@ -728,7 +728,7 @@ func TestTheCodecCasesReportAWalkThatFailed(t *testing.T) {
 // and a probe this package can no longer register is a change to core's rules
 // rather than a failure of the test that names it - so it is reported as one
 // line here rather than as a stack trace that aborts the run.
-func probesIn(t *testing.T, codecs ...ferry.Codec) *ferry.Registry {
+func probesIn(t *testing.T, codecs ...ferry.Registration) *ferry.Registry {
 	t.Helper()
 
 	defer func() {

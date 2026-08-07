@@ -26,17 +26,24 @@ import (
 // of that type needs in order to know why TagKey is in the key and a load-time
 // setting would not be. The mechanism is below.
 
-// schemaKey is the inner key of one registry's cache: the type, and the struct
-// tag key the compiler read it under.
+// schemaKey is the inner key of one registry's cache: the type, the struct tag
+// key the compiler read it under, and the foreign tag keys it was told to read
+// beside that one.
 //
 // It is a named struct rather than an anonymous one so that adding a field to
 // it is a deliberate act rather than a side effect of adding an Option. Every
 // compile-affecting Option in [config] beside the registry is collected here,
 // and the registry is not a member because it is the outer level: the cache
 // hangs off the *[Registry] (ADR-0010).
+//
+// The declaration is a member on the same rule as the tag key, and it is
+// carried in its canonical order-independent form, so two registries declaring
+// the same extensions in opposite orders key one schema rather than two
+// (ADR-0021).
 type schemaKey struct {
 	typ    reflect.Type
 	tagKey string
+	decl   extDecl
 }
 
 // This is the whole mechanism behind the rule above, and it is the only one Go
@@ -50,7 +57,9 @@ type schemaKey struct {
 // package compiling, at the line that added it, rather than panicking inside
 // somebody's Load. internal/testdata/schemakey/unhashable is the fixture that
 // asserts it, because a rule enforced by the compiler has no run-time behaviour
-// to observe.
+// to observe. It is also what holds an extension declaration to being reducible
+// to a comparable value: [extDecl] is in the key, so a declaration that could
+// not be canonicalised would stop this line compiling (ADR-0021).
 var _ = map[schemaKey]struct{}{}
 
 // cacheEntry is one key's place in the cache, and the second of the two levels.

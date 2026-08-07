@@ -211,7 +211,7 @@ func mustRefuse(t *testing.T, err error, want ...string) {
 
 // registryWith builds a fresh registry per test, because a registry is complete
 // at birth and a shared one would make every test read a table it did not write.
-func registryWith(t *testing.T, codecs ...Codec) *Registry {
+func registryWith(t *testing.T, codecs ...Registration) *Registry {
 	t.Helper()
 
 	return NewRegistry(codecs...)
@@ -450,9 +450,13 @@ func TestARegistrationRefusalKeepsItsOwnClass(t *testing.T) {
 	}
 }
 
-// TestWhatARegistrationMayNotBe is ADR-0009's three refusals plus the nil codec
-// a variadic constructor makes writable, plus the one case that must be
-// accepted, which is the escape the first refusal names.
+// TestWhatARegistrationMayNotBe is ADR-0009's three refusals plus the nil
+// registration a variadic constructor makes writable, plus the one case that
+// must be accepted, which is the escape the first refusal names.
+//
+// The nil arm names a registration rather than a codec because the variadic
+// takes a sealed union now, and a nil member of it says nothing about which
+// kind it meant to be (ADR-0021).
 func TestWhatARegistrationMayNotBe(t *testing.T) {
 	t.Parallel()
 
@@ -475,7 +479,7 @@ func TestWhatARegistrationMayNotBe(t *testing.T) {
 	}, {
 		name:  "nothing at all",
 		codec: nil,
-		want:  "was given a nil codec",
+		want:  "was given a nil registration",
 	}}
 
 	for _, c := range cases {

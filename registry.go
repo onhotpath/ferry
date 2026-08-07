@@ -50,6 +50,14 @@ type Registry struct {
 	// to arrange (ADR-0017, #227, #262).
 	byType map[reflect.Type]registration
 
+	// exts is the foreign struct tag keys this registry was told to read beside
+	// ferry's own, written once by [NewRegistry] before the value escapes for
+	// the reason byType is (ADR-0021).
+	//
+	// It reaches the cache key through its own canonical form rather than
+	// through this struct, which is what keeps [schemaKey] comparable.
+	exts extSet
+
 	// schemas is the schema cache, and it hangs off the registry because the
 	// registry is the outer level of the cache key: two registries that disagree
 	// about one type are two schemas for that type, and a cache they shared would
@@ -60,11 +68,13 @@ type Registry struct {
 }
 
 // NewRegistry builds the registry a call resolves types against: core's own type
-// set, plus one codec per [Codec] handed to it.
+// set, plus one codec per [Codec] handed to it, plus whatever foreign struct tag
+// keys [WithTagKeys] declares.
 //
 //	var registry = ferry.NewRegistry(
 //	    ferry.NumberText[big.Int](),
 //	    ferry.StringText[netip.Addr]().AsMapKey(),
+//	    ferry.WithTagKeys(yamlext.Extension()),
 //	)
 //
 //	cfg, err := ferry.Load[Config](ctx, src, ferry.WithRegistry(registry))
@@ -84,9 +94,9 @@ type Registry struct {
 // it panics with is an *[Error] of [ErrSchema]'s class, so a caller who recovers
 // one reads the same report ferry gives any other refusal.
 //
-// It refuses five things. A nil [Codec]. A pointer type, because pointer
-// indirection is structural and a codec for one would lose the null a nil
-// pointer writes. A type core owns, whose representation is pinned and not
+// It refuses five things about a codec. A nil one. A pointer type, because
+// pointer indirection is structural and a codec for one would lose the null a
+// nil pointer writes. A type core owns, whose representation is pinned and not
 // replaceable, every predeclared type included: define a named type over it and
 // register that. A second codec for a type another codec in the same call
 // already claimed, since a registration claims its type unconditionally and
@@ -96,15 +106,34 @@ type Registry struct {
 // That last check catches one class of wrong codec out of three. A lossy codec
 // and a constant codec both pass it, and the way to discharge those is a proof
 // through ferrytest.
-func NewRegistry(codecs ...Codec) *Registry {
-	r := &Registry{byType: make(map[reflect.Type]registration, len(codecs))}
-
-	for _, c := range codecs {
-		r.add(c)
+//
+// What it refuses about a declared tag key is listed on [WithTagKeys], and is
+// refused here for the same reason and in the same words.
+func NewRegistry(items ...Registration) *Registry {
+	r := &Registry{
+		byType: make(map[reflect.Type]registration, len(items)),
+		exts:   extSet{words: map[string]map[string]Word{}},
 	}
+
+	for _, it := range items {
+		if it == nil {
+			panic(regError(nilRegistrationMsg))
+		}
+
+		it.registerOn(r)
+	}
+
+	r.exts.seal()
 
 	return r
 }
+
+// nilRegistrationMsg names both kinds of item, because a variadic that takes a
+// sealed union makes a nil of either writable and neither one says which it
+// meant to be.
+const nilRegistrationMsg = "ferry.NewRegistry was given a nil registration: a codec comes from one of the " +
+	"kind-named constructors, each of which takes both halves at once, and a tag key declaration comes from " +
+	"ferry.WithTagKeys"
 
 // builtins is what a call with no [WithRegistry] resolves against: core's own
 // type set and no codec over it.
@@ -153,9 +182,8 @@ func (r *Registry) Types() []reflect.Type {
 // the reason it has none is the decision: a registry is complete at birth, so a
 // refusal here is a program that cannot start rather than a call that failed
 // (ADR-0017).
-func (r *Registry) add(c Codec) {
-	g, err := r.refuse(c)
-	if err != nil {
+func (r *Registry) add(g registration) {
+	if err := r.refuse(g); err != nil {
 		panic(err)
 	}
 
@@ -168,28 +196,22 @@ func (r *Registry) add(c Codec) {
 
 // refuse is everything a registration is held to before its codec is run.
 //
-// The order is the order a reader wants: something that is not a registration at
-// all is reported as that rather than as whatever it looks like, then the
-// structural facts about the type, then what else the table already holds.
-func (r *Registry) refuse(c Codec) (registration, error) {
-	if c == nil {
-		return registration{}, regError("ferry.NewRegistry was given a nil codec: every registration comes from " +
-			"one of the kind-named constructors, each of which takes both halves at once")
-	}
-
-	g := c.entry()
-
+// The order is the order a reader wants: the structural facts about the type,
+// then what else the table already holds. What is not a registration at all is
+// refused a step earlier, at [NewRegistry], because the union it takes makes a
+// nil of either kind writable (ADR-0021).
+func (r *Registry) refuse(g registration) error {
 	switch {
 	case g.typ.Kind() == reflect.Pointer:
-		return g, regError(fmt.Sprintf("%s may not be registered: pointer indirection is structural and a pointer "+
+		return regError(fmt.Sprintf("%s may not be registered: pointer indirection is structural and a pointer "+
 			"type never reaches the table, so an entry for one would make a nil pointer a leaf and lose the "+
 			"null it writes at its own address - register %s instead", g.typ, g.typ.Elem()))
 	case coreOwns(g.typ):
-		return g, regError(fmt.Sprintf("%s is in core's own set and its representation is pinned: an entry ferry "+
+		return regError(fmt.Sprintf("%s is in core's own set and its representation is pinned: an entry ferry "+
 			"owns is not replaceable, because a stored plane holds what ferry promised for it - define a named "+
 			"type over it and register that", g.typ))
 	default:
-		return g, r.duplicate(g.typ)
+		return r.duplicate(g.typ)
 	}
 }
 
