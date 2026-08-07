@@ -1195,6 +1195,37 @@ func (d dumpTo) ensure(ctx context.Context, at Container, p Presence) (outcome, 
 	return outcome{wrote: true}, nil
 }
 
+// unset tells the plane to let go of a composite's address and everything under
+// it, which is what makes a dump replace that composite rather than add to it
+// (ADR-0004).
+//
+// It reports no presence. Forgetting is not the plane speaking, so a composite
+// whose members wrote nothing has still written nothing, and an unset can never
+// materialise a section above it (ADR-0006).
+//
+// A writer with no [Unsetter] is passed over in silence, which is the one place
+// this differs from [dumpTo.ensure] and is the same distinction [forgotten]
+// records: what the value has to say must be spellable, and what the plane
+// already holds is beyond core's knowledge.
+func (d dumpTo) unset(ctx context.Context, at CompositeAddr) (outcome, error) {
+	if d.w == nil {
+		return outcome{writes: []stagedWrite{{forget: true, comp: at}}}, nil
+	}
+
+	return outcome{}, forgotten(ctx, d.w, at)
+}
+
+// replacing opens a composite's own writes with the unset that makes the rest of
+// them a replacement, so that both composite arms below say it once and in the
+// order the plane has to see it.
+func (d dumpTo) replacing(ctx context.Context, at CompositeAddr) batch {
+	var b batch
+
+	b.add(d.unset(ctx, at))
+
+	return b
+}
+
 // unspellableMsg refuses a container-level write on a plane that cannot spell
 // one, naming what the value needed said and what the plane is.
 func unspellableMsg(p Presence, w Writer) string {
@@ -1235,8 +1266,12 @@ func (d dumpTo) atNullable(ctx context.Context, s spot, into descend) (outcome, 
 // for nil and nothing for empty - made a map key whose value minted nothing
 // vanish entirely, which is a silently dropped entry (ADR-0005).
 func (d dumpTo) atSlice(ctx context.Context, s spot, into descend) (outcome, error) {
+	b := d.replacing(ctx, s.composite())
+
 	if s.v.Len() == 0 {
-		return d.ensure(ctx, s.composite(), PresenceNull)
+		b.add(d.ensure(ctx, s.composite(), PresenceNull))
+
+		return b.done()
 	}
 
 	r := d.realising(s, s.v.Len())
@@ -1251,19 +1286,27 @@ func (d dumpTo) atSlice(ctx context.Context, s spot, into descend) (outcome, err
 		at++
 	}
 
-	return r.b.done()
+	b.add(r.b.done())
+
+	return b.done()
 }
 
 // atMap writes one address per key, in the order of the key text, and a Null at
 // the mapping's own address where it has no entries.
 func (d dumpTo) atMap(ctx context.Context, s spot, into descend) (outcome, error) {
+	b := d.replacing(ctx, s.composite())
+
 	if s.v.Len() == 0 {
-		return d.ensure(ctx, s.composite(), PresenceNull)
+		b.add(d.ensure(ctx, s.composite(), PresenceNull))
+
+		return b.done()
 	}
 
 	keys, err := sortedKeys(s)
 	if err != nil {
-		return outcome{}, err
+		b.fail(err)
+
+		return b.done()
 	}
 
 	r := d.realising(s, len(keys))
@@ -1272,7 +1315,9 @@ func (d dumpTo) atMap(ctx context.Context, s spot, into descend) (outcome, error
 		r.member(s.v.MapIndex(k.key), s.at.At(k.text), into)
 	}
 
-	return r.b.done()
+	b.add(r.b.done())
+
+	return b.done()
 }
 
 // emptySegmentMsg is what an empty map key is refused with, and it is one

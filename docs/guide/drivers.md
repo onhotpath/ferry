@@ -224,9 +224,9 @@ The set is sorted segment-wise and the order is stable across builds of one sche
 A driver that treats its precomputed table as a **closed** set refuses a legal write, because the addresses a value mints are in no address set.
 That is why core hands out a key function rather than a map.
 
-## The six optional interfaces
+## The seven optional interfaces
 
-All six are discovered by type assertion on your `Reader` or `Writer`, and none is required.
+All seven are discovered by type assertion on your `Reader` or `Writer`, and none is required.
 
 ```go
 type Releaser interface {
@@ -249,6 +249,10 @@ type Ensurer interface {
 	Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error
 }
 
+type Unsetter interface {
+	Unset(ctx context.Context, addr ferry.CompositeAddr) error
+}
+
 type Concurrent interface {
 	MaxConcurrent() int
 }
@@ -261,13 +265,14 @@ type Concurrent interface {
 | `Prober` | your plane can say whether a container is there |
 | `Enumerator` | your plane can list what is under a composite |
 | `Ensurer` | your plane can spell a container at the container's own address |
+| `Unsetter` | your plane can forget an address and everything under it |
 | `Concurrent` | your open instance tolerates overlapping calls |
 
-Of the four drivers here, `driver/yaml` implements five of the six and the flat planes implement fewer: `driver/kv` reads with `Prober` and `Enumerator` and writes with `Committer` alone, and its refusal to implement `Ensurer` is a declaration rather than an omission, because a store that holds bytes at keys has no way to say that a container is there and holds nothing.
+Of the four drivers here, `driver/yaml` implements five of the seven and the flat planes implement fewer: `driver/kv` reads with `Prober` and `Enumerator` and writes with `Committer` and `Unsetter`, and its refusal to implement `Ensurer` is a declaration rather than an omission, because a store that holds bytes at keys has no way to say that a container is there and holds nothing.
 
 That spread is the case for making them optional rather than methods on `Reader` and `Writer`: a required `Close` would be `return nil` boilerplate in four of ADR-0004's six sinks, and in the source that is indistinguishable from a driver that should have rolled back and did not.
 The same argument holds for `Ensurer`: a stub that stored a zero-length value would make "the section is present and empty" and "the field is empty text" one observation, which is precisely the collision the kinds exist to keep apart.
-`Concurrent` is the one of the six that is a promise rather than a capability, and it has a section of its own below.
+`Concurrent` is the one of the seven that is a promise rather than a capability, and it has a section of its own below.
 
 ### `Releaser` and `Committer`
 
@@ -408,6 +413,31 @@ A plane with no spelling for a container implements no `Ensurer`, and core refus
 The alternatives were weighed and both lose ([ADR-0016](../adr/0016-the-sealed-address-model.md)).
 Accepting the degradation makes present-empty become absent on reload, which is the silent divergence the whole address model exists to remove; refusing everywhere makes a legal Go value undumpable on planes that could carry it perfectly.
 The rule taken is the loud refusal scoped to exactly the planes that cannot spell the value.
+
+### `Unsetter`
+
+This is what makes a dump a **replacement** of a composite rather than an addition to it.
+
+```go
+type Unsetter interface {
+	Unset(ctx context.Context, addr ferry.CompositeAddr) error
+}
+```
+
+Core calls it at a slice's or a map's own address, before the writes beneath that address, and at the empty arm too: a composite that lost every element writes a null at its own address, and what your plane held under it goes with the unset that came first.
+It is the only thing in a dump that deletes.
+A field the value omits is not written and is not removed either, so silence never deletes anything.
+
+**The order is the contract.**
+A member this dump does write arrives after the unset covering it and has to survive.
+If you stage, resolve what to forget at commit time against what the dump staged, rather than deleting first and putting afterwards: `driver/kv` lists each forgotten folder and subtracts its own staged keys, which is one listing per composite on the commit path.
+
+**Implementing nothing is a legitimate answer, and here it is the quiet one.**
+Unlike `Ensurer`, a sink without this is refused nothing, because an unset is about what your plane *already holds* and core cannot know anything about that.
+A plane without it is additive at a composite - a save of a shorter list leaves the previous save's later positions in place - and that is a property of the plane, so say so in your own documentation.
+`driver/yaml` implements none, and that is not an omission either: it emits a fresh document and swaps the file, so it already forgets by construction.
+
+A section is never unset, because its membership comes from the type and not from the value.
 
 ### `Concurrent`
 
@@ -893,7 +923,7 @@ func TestConformance(t *testing.T) {
 ```
 
 That is the whole file.
-`Driver` is sixteen cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
+`Driver` is seventeen cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
 
 ### The four fields
 
@@ -941,7 +971,7 @@ See [plane compatibility](compatibility.md).
 `Want` is one string, which puts an obligation on a plane holding more than one storage unit: what it renders for this comparison must be **deterministic and injective over stores**.
 That is the same obligation your key function already carries.
 
-### The sixteen cases
+### The seventeen cases
 
 1. Every proof the plane can express round-trips, and every kind it declared it cannot carry is refused loudly.
 2. `Bind` succeeds against an unreachable plane, and the refusal lands inside the open.
@@ -959,6 +989,7 @@ That is the same obligation your key function already carries.
 14. One binding, opened from many goroutines at once, on both halves, and loaded through concurrently: every open succeeds and every load reads what the plane holds.
 15. A second dump through one held sink binding, with a different value at the same addresses: it is taken, and it is what the plane holds afterwards.
 16. A reader declaring `Concurrent` produces, under every concurrency budget, the destination and the error report it produces serially.
+17. A sink declaring `Unsetter` replaces the composite it writes: a value whose list lost members, dumped over one that had them, loads back as the second value and only the second.
 
 Case 14 is where a driver that keeps mutable state in the closure it handed back is found, and the case creates the concurrency rather than judging it: run your own suite under `go test -race`, which is what actually reports the defect.
 It opens the write half concurrently and walks nothing, because what the contract obligates is the open.
@@ -984,6 +1015,8 @@ case 12 skipped: the plane declares no null; case 1 is where its refusal of one 
 case 13 skipped: the plane's reader does not probe, which is optional for the same reason enumeration is
 case 16 skipped: the plane's reader does not declare that it tolerates overlapping calls, so core walks it
     serially whatever the caller asked for
+case 17 skipped: the plane's sink does not declare that it can forget an address, so a dump adds to what a
+    composite already held
 ```
 
 And a run says once, before any case, what it scaled itself to, so that a skipped case is never mistaken for a passing one:
@@ -998,7 +1031,8 @@ A reader that declares the concurrency capability says so in the same line, and 
 
 ```
 plane kv: the suite scaled to: a source, a sink, readable contents, a pinned spelling,
-    probes a container's own address, enumerates, tolerates overlapping calls, commits
+    probes a container's own address, enumerates, tolerates overlapping calls,
+    forgets a composite and everything under it, commits
 ```
 
 Which of the optional interfaces you implement is read off your own reader and writer rather than declared, so there is no field to fill in wrongly, and `Plane` describes only what cannot be discovered that way.

@@ -3,18 +3,24 @@ package kv
 import "context"
 
 // Client is the store this driver talks to, and the whole of what it needs from
-// a backend: read one key, list what is under a folder, write one key.
+// a backend: read one key, list what is under a folder, write one key, remove
+// one key.
 //
 // It is an interface rather than a dependency, so an adapter over consul/api,
 // etcd, a Redis hash, a table with two columns or a test double is a few lines
 // and this package never learns which of them it is talking to.
 //
-// Three things an implementer owns.
+// Four things an implementer owns.
 //
 // Absence is a result and not an error. Get reports a key the store does not
 // hold with found false and a nil error, so that a backend's own not-found stays
 // distinguishable from a real failure. A zero-length value is a value the store
 // holds, and it arrives as an empty string rather than as absence.
+//
+// Delete is idempotent, and that is the same rule read from the write side: a
+// key the store does not hold is nothing to remove and not a failure. A backend
+// whose own delete reports not-found has that translated here rather than in
+// this driver.
 //
 // Cancellation is yours. The driver hands its caller's context to every call and
 // adds no deadline of its own, so a client that ignores the context is the only
@@ -47,6 +53,15 @@ type Client interface {
 
 	// Put stores value at key, creating it or replacing what is there.
 	Put(ctx context.Context, key string, value []byte) error
+
+	// Delete removes key, and reports nothing for a key the store does not
+	// hold.
+	//
+	// It is what makes a save a replacement rather than an addition: a list
+	// that lost its third element, or a map that lost a key, leaves the
+	// previous save's keys in the store without it, and the next load reads
+	// them back as though they were still configured.
+	Delete(ctx context.Context, key string) error
 }
 
 // ACL is implemented by a [Client] whose credentials can be asked, before

@@ -32,16 +32,18 @@ type fake struct {
 	data map[string][]byte
 
 	// The call counters, which are what the batch-versus-lazy assertion reads.
-	gets, lists, puts int
+	gets, lists, puts, deletes int
 
 	// failGetOn is the 1-based Get this store fails, or zero for a store that
 	// answers every one of them.
 	failGetOn int
 
 	// failList fails every listing, and failPut names the keys whose write
-	// fails, which is what a partial failure looks like from below.
-	failList bool
-	failPut  []string
+	// fails, which is what a partial failure looks like from below. failDelete
+	// is the same knob on the removal half.
+	failList   bool
+	failPut    []string
+	failDelete []string
 
 	// blockGet holds a Get until the context ends, which is how a cancellation
 	// is staged against a client that is genuinely in flight rather than
@@ -101,6 +103,14 @@ func (f *fake) failLists() *fake {
 // succeed, which is what a store that is partly unavailable looks like.
 func (f *fake) failPuts(keys ...string) *fake {
 	f.failPut = keys
+
+	return f
+}
+
+// failDeletes makes the removal of each named key fail, and leaves the rest to
+// succeed.
+func (f *fake) failDeletes(keys ...string) *fake {
+	f.failDelete = keys
 
 	return f
 }
@@ -225,13 +235,28 @@ func (f *fake) Put(_ context.Context, key string, value []byte) error {
 	return nil
 }
 
+func (f *fake) Delete(_ context.Context, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.deletes++
+
+	if slices.Contains(f.failDelete, key) {
+		return errFakeWrite
+	}
+
+	delete(f.data, key)
+
+	return nil
+}
+
 // calls is every backend call this store has answered, which is what "three
 // backend calls lazily and one in batch" is counted with.
 func (f *fake) calls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	return f.gets + f.lists + f.puts
+	return f.gets + f.lists + f.puts + f.deletes
 }
 
 func (f *fake) putCount() int {

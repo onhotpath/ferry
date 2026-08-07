@@ -19,6 +19,9 @@ var (
 	_ ferry.Releaser  = shellReleaser{}
 	_ ferry.Committer = shellBoth{}
 	_ ferry.Releaser  = shellBoth{}
+	_ ferry.Writer    = shellUnsetter{}
+	_ ferry.Unsetter  = shellUnsetter{}
+	_ ferry.Unsetter  = shellEverything{}
 	_ ferry.Sink      = nowhere{}
 	_ ferry.Writer    = nowhere{}
 )
@@ -122,46 +125,104 @@ func shellWriter(front, w ferry.Writer) ferry.Writer {
 	c.commit, _ = commitsThrough(front, w)
 	c.release, _ = releasesThrough(front, w)
 	c.ensure, _ = ensuresThrough(front, w)
+	c.unset, _ = unsetsThrough(front, w)
 
-	if c.ensure != nil {
-		return ensuringShell(front, c)
-	}
-
-	switch {
-	case c.commit != nil && c.release != nil:
-		return shellBoth{Writer: front, Committer: c.commit, Releaser: c.release}
-	case c.commit != nil:
-		return shellCommitter{Writer: front, Committer: c.commit}
-	case c.release != nil:
-		return shellReleaser{Writer: front, Releaser: c.release}
-	default:
-		return shellPlain{Writer: front}
-	}
+	return shells[c.combination()](front, c)
 }
 
-// caps is which of the three optional interfaces the shell carries, and which
+// caps is which of the four optional interfaces the shell carries, and which
 // object each call goes to. A nil member is a capability the wrapped writer
 // does not have, so the shell must not claim it either.
 type caps struct {
 	commit  ferry.Committer
 	release ferry.Releaser
 	ensure  ferry.Ensurer
+	unset   ferry.Unsetter
 }
 
-// ensuringShell is [shellWriter]'s other four arms, split out because the three
-// optional interfaces make eight combinations and one function listing all
-// eight is over the nesting the linter allows.
-func ensuringShell(front ferry.Writer, c caps) ferry.Writer {
-	switch {
-	case c.commit != nil && c.release != nil:
-		return shellAll{Writer: front, Committer: c.commit, Releaser: c.release, Ensurer: c.ensure}
-	case c.commit != nil:
-		return shellCommitEnsurer{Writer: front, Committer: c.commit, Ensurer: c.ensure}
-	case c.release != nil:
-		return shellReleaseEnsurer{Writer: front, Releaser: c.release, Ensurer: c.ensure}
-	default:
-		return shellEnsurer{Writer: front, Ensurer: c.ensure}
+// One bit per optional interface, so that the sixteen combinations are looked up
+// rather than branched through: four capabilities nested as conditions is over
+// the nesting the linter allows, and a table is the one shape that keeps every
+// combination visible in one place.
+const (
+	hasCommit = 1 << iota
+	hasRelease
+	hasEnsure
+	hasUnset
+)
+
+// combination is which of the four the wrapped writer had, as an index.
+func (c caps) combination() int {
+	var i int
+
+	for bit, has := range map[int]bool{
+		hasCommit:  c.commit != nil,
+		hasRelease: c.release != nil,
+		hasEnsure:  c.ensure != nil,
+		hasUnset:   c.unset != nil,
+	} {
+		if has {
+			i |= bit
+		}
 	}
+
+	return i
+}
+
+// shells is one constructor per combination of the four optional interfaces.
+//
+// Every combination has an entry, because a combination with no shell is a
+// capability silently dropped from a wrapped driver, and the table is what makes
+// a missing one a hole somebody can see rather than a branch nobody wrote.
+var shells = [16]func(ferry.Writer, caps) ferry.Writer{
+	0: func(f ferry.Writer, _ caps) ferry.Writer { return shellPlain{Writer: f} },
+	hasCommit: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellCommitter{Writer: f, Committer: c.commit}
+	},
+	hasRelease: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellReleaser{Writer: f, Releaser: c.release}
+	},
+	hasEnsure: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellEnsurer{Writer: f, Ensurer: c.ensure}
+	},
+	hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellUnsetter{Writer: f, Unsetter: c.unset}
+	},
+	hasCommit | hasRelease: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellBoth{Writer: f, Committer: c.commit, Releaser: c.release}
+	},
+	hasCommit | hasEnsure: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellCommitEnsurer{Writer: f, Committer: c.commit, Ensurer: c.ensure}
+	},
+	hasCommit | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellCommitUnsetter{Writer: f, Committer: c.commit, Unsetter: c.unset}
+	},
+	hasRelease | hasEnsure: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellReleaseEnsurer{Writer: f, Releaser: c.release, Ensurer: c.ensure}
+	},
+	hasRelease | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellReleaseUnsetter{Writer: f, Releaser: c.release, Unsetter: c.unset}
+	},
+	hasEnsure | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellEnsureUnsetter{Writer: f, Ensurer: c.ensure, Unsetter: c.unset}
+	},
+	hasCommit | hasRelease | hasEnsure: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellAll{Writer: f, Committer: c.commit, Releaser: c.release, Ensurer: c.ensure}
+	},
+	hasCommit | hasRelease | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellBothUnsetter{Writer: f, Committer: c.commit, Releaser: c.release, Unsetter: c.unset}
+	},
+	hasCommit | hasEnsure | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellCommitEnsureUnsetter{Writer: f, Committer: c.commit, Ensurer: c.ensure, Unsetter: c.unset}
+	},
+	hasRelease | hasEnsure | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellReleaseEnsureUnsetter{Writer: f, Releaser: c.release, Ensurer: c.ensure, Unsetter: c.unset}
+	},
+	hasCommit | hasRelease | hasEnsure | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellEverything{
+			Writer: f, Committer: c.commit, Releaser: c.release, Ensurer: c.ensure, Unsetter: c.unset,
+		}
+	},
 }
 
 // commitsThrough answers whether the shell is a [ferry.Committer] - which is w's
@@ -204,6 +265,23 @@ func ensuresThrough(front, w ferry.Writer) (ferry.Ensurer, bool) {
 	}
 
 	if outer, ok := front.(ferry.Ensurer); ok {
+		return outer, true
+	}
+
+	return inner, true
+}
+
+// unsetsThrough is [commitsThrough] for [ferry.Unsetter], which is the
+// capability that makes a dump replace a composite rather than add to it
+// (ADR-0004). A shell that dropped it would turn a driver whose dumps replace
+// into one whose dumps accumulate, with nothing anywhere saying so.
+func unsetsThrough(front, w ferry.Writer) (ferry.Unsetter, bool) {
+	inner, ok := w.(ferry.Unsetter)
+	if !ok {
+		return nil, false
+	}
+
+	if outer, ok := front.(ferry.Unsetter); ok {
 		return outer, true
 	}
 
@@ -269,11 +347,11 @@ type shellPlain struct {
 	ferry.Writer
 }
 
-// The seven shells that carry at least one optional interface.
+// The fifteen shells that carry at least one optional interface.
 //
 // Each embeds the interfaces its combination has, so the promoted method is the
 // one [shellWriter] resolved and there is no forwarding body to get wrong. The
-// three optional interfaces make eight combinations and every one of them has a
+// four optional interfaces make sixteen combinations and every one of them has a
 // name here, because a combination with no shell is a capability silently
 // dropped from a wrapped driver.
 type (
@@ -321,6 +399,61 @@ type (
 		ferry.Committer
 		ferry.Releaser
 		ferry.Ensurer
+	}
+
+	// shellUnsetter is the shell for a sink that can forget a composite and
+	// everything under it, and the seven below are it combined with the three
+	// above.
+	shellUnsetter struct {
+		ferry.Writer
+		ferry.Unsetter
+	}
+
+	shellCommitUnsetter struct {
+		ferry.Writer
+		ferry.Committer
+		ferry.Unsetter
+	}
+
+	shellReleaseUnsetter struct {
+		ferry.Writer
+		ferry.Releaser
+		ferry.Unsetter
+	}
+
+	shellEnsureUnsetter struct {
+		ferry.Writer
+		ferry.Ensurer
+		ferry.Unsetter
+	}
+
+	shellBothUnsetter struct {
+		ferry.Writer
+		ferry.Committer
+		ferry.Releaser
+		ferry.Unsetter
+	}
+
+	shellCommitEnsureUnsetter struct {
+		ferry.Writer
+		ferry.Committer
+		ferry.Ensurer
+		ferry.Unsetter
+	}
+
+	shellReleaseEnsureUnsetter struct {
+		ferry.Writer
+		ferry.Releaser
+		ferry.Ensurer
+		ferry.Unsetter
+	}
+
+	shellEverything struct {
+		ferry.Writer
+		ferry.Committer
+		ferry.Releaser
+		ferry.Ensurer
+		ferry.Unsetter
 	}
 )
 

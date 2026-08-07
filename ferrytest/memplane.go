@@ -25,6 +25,7 @@ var (
 	_ ferry.Enumerator = memReader{}
 	_ ferry.Writer     = memWriter{}
 	_ ferry.Ensurer    = memWriter{}
+	_ ferry.Unsetter   = memWriter{}
 )
 
 // memStore is the contents, and the key is the canonical rendering of the
@@ -49,7 +50,16 @@ type memStore struct {
 	// only leaves has nowhere to keep. It is the store's answer to a probe, and
 	// it is what makes a nil section and a present-but-empty one two
 	// observations rather than one (ADR-0016).
-	marks map[string]ferry.Presence
+	marks map[string]memMark
+}
+
+// memMark is one container's own answer, kept beside the address it was made
+// at for the same reason [memEntry] keeps one: forgetting a subtree asks which
+// marks lie under an address, and the rendering alone cannot be walked
+// segment-wise (ADR-0004).
+type memMark struct {
+	addr ferry.Path
+	p    ferry.Presence
 }
 
 // memEntry keeps the address beside the value so enumeration can hand back
@@ -62,7 +72,7 @@ type memEntry struct {
 }
 
 func newMemStore() *memStore {
-	return &memStore{entries: map[string]memEntry{}, marks: map[string]ferry.Presence{}}
+	return &memStore{entries: map[string]memEntry{}, marks: map[string]memMark{}}
 }
 
 // put writes unconditionally, and is what [Static] builds its contents with: a
@@ -111,7 +121,34 @@ func (s *memStore) set(written map[string]bool, addr ferry.Path, v ferry.Value) 
 }
 
 // mark records what a container's own address was told.
-func (s *memStore) mark(addr ferry.Path, p ferry.Presence) { s.marks[addr.String()] = p }
+func (s *memStore) mark(addr ferry.Path, p ferry.Presence) {
+	s.marks[addr.String()] = memMark{addr: addr, p: p}
+}
+
+// forget drops everything held beneath addr and the mark at addr itself, which
+// is what makes a dump replace a composite rather than add to it (ADR-0004).
+//
+// The address's own entry is left alone, because a composite has no value at
+// its own address and anything of that rendering is a leaf of the same name,
+// which is another address. Its mark goes, because the mark is the statement
+// this dump is about to make again.
+func (s *memStore) forget(addr ferry.Path) {
+	pre := slices.Collect(addr.Segments())
+
+	for key, e := range s.entries {
+		if _, ok := childOf(pre, e.addr); ok {
+			delete(s.entries, key)
+		}
+	}
+
+	for key, m := range s.marks {
+		if _, ok := childOf(pre, m.addr); ok {
+			delete(s.marks, key)
+		}
+	}
+
+	delete(s.marks, addr.String())
+}
 
 // probe answers what the plane holds at a container's own address.
 //
@@ -120,7 +157,7 @@ func (s *memStore) mark(addr ferry.Path, p ferry.Presence) { s.marks[addr.String
 // what a plane holding only leaves can infer, and nothing beneath it is
 // absence.
 func (s *memStore) probe(addr ferry.Path) ferry.SectionInfo {
-	if p, ok := s.marks[addr.String()]; ok && p == ferry.PresenceNull {
+	if m, ok := s.marks[addr.String()]; ok && m.p == ferry.PresenceNull {
 		return ferry.SectionNull
 	}
 
@@ -309,6 +346,19 @@ func (w memWriter) Set(_ context.Context, addr ferry.LeafAddr, v ferry.Value) er
 // observations a reload can tell apart.
 func (w memWriter) Ensure(_ context.Context, addr ferry.Container, p ferry.Presence) error {
 	w.store.mark(addr.Path(), p)
+
+	return nil
+}
+
+// Unset drops what the store holds under a composite, so that a dump of a
+// shorter list or a map that lost a key leaves nothing of the previous dump for
+// the next load to read back.
+//
+// The reference implementation carries it because the plane can: forgetting a
+// subtree of a map is a scan, and a plane that could not would leave the whole
+// capability unexercised by the suite that demonstrates the contract.
+func (w memWriter) Unset(_ context.Context, addr ferry.CompositeAddr) error {
+	w.store.forget(addr.Path())
 
 	return nil
 }
