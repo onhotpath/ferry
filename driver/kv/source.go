@@ -197,7 +197,7 @@ func (s *Source) opener(keys *ferry.Keys, sections map[ferry.SectionAddr]section
 			return nil, err
 		}
 
-		r := &reader{client: s.client, key: keys.Open(), sections: sections, raw: s.raw}
+		r := &reader{client: s.client, names: keys, key: keys.Open(), sections: sections, raw: s.raw}
 		if !s.batch {
 			return r, nil
 		}
@@ -239,6 +239,12 @@ type reader struct {
 	// declares nothing paying nothing (ADR-0019).
 	mu sync.Mutex
 
+	// names is the binding's checked key table, held for the reports rather than
+	// for the reads. It answers what this store calls an address without minting
+	// anything, so it needs no lock and is outside everything [reader.mu] guards
+	// (ADR-0011, ADR-0019, #159).
+	names *ferry.Keys
+
 	// key is this open's key function. It serves the static tier from the table
 	// Bind built and mints an address that came from a value - a map key, a
 	// sequence index - as it is asked for, checking it against everything this
@@ -268,7 +274,16 @@ var (
 	_ ferry.Prober     = (*reader)(nil)
 	_ ferry.Enumerator = (*reader)(nil)
 	_ ferry.Concurrent = (*reader)(nil)
+	_ ferry.PlaneNamer = (*reader)(nil)
 )
+
+// PlaneName is the store key an address is read from, prefix included, which is
+// what a report opens with in place of the address: /db/host prints as
+// app/db/host, which is the key an operator greps the store for.
+//
+// It reads the table Bind built and never this open's key function, so it mints
+// nothing, needs no lock and cannot refuse (ADR-0011, #159).
+func (r *reader) PlaneName(addr ferry.Path) (string, bool) { return r.names.PlaneName(addr) }
 
 // MaxConcurrent reports that this reader tolerates overlapping calls and
 // imposes no bound of its own, so a caller's [ferry.MaxConcurrency] stands

@@ -698,6 +698,24 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 > **The surface table does not move**, because `Instance` is already on it and a field adds no exported name; `TestExportedSurface` locks the same twenty-six.
 > That table's own staleness is [#175](https://github.com/onhotpath/ferry/issues/175)'s and is untouched here.
 
+> **Amended under [#159](https://github.com/onhotpath/ferry/issues/159): the list is twenty-two cases, and the twenty-second is the purity of a capability that has no other check.**
+>
+> [ADR-0004](0004-source-and-sink.md)'s amendment under the same issue ships `PlaneNamer`, a ninth optional capability, and [ADR-0011](0011-the-error-model.md)'s puts what it answers into every report a run produces.
+> Nothing above asks anything of it, and the obligation it carries is one core cannot check: the name is a string a driver computed, and core has no way to tell a name computed from the address from a name computed from what the plane held.
+>
+> 22. **A plane's own name for an address is a function of the address.** For a reader declaring `ferry.PlaneNamer`, one address named twice gives one string, and a set of addresses named over an empty plane gives what it gives over a populated one ([ADR-0011](0011-the-error-model.md), [ADR-0004](0004-source-and-sink.md)).
+>
+> **Purity is the half that matters and the plane already builds both states**, so the case costs one dump: the suite opens a fresh instance, names the addresses, dumps a fixture into a second instance and names them again.
+> Identical answers are the whole assertion, and a reader that names an address over one and not over the other fails it as loudly as one that renames it.
+> **It is skipped, out loud, for every reader that is no `PlaneNamer`**, which is the same scaling cases 16, 17, 18 and 19 have, and it is why `MemPlane` running it to a skip is correct rather than a hole: that plane keys by the canonical rendering of an address, so there is no second spelling for the case to be about.
+> **The fixture it writes is the leaf-only one**, so a sink that cannot forget a composite and a source that cannot list are both asked nothing they cannot answer.
+> **The addresses it names are not confined to the set the read half was bound to**, and that is deliberate rather than sloppy: `PlaneName` takes a `Path`, and core asks it about an address a value minted, which is a member of no bound set.
+> So the case asks about the address the fixture writes, which is the one a flattening driver answers out of its own table, and about three the driver has to compute.
+> `driver/env`, `driver/http`, `driver/kv` and `driver/yaml` all run it to a conclusion.
+>
+> **The surface table does not move**: the case is internal, no exported name of this package changes, and `TestExportedSurface` locks the same twenty-six.
+> What does move is the count in this package's own prose, from twenty-one to twenty-two, and the line a run says about itself, which now names this capability on whichever half declares it.
+
 Case 11 is the one that is new, and ADR-0013 gives the reason a round-trip case cannot stand in for it: a round trip tests a function against its own inverse, a spelling is a *choice* of function, and changing both halves together is invisible to any test that only composes them.
 The expected contents live on the `Plane` rather than being a parameter of the suite, because the spelling is the **driver's** statement about itself and ADR-0005 puts it on the driver's side of the line.
 
@@ -876,6 +894,11 @@ That is weaker than a compile-time signal and it is the only shape available, be
 > - **The `Driver` list is twenty-one cases, not fifteen.** The bullet above ends its parenthetical at fifteen; the amendments after it - the concurrency model's, [#220](https://github.com/onhotpath/ferry/issues/220)/[#221](https://github.com/onhotpath/ferry/issues/221)'s, [#135](https://github.com/onhotpath/ferry/issues/135)'s and [#306](https://github.com/onhotpath/ferry/issues/306)'s two - carry the list to sixteen, seventeen, eighteen, nineteen and then twenty-one, and twenty-one is what ships.
 > - **The exported-name count is the surface table's**, and the first bullet of this section - "Nineteen exported names in one package", raised to twenty in its parenthetical - predates [#175](https://github.com/onhotpath/ferry/issues/175)'s re-total. The table under [The surface](#the-surface) and its amendments are the authority, and this section states no figure of its own.
 > - **The registrant's sample no longer compiles as printed.** It reads `reg := ferry.NewRegistry(...)` in one assignment, and [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md), amended under [#299](https://github.com/onhotpath/ferry/issues/299), makes `NewRegistry` return `(*Registry, error)` and puts the panicking spelling under `MustRegistry`. A test writes `reg := ferry.MustRegistry(...)` and stays the length this ADR argues it has to be; a caller that wants the report writes the two-value form and checks it.
+
+> **Amended under [#159](https://github.com/onhotpath/ferry/issues/159): two of the figures the correction above re-totalled have moved again, and for one reason.**
+>
+> [ADR-0004](0004-source-and-sink.md) gained `PlaneNamer`, so **the optional interfaces are nine, not eight**, and the `Driver` amendment under the same issue gives it a case, so **the list is twenty-two cases, not twenty-one**.
+> Nothing else in the correction above moves, and the arithmetic is stated here rather than edited into it for the reason that correction gives: a figure belongs to the section that owns the decision, and this one is the summary.
 
 ## Items from the xload survey
 

@@ -99,7 +99,8 @@ func (s *Sink) opener(keys *ferry.Keys) ferry.OpenWriterFunc {
 			}
 		}
 
-		return &writer{client: s.client, acl: acl, key: keys.Open(), staged: map[string]staged{}, raw: s.raw}, nil
+		return &writer{client: s.client, acl: acl, names: keys, key: keys.Open(),
+			staged: map[string]staged{}, raw: s.raw}, nil
 	}
 }
 
@@ -133,6 +134,11 @@ type writer struct {
 	// permission questions and is writable everywhere.
 	acl ACL
 
+	// names is the binding's checked key table, held for the reports rather than
+	// for the writes: it answers what this store calls an address without minting
+	// anything (ADR-0011, #159).
+	names *ferry.Keys
+
 	// key is this open's key function, and everything it mints belongs to this
 	// open (ADR-0012).
 	key ferry.KeyFunc
@@ -157,9 +163,18 @@ type writer struct {
 }
 
 var (
-	_ ferry.Committer = (*writer)(nil)
-	_ ferry.Unsetter  = (*writer)(nil)
+	_ ferry.Committer  = (*writer)(nil)
+	_ ferry.Unsetter   = (*writer)(nil)
+	_ ferry.PlaneNamer = (*writer)(nil)
 )
+
+// PlaneName is the store key an address is written to, prefix included, which is
+// what a report opens with in place of the address.
+//
+// It reads the table Bind built and never this open's key function, so a report
+// composed after a failed dump cannot mint a key or manufacture a collision
+// (ADR-0011, #159).
+func (w *writer) PlaneName(addr ferry.Path) (string, bool) { return w.names.PlaneName(addr) }
 
 // staged is one pending write: the bytes, and the address they came from, which
 // is what lets a failed commit name the address rather than the key.

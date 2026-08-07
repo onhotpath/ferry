@@ -34,6 +34,7 @@ var (
 	_ ferry.Reader     = reader{}
 	_ ferry.Prober     = reader{}
 	_ ferry.Enumerator = reader{}
+	_ ferry.PlaneNamer = reader{}
 )
 
 // Source reads a struct's fields out of a YAML file.
@@ -113,6 +114,11 @@ type reader struct {
 	// once at Bind and never written to afterwards.
 	sections map[ferry.SectionAddr]yamlv3.Kind
 }
+
+// PlaneName is the document's own name for an address, and it is [nameInDocument]
+// forwarded: this half of the driver holds nothing a name depends on
+// (ADR-0011, #159).
+func (reader) PlaneName(addr ferry.Path) (string, bool) { return nameInDocument(addr) }
 
 // sectionShapes reads the container shape of every section the type determined
 // out of the address set (ADR-0016).

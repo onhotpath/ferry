@@ -16,12 +16,13 @@ import (
 // first-party plane does: it stages a replacement, so it has something to
 // commit, and it holds an open file, so it has something to release.
 var (
-	_ ferry.Sink      = Sink{}
-	_ ferry.Writer    = (*writer)(nil)
-	_ ferry.Ensurer   = (*writer)(nil)
-	_ ferry.Unsetter  = (*writer)(nil)
-	_ ferry.Committer = (*writer)(nil)
-	_ ferry.Releaser  = (*writer)(nil)
+	_ ferry.Sink       = Sink{}
+	_ ferry.Writer     = (*writer)(nil)
+	_ ferry.Ensurer    = (*writer)(nil)
+	_ ferry.Unsetter   = (*writer)(nil)
+	_ ferry.Committer  = (*writer)(nil)
+	_ ferry.Releaser   = (*writer)(nil)
+	_ ferry.PlaneNamer = (*writer)(nil)
 )
 
 // indent is how wide a level is on the way out. YAML's emitter has to be told a
@@ -206,6 +207,11 @@ type writer struct {
 	durable bool
 	swapped bool
 }
+
+// PlaneName is the document's own name for an address, and it is the same
+// rendering the read half answers with: one address has one spelling in a report
+// whichever direction failed (ADR-0011, #159).
+func (*writer) PlaneName(addr ferry.Path) (string, bool) { return nameInDocument(addr) }
 
 // claim is one address's write at one node: where it came from, and what it put
 // there.

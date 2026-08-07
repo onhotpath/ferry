@@ -34,6 +34,7 @@ const (
 	caseUnforgettableNo = 19
 	caseOrderingNo      = 20
 	caseOmissionNo      = 21
+	caseNamedNo         = 22
 )
 
 // The suite's own fixtures, and their addresses.

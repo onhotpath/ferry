@@ -82,6 +82,7 @@ func (d *driverRun) readCapabilities(inst Instance) []string {
 		implemented[ferry.Enumerator]("enumerates"),
 		implemented[ferry.Releaser]("releases its reader"),
 		implemented[ferry.Concurrent]("tolerates overlapping calls"),
+		implemented[ferry.PlaneNamer]("names an address in the plane's own spelling"),
 	)
 }
 
@@ -125,6 +126,7 @@ func (d *driverRun) writeCapabilities(inst Instance) []string {
 		implemented[ferry.Preparer]("is handed a dump's realised addresses before its first write"),
 		implemented[ferry.Committer]("commits"),
 		implemented[ferry.Releaser]("releases its writer"),
+		implemented[ferry.PlaneNamer]("names an address in the plane's own spelling"),
 	)
 }
 

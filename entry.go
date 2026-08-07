@@ -167,7 +167,7 @@ func (b *bound) load(ctx context.Context, dst reflect.Value) (err error) {
 		return driverNil(momentOpen, nilReaderMsg)
 	}
 
-	defer func() { err = join(err, released(r)) }()
+	defer func() { err = spelledFor(join(err, released(r)), r) }()
 
 	w := newWalker(loadFrom{r: r, addrs: b.sch.addrs}, schedulerFor(b.budget, r))
 
@@ -280,7 +280,7 @@ func (b *boundSink) dump(ctx context.Context, v reflect.Value) (err error) {
 		return driverNil(momentOpen, nilWriterMsg)
 	}
 
-	defer func() { err = join(err, released(w)) }()
+	defer func() { err = spelledFor(join(err, released(w)), w) }()
 
 	if err := b.replaceable(w); err != nil {
 		return err
@@ -384,6 +384,22 @@ func released(plane any) error {
 	}
 
 	return nil
+}
+
+// spelledFor names every located failure of one run in the plane's own spelling,
+// where the reader or writer it went through has one (ADR-0011, #159).
+//
+// It is the last thing either direction does, after the close error has joined
+// in, so every element of one run is spelled once and never twice. The optional
+// interface is discovered by assertion, so a plane that names nothing leaves the
+// report exactly as core composed it.
+func spelledFor(err error, plane any) error {
+	n, ok := plane.(PlaneNamer)
+	if err == nil || !ok {
+		return err
+	}
+
+	return spellLocations(err, n)
 }
 
 // committed commits a staging sink. Its caller runs it only where the walk

@@ -181,6 +181,11 @@ type Error struct {
 	// driver records that the cause came from below. It is what ErrDriver
 	// matches, and core supplies it so a driver cannot forge it.
 	driver bool
+	// spelled is the plane's own name for loc, or "" where no plane supplied
+	// one. It is what a report prints at the location, and loc is what
+	// Address returns, so a driver's spelling reaches the reader of a log
+	// without reaching anything programmatic (ADR-0011, #159).
+	spelled string
 	// msg is ferry's own text, and never the plane's.
 	msg string
 	// cause is reachable and, except for a driver's own error, never printed.
@@ -204,6 +209,10 @@ func (e *Error) Unwrap() error { return e.cause }
 // Address is where the failure happened: the plane address, or the Go field
 // path where the position names no address at all. An error with no location
 // returns the zero [Path].
+//
+// It is what to match on. The printed line may open with the plane's own name
+// for the address instead, because a driver implementing [PlaneNamer] supplies
+// one, and this is unaffected by that.
 func (e *Error) Address() Path { return e.loc }
 
 // Is matches the class sentinel and the provenance marker, which is what makes
@@ -227,7 +236,7 @@ func (e *Error) line() string {
 	var b strings.Builder
 
 	if e.loc != (Path{}) {
-		b.WriteString(e.loc.String())
+		b.WriteString(e.where())
 		b.WriteString(": ")
 	}
 
@@ -244,6 +253,53 @@ func (e *Error) line() string {
 	}
 
 	return b.String()
+}
+
+// where is what a report prints at the location: the plane's own name for it
+// where the reader or writer this run went through supplied one, and ferry's own
+// rendering of the address otherwise (#159).
+//
+// It is not what the element sorts on. The sort key is the Path, so a report is
+// ordered by address and displayed by name, and the order does not depend on
+// which driver composed it (ADR-0003).
+func (e *Error) where() string {
+	if e.spelled != "" {
+		return e.spelled
+	}
+
+	return e.loc.String()
+}
+
+// spellLocations names every located failure of one run in the plane's own
+// spelling, wherever the reader or writer that run went through has one
+// (ADR-0011, #159).
+//
+// It runs once, after the close error has joined in, so every element is spelled
+// exactly once and none is spelled twice. It returns the error it was handed:
+// the elements are pointers and the aggregate does not move, which is what keeps
+// the order the sort already fixed.
+//
+// An element ferry did not build is skipped, and so is one with no location: a
+// close failure has no address for a name to stand in for. An empty name is
+// skipped too, because a name a plane spells as nothing says less than ferry's
+// own rendering of the address.
+func spellLocations(err error, n PlaneNamer) error {
+	for _, e := range Elements(err) {
+		spellOne(e, n)
+	}
+
+	return err
+}
+
+func spellOne(err error, n PlaneNamer) {
+	e, ok := errors.AsType[*Error](err)
+	if !ok || e.loc == (Path{}) {
+		return
+	}
+
+	if name, named := n.PlaneName(e.loc); named && name != "" {
+		e.spelled = name
+	}
 }
 
 func (e *Error) oneLine() string { return e.Error() }
@@ -686,7 +742,7 @@ func label(err error) string {
 	case !ok:
 		return "(unknown)"
 	case e.loc != (Path{}):
-		return e.loc.String()
+		return e.where()
 	default:
 		return "(" + e.mom.String() + ")"
 	}

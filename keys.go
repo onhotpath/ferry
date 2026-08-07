@@ -273,6 +273,32 @@ func (k *Keys) Open() KeyFunc {
 	}
 }
 
+// PlaneName is this plane's own key for an address, for a report to print in
+// place of ferry's own rendering of it. A driver holding a [Keys] satisfies
+// [PlaneNamer] by forwarding one method to this one.
+//
+// An address the type determined is answered from the precomputed table, and
+// any other is computed on the spot and not recorded, so calling this affects no
+// open and is safe from any goroutine. An address this plane cannot name is a
+// false rather than an error, because a report is composed after the failure it
+// is about and has nowhere left to put a second one.
+func (k *Keys) PlaneName(addr Path) (string, bool) {
+	if key, ok := k.static[addr]; ok {
+		return key, true
+	}
+
+	// The pure key function and never the open's, deliberately: the open's mints
+	// into its own set and can refuse a collision, so calling it to render a
+	// message would write another goroutine's state and could manufacture a
+	// refusal nothing asked for (ADR-0012, #159).
+	key, err := k.f(addr)
+	if err != nil {
+		return "", false
+	}
+
+	return key, true
+}
+
 // mint issues a plane key for an address that came from a value, and refuses one
 // that is not injective against everything already issued in this open.
 //

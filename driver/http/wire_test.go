@@ -404,10 +404,12 @@ func TestARefusalNeverQuotesWhatTheRequestHeld(t *testing.T) {
 		}
 	}
 
-	// The name is not the value, and the address is what a handler answering
-	// 400 has to name.
-	if !strings.Contains(fmt.Sprintf("%v", queryErr), "/secret") {
-		t.Errorf("the refusal does not name the parameter it is about: %v", queryErr)
+	// The name is not the value, and the parameter is what a handler answering
+	// 400 has to name. It is the request's own spelling of it and not ferry's
+	// rendering of the address, because this driver names the address it refuses
+	// about (#159).
+	if !strings.HasPrefix(fmt.Sprintf("%v", queryErr), "ferry: secret: ") {
+		t.Errorf("the refusal does not open with the parameter it is about: %v", queryErr)
 	}
 }
 

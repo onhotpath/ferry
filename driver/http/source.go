@@ -222,7 +222,7 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 			return nil, err
 		}
 
-		return newReader(p, cfg, keys.Open(), static, vals), nil
+		return newReader(p, cfg, keys, static, vals), nil
 	}, nil
 }
 

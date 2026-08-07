@@ -254,6 +254,18 @@ Everywhere else it is the plane address.
 ADR-0008's own measured diagnostic is `ferry: /Debug: field Debug carries no ferry tag`, where `/Debug` is a Go name, and two lines later `two fields address /name` is a genuine address.
 This ADR states the rule rather than carrying two fields or pretending the space is always the same.
 
+> **Amended under [#159](https://github.com/onhotpath/ferry/issues/159): the location is still a `Path`, and what is printed at it may be the plane's own name for it.**
+>
+> As published this section decides only what the location *is*.
+> What it renders as was never decided here and fell out of `Path.String()`, so every error opened with ferry's own spelling of an address on a plane the reader spells differently.
+> A `Reader` or `Writer` implementing `PlaneNamer` names the address in the plane's own spelling and core prints that instead; a driver that cannot, or that has no name for this address, leaves ferry's rendering standing.
+> `Address()` is unmoved and still returns the `Path`, so nothing programmatic changes and the matching advice is unchanged.
+>
+> Three things bound it.
+> It applies at the walk moment only, because no reader exists earlier - which is also why the key-collision refusal keeps ferry's rendering, its whole content being that two addresses share one name.
+> The name must be a function of the address alone, which is `Keys.collision`'s own already-published argument that a plane key computed from an address is safe to print, and which is a conformance case rather than prose alone ([ADR-0014](0014-what-ferrytest-exports.md)).
+> And the sort key does not move: elements still order on the `Path`, so a report is ordered by address and displayed by name.
+
 > **Corrected under [#113](https://github.com/onhotpath/ferry/issues/113): the space is decided by whether the position has an address, and never by the moment.**
 >
 > As published the sentence above reads "at schema compile it is the Go field path", which is true of the diagnostic it quotes and false of most schema-compile refusals.
