@@ -442,21 +442,32 @@ func byteSliceLeaf() leafCodec {
 // bytes is loud rather than padded or truncated. The message names both
 // lengths, which ADR-0011 permits because a length is structure rather than a
 // value the plane supplied.
+//
+// Both halves reach the bytes through reflect.Value.Bytes, which is kind-based
+// and therefore admits a named element type the way ADR-0005 says a kind is
+// admitted: [N]MyByte is Bytes exactly as [N]byte is, and []MyByte already was.
+// reflect.Copy is what cannot be used here, because it compares element types
+// by identity and panics on the named one, which is core taking the caller's
+// process with it over its own invariant (#222).
+//
+// Value.Bytes over an array wants an addressable one, so encode copies into a
+// fresh array first: the value a dump holds is not addressable, and the copy is
+// what the returned bytes alias, so no caller's array is handed out.
 func byteArrayLeaf(n int) leafCodec {
 	return leafCodec{
 		kind: KindBytes,
 		encode: func(v reflect.Value) (Value, error) {
-			b := make([]byte, n)
-			reflect.Copy(reflect.ValueOf(b), v)
+			held := reflect.New(v.Type()).Elem()
+			held.Set(v)
 
-			return Bytes(b), nil
+			return Bytes(held.Bytes()), nil
 		},
 		parse: func(v reflect.Value, text string) error {
 			if len(text) != n {
 				return &lengthFailure{typ: v.Type(), got: len(text), want: n}
 			}
 
-			reflect.Copy(v, reflect.ValueOf([]byte(text)))
+			copy(v.Bytes(), text)
 
 			return nil
 		},

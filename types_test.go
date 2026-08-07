@@ -330,6 +330,82 @@ func TestEveryLeafTakesItsOwnKindAndStringAndNothingElse(t *testing.T) {
 	}
 }
 
+// namedByte is a named type whose kind is Uint8: a distinct reflect.Type from
+// byte, admitted with it by ADR-0005's kind rule.
+type namedByte byte
+
+// TestBytesAdmitsANamedElementType is kind admission reaching the element type
+// of a byte blob, in every form that carries one.
+//
+// The array is the form that broke: reflect.Copy compares element types by
+// identity, so [3]namedByte compiled clean and panicked inside reflect in both
+// directions, while []namedByte round-tripped all along because Value.Bytes and
+// SetBytes are kind-based (#222).
+func TestBytesAdmitsANamedElementType(t *testing.T) {
+	t.Parallel()
+
+	blob := Bytes([]byte("abc"))
+	arr := [3]namedByte{'a', 'b', 'c'}
+
+	t.Run("an array dumps its bytes", func(t *testing.T) {
+		t.Parallel()
+
+		if got := dumped(t, leafHolder[[3]namedByte]{V: arr}); got != blob {
+			t.Errorf("[3]namedByte writes %#v, want %#v", got, blob)
+		}
+	})
+
+	t.Run("a pointer to an array dumps its bytes", func(t *testing.T) {
+		t.Parallel()
+
+		if got := dumped(t, leafHolder[*[3]namedByte]{V: &arr}); got != blob {
+			t.Errorf("*[3]namedByte writes %#v, want %#v", got, blob)
+		}
+	})
+
+	t.Run("a slice dumps its bytes", func(t *testing.T) {
+		t.Parallel()
+
+		if got := dumped(t, leafHolder[[]namedByte]{V: []namedByte{'a', 'b', 'c'}}); got != blob {
+			t.Errorf("[]namedByte writes %#v, want %#v", got, blob)
+		}
+	})
+
+	t.Run("an array loads its bytes", func(t *testing.T) {
+		t.Parallel()
+		checkLoaded(t, readLeaf[[3]namedByte], blob, "[97 98 99]")
+	})
+
+	t.Run("a pointer to an array loads its bytes", func(t *testing.T) {
+		t.Parallel()
+		checkLoaded(t, readLeaf[*[3]namedByte], blob, "&[97 98 99]")
+	})
+
+	t.Run("a slice loads its bytes", func(t *testing.T) {
+		t.Parallel()
+		checkLoaded(t, readLeaf[[]namedByte], blob, "[97 98 99]")
+	})
+
+	t.Run("an array of the wrong length is still refused", func(t *testing.T) {
+		t.Parallel()
+		checkRefused(t, readLeaf[[3]namedByte], Bytes([]byte("ab")))
+	})
+}
+
+// checkLoaded holds one observation to landing as exactly one rendering.
+func checkLoaded(t *testing.T, read func(Value) (string, error), got Value, want string) {
+	t.Helper()
+
+	out, err := read(got)
+	if err != nil {
+		t.Fatalf("%#v does not load: %v", got, err)
+	}
+
+	if out != want {
+		t.Errorf("%#v lands as %s, want %s", got, out, want)
+	}
+}
+
 // checkEveryKindIsAnswered stops a row saying nothing about a kind, which is
 // how "and nothing else" quietly stops being asserted.
 func (d donor) checkEveryKindIsAnswered(t *testing.T) {
