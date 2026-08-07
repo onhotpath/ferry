@@ -68,8 +68,13 @@ const ferryTag = "yaml"
 // ferryOpts is the option set every ferry adapter uses. The Registry is the
 // per-type schema cache, and minting a fresh one is how the cold benchmark
 // defeats it.
+//
+// MustRegistry rather than NewRegistry (#299): the constructor returns an error
+// now, and the only thing it refuses is a bad registration. This call registers
+// nothing, so there is no error here to report and nowhere at this point in a
+// benchmark to report one to.
 func ferryOpts() []ferry.Option {
-	return []ferry.Option{ferry.TagKey(ferryTag), ferry.WithRegistry(ferry.NewRegistry())}
+	return []ferry.Option{ferry.TagKey(ferryTag), ferry.WithRegistry(ferry.MustRegistry())}
 }
 
 func ferryEnv[T any](notes string) Impl {
