@@ -90,6 +90,20 @@ Watch is Milestoned: the machinery does not exist yet, and building it is core's
 >
 > Plane inspection and delta dump stay Milestoned on their own terms and are untouched.
 
+> **Amended under [#306](https://github.com/onhotpath/ferry/issues/306): the transfer row's example exists, and it is the struct-mediated shape.**
+>
+> As published the row reads "Falls out of the pluggable design. Ships as an example", and no such example shipped.
+> It is `examples/planetransfer` now: one annotated struct, a `Load` out of one plane and a `Dump` into another, with nothing between them.
+> The row is unchanged and so is the bucket, since the example needed no core surface that was not already there, which is what Enabled means.
+>
+> **The shape shipped is the one the row describes.**
+> [ADR-0006](0006-defaults-and-zero-values.md) distinguishes an address-to-address copy, which builds no Go value and preserves what the plane holds exactly, from the struct-mediated one, and the second is what "falls out of the pluggable design" names: it is the two verbs already published, over a type the user already wrote.
+> The first is not shipped and is not owed here.
+> Only ferry mints an address, so a copy that never builds a value can reach the addresses a value mints - a map key, a sequence position - only by riding core's own walk, and an example of that would be teaching a shim rather than the design.
+>
+> **What the example spends its length on is the cost**, which is the part a reader needs before pointing this at a live plane: an address the type does not name does not cross, a value the type refuses fails the transfer loudly rather than crossing, and a composite with no members arrives as a null.
+> All three are rules ADR-0005 and ADR-0006 already state, met at the one place a user meets all of them at once.
+
 
 
 **Schema extraction needs no new core surface.**
