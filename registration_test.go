@@ -348,6 +348,30 @@ func TestANullPolicyOverNoRegistrationIsRefused(t *testing.T) {
 	}, "was given no registration to wrap")
 }
 
+// TestANullPolicyOverARefusedRegistrationReportsTheInnerOne asserts a wrapper
+// hands on the refusal it was handed rather than covering it with one of its
+// own.
+//
+// The inner registration here is a key with a nil half, so both refusals are
+// available and only one of them is about what the registrant wrote: the halves
+// are the mistake, and the policy over a key is the shape that mistake left
+// behind. Reporting the wrapper's would send them to fix the wrong line.
+func TestANullPolicyOverARefusedRegistrationReportsTheInnerOne(t *testing.T) {
+	t.Parallel()
+
+	err := refusalFrom(NullValue(
+		StringKey[plainCount](nil, nil),
+		func() (plainCount, error) { return 0, nil },
+		func(c plainCount) bool { return c == 0 }))
+
+	mustRefuse(t, err, "a registration takes both halves and one of them is nil")
+
+	if strings.Contains(err.Error(), "may not be grafted") {
+		t.Errorf("the refusal is %q, and it is the wrapper's complaint rather than the one about the halves "+
+			"the registrant left out", err)
+	}
+}
+
 // TestANullPolicyOverAKeyRegistrationIsRefused is the one composition that
 // compiles, is meaningless, and corrupts a plane rather than failing.
 //
