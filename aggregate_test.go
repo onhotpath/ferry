@@ -67,7 +67,7 @@ func loadUnder(t *testing.T, run sched, p *plane) error {
 
 	var out walkConf
 
-	w := newWalker(loadFrom{r: r})
+	w := newWalker(loadFrom{r: r}, serial)
 	w.run = run
 
 	_, err = w.walk(t.Context(), spot{n: sch.root, v: reflect.ValueOf(&out).Elem()})
