@@ -279,8 +279,11 @@ func bytesLeaf(t reflect.Type) (leafCodec, bool) {
 // canonical spelling and never 1 or "yes".
 //
 // ParseBool is the leaf's own parser rather than a wider reading of what a
-// human might have meant, which is why enabled: yes from YAML and ENABLED=yes
-// from env are both refused here instead of being made to agree on a guess.
+// human might have meant, and the refusal it produces is core declining to
+// guess rather than core ruling on what a plane may spell. A plane whose
+// booleans are yes and no, or on and off, says so where the plane is, through
+// its driver's own spelling, and what reaches here is then a Bool and not text
+// for this parser to widen (ADR-0018).
 func boolLeaf() leafCodec {
 	return leafCodec{
 		kind:   KindBool,

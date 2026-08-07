@@ -431,6 +431,11 @@ func (w *writer) put(addr ferry.Path, spelled *yamlv3.Node, kind yamlv3.Kind) er
 		return ferry.ErrorAt(addr, err)
 	}
 
+	// So is the spelling of a number, on the rule the tag and the anchor are
+	// kept on: what the operator wrote survives until the value says otherwise
+	// (#259, ADR-0016, ADR-0018).
+	carrySpelling(at, spelled)
+
 	// So is the anchor, for the same reason and with a sharper consequence
 	// (#196): dropping it leaves every alias to this node dangling, so the save
 	// reports success and writes a document no reader can parse. Keeping it
