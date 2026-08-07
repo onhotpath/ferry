@@ -137,6 +137,38 @@ func TestDriverCase5SkipsAReaderThatDoesNotEnumerate(t *testing.T) {
 	}
 }
 
+// TestDriverCase13SkipsAReaderThatDoesNotProbe is [ferry.Prober]'s optionality
+// asserted from the side that has to stay silent, which is what
+// [TestDriverCase5SkipsAReaderThatDoesNotEnumerate] does for the other optional
+// interface.
+//
+// A plane that cannot list often cannot say whether a container is there
+// either, so a reader that does not probe declines case 13 rather than failing
+// it - and the skip is said out loud, because a case that quietly did nothing
+// is indistinguishable from a case that passed. Every driver this repository
+// ships probes, so without this the arm a probe-less driver runs through is one
+// nothing has executed, and an arm that reported instead of skipping would fail
+// a driver whose design is legal.
+//
+// The reader is blinded only for the address set case 13 binds. Case 3 settles
+// the same question against its own set and reports its own skip, and blinding
+// both would prove one arm twice and say which case skipped for neither.
+func TestDriverCase13SkipsAReaderThatDoesNotProbe(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, wrapPlane("unprobing", func(inst *ferrytest.Instance) {
+		inst.Source = blindSource{inner: inst.Source, when: isForeignSet}
+	}))
+
+	if len(c.lines) != 0 {
+		t.Errorf("a reader that does not probe reported %q, want the case skipped", c.lines)
+	}
+
+	if !anyLineContains(c.logs, "case 13 skipped") {
+		t.Errorf("the suite logged %q, want case 13's skip said out loud", c.logs)
+	}
+}
+
 // TestDriverCase5ReportsChildrenThatCannotBeListed is case 5's other failure: a
 // reader that answers [ferry.Enumerator] and then fails the enumeration has not
 // declined the case, it has failed it.
@@ -473,6 +505,13 @@ func isContainerSet(addrs *ferry.AddressSet) bool {
 // case 1's and one narrower than case 3's.
 func isChildrenSet(addrs *ferry.AddressSet) bool {
 	return addrs.Len() == 3 && hasPath(addrs, probeList) && hasPath(addrs, probeMap) && hasPath(addrs, probeLeaf)
+}
+
+// isForeignSet is the address set case 13 binds: one optional section and the
+// one leaf under it, which is the only set in the suite holding a section and
+// nothing beside it.
+func isForeignSet(addrs *ferry.AddressSet) bool {
+	return addrs.Len() == 2 && hasPath(addrs, probeSection)
 }
 
 // refuseRetainedKey is a key function that kept what it minted: the second of
