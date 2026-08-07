@@ -281,19 +281,21 @@ type (
 //
 // The refusal locates at the shape rather than at a realised address, because
 // there is no value in hand at schema compile and every element would give the
-// same diagnosis anyway.
+// same diagnosis anyway. The shape is spelled in the plane's own address space,
+// which is the space every refusal about a position that has an address is
+// located in (ADR-0011).
 func TestAnElementThatMapsNoAddressIsRefusedAtItsShape(t *testing.T) {
 	t.Parallel()
 
 	run(t, []compileCase{{
 		name:     "a map of a struct that maps no address",
 		run:      Compile[mapOfNothing],
-		want:     []string{"/M/*:", "time.Location maps no address"},
+		want:     []string{"/m/*:", "time.Location maps no address"},
 		elements: 1,
 	}, {
 		name:     "a slice of one",
 		run:      Compile[sliceOfNothing],
-		want:     []string{"/S/*:", "time.Location maps no address"},
+		want:     []string{"/s/*:", "time.Location maps no address"},
 		elements: 1,
 	}, {
 		name:     "and a map of a type outside the set entirely",

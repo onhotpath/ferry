@@ -126,6 +126,13 @@ func Canonical(f Form) Option {
 // It is called once per load, so one load sees one consistent snapshot and a
 // later change to the environment reaches the next load rather than half of this
 // one.
+//
+// Making it safe to call from many goroutines at once is the caller's, and it is
+// ordinary rather than exotic: a [ferry.Binding] is held for the life of a
+// process and loaded through from wherever, so this function is entered
+// concurrently as a matter of course. [os.Environ] is safe. A closure over a map
+// or a slice that anything else writes to is not, and nothing here can make it
+// so.
 func Environ(fn func() []string) Option {
 	return optionFunc(func(c *config) { c.environ = fn })
 }

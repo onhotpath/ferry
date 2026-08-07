@@ -233,7 +233,7 @@ func TestCompileFieldRule(t *testing.T) {
 		run: Compile[struct {
 			S noAddress `ferry:"s"`
 		}],
-		want:     []string{"/S: ferry.noAddress maps no address"},
+		want:     []string{"/s: ferry.noAddress maps no address"},
 		elements: 1,
 	}, {
 		name: "a type ferry does not map is refused at its address",
@@ -243,6 +243,69 @@ func TestCompileFieldRule(t *testing.T) {
 		want:     []string{"/c: chan int is not a type ferry maps to an address"},
 		elements: 1,
 	}})
+}
+
+// locationCase is one compile refusal and the location it has to carry.
+type locationCase struct {
+	name string
+	run  func(...Option) error
+	want string
+}
+
+// TestASchemaRefusalLocatesInTheSpaceThePositionHas is ADR-0011's two location
+// spaces, asserted as one rule over one struct shape.
+//
+// The rule is the address wherever the position has one, and the Go field path
+// only where it has none, which is the reason the ADR gives for holding two
+// spaces at all: a field with no tag never named an address. Every refusal
+// below is about one tagged field of one struct, so a report grouping by
+// location gets a key from one space rather than a key whose space depends on
+// which refusal fired.
+func TestASchemaRefusalLocatesInTheSpaceThePositionHas(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []locationCase{{
+		name: "a struct that contributes no address, at the address its tag named",
+		run:  Compile[locHolder[noAddress]],
+		want: "/value: ferry.noAddress maps no address",
+	}, {
+		name: "a type outside the set, at the same address",
+		run:  Compile[locHolder[chan int]],
+		want: "/value: chan int is not a type ferry maps to an address",
+	}, {
+		name: "an interface, at the same address",
+		run:  Compile[locHolder[any]],
+		want: "/value: interface {} is not a type ferry maps to an address",
+	}, {
+		name: "a field with no tag, where there is no address to name",
+		run:  Compile[struct{ Value string }],
+		want: "/Value: field Value carries no ferry tag",
+	}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			c.check(t)
+		})
+	}
+}
+
+// check runs one compile and holds its report to the location.
+func (c locationCase) check(t *testing.T) {
+	t.Helper()
+
+	err := c.run()
+	if err == nil {
+		t.Fatalf("compiled clean, want %q", c.want)
+	}
+
+	if report := fmt.Sprintf("%+v", err); !strings.Contains(report, c.want) {
+		t.Errorf("report does not contain %q:\n%s", c.want, report)
+	}
+}
+
+// locHolder is one tagged field, so every refusal above is about a position
+// that has an address and differs only in why it was refused.
+type locHolder[T any] struct {
+	Value T `ferry:"value"`
 }
 
 // TestCompileUnexportedIsSkipped is the other half of the field rule, and it

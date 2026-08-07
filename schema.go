@@ -215,6 +215,27 @@ type site struct {
 	// addresses it can fetch, write, name and check, and there is nothing at a
 	// shape to fetch (ADR-0003).
 	dynamic bool
+
+	// owned says that addr is this position's own address rather than the
+	// address it sits inside. A tagged field owns the address its tag names, and
+	// so does everything that mints no segment of its own beneath it; the root,
+	// an untagged field and a promoted block do not.
+	owned bool
+}
+
+// locate is where a refusal about the whole of what a site holds is reported,
+// and it is ADR-0011's two location spaces stated precisely.
+//
+// The address wherever this position has one, and the Go field path only where
+// it has none. The rule reads "the Go field path at schema compile" and its
+// reason is that a field with no tag has no address, so the space is decided by
+// whether an address exists and never by which tier the refusal fired in.
+func (s site) locate() Path {
+	if s.owned {
+		return s.addr
+	}
+
+	return s.field
 }
 
 // compileSchema is the one compiler. Every entry point reaches a compiled type
@@ -286,7 +307,7 @@ func (c *compiler) compileStruct(t reflect.Type, s site, base []int) (n *node, a
 	// reported, because a field error is why it contributed nothing, and one
 	// mistake reporting twice is what ADR-0008's tiers exist to stop.
 	if count == 0 && len(c.errs) == before {
-		c.errAt(s.field, noAddressMsg(t))
+		c.errAt(s.locate(), noAddressMsg(t))
 	}
 
 	return n, count
@@ -448,6 +469,7 @@ func (c *compiler) compileTagged(t reflect.Type, parent *node, s site, value str
 		field:   s.field,
 		index:   s.index,
 		dynamic: s.dynamic,
+		owned:   true,
 	}, tg)
 }
 
@@ -533,6 +555,7 @@ func (c *compiler) compilePointer(t reflect.Type, parent *node, s site, tg tag) 
 		field:    s.field,
 		nullable: true,
 		dynamic:  s.dynamic,
+		owned:    s.owned,
 	}, tg)
 	if count == 0 {
 		return 0
@@ -611,7 +634,7 @@ func (c *compiler) compileMap(t reflect.Type, parent *node, s site, tg tag) int 
 // count minted address shapes rather than static leaf addresses - without it,
 // struct{ Limits map[string]int } contributes nothing and does not compile.
 func shapeSite(s site) site {
-	return site{addr: s.addr.shape(), field: s.field.shape(), dynamic: true}
+	return site{addr: s.addr.shape(), field: s.field.shape(), dynamic: true, owned: true}
 }
 
 // checkDynamicOptions is the second tier at a slice or a map.
@@ -782,7 +805,7 @@ func emptyArrayMsg(t reflect.Type) string {
 // too, because "the third element of Arr" is what a reader needs and "Arr" is
 // what every element would otherwise be called.
 func elemSite(s site, at uint) site {
-	return site{addr: s.addr.Elem(at), field: s.field.Elem(at), dynamic: s.dynamic}
+	return site{addr: s.addr.Elem(at), field: s.field.Elem(at), dynamic: s.dynamic, owned: true}
 }
 
 // compileLeaf records a value that crosses the boundary at one address, with

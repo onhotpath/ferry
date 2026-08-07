@@ -862,3 +862,61 @@ type zeroDuration struct {
 type unparseableInt struct {
 	V int `ferry:"v,omitzero,default=abc"`
 }
+
+// TestTheTwoTypesThatLoseAReasonCarryAHint is the other half of the redaction
+// rule, and the half that keeps it from being a loss.
+//
+// ferry never prints what the plane held, so "missing unit" and "not RFC 3339"
+// - the two reasons the stdlib carried that the address does not - would be
+// gone with it. Core states the rule instead of echoing the input, for exactly
+// the two types in its own identity table that lose one; every other type
+// loses only the value, which the address already locates.
+func TestTheTwoTypesThatLoseAReasonCarryAHint(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		name string
+		read func(Value) (string, error)
+		text string
+		want string
+	}{{
+		name: "a duration with no unit",
+		read: readLeaf[time.Duration],
+		text: "45",
+		want: "is not a valid time.Duration: a duration needs a unit, as in 30s or 1h30m",
+	}, {
+		name: "a time that is not RFC 3339",
+		read: readLeaf[time.Time],
+		text: "1999-31-31",
+		want: "is not a valid time.Time: a time is RFC 3339, as in 2026-08-02T12:00:00Z",
+	}, {
+		name: "an int, which loses only the value",
+		read: readLeaf[int],
+		text: "eight",
+		want: "is not a valid int",
+	}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			checkHint(t, c.read, c.text, c.want)
+		})
+	}
+}
+
+// checkHint asserts one refusal's sentence, and that the plane's own text is
+// still nowhere in it.
+func checkHint(t *testing.T, read func(Value) (string, error), text, want string) {
+	t.Helper()
+
+	_, err := read(String(text))
+	if err == nil {
+		t.Fatalf("%q was accepted", text)
+	}
+
+	if got := err.Error(); !strings.Contains(got, want) {
+		t.Errorf("the refusal reads %q, want it to contain %q", got, want)
+	}
+
+	if strings.Contains(err.Error(), text) {
+		t.Errorf("the refusal %q contains the text the plane held", err)
+	}
+}

@@ -1,6 +1,7 @@
 package ferrytest_test
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"slices"
@@ -333,23 +334,87 @@ func TestMemPlaneRefusesADuplicateWrite(t *testing.T) {
 // asserted where a caller reads it. The address is attached with
 // [ferry.ErrorAt], which makes it data for core rather than text the plane
 // wrote, so what names it is the ferry error a dump reports.
+//
+// The duplicate is forced by holding one writer across two dumps, because that
+// is what a duplicate write now is: what an earlier open wrote is a previous
+// dump, and a binding may be dumped through any number of times.
 func TestMemPlaneNamesTheAddressItRefused(t *testing.T) {
-	inst := ferrytest.MemPlane().Open()
+	sink := oneWriter{inner: ferrytest.MemPlane().Open().Sink}
 	cfg := memThree{Host: "h", Port: "1", Rate: "2"}
 
-	if err := ferry.Dump(t.Context(), cfg, inst.Sink); err != nil {
+	if err := ferry.Dump(t.Context(), cfg, &sink); err != nil {
 		t.Fatalf("the first dump failed: %v", err)
 	}
 
-	err := ferry.Dump(t.Context(), cfg, inst.Sink)
+	err := ferry.Dump(t.Context(), cfg, &sink)
 
 	els := ferry.Elements(err)
 	if len(els) != 3 {
-		t.Fatalf("a dump into a plane that already holds all three gave %d elements, want 3:\n%+v", len(els), err)
+		t.Fatalf("a second dump through one writer gave %d elements, want 3:\n%+v", len(els), err)
 	}
 
 	for i, want := range []ferry.Path{ferry.At("host"), ferry.At("port"), ferry.At("rate")} {
 		checkRefusalAt(t, els[i], want)
+	}
+}
+
+// oneWriter is a sink shell that hands every open the same writer, which is
+// how a test reaches two writes at one address inside one writer's lifetime
+// now that the memory plane scopes its refusal to the open.
+//
+// It is not a shape a driver should have. It is the fixture that makes the
+// refusal observable through [ferry.Dump], where core turns the address the
+// plane attached into the address a caller reads.
+type oneWriter struct {
+	inner ferry.Sink
+	w     ferry.Writer
+}
+
+func (s *oneWriter) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
+	open, err := s.inner.Bind(addrs)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context) (ferry.Writer, error) {
+		if s.w == nil {
+			s.w, err = open(ctx)
+		}
+
+		return s.w, err
+	}, nil
+}
+
+// TestMemPlaneTakesASecondDumpThroughOneBinding is ADR-0004's reusable binding
+// held to by the plane whose whole job is to be the reference implementation.
+//
+// One SinkBinding dumps any number of times, with a different value each time,
+// and the second dump writes the addresses the first one wrote. A duplicate
+// refusal that outlived its open made the reference plane refuse the reload it
+// exists to demonstrate.
+func TestMemPlaneTakesASecondDumpThroughOneBinding(t *testing.T) {
+	inst := ferrytest.MemPlane().Open()
+
+	b, err := ferry.BindSink[memThree](inst.Sink)
+	if err != nil {
+		t.Fatalf("BindSink: %v", err)
+	}
+
+	if err := b.Dump(t.Context(), memThree{Host: "h", Port: "1", Rate: "2"}); err != nil {
+		t.Fatalf("the first dump failed: %v", err)
+	}
+
+	if err := b.Dump(t.Context(), memThree{Host: "h2", Port: "2", Rate: "3"}); err != nil {
+		t.Fatalf("the second dump through one binding failed: %v", err)
+	}
+
+	back, err := ferry.Load[memThree](t.Context(), inst.Source)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if want := (memThree{Host: "h2", Port: "2", Rate: "3"}); back != want {
+		t.Errorf("the plane holds %+v, want the second dump's value %+v", back, want)
 	}
 }
 

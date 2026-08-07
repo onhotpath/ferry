@@ -18,10 +18,12 @@ import (
 // the suite's own are: an address a test computes the way the code under test
 // does is an address that agrees with itself.
 var (
-	probeLeaf    = ferry.At("leaf")
-	probeList    = ferry.At("list")
-	probeMap     = ferry.At("map")
-	probeSection = ferry.At("section")
+	probeLeaf     = ferry.At("leaf")
+	probeList     = ferry.At("list")
+	probeMap      = ferry.At("map")
+	probeSection  = ferry.At("section")
+	probeNilList  = ferry.At("nillist")
+	probeEmptyMap = ferry.At("emptymap")
 )
 
 // The failures the fixtures below stage, each one distinct so that a report can
@@ -166,6 +168,58 @@ func TestDriverCase13SkipsAReaderThatDoesNotProbe(t *testing.T) {
 
 	if !anyLineContains(c.logs, "case 13 skipped") {
 		t.Errorf("the suite logged %q, want case 13's skip said out loud", c.logs)
+	}
+}
+
+// TestDriverCase5SkipsAReaderThatDoesNotEnumerateAtABlankAddress is the blank
+// half of the skip [TestDriverCase5SkipsAReaderThatDoesNotEnumerate] asserts.
+//
+// The two halves bind different address sets, so a fixture scoped to one says
+// nothing about the other, and the blank half is where the skip would be
+// noticed last: it runs after the populated half has already passed, so a skip
+// that had become a report would arrive as case 5 failing a driver it had just
+// accepted.
+//
+// Blinding this set silences the container probe over it too, which is the same
+// blinding done for the same reason one case along.
+func TestDriverCase5SkipsAReaderThatDoesNotEnumerateAtABlankAddress(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, wrapPlane("blind-at-blank", func(inst *ferrytest.Instance) {
+		inst.Source = blindSource{inner: inst.Source, when: isBlanksSet}
+	}))
+
+	if len(c.lines) != 0 {
+		t.Errorf("a reader that does not enumerate at a blank address reported %q, want the case skipped",
+			c.lines)
+	}
+
+	if !anyLineContains(c.logs, "case 5 skipped") {
+		t.Errorf("the suite logged %q, want case 5's skip said out loud", c.logs)
+	}
+}
+
+// TestDriverCase5ReportsChildrenThatCannotBeListedAtABlankAddress is that half's
+// failure, and it is the one the blank addresses exist to catch.
+//
+// A driver answering out of every plane key that shares a container's prefix
+// passes an enumeration of a populated container and invents a member at an
+// empty one. So the case asks a container the plane holds nothing under, and a
+// driver that cannot answer there has failed rather than declined: it answered
+// the populated half a moment ago.
+func TestDriverCase5ReportsChildrenThatCannotBeListedAtABlankAddress(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, wrapPlane("unlistable-at-blank", func(inst *ferrytest.Instance) {
+		inst.Source = unlistableSource{inner: inst.Source, at: probeNilList, err: errNoList}
+	}))
+
+	if !anyLineContains(c.lines, "case 5: Children at /nillist failed") {
+		t.Errorf("the suite reported %q, want case 5 naming the blank container it could not list", c.lines)
+	}
+
+	if !anyLineContains(c.lines, "the plane holds nothing under it") {
+		t.Errorf("the suite reported %q, want the refusal saying what was blank about the address", c.lines)
 	}
 }
 
@@ -512,6 +566,13 @@ func isChildrenSet(addrs *ferry.AddressSet) bool {
 // nothing beside it.
 func isForeignSet(addrs *ferry.AddressSet) bool {
 	return addrs.Len() == 2 && hasPath(addrs, probeSection)
+}
+
+// isBlanksSet is the address set the blank-address halves bind: the two blank
+// composites and the optional section, which is one address wider than case
+// 13's and holds no leaf of its own above them.
+func isBlanksSet(addrs *ferry.AddressSet) bool {
+	return addrs.Len() == 4 && hasPath(addrs, probeNilList) && hasPath(addrs, probeEmptyMap)
 }
 
 // refuseRetainedKey is a key function that kept what it minted: the second of

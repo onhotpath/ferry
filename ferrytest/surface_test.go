@@ -84,28 +84,10 @@ func TestCaptureIsAT(t *testing.T) {
 // that writes it and the types the engine cannot yet carry are named in a skip
 // list in core's own test rather than being absent from the artefact.
 //
-// # Twenty-six, where ADR-0014 published nineteen
-//
-// Three of the four are the ADR's own, arriving with the tickets that could
-// build them: Instance under #101, because the shape as published could not
-// support its own golden artefact case; Complete under #79, because the check
-// joins over three tables and the third is a registry; and Driver, Codec and
-// Injective here, which is the last of the list.
-//
-// The last three are DiffErrors, CheckErrors and Want, added under #169. They
-// are ADR-0011's, published there and never built, which left the documented
-// remedy for "message text is not API" as an API a user could not call. They are
-// apparatus rather than a suite: their semantics are fixed and they gain no
-// cases, so they are ordinary exported Go under semver.
-//
-// The twenty-third is Golden, and it is provisional. ADR-0014 publishes
-// Artefact as a struct of `Value any` and `Want string`, filled in as a
-// composite literal, and that cannot be dumped: ferry.Dump compiles its schema
-// from its type parameter, so `any` is the schema of interface{}, which names no
-// address and is refused. A slice of Artefact is heterogeneous by design, so the
-// type parameter has to be captured at the row's own construction, which is a
-// constructor. #109 is where the owner chooses between that and two other
-// shapes; this is option 1, taken so that case 11 could be built at all.
+// The list below is ADR-0014's own, name for name (#175). Why each of them
+// ships is argued there and is not restated here: a test comment explaining why
+// the specification is wrong is a workaround, and the specification is now
+// right.
 func TestExportedSurface(t *testing.T) {
 	want := []string{
 		"Artefact", "At", "BitEq", "Case", "CheckErrors", "Codec", "Complete", "CoreTypes", "DiffErrors",

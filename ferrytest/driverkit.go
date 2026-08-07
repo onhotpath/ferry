@@ -26,6 +26,8 @@ const (
 	caseGoldenNo     = 11
 	caseNullNo       = 12
 	caseForeignNo    = 13
+	caseConcurrentNo = 14
+	caseSecondDumpNo = 15
 )
 
 // The suite's own fixtures, and their addresses.
@@ -89,6 +91,23 @@ type (
 // fixtureKey is the one map key the fixtures carry, and the one a dynamic
 // address is minted at.
 const fixtureKey = "k"
+
+// The two map keys case 8 mints, one per open. They are one pair a flattening
+// driver folds together and two distinct addresses everywhere else.
+const (
+	retentionFirst  = "a-b"
+	retentionSecond = "a_b"
+)
+
+// dynamicKeys is what case 9 mints, in one dump: its own key and the first of
+// case 8's two.
+//
+// Case 8's first write is here and its second is not, and the asymmetry is the
+// hole this closes rather than an oversight. A refused second write fails case 8
+// out loud, because that is the retention the case is about; a refused first
+// write only ends it, so without this line a sink that cannot spell that key was
+// asked by nothing at all.
+var dynamicKeys = []string{fixtureKey, retentionFirst}
 
 // The fixtures' addresses.
 var (
@@ -165,6 +184,25 @@ func filledFixture() filled {
 func blanksFixture() blanks {
 	return blanks{EmptyMap: map[string]string{}}
 }
+
+// secondFixture is [filledFixture] again with a different value everywhere, and
+// it is what case 15 saves the second time.
+//
+// Every address is the address the first dump wrote, and no address is one it
+// did not: a re-save is a different value at the same places, and a second dump
+// that also changed the shape would be asking what a sink does about an address
+// the new value no longer has, which is a different question.
+func secondFixture() filled {
+	return filled{
+		List: []string{"c", "d"},
+		Map:  map[string]string{fixtureKey: "w"},
+		Leaf: secondLeaf,
+	}
+}
+
+// secondLeaf is the value the second dump leaves at the fixture's leaf, and it
+// is what the plane must hold afterwards.
+const secondLeaf = "y"
 
 // driverFixturesCompile resolves the caller's Option list against every fixture
 // the suite dumps, which is where an Option that cannot be honoured is reported.
@@ -252,6 +290,41 @@ func dumpAndOpen[T any](d *driverRun, v T, set *ferry.AddressSet, n int) (contex
 		return nil, nil, false
 	}
 
+	return d.openOver(ctx, inst, set, n)
+}
+
+// dumpAndOpenQuiet is [dumpAndOpen] for a case that is not the owner of the
+// dump it needs.
+//
+// A sink refusing to write a null at a container address is case 12's failure
+// and case 3 already reports the read half of it, so a third case reporting the
+// same refusal is one mistake reported three times, which is the misattribution
+// the case-3 fixture ordering was fixed for. Everything after the dump is still
+// reported here, because from there on the failure is this case's own.
+func dumpAndOpenQuiet[T any](d *driverRun, v T, set *ferry.AddressSet, n int) (context.Context, ferry.Reader, bool) {
+	d.rep.Helper()
+
+	inst := d.plane.Open()
+	if inst.Sink == nil || inst.Source == nil {
+		return nil, nil, false
+	}
+
+	ctx := inst.ctx()
+
+	if err := ferry.Dump(ctx, v, inst.Sink, d.opts...); err != nil {
+		return nil, nil, false
+	}
+
+	return d.openOver(ctx, inst, set, n)
+}
+
+// openOver binds one instance's read half to a set and opens it, under the
+// context that instance's contents live in.
+func (d *driverRun) openOver(ctx context.Context, inst Instance, set *ferry.AddressSet,
+	n int,
+) (context.Context, ferry.Reader, bool) {
+	d.rep.Helper()
+
 	open, err := inst.Source.Bind(set)
 	if err != nil {
 		d.fail(n, "Source.Bind: "+err.Error())
@@ -292,10 +365,15 @@ var (
 
 // erringSource wraps a driver's read half and makes one address fail.
 //
-// It keeps neither [ferry.Enumerator] nor [ferry.Releaser], which is why the
-// case that uses it loads a leaf-only fixture: a shell handing out interfaces
-// its inner reader does not have is the defect [shellWriter] exists to avoid,
-// and one that drops them is only usable where nothing needs them.
+// It keeps no [ferry.Enumerator], which is why the case that uses it loads a
+// leaf-only fixture: a shell handing out interfaces its inner reader does not
+// have is the defect [shellWriter] exists to avoid, and one that drops them is
+// only usable where nothing needs them.
+//
+// It does release, and that is not the same trade. Dropping Enumerator costs
+// the case nothing, because nothing it loads enumerates; dropping Close leaked
+// the driver's own reader once per Driver call, measured at 61 opens against 60
+// closes, and for a file- or connection-backed driver that is a descriptor.
 type erringSource struct {
 	inner ferry.Source
 	at    ferry.Path
@@ -334,6 +412,22 @@ func (r erringReader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value
 	}
 
 	return r.inner.Get(ctx, addr)
+}
+
+// Close releases the driver's own reader, and answers for a reader that holds
+// nothing.
+//
+// Declaring it unconditionally is what a shell may not do for [ferry.Committer]
+// or [ferry.Enumerator], where a no-op answer is indistinguishable from the
+// driver's own, and is safe here for the reason core's own release is: a Close
+// that reports nothing is exactly what a reader holding no resource produces.
+func (r erringReader) Close() error {
+	c, ok := r.inner.(ferry.Releaser)
+	if !ok {
+		return nil
+	}
+
+	return c.Close()
 }
 
 // bindSpy keeps the address set a driver's Bind was handed, which is the only

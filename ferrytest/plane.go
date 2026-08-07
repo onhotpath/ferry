@@ -49,11 +49,22 @@ type Plane struct {
 	//
 	// So this is a declaration and not a wish. Declaring a kind you cannot
 	// carry fails a proof; omitting one you can carry stops proving it and
-	// demands a refusal you will not make. A flattening plane with no null -
-	// environment variables, query parameters, an opaque key-value store -
-	// declares Absent, Bool, Number, String and Bytes, and omitting Bool and
-	// Number from that list demands a store that refuses every boolean and
-	// every port number.
+	// demands a refusal you will not make.
+	//
+	// A flattening plane with no null - environment variables, query
+	// parameters, headers, an opaque key-value store - declares five kinds:
+	//
+	//	Kinds: []ferry.VKind{ferry.KindAbsent, ferry.KindBool,
+	//	    ferry.KindNumber, ferry.KindString, ferry.KindBytes},
+	//
+	// Null is the one it leaves out, and it is the only one. That plane stores
+	// everything as text, and it still carries Bool and Number, because a bool
+	// written to it comes back as the same bool. Omitting those two is the
+	// tempting mistake and it demands a store that refuses every boolean and
+	// every port number, which is not a key-value store.
+	//
+	// A format that carries a kind and not every value inside it says so with
+	// [Plane.Except] rather than by dropping the kind.
 	//
 	// Declaring a kind and then refusing one value of it is a failure and not a
 	// refusal. [Plane.Except] is how a plane whose format carries a kind but not

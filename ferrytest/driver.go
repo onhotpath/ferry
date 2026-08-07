@@ -10,7 +10,7 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// Driver is the driver conformance suite: thirteen cases over one plane, and the
+// Driver is the driver conformance suite: fifteen cases over one plane, and the
 // whole of what a driver author writes.
 //
 //	func TestConformance(t *testing.T) {
@@ -87,10 +87,11 @@ type driverRun struct {
 	carry map[ferry.VKind]bool
 }
 
-// run is the thirteen cases, in the order ADR-0014 lists them.
+// run is the fifteen cases, in the order ADR-0014 lists them.
 func (d *driverRun) run() {
 	d.rep.Helper()
 
+	d.declared()
 	d.caseKinds()
 	d.caseBind()
 	d.caseProbe()
@@ -104,6 +105,8 @@ func (d *driverRun) run() {
 	d.caseGolden()
 	d.caseNullAtContainer()
 	d.caseForeign()
+	d.caseConcurrentOpen()
+	d.caseSecondDump()
 }
 
 // caseKinds is case 1: every value the plane can express, and a loud refusal for
@@ -400,6 +403,9 @@ func (d *driverRun) probeBlanks() {
 
 	pr, ok := r.(ferry.Prober)
 	if !ok {
+		d.skip(caseContainerNo, "the plane's reader does not probe, which is optional for the same reason "+
+			"enumeration is")
+
 		return
 	}
 
@@ -515,6 +521,91 @@ func (d *driverRun) caseChildren() {
 	if a, found := compositeIn(set, addrMap); found {
 		d.childrenAre(ctx, e, a, []ferry.Segment{ferry.NameSegment(fixtureKey)})
 	}
+
+	d.childrenAtBlank()
+}
+
+// childrenAtBlank is the other half of case 5, and it is the half a driver
+// fails silently: a container the plane holds nothing under, and a container it
+// holds a null at, each answer with no members at all.
+//
+// Enumerating only the containers the suite populated measures a driver against
+// what it was just told, and a driver answering out of every plane key sharing
+// the container's prefix passes that. Measured, one inventing a single element
+// at a blank address was reported by nothing, and a load of the field then
+// fabricated a member out of an unrelated ambient variable.
+//
+// It is the address rather than the plane that is blank, so nothing here needs
+// an empty plane: the fixture written is one schema's and the set bound is
+// another's, which is case 13's idiom and makes no assumption about how the
+// plane spells a key.
+func (d *driverRun) childrenAtBlank() {
+	d.rep.Helper()
+
+	set, err := setOf[blanks](d.opts)
+	if err != nil {
+		d.fail(caseChildrenNo, "compiling the suite's own fixture: "+err.Error())
+
+		return
+	}
+
+	childrenAreEmpty(d, set, filledFixture(), "the plane holds nothing under it")
+
+	// A blank writes a null at its own address, so on a plane with no null it is
+	// never written and there is no stored answer to enumerate. Case 1 owns that
+	// plane's refusal of the null itself.
+	if d.carry[ferry.KindNull] {
+		childrenAreEmpty(d, set, blanksFixture(), "the plane holds a null at it")
+	}
+}
+
+// childrenAreEmpty dumps one fixture, binds the blanks schema over it, and
+// requires both of its composites to enumerate to nothing.
+//
+// It is a function rather than a method for [dumpAndOpen]'s reason: the fixture
+// dumped is a type parameter, and one of the two callers writes a different
+// schema from the one the reader is bound to.
+func childrenAreEmpty[T any](d *driverRun, set *ferry.AddressSet, v T, why string) {
+	d.rep.Helper()
+
+	ctx, r, ok := dumpAndOpenQuiet(d, v, set, caseChildrenNo)
+	if !ok {
+		return
+	}
+
+	defer closeIf(r)
+
+	e, ok := r.(ferry.Enumerator)
+	if !ok {
+		d.skip(caseChildrenNo, "the plane's reader does not enumerate, which ADR-0004 makes optional")
+
+		return
+	}
+
+	for _, at := range []ferry.Path{addrNilList, addrEmptyMap} {
+		if a, found := compositeIn(set, at); found {
+			d.noChildren(ctx, e, a, why)
+		}
+	}
+}
+
+// noChildren is one blank container's enumeration, which has to be empty.
+func (d *driverRun) noChildren(ctx context.Context, e ferry.Enumerator, addr ferry.CompositeAddr, why string) {
+	d.rep.Helper()
+
+	got, err := e.Children(ctx, addr)
+	if err != nil {
+		d.fail(caseChildrenNo, fmt.Sprintf("Children at %s failed with %v, where %s", addr, err, why))
+
+		return
+	}
+
+	if len(got) == 0 {
+		return
+	}
+
+	d.fail(caseChildrenNo, fmt.Sprintf("Children at %s answered %v, want nothing, because %s: a member "+
+		"invented at a blank container is a field loaded out of somebody else's key", addr, got, why))
 }
 
 // childrenAre reads one composite's members and compares them against the
@@ -656,11 +747,11 @@ func (d *driverRun) caseRetention() {
 		return
 	}
 
-	if !d.mints(inst.ctx(), b, "a-b", caseRetentionNo) {
+	if !d.mints(inst.ctx(), b, []string{retentionFirst}, caseRetentionNo) {
 		return
 	}
 
-	if d.mints(inst.ctx(), b, "a_b", caseRetentionNo) {
+	if d.mints(inst.ctx(), b, []string{retentionSecond}, caseRetentionNo) {
 		return
 	}
 
@@ -677,6 +768,13 @@ func (d *driverRun) caseRetention() {
 // exist until there is a value. A driver treating its precomputed table as a
 // closed set refuses a legal write, which is why core hands out a key function
 // rather than a map.
+//
+// It mints every key the suite ever mints, in one dump, and that is not
+// thoroughness for its own sake. Case 8 writes one of them first and gives up
+// where the write is refused, so a sink with a restrictive key charset - a
+// store that will not take a hyphen - used to end case 8 and be asked by
+// nothing else at all. This case owns whether a dynamic address is taken, so it
+// is the case that has to ask about each of them.
 func (d *driverRun) caseDynamic() {
 	d.rep.Helper()
 
@@ -692,7 +790,7 @@ func (d *driverRun) caseDynamic() {
 		return
 	}
 
-	if d.mints(inst.ctx(), b, fixtureKey, caseDynamicNo) {
+	if d.mints(inst.ctx(), b, dynamicKeys, caseDynamicNo) {
 		return
 	}
 
@@ -708,10 +806,20 @@ func (d *driverRun) caseDynamic() {
 // address kinds are sealed and the compiler is the only thing that mints one
 // (ADR-0016). Each dump is one open of the binding, which is what makes this
 // the retention question.
-func (d *driverRun) mints(ctx context.Context, b *ferry.SinkBinding[justMap], key string, n int) bool {
+//
+// It takes the keys as a set rather than one at a time, because case 9 mints
+// both of case 8's addresses in one dump: a sink that cannot spell one of them
+// ends case 8, and a case that ends is a case that measured nothing unless
+// something else is asking whether the write should have been taken.
+func (d *driverRun) mints(ctx context.Context, b *ferry.SinkBinding[justMap], keys []string, n int) bool {
 	d.rep.Helper()
 
-	err := b.Dump(ctx, justMap{Map: map[string]string{key: "v"}})
+	m := make(map[string]string, len(keys))
+	for _, k := range keys {
+		m[k] = "v"
+	}
+
+	err := b.Dump(ctx, justMap{Map: m})
 	if err == nil {
 		return true
 	}
@@ -723,6 +831,11 @@ func (d *driverRun) mints(ctx context.Context, b *ferry.SinkBinding[justMap], ke
 
 // note is where a refused write's own text reaches the report, so that a driver
 // author sees why rather than only that.
+//
+// It is a skip and not a failure, because a write that never landed is no
+// evidence about what a second open retained. Whether the write should have
+// landed at all is case 9's, which mints both of these addresses in one dump
+// precisely so that this one cannot end a case by disappearing.
 func (d *driverRun) note(n int, err error) {
 	d.rep.Helper()
 
@@ -1056,7 +1169,7 @@ func fixtureSet[T any](d *driverRun, n int) (*ferry.AddressSet, bool) {
 }
 
 // fail is what every case reports through, and it names the plane and the case
-// so that a driver author reading their own CI output knows which of thirteen went
+// so that a driver author reading their own CI output knows which of fifteen went
 // red.
 func (d *driverRun) fail(n int, msg string) {
 	d.rep.Helper()
@@ -1065,13 +1178,20 @@ func (d *driverRun) fail(n int, msg string) {
 }
 
 // skip says out loud that a case did not run.
+func (d *driverRun) skip(n int, why string) {
+	d.rep.Helper()
+
+	d.logf("plane %s: case %d skipped: %s", d.plane.Name, n, why)
+}
+
+// logf is where everything this suite says that is not a failure goes.
 //
 // [T] is two methods and neither of them is a log, deliberately: it is what
 // *testing.T satisfies for free and what a probe can implement in four lines. So
 // a skip is written where the reporter can carry one and is otherwise the
 // silence it already was - which is why the reason is in each case's own
 // documentation as well, where it cannot be lost.
-func (d *driverRun) skip(n int, why string) {
+func (d *driverRun) logf(format string, args ...any) {
 	d.rep.Helper()
 
 	l, ok := d.rep.(interface {
@@ -1081,5 +1201,5 @@ func (d *driverRun) skip(n int, why string) {
 		return
 	}
 
-	l.Logf("plane %s: case %d skipped: %s", d.plane.Name, n, why)
+	l.Logf(format, args...)
 }
