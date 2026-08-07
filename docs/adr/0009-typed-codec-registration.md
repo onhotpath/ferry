@@ -809,6 +809,15 @@ The research surveyed eight stdlib type caches and found no eviction anywhere, a
 Keying by a per-call value destroys exactly that property.
 A registry has to be long-lived, and that is a real constraint on how [#16](https://github.com/onhotpath/ferry/issues/16) spells the entry point rather than a free choice.
 
+> **Amended under [#132](https://github.com/onhotpath/ferry/issues/132): the measurement above is a property of the cache shape it was taken against, and as published it reads as a property of the registry.**
+>
+> The prototype it came from held one **package-level** cache keyed by the type and the registry together, so an entry outlived the registry that caused it and 10000 per-call registries left 10000 entries nothing could reach or evict.
+> [ADR-0010](0010-the-entry-point-and-the-schema-cache.md) later decided the other shape, and it is what ships: the cache is a field on the `*Registry`, the pointer key is the outer level rather than part of a flat key, and a per-call registry's cache becomes unreachable with the registry.
+> Under the shipped shape this measurement does not reproduce, and the conclusion below it is unchanged: a per-call registry pays a full compile on every call and hits the cache never, which is the same "destroys exactly that property" reached through wasted work instead of retained memory.
+>
+> **Nothing else in this section moves.**
+> The four candidate keys, the pointer key's soundness resting on the freeze, and the per-registry freeze are all as published.
+
 #### Global-and-frozen was costed rather than assumed
 
 It removes the staleness entirely, and it costs two things.

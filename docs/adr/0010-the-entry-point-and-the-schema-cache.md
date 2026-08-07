@@ -920,6 +920,25 @@ What is ferry-specific is that the cache hangs off a **registry**, so the leak h
 ADR-0009 already measured that ("10000 per-call registries -> 10000 cache entries, none evictable") and concluded that a registry must be long-lived.
 This ADR restates it as a property of the cache rather than of the registry, because that is where it bites.
 
+> **Amended under [#132](https://github.com/onhotpath/ferry/issues/132): the second door does not exist under the cache shape this ADR adopts, and as published the paragraph above says it does.**
+>
+> As published the three sentences read that the cache hanging off a registry gives the leak "a second door: a per-call registry would leak the same way for ordinary, statically declared types", on ADR-0009's measurement of 10000 per-call registries yielding 10000 non-evictable entries.
+> That measurement was taken against a **package-level** cache keyed by the type and the registry together, where an entry outlives the registry that caused it.
+> This ADR decides the opposite shape, and it is what shipped: the cache is a `sync.Map` field on the `*Registry`, so when a per-call registry becomes unreachable its cache becomes unreachable with it and the entries are ordinary garbage.
+> There is no second door, and nothing accumulates.
+>
+> **The two hazards the adopted shape does have**, neither of which is the one the paragraph describes:
+>
+> - **A retained registry retains every schema ever compiled against it.**
+>   This is the genuine unbounded-growth case, and it is the one this section's own `reflect.StructOf` measurement demonstrates: 200 generated types, 200 entries, none evictable.
+>   Real, documented, and not solved here.
+> - **A per-call registry pays a full compile on every call and reuses nothing.**
+>   That is not a leak, it is the opposite failure - the cache is never hit at all, which is precisely the cost the cache exists to remove, priced above at 47370 ns against 34 ns.
+>
+> **ADR-0009's conclusion survives both readings.**
+> A registry has to be long-lived, and it follows from wasted work rather than from retained memory.
+> The correction matters because a reader who takes the paragraph at its word will reach for eviction or weak references against a leak that is not there, when the fix for the per-call case is to hold the registry and the actual unbounded case is the generated-type one that no eviction policy in this ADR addresses either.
+
 ### What this hands the tickets that were waiting
 
 **[#25](https://github.com/onhotpath/ferry/issues/25), how a caller holds a binding.**
@@ -1003,7 +1022,10 @@ Nothing is added to that package, and one thing is handed to it: the equivalence
   From a test it is always safe, and that is a property of Go's initialisation order rather than of ferry's design.
 - The compile is the whole cost the cache saves, and resolving the codec into the leaf is a modest separate win.
   Neither is the argument for compiling behaviour into the schema; ADR-0009's staleness result is.
-- ferry inherits the unbounded-cache limitation every surveyed library documents, plus one door of its own: a per-call registry leaks for ordinary types, not only for generated ones.
+- ferry inherits the unbounded-cache limitation every surveyed library documents, and it is bounded by the registry: a retained registry retains every schema ever compiled against it, and a per-call registry leaks nothing because its cache dies with it.
+  *(Amended under [#132](https://github.com/onhotpath/ferry/issues/132): as published this bullet read "plus one door of its own: a per-call registry leaks for ordinary types, not only for generated ones", which is a property of a package-level cache and not of the per-registry one this ADR adopts.
+  The per-call case is a full compile on every call rather than a leak, and it is what makes a long-lived registry a requirement.
+  See [The unbounded cache, and the one thing ferry adds to it](#the-unbounded-cache-and-the-one-thing-ferry-adds-to-it).)*
 - **The compile entry point is renamed from ADR-0008's `Validate[T]()` to `Compile[T]()`**, which is an amendment to an Accepted ADR and the only one this ticket makes.
   Nothing about ADR-0008's decision changes except the word, and the word matters because ADR-0001 rules validation out by architecture and a package that does that cannot export `Validate` honestly.
   Measured, its justification is also narrower than ADR-0008 wrote: for a malformed annotation it and `Load` return the same error, and it earns its place only by separating an annotation fault from a plane fault.
