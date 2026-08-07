@@ -171,6 +171,10 @@ Until it lands, the per-request use case pays what ADR-0004 measured and this AD
 A reader of the accepted ADR set will find a decision with no code behind it, which is a thing to keep honest: if the first per-request driver is never written, this ADR describes a surface ferry never grows, and that is a legitimate outcome rather than a failure of the decision.
 The prototype on `proto/25-binding` stays as the documentation of the shape, which is the one place the whole thing is written out and run.
 
+*(Amended under [#249](https://github.com/onhotpath/ferry/issues/249): there is no deferral left to price, and the price of the shipped binding is measured rather than estimated.
+The figures in this paragraph are the prototype's and stay as the record of what the deferral was priced at; what a held binding is worth now is in [`docs/perf/results.md`](../perf/results.md).
+See [the amendment under the deciding measurement](#a-caller-may-hold-a-binding-and-the-one-shot-verb-is-that-binding-with-the-handle-dropped).)*
+
 ### What a consumer writes
 
 This section is first, because ADR-0009 was sent back for arguing from measurements without showing the API a consumer meets, and this ticket owns a caller-facing shape.
@@ -251,6 +255,9 @@ func NewHandler() http.Handler {
 ```
 
 Run side by side against one request, the two produce the identical value, and the difference is 85 allocations against 45.
+
+*(Amended under [#249](https://github.com/onhotpath/ferry/issues/249): that is the prototype's fixture and the prototype's `Path`.
+The same two shapes are measured on what shipped, per scenario, in [`docs/perf/results.md`](../perf/results.md).)*
 
 **And a caller who forgets the plane**, measured:
 
@@ -378,6 +385,28 @@ The last row is the one that settles it.
 **Binding per load, ferry allocates 3.9 times what xload allocates on the use case xload was pitched at**, and a held binding brings it to 2.0 times.
 The residual is the prototype's own, whose `Path` allocates per segment, and ADR-0010 already records that caveat about the same prototype.
 What a library cannot do is ship a design in which the fix for losing to its own ancestor exists, is one function, and was declined.
+
+> **Amended under [#249](https://github.com/onhotpath/ferry/issues/249): the binding is priced from a prototype above, and the shipped one is now measured.**
+>
+> As published, every figure in this section is the prototype's, on `proto/25-binding`: the two tables, the deferral's price stated as "85 allocations per request against a held binding's 45, and against xload's 22", the same difference restated in Program 2 and on the write side in Program 3, and the 3.9-times and 2.0-times ratios drawn from them.
+> The section says so, and the ADR's opening note already quotes allocations as measurements and times only as a scale.
+> **Those figures are not withdrawn**: they are the evidence the decision was taken on, over a six-address fixture, through a prototype whose `Path` allocates per segment.
+> They are also not the price of what shipped, because at the time nothing had.
+>
+> **What moved is that what shipped can now be measured.**
+> [#202](https://github.com/onhotpath/ferry/issues/202) landed `Bind`, `BindSink`, `Binding[T]` and `SinkBinding[T]`, and [#217](https://github.com/onhotpath/ferry/issues/217) landed the first driver whose plane is per request, which is the trigger this ADR named.
+> The perf harness now carries a `ferry-bound` row in every scenario: `Bind` once outside the timed loop, then `Binding.Load` per iteration, beside the per-load `Load[T]`, over the same fixture, asserted to produce the same value, with nothing else differing.
+> **The figures are in [`docs/perf/results.md`](../perf/results.md), in the section "The same library, measured a second way" and in the per-scenario tables it draws from.**
+> Read the price of a held binding there, per scenario, against the same run's `ferry` and `xload` rows.
+>
+> **No figure from that run is copied into this ADR.**
+> A published number is produced by the pipeline and never written by hand, and a copy of one goes stale on the next run without saying so.
+> One figure that has circulated is refused rather than merely omitted: the probe that memoised the bind on the perf harness measured a design [ADR-0004](0004-source-and-sink.md) refused, so it is an upper bound on what a binding could buy rather than a measurement of what one does, and it is not evidence for anything here.
+>
+> **The decision does not move, and the shipped measurement says one thing the prototype's single fixture could not.**
+> A held binding is worth most where the bind's share of a load is largest, which is the flat environment scenarios, and worth close to nothing where the plane's own parsing dominates, which is the YAML scenarios and the dump one.
+> That is [Program 1](#program-1-startup-configuration-which-wants-no-binding)'s second reason measured at scale rather than on one file: a tree driver pays almost nothing at `Bind`, so there is almost nothing for a binding to hoist.
+> The per-request case this ticket was filed for is the first kind, which is why the surface exists.
 
 **And the argument for refusing was real and is answered rather than ignored.**
 ADR-0006's rule that refusing is the reversible direction applies: `Bind[T]` is additive, so not shipping it costs nothing later.
@@ -795,6 +824,8 @@ It changes nothing this ADR measured, because no probe here depends on a driver 
 - **ferry ships a caller-held binding, and the deciding argument is the ancestor.**
   Binding per load, ferry allocates 85 times per request against xload's 22 on the use case xload was pitched at; a held binding brings it to 45.
   The ergonomic argument was not decisive in either direction and the compile-cost argument was already gone, removed by ADR-0010 before this ticket opened.
+  *(Amended under [#249](https://github.com/onhotpath/ferry/issues/249): those counts are the prototype's, and the shipped binding is measured by the pipeline in [`docs/perf/results.md`](../perf/results.md), section "The same library, measured a second way".
+  The bullet's claim holds and its numbers are a record rather than a current figure.)*
 - **`Load[T]` is `Bind[T]` with the handle discarded and `Dump[T]` is `BindSink[T]` with the handle discarded, in the implementation and not only in the prose.**
   That is what keeps 5.14's first item closed on the verbs: nothing is expressible through one and not the other, and the two cannot drift because there is one code path.
 - **The whole surface is additive, and the compiler says so rather than the ADR.**
