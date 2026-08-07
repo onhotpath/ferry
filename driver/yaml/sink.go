@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	yamlv3 "go.yaml.in/yaml/v3"
 
@@ -18,6 +19,7 @@ var (
 	_ ferry.Sink      = Sink{}
 	_ ferry.Writer    = (*writer)(nil)
 	_ ferry.Ensurer   = (*writer)(nil)
+	_ ferry.Unsetter  = (*writer)(nil)
 	_ ferry.Committer = (*writer)(nil)
 	_ ferry.Releaser  = (*writer)(nil)
 )
@@ -35,6 +37,14 @@ const indent = 2
 // your struct maps are replaced, and everything else - comments, key order, and
 // every key no field of yours maps - is left as it was. That is what makes a
 // hand-maintained config file survive being loaded and written back.
+//
+// A list or a map your struct maps is the one place the merge stops, because it
+// is replaced whole: a three-element list saved over with one element is one
+// element afterwards, and a mapping saved over with a map that lost a key no
+// longer holds that key. Anything a save like that keeps is still the
+// operator's - its comments, its anchor and the node tag it was written under
+// all survive - and a struct's fields are untouched by the rule, since a field
+// your value leaves out is left exactly where it is rather than removed.
 //
 // An anchor is the exception, and it is deliberate. A value ferry replaces keeps
 // the anchor you wrote on it, so a key no field maps that aliases it reads back
@@ -161,12 +171,21 @@ func open(ctx context.Context, path string, cfg config, nodes map[ferry.Path]str
 // nodes is the schema's own answer for what tag an address is written under,
 // built at Bind and nil for every save under a registry that declares none
 // (ADR-0021, #156).
+//
+// forget is the composites this dump replaces, in the order core named them,
+// and wrote is every address it wrote with every address above it, each under
+// its [trail] rather than under its ferry.Path, for [mark]'s reason. The two are
+// subtracted at the commit rather than at the moment core asks, for the reason
+// [writer.Unset] gives, and both stay empty for a dump over a value with no
+// slice and no map in it (ADR-0004, #220).
 type writer struct {
 	path   string
 	doc    *yamlv3.Node
 	tmp    *os.File
 	claims map[*yamlv3.Node]claim
 	nodes  map[ferry.Path]string
+	forget []ferry.Path
+	wrote  map[string]bool
 
 	shared  bool
 	durable bool
@@ -233,10 +252,151 @@ func container(p ferry.Presence) (*yamlv3.Node, yamlv3.Kind, error) {
 	}
 }
 
+// Unset records that this dump replaces everything the document holds under one
+// list or one mapping, which is what stops a save of a shorter list from leaving
+// the previous document's later positions behind.
+//
+// Nothing is removed here. What this dump writes arrives afterwards and has to
+// survive (ADR-0004), and a node removed now and written again later would be a
+// fresh node: the comments, the anchor and the tag on the member that stays are
+// exactly what a save must not lose, and they live on the node that is already
+// there. So the members are subtracted at the commit, once the writes are in.
+func (w *writer) Unset(_ context.Context, addr ferry.CompositeAddr) error {
+	w.forget = append(w.forget, addr.Path())
+
+	return nil
+}
+
+// replace drops from every replaced composite what this dump did not write,
+// which is the whole of dump-is-replace for this plane (ADR-0004).
+//
+// A mapping keeps the members the dump wrote, in the order the document had
+// them, and a sequence keeps its positions up to the last one written. The
+// difference is that removing a position renumbers the ones after it, so a
+// sequence is truncated rather than picked through: core writes a slice's
+// positions from zero and a position it wrote nothing at is one whose members
+// were all omitted, which is a value left alone rather than removed (ADR-0006).
+//
+// A composite whose node is neither - the empty arm writes a null at the
+// address, and the unset precedes it - has nothing under it to drop.
+func (w *writer) replace() {
+	for _, at := range w.forget {
+		if n := deref(lookup(w.doc, at)); n != nil {
+			w.prune(at, n)
+		}
+	}
+}
+
+// prune is one replaced composite's own subtraction, by the kind of node the
+// walk left at its address.
+func (w *writer) prune(at ferry.Path, n *yamlv3.Node) {
+	held := trail(at)
+
+	switch n.Kind {
+	case yamlv3.SequenceNode:
+		n.Content = n.Content[:w.written(held, len(n.Content))]
+	case yamlv3.MappingNode:
+		n.Content = w.members(held, n.Content)
+	default:
+		// A scalar, an alias resolving to one, or a node the document never
+		// had: nothing holds members here, so nothing is subtracted.
+	}
+}
+
+// written is how long a replaced sequence stays: one past the last position this
+// dump wrote at, and zero where it wrote at none.
+func (w *writer) written(at string, held int) int {
+	kept := 0
+
+	for i := range held {
+		if w.wrote[at+mark(ferry.IndexSegment(uint(i)))] {
+			kept = i + 1
+		}
+	}
+
+	return kept
+}
+
+// members is a replaced mapping's content with every pair this dump did not
+// write taken out.
+//
+// A key spelled twice keeps its first pair only, which is the one an address
+// reaches: [member] reads the first and [keys] enumerates it once, so leaving
+// the second behind would leave a member no address can reach under a mapping
+// the dump replaced.
+func (w *writer) members(at string, held []*yamlv3.Node) []*yamlv3.Node {
+	out, seen := held[:0], make(map[string]bool, len(held)/2)
+
+	for i := 0; i+1 < len(held); i += 2 {
+		k := held[i]
+		if k.Kind != yamlv3.ScalarNode || seen[k.Value] || !w.wrote[at+mark(ferry.NameSegment(k.Value))] {
+			continue
+		}
+
+		seen[k.Value] = true
+		out = append(out, k, held[i+1])
+	}
+
+	return out
+}
+
+// record marks an address this dump wrote, and every address above it, as one
+// [writer.replace] must keep.
+//
+// The addresses above it are what makes a member of a replaced composite count
+// as written when what the dump actually wrote was a leaf somewhere below it.
+//
+// It records nothing until a composite has been replaced, which loses nothing:
+// core names a composite before it writes anything beneath it, so an address
+// under one is always recorded (ADR-0004). An address written before the first
+// unset is under none of them.
+func (w *writer) record(addr ferry.Path) {
+	if len(w.forget) == 0 {
+		return
+	}
+
+	if w.wrote == nil {
+		w.wrote = make(map[string]bool)
+	}
+
+	var b []byte
+
+	for seg := range addr.Segments() {
+		b = append(b, mark(seg)...)
+		w.wrote[string(b)] = true
+	}
+}
+
+// mark is one segment's contribution to a trail: its kind, then its text under a
+// length that keeps one segment from spelling two.
+//
+// It is what an address is recorded and looked up under, rather than the
+// [ferry.Path] itself, because a prefix of an address has to be recorded and a
+// Path cannot be extended by a [ferry.Segment]: [ferry.Path.Elem] takes a
+// position, and recovering one from the segment's text means a parse that only
+// an address no walk can mint could fail (ADR-0016).
+func mark(seg ferry.Segment) string {
+	return string(byte(seg.Kind())) + strconv.Itoa(len(seg.Text())) + ":" + seg.Text()
+}
+
+// trail is a whole address spelled in [mark]s, which is what a replaced
+// composite's children are looked up beneath.
+func trail(p ferry.Path) string {
+	var b []byte
+
+	for seg := range p.Segments() {
+		b = append(b, mark(seg)...)
+	}
+
+	return string(b)
+}
+
 // put is the write both halves share: find or build the node at the address,
 // check that no other address has already claimed it, and replace it while
 // keeping what belongs to the operator.
 func (w *writer) put(addr ferry.Path, spelled *yamlv3.Node, kind yamlv3.Kind) error {
+	w.record(addr)
+
 	at, err := place(w.doc, addr, kind)
 	if err != nil {
 		return ferry.ErrorAt(addr, err)
@@ -387,7 +547,12 @@ func anchored(n *yamlv3.Node) *yamlv3.Node {
 //
 // It runs only where the walk succeeded, which is why nothing here has to ask
 // whether it did.
+//
+// The replaced composites are settled first, and the document that reaches the
+// staged file is the one a load has to see (ADR-0004).
 func (w *writer) Commit(_ context.Context) error {
+	w.replace()
+
 	if err := w.emit(); err != nil {
 		return err
 	}

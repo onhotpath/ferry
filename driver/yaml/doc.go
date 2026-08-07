@@ -32,6 +32,29 @@
 // A file holding a stream of several documents is refused rather than
 // half-written, because an address names a place in one of them.
 //
+// # A list or a map is replaced whole
+//
+// The editing stops at a list or a map your struct maps, because what is in one
+// comes from your value rather than from your type. Saving []string{"x"} over
+//
+//	tags:
+//	  - a
+//	  - b
+//	  - c
+//
+// leaves `tags: [x]` and not `[x, b, c]`, and a map that lost a key no longer
+// holds that key in the file. Otherwise the elements you dropped would load
+// straight back the next time, out of a file that says something your value
+// never did.
+//
+// What stays is still yours: the comments on it, the anchor on it and the tag it
+// was written under all survive, because the entry is edited where it already
+// sits rather than written out fresh. A list is cut at the last position saved,
+// which is what keeps the positions before it from being renumbered.
+//
+// A struct's fields are not touched by this. A field your value leaves out is
+// left exactly where it is, and so is every key no field of yours maps.
+//
 // # An anchor is kept, so an alias to it moves
 //
 // An anchor you wrote on a value ferry replaces stays on it, and that is the one

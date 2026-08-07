@@ -269,7 +269,7 @@ type Concurrent interface {
 | `Unsetter` | your plane can forget an address and everything under it |
 | `Concurrent` | your open instance tolerates overlapping calls |
 
-Of the four drivers here, `driver/yaml` implements five of the seven and the flat planes implement fewer: `driver/kv` reads with `Prober` and `Enumerator` and writes with `Committer` and `Unsetter`, and its refusal to implement `Ensurer` is a declaration rather than an omission, because a store that holds bytes at keys has no way to say that a container is there and holds nothing.
+Of the four drivers here, `driver/yaml` implements six of the seven and the flat planes implement fewer: `driver/kv` reads with `Prober` and `Enumerator` and writes with `Committer` and `Unsetter`, and its refusal to implement `Ensurer` is a declaration rather than an omission, because a store that holds bytes at keys has no way to say that a container is there and holds nothing.
 
 That spread is the case for making them optional rather than methods on `Reader` and `Writer`: a required `Close` would be `return nil` boilerplate in four of ADR-0004's six sinks, and in the source that is indistinguishable from a driver that should have rolled back and did not.
 The same argument holds for `Ensurer`: a stub that stored a zero-length value would make "the section is present and empty" and "the field is empty text" one observation, which is precisely the collision the kinds exist to keep apart.
@@ -436,7 +436,8 @@ If you stage, resolve what to forget at commit time against what the dump staged
 **Implementing nothing is a legitimate answer, and here it is the quiet one.**
 Unlike `Ensurer`, a sink without this is refused nothing, because an unset is about what your plane *already holds* and core cannot know anything about that.
 A plane without it is additive at a composite - a save of a shorter list leaves the previous save's later positions in place - and that is a property of the plane, so say so in your own documentation.
-`driver/yaml` implements none, and that is not an omission either: it emits a fresh document and swaps the file, so it already forgets by construction.
+`driver/yaml` implements it, and its reason is the one to read if your plane holds a document somebody maintains by hand: its save is atomic but its document is not fresh, so a list that lost members left them in the file and loaded straight back.
+It records the composites core named and subtracts them at `Commit`, which keeps the comments, the anchor and the tag on every member that stays exactly where they were.
 
 A section is never unset, because its membership comes from the type and not from the value.
 

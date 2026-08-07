@@ -158,8 +158,15 @@ Everything beyond that is opt-in.
 > As published this section reads "Both are refused at open where the driver lacks them, before any write happens", of `Unsetter` and `Ensurer` together, and neither half of that shipped.
 > `Ensurer` is refused at the address and not at the open, because what needs one is a property of the value and not of the schema, so `Bind` cannot know and the open cannot either.
 > `Unsetter` is refused nowhere at all, and the asymmetry is the decision rather than an omission: what a value has to say at a container's own address must be spellable or the dump is storing something misleading, where an unset is about what the plane *already holds*, which core cannot know anything about.
-> A sink that replaces its whole plane on every dump - `driver/yaml`, which emits a fresh document and swaps the file - already forgets by construction, and refusing it for want of a method would be refusing the driver that has least need of one.
+> A sink that builds its plane's whole contents out of the dump alone - one that writes what it was given and nothing else, over the top - already forgets by construction, and refusing it for want of a method would be refusing the driver that has least need of one.
 > So a plane without it is additive at a composite, and that is a property of the plane, stated in its own documentation.
+>
+> **`driver/yaml` implements it, which is #220 and is what the paragraph above would have got wrong about that driver.**
+> Its save is atomic and its document is not fresh: it parses the operator's file, edits the addresses the schema maps and emits that, which is what makes the comments, the key order and every key no field maps survive a round trip.
+> So a shorter list left the earlier positions in place - `tags: [a, b, c]` saved over with `[x]` gave `[x, b, c]` and loaded straight back - and the same for a mapping that lost a key.
+> The residue is worse here than in a store, because the operator can see it and it looks like something they wrote.
+> The sink records the composites core named and subtracts them at `Commit`, keeping the member nodes the dump wrote where they already were: a position that stays keeps its comments, its anchor and its tag, which clearing the container and writing it again would have lost.
+> A sequence is truncated to the last position written rather than picked through, because removing a position renumbers the ones after it.
 >
 > **`Delete` joins the kv client's interface**, which is the breaking change this costs and the one the published text already anticipated in "`Delete` stays the kv **client's** verb, one layer below".
 > It is idempotent, and the sink resolves what to remove at `Commit` by listing each forgotten folder and subtracting what the dump staged.
