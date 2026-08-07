@@ -216,6 +216,45 @@ func (w writeOnceWriter) Ensure(ctx context.Context, addr ferry.Container, p fer
 	return ensureThrough(ctx, w.inner, addr, p)
 }
 
+// TestDriverCase15SkipsASinkWhoseFirstDumpFailed is the attribution rule, which
+// is what keeps one defect from being reported by three cases.
+//
+// Case 15 asks what a second dump through a held binding does, and a sink that
+// could not take the first one has not answered that question badly, it has not
+// been asked it. Case 1 owns a dump that cannot happen, so this case says out
+// loud that it stood down and leaves the report to the case it belongs to.
+func TestDriverCase15SkipsASinkWhoseFirstDumpFailed(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, wrapPlane("no-first-dump", func(inst *ferrytest.Instance) {
+		inst.Sink = pickyWriteSink{inner: inst.Sink, refuse: refuseTheLeaf}
+	}))
+
+	if !anyLineContains(c.logs, "case 15 skipped") {
+		t.Errorf("the suite logged %q, want case 15 standing down for a first dump that failed", c.logs)
+	}
+
+	if !anyLineContains(c.logs, "case 1 is where a dump that cannot happen is reported") {
+		t.Errorf("the suite logged %q, want the skip naming the case the report belongs to", c.logs)
+	}
+
+	for _, line := range c.lines {
+		if strings.Contains(line, "case 15:") {
+			t.Errorf("case 15 reported %q, and a case that stood down reports nothing", line)
+		}
+	}
+}
+
+// refuseTheLeaf refuses the one write every fixture in this suite makes, so the
+// first dump of case 15 fails before there is a second one to ask about.
+func refuseTheLeaf(_ *ferry.AddressSet, addr ferry.Path, _ ferry.Value) error {
+	if addr == probeLeaf {
+		return errNoWrite
+	}
+
+	return nil
+}
+
 // TestDriverCase15ReportsASinkThatKeepsTheEarlierValue is the half that is
 // worse than a refusal, because nothing says so: the second dump is accepted
 // and the plane still holds what the first one wrote.
