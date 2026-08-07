@@ -73,6 +73,38 @@ Three cases replace it: a tag this package writes itself, a tag whose value is n
 
 Such a tag is carried and not interpreted: `!!timestamp 2026-08-04` and `!mycompany:duration 30s` both load as the string after the tag, whatever the tag says, and reach whichever codec your field declared.
 
+## A list or a map is replaced whole
+
+The editing stops at a list or a map your struct maps, because what is in one comes from your value and not from your type.
+Save `[]string{"x"}` over
+
+```yaml
+tags:
+  - a
+  - b
+  - c
+```
+
+and the file holds `tags: [x]`, not `[x, b, c]`.
+A map that lost a key no longer holds that key either.
+Anything else leaves the elements you dropped in the file, where they load straight back the next time out of a document that says something your value never did.
+That was [#220](https://github.com/onhotpath/ferry/issues/220), and both legs of it were silent.
+
+What stays is still yours.
+The entry is edited where it already sits rather than written out fresh, so its comments, its anchor and its tag all survive:
+
+```yaml
+# the file
+tags:
+  - &first x # keep me
+note: untouched
+```
+
+is what saving `[]string{"x"}` leaves of a three-element list whose first position carried that anchor and that comment.
+A list is cut at the last position saved, which is what keeps the positions before it from being renumbered.
+
+A struct's fields are not touched by this rule: a field your value leaves out is left exactly where it is, and so is every key no field of yours maps.
+
 ## An anchor is kept, so an alias to it moves
 
 There is exactly one case where a key no field of yours maps does not read back as it did.
