@@ -25,6 +25,10 @@ import (
 type Sink struct {
 	client Client
 	prefix []string
+
+	// raw is the spelling [Raw] declared, or nil where this plane's values are
+	// text (ADR-0018).
+	raw ferry.Spelling[[]byte, []byte]
 }
 
 var _ ferry.Sink = (*Sink)(nil)
@@ -52,7 +56,7 @@ func NewSink(client Client, opts ...Option) (*Sink, error) {
 			"together, so there is no per-address half of it to choose against")
 	}
 
-	return &Sink{client: client, prefix: cfg.prefix}, nil
+	return &Sink{client: client, prefix: cfg.prefix, raw: cfg.raw}, nil
 }
 
 // Bind computes this schema's store keys and checks them, exactly as
@@ -95,7 +99,7 @@ func (s *Sink) opener(keys *ferry.Keys) ferry.OpenWriterFunc {
 			}
 		}
 
-		return &writer{client: s.client, acl: acl, key: keys.Open(), staged: map[string]staged{}}, nil
+		return &writer{client: s.client, acl: acl, key: keys.Open(), staged: map[string]staged{}, raw: s.raw}, nil
 	}
 }
 
@@ -141,6 +145,11 @@ type writer struct {
 	// in walk order and two identical dumps make identical sequences of calls.
 	order []string
 
+	// raw is this plane's spelling of a payload, or nil where the plane carries
+	// text. A bytes value goes through it so that the two directions of [Raw]
+	// cannot drift apart (ADR-0018).
+	raw ferry.Spelling[[]byte, []byte]
+
 	// forget is the folders this dump replaced, in walk order, each already
 	// carrying its trailing separator so that a listing under one cannot reach
 	// a sibling whose key merely starts with the same bytes.
@@ -181,7 +190,7 @@ func (w *writer) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) er
 		return err
 	}
 
-	value, err := opaque(v)
+	value, err := w.opaque(v)
 	if err != nil {
 		return err
 	}
@@ -387,14 +396,14 @@ func (w *writer) remove(ctx context.Context, key string) error {
 //
 // Absent never arrives. It is a reader-side kind, and an omitted address is one
 // that gets no Set call at all.
-func opaque(v ferry.Value) ([]byte, error) {
+func (w *writer) opaque(v ferry.Value) ([]byte, error) {
 	switch v.Kind() {
 	case ferry.KindString:
 		return bytesOf(v.AsString())
 	case ferry.KindNumber:
 		return bytesOf(v.AsNumber())
 	case ferry.KindBytes:
-		return v.AsBytes()
+		return w.payload(v)
 	case ferry.KindBool:
 		b, err := v.AsBool()
 
@@ -405,6 +414,23 @@ func opaque(v ferry.Value) ([]byte, error) {
 		return nil, fmt.Errorf("%w: this store was handed %s, which is not a kind ferry's boundary has",
 			ferry.ErrValue, v.Kind())
 	}
+}
+
+// payload is the bytes arm, and it is the one kind this plane holds with no
+// conversion of any sort: the store takes bytes and a bytes value carries them.
+//
+// [Raw] is what puts a spelling in the way, and the spelling is the identity,
+// so what this buys is not a different byte written but the two directions of
+// that Option going through one place. A plane declared to read payloads and
+// writing them through a different rule would be the drift the seam exists to
+// stop (ADR-0018).
+func (w *writer) payload(v ferry.Value) ([]byte, error) {
+	b, err := v.AsBytes()
+	if err != nil || w.raw == nil {
+		return b, err
+	}
+
+	return w.raw.Render(b)
 }
 
 // bytesOf is the text half of every accessor above, so that the switch reads as

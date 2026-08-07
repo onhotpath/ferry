@@ -229,6 +229,44 @@ A query parameter has no such limit: any byte sequence survives percent-encoding
 Neither plane carries type information of its own.
 Everything is text, and a `bool` or an `int` field is parsed out of that text by ferry rather than by the plane.
 
+## A plane can carry payloads instead of text
+
+A `[]byte` field takes the bytes of the text that arrived, which is what a request holding text means.
+`ferryhttp.BytesAs` says the plane carries payloads instead, and how they are spelled:
+
+```go
+spelling := ferry.With(ferryhttp.Base64(), ferryhttp.Gzip(), ferryhttp.MaxSize(4<<10))
+src := ferryhttp.NewQuerySource(ferryhttp.BytesAs(spelling))
+
+// What a client would have put in the query string.
+spelled, err := spelling.Render([]byte("-----BEGIN CERTIFICATE-----"))
+if err != nil {
+	fmt.Println(err)
+
+	return
+}
+
+ctx := ferryhttp.WithQuery(context.Background(), url.Values{"cert": {spelled}})
+
+c, err := ferry.Load[Certificate](ctx, src)
+if err != nil {
+	fmt.Println(err)
+
+	return
+}
+
+fmt.Printf("%s\n", c.Cert)
+// Output: -----BEGIN CERTIFICATE-----
+```
+
+`ferryhttp.Base64` is the spelling, and `ferryhttp.Gzip` and `ferryhttp.MaxSize` are payload steps stacked under it.
+The step written last is closest to the payload and runs first on the way out, so that source caps the payload, compresses it and spells the result as base64.
+A load undoes exactly that, and `ferryhttp.MaxSize` refuses in both directions - on the way out before anything is written, and on the way in once the payload is decompressed.
+
+A spelling is a fact about the whole plane, because a request carries no type information for a driver to consult.
+Declare one and every value that source reads is a payload, so a `string` or an `int` field over it is then a value the field cannot take.
+Give the fields that are not payloads a source of their own.
+
 ## Refusals never quote what the request held
 
 Everything this driver reads came off the wire.

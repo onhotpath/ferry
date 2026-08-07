@@ -114,3 +114,44 @@ func ExampleSink_replace() {
 	// Output:
 	// app/tags/0 = x
 }
+
+// ExampleRaw saves and loads a store whose values are byte payloads.
+//
+// Without the Option a stored value crosses ferry's boundary as text, which
+// every field parses for itself. With it a value crosses as the bytes the store
+// holds, in both directions, and nothing in the middle turns them into a string.
+//
+// It is a fact about the whole store: once it is declared, a field that is not a
+// payload has no value it can take here.
+func ExampleRaw() {
+	type Certs struct {
+		Cert []byte `ferry:"cert"`
+	}
+
+	store := memory{}
+	ctx := context.Background()
+
+	sink, err := kv.NewSink(store, kv.WithPrefix("app"), kv.Raw())
+	if err != nil {
+		panic(err)
+	}
+
+	if err := ferry.Dump(ctx, Certs{Cert: []byte{0x1f, 0x8b, 0x00}}, sink); err != nil {
+		panic(err)
+	}
+
+	src, err := kv.NewSource(store, kv.WithPrefix("app"), kv.Raw())
+	if err != nil {
+		panic(err)
+	}
+
+	cfg, err := ferry.Load[Certs](ctx, src)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("% x\n", cfg.Cert)
+
+	// Output:
+	// 1f 8b 00
+}

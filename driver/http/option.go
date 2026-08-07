@@ -8,7 +8,8 @@ import (
 )
 
 // ErrOption reports a driver option this source cannot be built with: a
-// separator that is empty, or one holding a byte a header field name may not.
+// separator that is empty, one holding a byte a header field name may not, or a
+// [BytesAs] with no spelling in it.
 //
 // [NewQuerySource] and [NewHeaderSource] take options and return no error, so
 // this lands at the first moment the driver is asked for anything, which is
@@ -17,7 +18,8 @@ import (
 // returned.
 var ErrOption = errors.New("http: unusable driver option")
 
-// Option configures a [Source]. The set is closed at one: [Separator].
+// Option configures a [Source]. The set is closed at two: [Separator] and
+// [BytesAs].
 type Option interface {
 	apply(*config)
 }
@@ -33,6 +35,18 @@ func (f optionFunc) apply(c *config) { f(c) }
 // handed out.
 type config struct {
 	sep string
+
+	// bytes is the spelling [BytesAs] declared, and it is nil until one is
+	// declared: this plane holds text and nothing else, so a value is a String
+	// unless a spelling of this plane's own says the plane carries payloads
+	// (ADR-0018).
+	bytes ferry.Spelling[[]byte, string]
+
+	// bytesErr is what declaring it refused with, held until Bind for the
+	// reason [ErrOption] gives: an Option is applied inside a constructor that
+	// returns no error, so the refusal waits for the first moment the driver is
+	// asked for anything.
+	bytesErr error
 }
 
 // QuerySeparator is the string nested fields are joined with in a query
@@ -66,6 +80,40 @@ const HeaderSeparator = "-"
 // non-empty.
 func Separator(sep string) Option {
 	return optionFunc(func(c *config) { c.sep = sep })
+}
+
+// BytesAs says this plane carries byte payloads, and how they are spelled.
+//
+//	src := ferryhttp.NewHeaderSource(ferryhttp.BytesAs(
+//	    ferry.With(ferryhttp.Base64(), ferryhttp.Gzip(), ferryhttp.MaxSize(4<<10))))
+//
+// Without it every value this plane holds is text, which a []byte field takes as
+// the bytes of that text. With it every value is a payload spelled the way the
+// spelling says, so a request carrying base64 fills a []byte field with what the
+// base64 decoded to, and a value the spelling has no reading for fails the load
+// at the parameter or field it is about.
+//
+// The sharp edge is that this is a fact about the whole plane and not about one
+// field, because a request carries no type information for a driver to consult.
+// Every value is read as a payload once this is declared, so a string, an int or
+// a duration field over the same source is then a value the field cannot take:
+// declare it for a source whose every value is a payload, and read the fields
+// that are not through a source of their own.
+//
+// Build the spelling with [Base64], stack payload steps under it with
+// [ferry.With], and write your own by implementing [ferry.Spelling] over a
+// string carrier.
+func BytesAs(s ferry.Spelling[[]byte, string]) Option {
+	return optionFunc(func(c *config) {
+		if s == nil {
+			c.bytesErr = optionError("ferryhttp.BytesAs was given no spelling, so this plane has no reading " +
+				"and no writing for a payload: pass one, or omit the option to read every value as text")
+
+			return
+		}
+
+		c.bytes = s
+	})
 }
 
 // notEmpty is the query plane's whole rule for a separator. Every byte survives

@@ -162,7 +162,7 @@ type standInSink struct {
 // Bind checks the same things the source's does, through the same helper, so a
 // schema the plane refuses is refused in both directions.
 func (s standInSink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
-	keys, _, err := bindPlane(s.src.p, s.src.cfg.sep, addrs)
+	keys, _, err := bindPlane(s.src.p, s.src.cfg, addrs)
 	if err != nil {
 		return nil, err
 	}
