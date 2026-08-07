@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/onhotpath/ferry"
@@ -341,3 +342,92 @@ func ExampleWithTagKeys() {
 	// /host - where the service lives
 	// /port - the port it listens on
 }
+
+// ExampleSpellingFunc declares how one plane spells a bool, from a pair of
+// closures over words the driver owns.
+//
+// The accept set is wider than the write form, which is what lets a file
+// written by hand load while everything ferry writes stays canonical.
+func ExampleSpellingFunc() {
+	words := map[string]bool{"on": true, "off": false, "true": true, "false": false}
+
+	onOff := ferry.SpellingFunc(
+		func(text string) (bool, error) {
+			b, ok := words[text]
+			if !ok {
+				return false, errors.New("no word of this plane spells a bool that way")
+			}
+
+			return b, nil
+		},
+		func(v bool) (string, error) {
+			if v {
+				return "on", nil
+			}
+
+			return "off", nil
+		},
+	)
+
+	for _, text := range []string{"true", "off", "yes"} {
+		b, err := onOff.Parse(text)
+		if err != nil {
+			fmt.Printf("%s -> %v\n", text, err)
+
+			continue
+		}
+
+		written, _ := onOff.Render(b)
+		fmt.Printf("%s -> %t -> written back as %s\n", text, b, written)
+	}
+	// Output:
+	// true -> true -> written back as on
+	// off -> false -> written back as off
+	// yes -> no word of this plane spells a bool that way
+}
+
+// ExampleWith stacks a payload step under a spelling.
+//
+// The step written last is closest to the payload, so it runs first on the way
+// out and last on the way in: the pipeline reads as the nesting it is.
+func ExampleWith() {
+	spelled := ferry.With[string, string](angled{}, shouted{})
+
+	carrier, err := spelled.Render("ready")
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	back, err := spelled.Parse(carrier)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Println(carrier, back)
+	// Output:
+	// <READY> ready
+}
+
+// angled is a plane's own bracketing of a text payload.
+type angled struct{}
+
+func (angled) Render(v string) (string, error) { return "<" + v + ">", nil }
+
+func (angled) Parse(c string) (string, error) {
+	inner, ok := strings.CutPrefix(c, "<")
+	if !ok {
+		return "", errors.New("the carrier is not one this plane wrote")
+	}
+
+	return strings.TrimSuffix(inner, ">"), nil
+}
+
+// shouted is the payload step, and it inverts exactly what it applies.
+type shouted struct{}
+
+func (shouted) Apply(v string) (string, error)  { return strings.ToUpper(v), nil }
+func (shouted) Invert(v string) (string, error) { return strings.ToLower(v), nil }

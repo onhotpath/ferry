@@ -51,7 +51,7 @@ func checkNoLookup(t *testing.T, fset *token.FileSet, name string, file *ast.Fil
 			return true
 		}
 
-		if fn := render(fset, call.Fun); strings.HasSuffix(fn, ".Tag.Get") || strings.HasSuffix(fn, ".Tag.Lookup") {
+		if fn := sourceText(fset, call.Fun); strings.HasSuffix(fn, ".Tag.Get") || strings.HasSuffix(fn, ".Tag.Lookup") {
 			t.Errorf("%s calls %s, and core scans the raw struct tag itself (ADR-0008)", name, fn)
 		}
 
@@ -59,7 +59,7 @@ func checkNoLookup(t *testing.T, fset *token.FileSet, name string, file *ast.Fil
 	})
 }
 
-func render(fset *token.FileSet, node ast.Node) string {
+func sourceText(fset *token.FileSet, node ast.Node) string {
 	var b strings.Builder
 
 	if err := printer.Fprint(&b, fset, node); err != nil {
