@@ -358,7 +358,80 @@ func parseDoc(data []byte) (*yamlv3.Node, error) {
 		return nil, err
 	}
 
+	if err := onceEachKey(&doc); err != nil {
+		return nil, err
+	}
+
 	return &doc, nil
+}
+
+// onceEachKey refuses a plane holding a mapping that spells one key twice,
+// anywhere in the document (#257).
+//
+// The file says three different things otherwise. yaml.v3's own Unmarshal
+// refuses it; a reader that takes the last spelling reads the second; and this
+// driver reads the first, because [member] answers with the first pair and
+// [keys] enumerates it once. A load was silent about all of that, and a save
+// made it worse: it rewrote the occurrence an address reaches and left the
+// other, so the file came back holding both the new value and the old one, and
+// the old one is the one a last-wins reader believes.
+//
+// It is refused at the open, in both directions, for the reason [onlyDocument]
+// refuses a stream: there it costs a message, and one write later it costs the
+// operator's file.
+//
+// The class is [ferry.ErrValue] for [parseDoc]'s reason - ferry reached the
+// plane and read it, and what does not make sense is the operator's file - and
+// the walk is the whole document rather than the addresses, because a save
+// re-emits the whole document.
+func onceEachKey(n *yamlv3.Node) error {
+	if n.Kind == yamlv3.MappingNode {
+		if err := onceEach(n); err != nil {
+			return err
+		}
+	}
+
+	for _, c := range n.Content {
+		if err := onceEachKey(c); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// onceEach is one mapping's own keys, refused where two of them are the same
+// text.
+//
+// The comparison is byte for byte, which is [member]'s: two case-variant keys
+// are two members here as they are everywhere else in this driver, and a
+// document holding both is one it reads.
+//
+// A key that is not a scalar is passed over. No address reaches one, so the
+// question this refusal answers - which of the two an address reads - never
+// arises for it.
+//
+// The message names the key and the two lines, which is what the operator opens
+// the file at. A key is a name and not a value the plane supplied (ADR-0011).
+func onceEach(n *yamlv3.Node) error {
+	lines := make(map[string]int, len(n.Content)/2)
+
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k := n.Content[i]
+		if k.Kind != yamlv3.ScalarNode {
+			continue
+		}
+
+		if first, twice := lines[k.Value]; twice {
+			return fmt.Errorf("%w: this file spells the key %q twice in one mapping, at line %d and line %d: "+
+				"a YAML reader takes the last and this driver takes the first, so the two disagree about what "+
+				"the file holds", ferry.ErrValue, k.Value, first, k.Line)
+		}
+
+		lines[k.Value] = k.Line
+	}
+
+	return nil
 }
 
 // onlyDocument refuses a plane holding more than one document.
