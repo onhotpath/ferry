@@ -676,8 +676,23 @@ The four drivers, rewritten self-contained against this contract, counting non-b
 
 Inside koanf's band, and the only one above its median implements both directions and three optional interfaces, which koanf has no equivalent of.
 
-**No driver implements all three optional interfaces, and only the staging YAML writer needs two.**
+**No single `Reader` or `Writer` implements all three optional interfaces, because the enumerating half and the committing half are different types.**
+`Enumerator` is asked of a `Reader` and `Committer` and `Releaser` are asked of a `Writer`, so the YAML row's three are a property of the driver and never of one type in it, and only the staging YAML writer needs two on one side.
 That is the measured case for making them optional rather than part of `Reader` and `Writer`.
+
+> **Amended under [#168](https://github.com/onhotpath/ferry/issues/168): the sentence above contradicted the table four lines up, and as published it read "No driver implements all three optional interfaces, and only the staging YAML writer needs two."**
+>
+> The table's YAML row lists `Enumerator`, `Committer` and `Releaser`, and the shipped `driver/yaml` matches it: `Children` on the reader, `Commit` and `Close` on the writer.
+> So the driver does implement all three, the sentence is the half that was wrong, and the paragraph above it - "the only one above its median implements both directions and three optional interfaces" - was already reading the table correctly.
+>
+> **The argument the sentence exists to make is the stronger one for being true**, and it is what actually shapes these interfaces: a capability sits on a type that has the method, and a `Reader` is never asked to commit.
+> Requiring all three on `Reader` and `Writer` would make every source declare a `Children` it cannot answer, which is the plane class this section already refuses to exclude.
+>
+> **Counted off the shipped tree rather than off the prototype**, with the set now eight rather than three: `driver/env` and `driver/http` assert `Prober` and `Enumerator`; `driver/kv` asserts `Prober`, `Enumerator` and `Concurrent` on its reader and `Committer` and `Unsetter` on its writer; `driver/yaml` asserts `Prober` and `Enumerator` on its reader and `Ensurer`, `Unsetter`, `Committer` and `Releaser` on its writer.
+> No driver asserts all eight and no writer asserts all five of the writer-side ones, since no first-party driver implements `Preparer` at all and only `ferrytest`'s fixtures do.
+> `kv`'s reader does assert all three reader-side ones, which is the case for optionality rather than against it: the plane that can answer everything its side offers is the one whose capabilities would otherwise be forced onto `env` and `http`, which cannot.
+> Every driver asserts a different subset, so there is no common denominator to fold into `Reader` and `Writer`.
+> That is the same case restated at four times the interface count, which is why the count grew without the contract moving.
 
 One asymmetry is worth stating because it surprises: **a tree plane pays nothing for the address set.**
 The YAML driver never builds a plane key, it walks the segments, so it has no injectivity obligation and makes no key-table call at all.
@@ -730,6 +745,15 @@ The memory plane's column is empty on every axis, which is ADR-0002's own point 
 > **The axis table above predates five of the eight optional interfaces**, and no row exists for `Prober`, `Ensurer`, `Unsetter`, `Concurrent` or `Preparer`.
 > Counted off the shipped drivers rather than off the prototype: `yaml` asserts `Prober`, `Enumerator`, `Ensurer`, `Unsetter`, `Committer` and `Releaser`; `kv` asserts `Prober`, `Enumerator`, `Concurrent`, `Committer` and `Unsetter`; `env` and `http` each assert `Prober` and `Enumerator`.
 > So "no driver implements all three optional interfaces" is true of a set of three that is now eight, and the sentence it supports - that a capability belongs on an interface a driver opts into rather than on `Reader` and `Writer` - is the reason the count kept growing without the contract moving.
+>
+> > **Amended under [#168](https://github.com/onhotpath/ferry/issues/168): the sentence re-asserted here is the one that was wrong, and the count is not what makes it wrong.**
+> >
+> > The paragraph above reads "no driver implements all three optional interfaces" as true of the set of three and re-asserts it against the set of eight.
+> > `driver/yaml` implements all three of the original set - `Children` on its reader, `Commit` and `Close` on its writer - which is what the line-count table in [What a driver costs](#what-a-driver-costs-against-the-bar-adr-0001-named) says and what that section is now amended to say in prose.
+> > The claim that survives is per **type** rather than per driver, and it survives at three and at eight alike: `Enumerator` is a `Reader`'s and `Committer` and `Releaser` are a `Writer`'s, so no one type can hold all three however capable its plane is.
+> > `kv`'s reader does assert all three of the reader-side ones, which is not a counterexample but the case for optionality in its clearest form: a plane that can answer everything its side offers is exactly the plane whose capabilities would otherwise be forced onto the planes that cannot.
+> >
+> > **The conclusion the paragraph draws is unchanged**, and it is the one this correction strengthens: a capability belongs on an interface a driver opts into, which is why the count grew from three to eight without the contract moving.
 >
 > **The line counts are the prototype's**, as this ADR's own preamble says of every number in it, and no shipped driver has been re-measured against them.
 > They were evidence for a bar, the bar held, and they are left as the record of the measurement rather than restated as a fact about `driver/`.

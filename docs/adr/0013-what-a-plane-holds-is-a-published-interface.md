@@ -209,8 +209,17 @@ A registrant who pinned `string("api:80")` and then changes their codec has a re
 That is the same instrument as core's, which is the point: one mechanism, two owners, and core invents nothing.
 
 **Tier three is the honest part and it is large.**
-A type admitted by `reflect.Kind` gets a representation nobody chose, which is ADR-0005's own category 3 - `net.IP` as sixteen raw bytes, a `[16]byte` UUID likewise.
+A type admitted by `reflect.Kind` gets a representation nobody chose, which is ADR-0005's own category 3 - a `[16]byte` UUID as sixteen raw bytes, because `[16]byte` is `Bytes`.
 A type claimed by ADR-0007's text arm gets one from its own author, and that set is unbounded and unenumerable, which ADR-0007 calls its own weakest point.
+
+> **Corrected under [#167](https://github.com/onhotpath/ferry/issues/167): the category-three example named a type the text arm claims, and as published it read "`net.IP` as sixteen raw bytes, a `[16]byte` UUID likewise".**
+>
+> `net.IP` declares both halves of the text pair, so [ADR-0007](0007-the-codec-chain-and-its-precedence.md)'s text arm claims it before kind admission is reached and it lands as `string("192.0.2.1")`, not as sixteen raw bytes.
+> [ADR-0005](0005-the-supported-type-set.md) already carries this correction inline at its own category-three paragraph, and this ADR did not.
+> The `[16]byte` UUID half was correct as published and is the example that is kept, because no chain arm claims it.
+>
+> **The argument is unchanged**, and the fact that it needed a new example is the chain shortening the list exactly as intended.
+> `net.IP` is still in the third tier of this section's own three, but by the sentence below rather than the one above: its representation comes from `net`'s author, which is the arm ferry cannot enumerate.
 
 ferry cannot promise what it never chose.
 Saying so is more useful than a promise that quietly excludes most of what users actually store, and the documentation obligation ADR-0005 already created for category 3 grows one line: **the set's documentation says which tier each member is in.**
