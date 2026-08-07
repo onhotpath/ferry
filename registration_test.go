@@ -121,9 +121,7 @@ func TestAPointerCarriesThePointeeCodecsAcceptedSet(t *testing.T) {
 		P *blob `ferry:"p"`
 	}
 
-	reg := registryWith(t, BytesValue(
-		func(b blob) ([]byte, error) { return []byte(b), nil },
-		func(b []byte) (blob, error) { return blob(b), nil }))
+	reg := registryWith(t, blobCodec())
 
 	for _, at := range []Path{At("v"), At("p")} {
 		_, err := Load[conf](t.Context(), planeSource{
@@ -137,6 +135,51 @@ func TestAPointerCarriesThePointeeCodecsAcceptedSet(t *testing.T) {
 		if strings.Contains(err.Error(), "cannot take one") {
 			t.Errorf("a bool at %s was refused by core's own kind rule with %v: the accepted set is the "+
 				"registered codec's and is never derived from the kind it declared", at, err)
+		}
+	}
+}
+
+func blobCodec() Codec {
+	return BytesValue(
+		func(b blob) ([]byte, error) { return []byte(b), nil },
+		func(b []byte) (blob, error) { return blob(b), nil })
+}
+
+// TestABytesRegistrationTakesThePlanesOwnSpelling is the bytes half of the
+// donation the bool and number arms already pin.
+//
+// String is donated to the declared kind before any codec is called, so a flat
+// plane - one that has no types of its own and reports every address as a text -
+// must reach a bytes registration with the bytes that text holds. How a plane
+// spells bytes is the driver's business (ADR-0004), so nothing is decoded here:
+// the text's own bytes are what the codec is handed, and the Bytes spelling
+// arrives unchanged beside it.
+//
+// Both field shapes are driven for the same reason #229's test drives them: the
+// pointer reaches the leaf through a second path.
+func TestABytesRegistrationTakesThePlanesOwnSpelling(t *testing.T) {
+	t.Parallel()
+
+	type conf struct {
+		V blob  `ferry:"v"`
+		P *blob `ferry:"p"`
+	}
+
+	reg := registryWith(t, blobCodec())
+
+	for _, held := range []Value{String("hello"), Bytes([]byte("hello"))} {
+		got, err := Load[conf](t.Context(), planeSource{
+			p: newPlane(map[Path]Value{At("v"): held, At("p"): held}),
+		}, WithRegistry(reg))
+		if err != nil {
+			t.Errorf("loading %#v failed: %+v: a text is donated to the declared kind before any codec "+
+				"is called", held, err)
+
+			continue
+		}
+
+		if got.V != "hello" || got.P == nil || *got.P != "hello" {
+			t.Errorf("%#v loaded as %q and %v, want %q at both shapes", held, got.V, got.P, "hello")
 		}
 	}
 }
