@@ -354,6 +354,79 @@ func assertRefusesTheAbsence(t *testing.T, src *Source, want error) {
 	assertWraps(t, err, want, ferry.ErrPlane)
 }
 
+// TestANilRequestIsTheSameAsNoRequestAtAll is the refusal above reached the
+// other way: a handler that called the context function and handed it nothing.
+//
+// A nil url.Values or http.Header boxes into a non-nil interface, so a type
+// assertion alone answers yes for it and the load proceeds against a map that
+// holds nothing. That is exactly the outcome the refusal exists to prevent -
+// every field reported missing, with nothing saying the request never arrived -
+// so the nil is refused as the absence it is.
+func TestANilRequestIsTheSameAsNoRequestAtAll(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		ctx  func(context.Context) context.Context
+		src  *Source
+		want error
+	}{
+		"query": {
+			ctx:  func(ctx context.Context) context.Context { return WithQuery(ctx, nil) },
+			src:  NewQuerySource(),
+			want: ErrNoQuery,
+		},
+		"header": {
+			ctx:  func(ctx context.Context) context.Context { return WithHeaders(ctx, nil) },
+			src:  NewHeaderSource(),
+			want: ErrNoHeaders,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := ferry.Load[filter](tc.ctx(t.Context()), tc.src)
+			if err == nil {
+				t.Fatal("a load with a nil request in the context succeeded, so every field reported missing")
+			}
+
+			assertWraps(t, err, tc.want, ferry.ErrPlane)
+		})
+	}
+}
+
+// TestAnEmptyRequestIsNotAnAbsentOne is the control beside it, and it is the
+// row that keeps the check above narrow: a request that legitimately carries
+// nothing loads, and only the nil is the absence.
+func TestAnEmptyRequestIsNotAnAbsentOne(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		ctx func(context.Context) context.Context
+		src *Source
+	}{
+		"query": {
+			ctx: func(ctx context.Context) context.Context { return WithQuery(ctx, url.Values{}) },
+			src: NewQuerySource(),
+		},
+		"header": {
+			ctx: func(ctx context.Context) context.Context { return WithHeaders(ctx, http.Header{}) },
+			src: NewHeaderSource(),
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := ferry.Load[filter](tc.ctx(t.Context()), tc.src); err != nil {
+				t.Errorf("a load against an empty request was refused: %v", err)
+			}
+		})
+	}
+}
+
 // assertWraps is the errors.Is loop every refusal in this file makes.
 func assertWraps(t *testing.T, err error, want ...error) {
 	t.Helper()
