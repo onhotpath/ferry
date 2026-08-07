@@ -134,6 +134,11 @@ The field rule, which is the other half of the grammar and is where most of the 
 | embedded, with a ferry tag | nested under that name |
 | embedded **pointer**, with no ferry tag | **schema compile error**, see below |
 
+> **Amended under [#224](https://github.com/onhotpath/ferry/issues/224): the "embedded, with a ferry tag" row holds for a struct, and is a schema compile error for every other type when the embedded field is unexported.**
+>
+> The row as published is unconditional, and the first row's reason - reflect cannot set an unexported field - reaches it wherever the tag makes the embedded field itself the position ferry writes at.
+> A struct is what the row still holds for, promoted or nested, and the measurement is in [the section below](#--skips-and-embedding-needs-no-word).
+
 ### What a struct tag can carry, and what it cannot
 
 This section is first because the grammar has to live inside it, and because what it measures is stronger than the one instance ADR-0006 recorded.
@@ -516,6 +521,24 @@ its promoted exported field Name CanSet=true, and setting it works
 
 So the rule is that an **anonymous** field is considered whether or not its own type is exported, which is the same test `encoding/json/v2` applies.
 Skipping it would have dropped a mapped field in silence.
+
+> **Amended under [#224](https://github.com/onhotpath/ferry/issues/224): "reflect can set through it" is what the measurement above shows, and it is a statement about the field below rather than about the embedded field.**
+>
+> The measurement is of the promotion path, where what is set is `Name`, one step down.
+> Reflect clears the read-only flag there because that field is exported, and it clears it for a nested struct too, which is why an unexported struct type nested under a tag of its own is unaffected and still works.
+> Where the tag makes the embedded field **itself** the mapped position there is no step down, and the value ferry holds keeps the flag.
+> Measured on `go1.27rc2`, before the refusal existed:
+>
+> ```
+> struct{ myInt `ferry:"n"`;   K string `ferry:"k"` }   compiled clean, load panicked: SetInt using value obtained using unexported field
+> struct{ *common `ferry:"c"`; K string `ferry:"k"` }   compiled clean, load panicked: Set using value obtained using unexported field
+> struct{ myArr `ferry:"a"`;   K string `ferry:"k"` }   compiled clean, load panicked: SetString, the elements inherit the flag
+> ```
+>
+> A slice and a map panic the same way, and every one of them dumps clean, which is what made the shape look supported.
+> So the field rule refuses a tag on an unexported embedded field at every type ferry writes at the position itself: a leaf by any arm of ADR-0007's chain, a pointer, a slice, a map and an array.
+> A struct ferry descends into is what remains, promoted or nested, which is the case measured above.
+> `ferry:"-"` on such a field stays redundant and accepted, as it is on any unexported field.
 
 *And the walk must share the compiler's field rule.*
 With the rule in the compiler alone, the schema for the case above promised `/name` and the walk never visited it, so a load returned a nil error and a zero field.

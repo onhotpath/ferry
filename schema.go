@@ -450,8 +450,21 @@ func (c *compiler) compileUnexported(f *reflect.StructField, s site) int {
 // An anonymous field is considered whether or not its own type is exported,
 // because Go promotes it either way and reflect can set through it. Skipping it
 // would drop a mapped field in silence.
+//
+// "Reflect can set through it" is the whole of what ADR-0008 measured, and it
+// is true of the promotion path only: what reflect clears the read-only flag at
+// is the exported field one step below. A tag on an unexported embedded field
+// makes the field itself the mapped position, and there is no step below it, so
+// that case is refused rather than compiled into a leaf a load panics on
+// (#224).
 func (c *compiler) compileEmbedded(f *reflect.StructField, parent *node, s site, r read) int {
 	if r.found {
+		if !f.IsExported() && r.value != skipTag && c.setsTheFieldItself(f.Type) {
+			c.errAt(s.field, c.unsettableEmbeddedMsg(f))
+
+			return 0
+		}
+
 		return c.compileTagged(f.Type, parent, s, r.value, string(f.Tag))
 	}
 
@@ -465,6 +478,37 @@ func (c *compiler) compileEmbedded(f *reflect.StructField, parent *node, s site,
 	parent.fields = append(parent.fields, n.fields...)
 
 	return count
+}
+
+// setsTheFieldItself reports whether mapping this type writes to the position
+// the type sits at, rather than to something below it.
+//
+// A struct ferry descends into is the one shape that does not: its members are
+// reached with FieldByIndex, and reflect drops the read-only flag at the
+// exported field that step ends on, which is why a promoted block and a nested
+// one both work through an unexported embedded field. Everything else is
+// written at the position itself - a leaf parses into it, a pointer is
+// materialised into it, a slice and a map are built and set into it, and an
+// array's elements inherit its flag - so through an unexported embedded field
+// every one of them is a value reflect refuses to set (#224, ADR-0005).
+func (c *compiler) setsTheFieldItself(t reflect.Type) bool {
+	if _, isLeaf := c.cfg.registry.leafFor(t); isLeaf {
+		return true
+	}
+
+	return t.Kind() != reflect.Struct
+}
+
+// unsettableEmbeddedMsg refuses a tag that maps an unexported embedded field at
+// its own position, naming both remedies.
+//
+// It is worded for a Go author, because the mistake is in a Go type and no
+// plane is involved (ADR-0011).
+func (c *compiler) unsettableEmbeddedMsg(f *reflect.StructField) string {
+	return fmt.Sprintf("embedded field %s is unexported and its %s tag maps the field itself, which reflect "+
+		"cannot set: only a struct works there, because what a load sets is its exported fields and never "+
+		"the embedded field - give the field an exported name, or mark it %s:%q",
+		f.Name, c.cfg.tagKey, c.cfg.tagKey, skipTag)
 }
 
 // promotionMsg refuses an embedded field that cannot be promoted, naming both
