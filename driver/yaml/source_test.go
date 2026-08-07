@@ -2,8 +2,11 @@ package yaml_test
 
 import (
 	"errors"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/onhotpath/ferry"
@@ -363,6 +366,225 @@ func TestAliasIsFollowed(t *testing.T) {
 
 	if want := ferry.String("localhost"); got != want {
 		t.Errorf("Get through an alias = %#v, want %#v", got, want)
+	}
+}
+
+// The document #234 reproduced with: one key the mapping spells itself, and one
+// it inherits through YAML's merge key.
+const inherited = `defaults: &d
+  host: localhost
+  port: 1
+db:
+  <<: *d
+  port: 5432
+`
+
+// The same document with its numbers written as strings, which is what a
+// map[string]string destination can take one of.
+const inheritedText = `defaults: &d
+  host: localhost
+  port: "1"
+db:
+  <<: *d
+  port: "5432"
+`
+
+// The two destinations that document is read into: the one whose members the
+// type fixes, and the one whose members the document does.
+type (
+	inheritedSection struct {
+		DB inheritedMembers `ferry:"db"`
+	}
+
+	inheritedMembers struct {
+		Host string `ferry:"host"`
+		Port int    `ferry:"port"`
+	}
+
+	inheritedMap struct {
+		DB map[string]string `ferry:"db"`
+	}
+)
+
+// TestAMergeKeyIsResolved is #234's first outcome: a key the document supplies
+// through `<<` was absent, so a field the file does hold loaded as its zero
+// value with nothing saying so.
+//
+// A merge key is a standard YAML feature and not an unknown tag: the document
+// says db holds what defaults holds, and a driver that reads the document has
+// to read that too.
+func TestAMergeKeyIsResolved(t *testing.T) {
+	got, err := ferry.Load[inheritedSection](t.Context(), yaml.NewSource(write(t, inherited)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	want := inheritedSection{DB: inheritedMembers{Host: "localhost", Port: 5432}}
+	if got != want {
+		t.Errorf("loaded %+v, want %+v: the mapping's own key wins and the inherited one fills the rest", got, want)
+	}
+}
+
+// TestAMergeKeyIsNotAMember is #234's second outcome, and the worse of the two:
+// `<<` was enumerated as a data key, so a map-typed destination came back
+// holding a member literally named `<<` whose value the driver invented.
+func TestAMergeKeyIsNotAMember(t *testing.T) {
+	got, err := ferry.Load[inheritedMap](t.Context(), yaml.NewSource(write(t, inheritedText)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	want := map[string]string{"host": "localhost", "port": "5432"}
+	if !maps.Equal(got.DB, want) {
+		t.Errorf("loaded %v, want %v: `<<` is YAML's syntax and never a key the document holds", got.DB, want)
+	}
+}
+
+// TestMergedKeysAreEnumeratedAfterTheMappingsOwn asserts the order enumeration
+// answers in, which is the order the merge resolves in: what the mapping spells
+// itself, in the document's order, and then what it inherits.
+func TestMergedKeysAreEnumeratedAfterTheMappingsOwn(t *testing.T) {
+	r := openReader(t, write(t, inherited))
+	a := addressesOf[inheritedMap](t)
+
+	e, ok := r.(ferry.Enumerator)
+	if !ok {
+		t.Fatal("the reader does not enumerate")
+	}
+
+	lists(t, e, a.composite(t, ferry.At("db")),
+		[]ferry.Segment{ferry.NameSegment("port"), ferry.NameSegment("host")})
+}
+
+// TestMergeSourcesResolveInOrder is the rest of YAML's own rule for `<<`, at the
+// two shapes a single key is written in: a sequence of sources, where an earlier
+// one wins over a later one, and a source that merges in turn.
+func TestMergeSourcesResolveInOrder(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  string
+	}{
+		{"a sequence of sources takes the earlier one", `first: &f
+  host: localhost
+second: &s
+  host: elsewhere
+  port: 5432
+db:
+  <<: [*f, *s]
+`},
+		{"a source that merges in turn is followed", `base: &b
+  host: localhost
+mid: &m
+  <<: *b
+  port: 5432
+db:
+  <<: *m
+`},
+		{"a mapping written out rather than aliased is a source", `db:
+  <<:
+    host: localhost
+    port: 5432
+`},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { inherits(t, c.doc) })
+	}
+}
+
+// inherits loads one merged document and asserts the two members reached the
+// destination, lifted out of its table for [holds]'s reason.
+func inherits(t *testing.T, doc string) {
+	t.Helper()
+
+	got, err := ferry.Load[inheritedSection](t.Context(), yaml.NewSource(write(t, doc)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if want := (inheritedSection{DB: inheritedMembers{Host: "localhost", Port: 5432}}); got != want {
+		t.Errorf("loaded %+v, want %+v", got, want)
+	}
+}
+
+// TestAKeyNamedLikeTheMergeKeyIsAbsent is the same rule reached from the other
+// side: `<<` is not a member the document holds, so a field that names it reads
+// as absent rather than as whatever the merge brought in.
+func TestAKeyNamedLikeTheMergeKeyIsAbsent(t *testing.T) {
+	type db struct {
+		Merge string `ferry:"<<"`
+	}
+
+	type config struct {
+		DB db `ferry:"db"`
+	}
+
+	got, err := ferry.Load[config](t.Context(), yaml.NewSource(write(t, inherited)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got.DB.Merge != "" {
+		t.Errorf("loaded %q at db.<<, want nothing: a YAML syntax token is not a key the document holds",
+			got.DB.Merge)
+	}
+}
+
+// TestEverySourceOfASequenceMergeIsEnumerated is the enumeration half of the
+// sequence case: a map-typed destination holds the members of every source, and
+// the earlier source's value is the one that survives a name they share.
+func TestEverySourceOfASequenceMergeIsEnumerated(t *testing.T) {
+	doc := "first: &f\n  host: \"localhost\"\nsecond: &s\n  host: \"elsewhere\"\n  port: \"5432\"\n" +
+		"db:\n  <<: [*f, *s]\n"
+
+	got, err := ferry.Load[inheritedMap](t.Context(), yaml.NewSource(write(t, doc)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	want := map[string]string{"host": "localhost", "port": "5432"}
+	if !maps.Equal(got.DB, want) {
+		t.Errorf("loaded %v, want %v", got.DB, want)
+	}
+}
+
+// TestAMergeChainStopsAtTheBound is the bound the read is given: a chain of
+// merges deeper than this driver follows stops, and the load answers with what
+// it reached rather than spinning. An operator's file never gets near it, and a
+// document this driver did not parse cannot use it to hang a load.
+func TestAMergeChainStopsAtTheBound(t *testing.T) {
+	var doc strings.Builder
+
+	doc.WriteString("k0: &k0\n  host: localhost\n")
+
+	for i := 1; i <= 40; i++ {
+		fmt.Fprintf(&doc, "k%d: &k%d\n  <<: *k%d\n", i, i, i-1)
+	}
+
+	doc.WriteString("db:\n  <<: *k40\n  port: 5432\n")
+
+	got, err := ferry.Load[inheritedSection](t.Context(), yaml.NewSource(write(t, doc.String())))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if want := (inheritedSection{DB: inheritedMembers{Port: 5432}}); got != want {
+		t.Errorf("loaded %+v, want %+v: a chain past the bound supplies nothing rather than spinning", got, want)
+	}
+}
+
+// TestAMergeKeyThatNamesNoMappingSuppliesNothing is the bound on following one.
+// A `<<` naming a scalar merges nothing, and a chain of them that never ends
+// stops rather than spinning: neither is a document this driver can read members
+// out of, and neither may make a load hang.
+func TestAMergeKeyThatNamesNoMappingSuppliesNothing(t *testing.T) {
+	got, err := ferry.Load[inheritedMap](t.Context(), yaml.NewSource(write(t, "db:\n  <<: 8080\n  port: \"1\"\n")))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if want := map[string]string{"port": "1"}; !maps.Equal(got.DB, want) {
+		t.Errorf("loaded %v, want %v", got.DB, want)
 	}
 }
 

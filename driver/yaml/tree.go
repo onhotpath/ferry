@@ -2,6 +2,7 @@ package yaml
 
 import (
 	"fmt"
+	"iter"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,19 +25,45 @@ import (
 // package calls core's key helper, and a test asserts that by reading the
 // source.
 
-// lookup answers with the node at addr, or nil where the document has nothing
-// there.
+// visible answers with the node the document supplies at addr, or nil where it
+// supplies nothing there.
+//
+// It is the read side's walk, and a mapping's members here are the ones it
+// spells itself plus the ones a merge key brings in (#234). The document says
+// that a mapping holding `<<` holds what the mapping it names holds, and a
+// driver reading the document reads that too.
+func visible(doc *yamlv3.Node, addr ferry.Path) *yamlv3.Node {
+	return walk(doc, addr, merged)
+}
+
+// lookup answers with the node the document spells at addr, following no merge
+// key, or nil where the document has nothing there.
+//
+// It is the write side's walk, and an inherited key is a key this mapping does
+// not have: a save writes an override into the mapping the address names rather
+// than into the mapping it merges from, which would move the value under every
+// other mapping merging the same source (#234).
 func lookup(doc *yamlv3.Node, addr ferry.Path) *yamlv3.Node {
+	return walk(doc, addr, member)
+}
+
+// walk takes addr one segment at a time, with pick deciding what a mapping's
+// members are.
+func walk(doc *yamlv3.Node, addr ferry.Path, pick memberFunc) *yamlv3.Node {
 	n := root(doc)
 
 	for seg := range addr.Segments() {
-		if n = step(n, seg); n == nil {
+		if n = step(n, seg, pick); n == nil {
 			return nil
 		}
 	}
 
 	return n
 }
+
+// memberFunc is how one walk reads a mapping: byte for byte, or through the
+// merge keys as well.
+type memberFunc func(n *yamlv3.Node, name string) *yamlv3.Node
 
 // root is the document's content node, or nil for a document with none.
 func root(doc *yamlv3.Node) *yamlv3.Node {
@@ -48,14 +75,14 @@ func root(doc *yamlv3.Node) *yamlv3.Node {
 }
 
 // step takes one segment down from n.
-func step(n *yamlv3.Node, seg ferry.Segment) *yamlv3.Node {
+func step(n *yamlv3.Node, seg ferry.Segment, pick memberFunc) *yamlv3.Node {
 	n = deref(n)
 
 	if seg.Kind() == ferry.Index {
 		return element(n, seg.Text())
 	}
 
-	return member(n, seg.Text())
+	return pick(n, seg.Text())
 }
 
 // member is the value a mapping holds under one key, comparing the key text
@@ -73,6 +100,114 @@ func member(n *yamlv3.Node, name string) *yamlv3.Node {
 	}
 
 	return nil
+}
+
+// merged is a mapping's member as the document supplies it: the key the mapping
+// spells itself, and failing that the key a merge brings in (#234).
+//
+// The mapping's own key winning is YAML's own rule, and so is the order the
+// sources are tried in. [mergeKey] itself is no member at all: enumerating it
+// handed core an address whose value was the merged mapping, which core then
+// read a single value from and materialised at its zero, so a YAML syntax token
+// became a data key whose value the driver invented.
+func merged(n *yamlv3.Node, name string) *yamlv3.Node {
+	if name == mergeKey {
+		return nil
+	}
+
+	if v := member(n, name); v != nil {
+		return v
+	}
+
+	return inherited(n, name)
+}
+
+// inherited is the first answer among the mappings this one merges from.
+func inherited(n *yamlv3.Node, name string) *yamlv3.Node {
+	if n == nil || n.Kind != yamlv3.MappingNode {
+		return nil
+	}
+
+	for src := range sources(n, mergeDepth) {
+		if v := member(src, name); v != nil {
+			return v
+		}
+	}
+
+	return nil
+}
+
+// mergeDepth bounds how deep a chain of merges is followed, for the reason
+// [aliasLimit] bounds an alias chain: an anchor is defined before it is used, so
+// a chain in a parsed document is short and acyclic, and the bound is what stops
+// a document this driver did not parse from making a read spin.
+const mergeDepth = 32
+
+// sources yields the mappings a mapping merges from, nearest first: each merge
+// key's own source before the one written after it, and a source's own sources
+// after itself.
+//
+// That order is the precedence YAML gives them, so the first answer a caller
+// takes is the right one, and one traversal serves both the member lookup and
+// the enumeration.
+func sources(n *yamlv3.Node, depth int) iter.Seq[*yamlv3.Node] {
+	return func(yield func(*yamlv3.Node) bool) { yieldSources(n, depth, yield) }
+}
+
+// yieldSources yields what one mapping's merge keys name, and reports whether
+// the caller is still taking them.
+func yieldSources(n *yamlv3.Node, depth int, yield func(*yamlv3.Node) bool) bool {
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if !isMerge(n.Content[i]) {
+			continue
+		}
+
+		if !yieldFrom(n.Content[i+1], depth-1, yield) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// yieldFrom yields what one merge key's value names: a mapping, or every mapping
+// in a sequence of them.
+//
+// A merge key naming anything else supplies nothing. YAML says a merge takes a
+// mapping or a sequence of mappings, so a scalar there is a document no member
+// can be read out of, and there is nothing to report at an address it is not
+// reached from.
+func yieldFrom(src *yamlv3.Node, depth int, yield func(*yamlv3.Node) bool) bool {
+	src = deref(src)
+	if src == nil || depth == 0 {
+		return true
+	}
+
+	if src.Kind == yamlv3.SequenceNode {
+		return yieldEach(src.Content, depth-1, yield)
+	}
+
+	if src.Kind != yamlv3.MappingNode {
+		return true
+	}
+
+	return yield(src) && yieldSources(src, depth, yield)
+}
+
+// yieldEach is a sequence of merge sources, in the order it was written.
+func yieldEach(srcs []*yamlv3.Node, depth int, yield func(*yamlv3.Node) bool) bool {
+	for _, s := range srcs {
+		if !yieldFrom(s, depth, yield) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isMerge says whether a mapping's key node is YAML's merge key.
+func isMerge(k *yamlv3.Node) bool {
+	return k.Kind == yamlv3.ScalarNode && k.Value == mergeKey
 }
 
 // element is the node at one sequence position.
@@ -385,7 +520,7 @@ func writeName(b *strings.Builder, seg ferry.Segment) bool {
 // position and a mapping member are still different answers, and the segment's
 // kind is what says which.
 func children(doc *yamlv3.Node, prefix ferry.Path) []ferry.Segment {
-	n := deref(lookup(doc, prefix))
+	n := deref(visible(doc, prefix))
 	if n == nil {
 		return nil
 	}
@@ -407,26 +542,46 @@ func positions(n int) []ferry.Segment {
 	return out
 }
 
-// keys is a mapping's children, in the order the document holds them.
+// keys is a mapping's children: the keys it spells itself, in the order the
+// document holds them, and then the keys it merges in, in the order those
+// resolve (#234).
+//
+// The two orders are one order, and it is the one [merged] reads a member in, so
+// what enumeration answers and what a read at each answer finds are the same
+// mapping.
 //
 // A duplicate key is a document YAML's own grammar permits and this driver
 // answers once for, because two entries under one key are one address and
 // [member] reads the first of them: enumerating it twice would hand core an
-// address it then reads a single value from, twice.
+// address it then reads a single value from, twice. A key a merge would supply
+// and the mapping already has is the same case one level out.
 func keys(n *yamlv3.Node) []ferry.Segment {
 	if n.Kind != yamlv3.MappingNode {
 		return nil
 	}
 
 	seen := make(map[string]bool, len(n.Content)/2)
-	out := make([]ferry.Segment, 0, len(n.Content)/2)
+	out := own(n, seen, make([]ferry.Segment, 0, len(n.Content)/2))
 
+	for src := range sources(n, mergeDepth) {
+		out = own(src, seen, out)
+	}
+
+	return out
+}
+
+// own appends one mapping's own keys, skipping the merge key, which is syntax,
+// and every key already answered for.
+func own(n *yamlv3.Node, seen map[string]bool, out []ferry.Segment) []ferry.Segment {
 	for i := 0; i+1 < len(n.Content); i += 2 {
-		if k := n.Content[i]; k.Kind == yamlv3.ScalarNode && !seen[k.Value] {
-			seen[k.Value] = true
-
-			out = append(out, ferry.NameSegment(k.Value))
+		k := n.Content[i]
+		if k.Kind != yamlv3.ScalarNode || k.Value == mergeKey || seen[k.Value] {
+			continue
 		}
+
+		seen[k.Value] = true
+
+		out = append(out, ferry.NameSegment(k.Value))
 	}
 
 	return out
