@@ -36,7 +36,7 @@ Every number below is from that prototype unless it cites the survey.
 | one entry point or two for the harness and the driver suite | **three**, and two of them are not what the ticket expected | [Three entry points, not five](#three-entry-points-not-five) |
 | how a registry reaches the harness | **as an Option**, and a parameter is refused on ADR-0004's own grounds | [How a registry reaches the harness](#how-a-registry-reaches-the-harness) |
 | whether the completeness check is one function over two tables | **yes, over three**, joined by `reflect.Type` | [One completeness check](#one-completeness-check-joined-by-type) |
-| what the codec conformance suite contains | **yes**, six cases | [The case lists](#the-case-lists-and-who-owns-each) |
+| what the codec conformance suite contains | **yes**, seven cases | [The case lists](#the-case-lists-and-who-owns-each) |
 | one package or several | **one**, on the import graph | [The surface](#the-surface) |
 | whether it has a stability promise | **two promises, in one package** | [Two stability promises](#two-stability-promises-and-only-one-of-them-is-semvers) |
 
@@ -177,8 +177,7 @@ ADR-0009 measured that this has to be about four lines or nobody writes it.
 
 ```go
 func TestCodec(t *testing.T) {
-    reg := ferry.NewRegistry()
-    _ = reg.Register(ferry.TextCodec[netip.Addr](ferry.KindString).AsMapKey())
+    reg := ferry.NewRegistry(ferry.StringText[netip.Addr]().AsMapKey())
 
     proofs := []ferrytest.Proof{
         ferrytest.Type("netip.Addr", ferrytest.Eq[netip.Addr],
@@ -495,14 +494,30 @@ Without the second, a driver whose static table holds a wildcard shape instead o
 > A plane that declares no null is untouched by all of it, because an empty composite is never written there at all, and case 1 owns that refusal by name.
 > Evidence: [`proto/136-container-reads`](https://github.com/onhotpath/ferry/tree/proto/136-container-reads).
 
-**`Codec`, six cases.**
+**`Codec`, seven cases.**
 
 1. `AppendText` and `MarshalText` agree ([ADR-0007](0007-the-codec-chain-and-its-precedence.md); nothing enforces it for a user type, which is why it is a case and not a promise).
 2. A registered **interface** codec at its **nil** zero value, encoding.
 3. The same, decoding.
-4. A codec's declared kind matches what it emits.
+4. A registration's kind is the one its constructor names.
 5. A codec accepts every kind it emits ([ADR-0007](0007-the-codec-chain-and-its-precedence.md)).
 6. A key codec is **injective under `==`**, over ferry's own key text ([ADR-0005](0005-the-supported-type-set.md), amended under [#31](https://github.com/onhotpath/ferry/issues/31)).
+7. A **null policy** round trips both its arms, which is `isNull(load())` seen from outside ([ADR-0017](0017-the-registration-api-and-the-value-it-builds.md)).
+
+> **Amended on the merge of [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md)'s registration surface.**
+>
+> As published this list held six cases, case 4 read "a codec's declared kind matches what it emits", and the suite's godoc said it freezes the registry it is handed.
+>
+> Case 4 was written against a registration that took the kind as an argument and returned a whole `Value`, so a codec could declare one kind and emit another and core compared the two on every encode.
+> A registration is named after the kind it writes now and its halves are typed by payload, so that codec is unwritable and the comparison has nothing left to compare.
+> The case is re-aimed rather than dropped, at the property every registration in the program rests on instead: it registers one codec per constructor and asserts each lands at its own kind, which is a machinery question and is exactly what this suite is for.
+>
+> Case 7 is new, and [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md) asks for it by name: `NullValue`'s law is that `isNull(load())` holds, and a policy that loads a sentinel it cannot recognise on the way back makes the round trip lie silently and only on the null path.
+> What the suite can reach is the machinery, because a `Codec` is opaque and a caller's own policies are not readable from it; a registrant's own policy is a `Proof`.
+>
+> **The surface table does not move**: no exported name changes, and `TestExportedSurface` locks the same twenty-six.
+> The freeze sentence in the godoc goes, because there is no freeze: a registry is complete when it is built, so there is no longer an ordering rule between registering and calling this suite.
+> The four-line sample above is rewritten in the same surface, because it is the shape this ADR argues nobody writes if it is longer, and it is now three.
 
 Cases 2 and 3 are ADR-0009's two wrapper defects, and they are the reason this suite is load-bearing rather than optional: the codec was correct and the wrapper was not, so **no proof a registrant can write catches them**.
 One value finds both.

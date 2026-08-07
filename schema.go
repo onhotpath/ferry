@@ -18,8 +18,8 @@ import (
 //
 // It runs exactly the compiler [Load] and [Dump] run, and takes the same
 // [Option] values, so a type it accepts is a type they accept. It compiles the
-// schema and discards it, so it retains no resolution, does not freeze a
-// [Registry], and is safe anywhere, including during init.
+// schema and discards it, so it retains no resolution and is safe anywhere,
+// including during init.
 //
 // What it checks is the whole annotation: every exported field names the
 // segment it addresses or is marked "-", every named type is in the supported
@@ -69,12 +69,13 @@ const (
 // It is also where the schema cache lands, for the same reason: a cache in one
 // caller and not the other is two engines again, arrived at by omission.
 //
-// Retention is what decides both the cache and the freeze, and they are one
-// decision rather than two. ADR-0009's obligation is that once a type has been
-// resolved against a registry, that registry's answer for that type must never
-// change - which is a constraint on a resolution that is kept. A compile whose
-// result is discarded keeps nothing that could go stale, so [Compile] takes
-// neither the cache nor the freeze, and that is one omission rather than two.
+// Retention decides the cache and nothing else now. ADR-0009's obligation is
+// that once a type has been resolved against a registry, that registry's answer
+// for that type must never change, and it used to be kept by a freeze arranged
+// here; ADR-0017 moved it into the registry's own construction, so a registry
+// cannot change its answer at any point after it exists and there is nothing
+// left for this function to arrange. A compile whose result is discarded keeps
+// nothing that could go stale, so [Compile] takes no cache entry.
 func schemaOf(t reflect.Type, opts []Option, keep retention) (*schema, error) {
 	cfg, err := newConfig(opts)
 	if err != nil {
@@ -84,11 +85,6 @@ func schemaOf(t reflect.Type, opts []Option, keep retention) (*schema, error) {
 	if !keep {
 		return compileSchema(t, cfg)
 	}
-
-	// Before the compile rather than after it, because the compile is the first
-	// reader: freezing afterwards would leave the read that resolved this very
-	// schema racing a registration (ADR-0009).
-	cfg.registry.freeze()
 
 	return cfg.registry.schemaFor(schemaKey{typ: t, tagKey: cfg.tagKey}, cfg)
 }

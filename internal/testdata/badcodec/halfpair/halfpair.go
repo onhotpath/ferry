@@ -20,4 +20,8 @@ import (
 )
 
 // Half is one half of a pair, which is not a codec.
-var Half = ferry.StringCodec(netip.Addr.String)
+var Half = ferry.StringValue(addrText)
+
+// addrText is an encode half in the shape every constructor names: a T in, the
+// payload and an error out.
+func addrText(a netip.Addr) (string, error) { return a.String(), nil }

@@ -258,23 +258,23 @@ func scalarDonors() []donor {
 	return []donor{
 		{"bool", readLeaf[bool], []obs{
 			{Bool(true), true}, {String("true"), true},
-			{Number("1"), false}, {Bytes([]byte("true")), false}, {Null(), false},
+			{Number("1"), false}, {Bytes([]byte("true")), false}, {Null, false},
 		}},
 		{"string", readLeaf[string], []obs{
 			{String("8080"), true},
-			{Number("8080"), false}, {Bool(true), false}, {Bytes([]byte("8080")), false}, {Null(), false},
+			{Number("8080"), false}, {Bool(true), false}, {Bytes([]byte("8080")), false}, {Null, false},
 		}},
 		{"int", readLeaf[int], []obs{
 			{Number("8080"), true}, {String("8080"), true},
-			{Bool(true), false}, {Bytes([]byte("8080")), false}, {Null(), false},
+			{Bool(true), false}, {Bytes([]byte("8080")), false}, {Null, false},
 		}},
 		{"uint64", readLeaf[uint64], []obs{
 			{Number("8080"), true}, {String("8080"), true},
-			{Bool(true), false}, {Bytes([]byte("8080")), false}, {Null(), false},
+			{Bool(true), false}, {Bytes([]byte("8080")), false}, {Null, false},
 		}},
 		{"float64", readLeaf[float64], []obs{
 			{Number("0.1"), true}, {String("0.1"), true},
-			{Bool(true), false}, {Bytes([]byte("0.1")), false}, {Null(), false},
+			{Bool(true), false}, {Bytes([]byte("0.1")), false}, {Null, false},
 		}},
 	}
 }
@@ -284,12 +284,12 @@ func scalarDonors() []donor {
 func byteDonors() []donor {
 	return []donor{
 		{"[]byte", readLeaf[[]byte], []obs{
-			{Bytes([]byte("ab")), true}, {String("ab"), true}, {Null(), true},
+			{Bytes([]byte("ab")), true}, {String("ab"), true}, {Null, true},
 			{Bool(true), false}, {Number("1"), false},
 		}},
 		{"[3]byte", readLeaf[[3]byte], []obs{
 			{Bytes([]byte("abc")), true}, {String("abc"), true},
-			{Null(), false}, {Bool(true), false}, {Number("1"), false},
+			{Null, false}, {Bool(true), false}, {Number("1"), false},
 		}},
 	}
 }
@@ -302,12 +302,12 @@ func identityDonors() []donor {
 		{"time.Duration", readLeaf[time.Duration], []obs{
 			{String("30s"), true},
 			{Number("30000000000"), false}, {Bool(true), false},
-			{Bytes([]byte("30s")), false}, {Null(), false},
+			{Bytes([]byte("30s")), false}, {Null, false},
 		}},
 		{"time.Time", readLeaf[time.Time], []obs{
 			{String("2026-08-02T12:00:00Z"), true},
 			{Number("1785931200"), false}, {Bool(true), false},
-			{Bytes([]byte("2026-08-02T12:00:00Z")), false}, {Null(), false},
+			{Bytes([]byte("2026-08-02T12:00:00Z")), false}, {Null, false},
 		}},
 	}
 }
@@ -536,7 +536,7 @@ func checkRefused(t *testing.T, read func(Value) (string, error), got Value) {
 		t.Errorf("%#v was refused with %v, want an ErrValue", got, err)
 	}
 
-	if got.text != "" && strings.Contains(err.Error(), got.text) {
+	if got.text() != "" && strings.Contains(err.Error(), got.text()) {
 		t.Errorf("the refusal repeats the plane's own text: %v", err)
 	}
 }
@@ -648,7 +648,7 @@ func TestFmtStringerIsNeverConsulted(t *testing.T) {
 		t.Errorf("time.Time writes what fmt.Stringer gives, %#v", got)
 	}
 
-	if _, err := time.Parse(time.RFC3339Nano, got.text); err != nil {
+	if _, err := time.Parse(time.RFC3339Nano, got.text()); err != nil {
 		t.Errorf("time.Time writes %#v, which is not the text pair's RFC 3339: %v", got, err)
 	}
 

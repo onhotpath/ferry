@@ -17,32 +17,29 @@ import (
 )
 
 // Every assertion in this file goes through the exported surface: a
-// registration through Register, a claim through what Compile refused or what a
-// recording driver's Bind was handed, and a representation through what a plane
-// was written. Nothing reaches the compiled schema, the node tree or the
+// registration through NewRegistry, a claim through what Compile refused or what
+// a recording driver's Bind was handed, and a representation through what a
+// plane was written. Nothing reaches the compiled schema, the node tree or the
 // registry's map.
 //
 // The one thing asserted structurally rather than behaviourally is the shape of
-// the API itself - that no RegisterType exists and that a Reg has no exported
-// accessor - because those are claims about what is absent, and absence has no
-// behaviour to observe it through.
+// the API itself - that no registration by reflect.Type exists, and that a
+// registration has no exported accessor - because those are claims about what is
+// absent, and absence has no behaviour to observe it through.
 
-// The named types over one underlying type that ADR-0005 left as a documented
-// sharp edge and this ticket closes.
-type (
-	pollInterval    time.Duration
-	defaultInterval time.Duration
-	lateInterval    time.Duration
-)
+// pollInterval is a named type over time.Duration, which ADR-0005 left as a
+// documented sharp edge and DurationLike closes.
+type pollInterval time.Duration
 
-// retryCount is a named int, registered so that its codec accepts a Null and
-// returns the Go zero. Its kind admits it already, and the registration is what
-// gives the type a null it does not otherwise have (ADR-0006).
+// retryCount is a named int, registered under a null policy so that its codec
+// accepts a Null and returns the Go zero. Its kind admits it already, and the
+// registration is what gives the type a null it does not otherwise have
+// (ADR-0006).
 type retryCount int
 
-// plainCount is retryCount's counterpart through StringCodec, which is the
-// measured reason there are three constructors and not one: a decode half over
-// string cannot see a Null at all.
+// plainCount is retryCount's counterpart with no null policy, which is the
+// measured reason [NullValue] exists: a payload-typed decode half never sees a
+// Null at all (ADR-0017).
 type plainCount int
 
 // host is a struct with no text pair, so nothing but a registration collapses
@@ -52,7 +49,7 @@ type host struct {
 	Port int    `ferry:"port"`
 }
 
-func hostText(h host) string { return h.Name + ":" + strconv.Itoa(h.Port) }
+func hostText(h host) (string, error) { return h.Name + ":" + strconv.Itoa(h.Port), nil }
 
 func parseHost(text string) (host, error) {
 	name, port, ok := strings.Cut(text, ":")
@@ -86,28 +83,21 @@ type wave struct {
 
 func (w wave) greeting() string { return w.Name }
 
-// greeterValue emits Null for a nil interface, which is the mechanism that
-// makes an interface expressible at all, and accepts one back.
-func greeterValue(g greeter) (Value, error) {
-	if g == nil {
-		return Null(), nil
-	}
-
-	return String(g.greeting()), nil
+// greeterCodec is the interface case: a null policy over a string registration,
+// so a nil interface writes a Null and a Null loads back as a nil. That is the
+// mechanism that makes an interface expressible at all, and it is closed under
+// isNull(load()) because load returns the nil the policy calls null.
+func greeterCodec() Codec {
+	return NullValue(
+		StringValue(greeterText, parseGreeter),
+		func() (greeter, error) { return nil, nil }, //nolint:nilnil // a nil greeter is what a Null carries.
+		func(g greeter) bool { return g == nil },
+	)
 }
 
-func parseGreeter(v Value) (greeter, error) {
-	if v.Kind() == KindNull {
-		return nil, nil //nolint:nilnil // a nil greeter is the value Null carries, and it is not a failure.
-	}
+func greeterText(g greeter) (string, error) { return g.greeting(), nil }
 
-	s, err := v.AsString()
-	if err != nil {
-		return nil, err
-	}
-
-	return wave{Name: s}, nil
-}
+func parseGreeter(s string) (greeter, error) { return wave{Name: s}, nil }
 
 // severity is a type that already declares a text pair, so ADR-0007's chain
 // claims it at String with nothing registered. It is the fixture for the rule
@@ -139,7 +129,7 @@ func (s *severity) UnmarshalText(text []byte) error {
 // "invalid method expression url.URL.String (needs pointer receiver)", which is
 // a property of the standard library's receivers and the difference between a
 // one-line registration and a seven-line one.
-func urlText(u url.URL) string { return u.String() }
+func urlText(u url.URL) (string, error) { return u.String(), nil }
 
 func parseURL(text string) (url.URL, error) {
 	u, err := url.Parse(text)
@@ -150,7 +140,7 @@ func parseURL(text string) (url.URL, error) {
 	return *u, nil
 }
 
-func macText(a net.HardwareAddr) string { return a.String() }
+func macText(a net.HardwareAddr) (string, error) { return a.String(), nil }
 
 func parseMAC(text string) (net.HardwareAddr, error) {
 	if text == "" {
@@ -160,7 +150,7 @@ func parseMAC(text string) (net.HardwareAddr, error) {
 	return net.ParseMAC(text)
 }
 
-func countText(c plainCount) string { return strconv.Itoa(int(c)) }
+func countText(c plainCount) (string, error) { return strconv.Itoa(int(c)), nil }
 
 func parseCount(text string) (plainCount, error) {
 	n, err := strconv.Atoi(text)
@@ -168,15 +158,10 @@ func parseCount(text string) (plainCount, error) {
 	return plainCount(n), err
 }
 
-func bigValue(x big.Int) (Value, error) { return Number(x.String()), nil }
+func bigText(x big.Int) (string, error) { return x.String(), nil }
 
-func parseBig(v Value) (big.Int, error) {
+func parseBig(s string) (big.Int, error) {
 	var x big.Int
-
-	s, err := v.AsNumber()
-	if err != nil {
-		return x, err
-	}
 
 	if _, ok := x.SetString(s, numBase); !ok {
 		return x, errNotAnInteger
@@ -187,17 +172,21 @@ func parseBig(v Value) (big.Int, error) {
 
 var errNotAnInteger = errors.New("not an integer")
 
-func retryValue(c retryCount) (Value, error) { return Number(strconv.Itoa(int(c))), nil }
+// retryCodec is the escape hatch ADR-0006's strictness rests on: a plain int
+// refuses a Null, and a registration carrying a null policy for its own type
+// accepts one and returns 0.
+func retryCodec() Codec {
+	return NullValue(
+		NumberValue(retryText, parseRetry),
+		func() (retryCount, error) { return 0, nil },
+		func(c retryCount) bool { return c == 0 },
+	)
+}
 
-// parseRetry is the escape hatch ADR-0006's strictness rests on: a plain int
-// refuses a Null, and a registered codec for its own type accepts one and
-// returns 0.
-func parseRetry(v Value) (retryCount, error) {
-	if v.Kind() == KindNull {
-		return 0, nil
-	}
+func retryText(c retryCount) (string, error) { return strconv.Itoa(int(c)), nil }
 
-	n, err := v.AsInt()
+func parseRetry(s string) (retryCount, error) {
+	n, err := strconv.Atoi(s)
 
 	return retryCount(n), err
 }
@@ -220,18 +209,56 @@ func mustRefuse(t *testing.T, err error, want ...string) {
 	}
 }
 
-// registryWith builds a fresh registry per test, because a registry freezes and
-// a shared one would make every test after the first depend on the order they
-// ran in.
-func registryWith(t *testing.T, regs ...Reg) *Registry {
+// registryWith builds a fresh registry per test, because a registry is complete
+// at birth and a shared one would make every test read a table it did not write.
+func registryWith(t *testing.T, codecs ...Codec) *Registry {
 	t.Helper()
 
-	reg := NewRegistry()
-	if err := reg.Register(regs...); err != nil {
-		t.Fatalf("register: %+v", err)
+	return NewRegistry(codecs...)
+}
+
+// mustRefuseAtConstruction is [mustRefuse] for the refusals [NewRegistry] and
+// the constructors raise, which are panics rather than errors: a registry is
+// complete at birth, so there is no call left to return an error from.
+//
+// It recovers the panic and asserts the value is ferry's own located error, so
+// that a caller who wraps a NewRegistry in a recover reads the report ferry
+// gives every other refusal rather than a bare string (ADR-0017).
+func mustRefuseAtConstruction(t *testing.T, build func(), want ...string) {
+	t.Helper()
+
+	err := refusalFrom(build)
+	if err == nil {
+		t.Fatalf("no panic was raised, and one containing %q was expected", want)
 	}
 
-	return reg
+	mustRefuse(t, err, want...)
+
+	if !errors.Is(err, ErrSchema) {
+		t.Errorf("the refusal is %v, and does not answer to ErrSchema", err)
+	}
+}
+
+// refusal runs build and reports the *Error it panicked with, or nil where it
+// returned. A panic with anything else fails the test where it happened.
+func refusalFrom(build func()) (err error) {
+	defer func() {
+		p := recover()
+		if p == nil {
+			return
+		}
+
+		fe, ok := p.(*Error)
+		if !ok {
+			panic(p)
+		}
+
+		err = fe
+	}()
+
+	build()
+
+	return nil
 }
 
 // TestInferenceWorksAtEveryCallSiteWithAValueArgument is ADR-0009's ergonomic
@@ -245,30 +272,19 @@ func registryWith(t *testing.T, regs ...Reg) *Registry {
 // of this API.
 //
 // What is asserted at run time is that inference picked the right T, which is
-// read off the registry's own member list rather than off any Reg: three of the
-// ten are refused by the zero-value check and name their type in doing so, and
-// the other seven are the table.
+// read off the registry's own member list rather than off any Codec.
 func TestInferenceWorksAtEveryCallSiteWithAValueArgument(t *testing.T) {
 	t.Parallel()
 
-	reg := NewRegistry()
-
-	err := reg.Register(
-		StringCodec(netip.Addr.String, netip.ParseAddr),
-		StringCodec(netip.AddrPort.String, netip.ParseAddrPort),
-		StringCodec(netip.Prefix.String, netip.ParsePrefix),
-		StringCodec(macText, parseMAC),
-		StringCodec(countText, parseCount),
-		StringCodec(hostText, parseHost),
-		StringCodec(urlText, parseURL),
-		ValueCodec(KindNumber, bigValue, parseBig),
-		ValueCodec(KindString, greeterValue, parseGreeter),
-		ValueCodec(KindNumber, retryValue, parseRetry),
+	reg := NewRegistry(
+		StringValue(macText, parseMAC),
+		StringValue(countText, parseCount),
+		StringValue(hostText, parseHost),
+		StringValue(urlText, parseURL),
+		NumberValue(bigText, parseBig),
+		greeterCodec(),
+		retryCodec(),
 	)
-
-	if got := len(Elements(err)); got != len(refusedByTheZeroCheck) {
-		t.Fatalf("Register reported %d failures, want %d:\n%+v", got, len(refusedByTheZeroCheck), err)
-	}
 
 	want := []string{
 		"github.com/onhotpath/ferry.greeter", "github.com/onhotpath/ferry.host",
@@ -278,10 +294,6 @@ func TestInferenceWorksAtEveryCallSiteWithAValueArgument(t *testing.T) {
 
 	mustHoldTypes(t, reg, want)
 }
-
-// refusedByTheZeroCheck is the three standard-library types whose String and
-// Parse pair is not an inverse at the zero value.
-var refusedByTheZeroCheck = []string{"netip.Addr", "netip.AddrPort", "netip.Prefix"}
 
 // mustHoldTypes asserts a registry's membership through Types, which is the one
 // thing this package exports for ferrytest's sake.
@@ -325,23 +337,31 @@ func TestTheZeroValueCheckRefuses(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name string
-		reg  Reg
+		name  string
+		codec Codec
 	}{
-		{name: "netip.Addr through String and ParseAddr", reg: StringCodec(netip.Addr.String, netip.ParseAddr)},
+		{name: "netip.Addr through String and ParseAddr", codec: StringValue(addrText, netip.ParseAddr)},
 		{name: "netip.AddrPort through String and ParseAddrPort",
-			reg: StringCodec(netip.AddrPort.String, netip.ParseAddrPort)},
+			codec: StringValue(addrPortText, netip.ParseAddrPort)},
 		{name: "netip.Prefix through String and ParsePrefix",
-			reg: StringCodec(netip.Prefix.String, netip.ParsePrefix)},
+			codec: StringValue(prefixText, netip.ParsePrefix)},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			mustRefuse(t, NewRegistry().Register(c.reg), "not total over the zero value")
+			mustRefuseAtConstruction(t, func() { NewRegistry(c.codec) }, "not total over the zero value")
 		})
 	}
 }
+
+// The three one-liners a registrant is most likely to reach for, and the three
+// that are not an inverse at the zero value.
+func addrText(a netip.Addr) (string, error) { return a.String(), nil }
+
+func addrPortText(a netip.AddrPort) (string, error) { return a.String(), nil }
+
+func prefixText(p netip.Prefix) (string, error) { return p.String(), nil }
 
 // TestTheZeroValueCheckAccepts is the other four registrations ADR-0009
 // measured, and the interface is the case that had to keep working: its zero is
@@ -350,21 +370,20 @@ func TestTheZeroValueCheckAccepts(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name string
-		reg  Reg
+		name  string
+		codec Codec
 	}{
-		{name: "netip.Addr through its text pair", reg: TextCodec[netip.Addr](KindString)},
-		{name: "url.URL through two wrappers", reg: StringCodec(urlText, parseURL)},
-		{name: "a named duration", reg: DurationLike[pollInterval]()},
-		{name: "an interface, whose zero emits Null and takes Null back",
-			reg: ValueCodec(KindString, greeterValue, parseGreeter)},
+		{name: "netip.Addr through its text pair", codec: StringText[netip.Addr]()},
+		{name: "url.URL through two wrappers", codec: StringValue(urlText, parseURL)},
+		{name: "a named duration", codec: DurationLike[pollInterval]()},
+		{name: "an interface, whose zero writes Null and takes Null back", codec: greeterCodec()},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 
-			if err := NewRegistry().Register(c.reg); err != nil {
+			if err := refusalFrom(func() { NewRegistry(c.codec) }); err != nil {
 				t.Fatalf("the registration was refused: %+v", err)
 			}
 		})
@@ -377,16 +396,8 @@ func TestTheZeroValueCheckAccepts(t *testing.T) {
 func TestTheZeroCheckReportsWhatTheCodecEncodedTo(t *testing.T) {
 	t.Parallel()
 
-	err := NewRegistry().Register(StringCodec(netip.Addr.String, netip.ParseAddr))
-	if err == nil {
-		t.Fatal("the netip.Addr one-liner was accepted")
-	}
-
-	mustRefuse(t, err, "netip.Addr", `string("invalid IP")`, "decoding that back fails")
-
-	if !errors.Is(err, ErrSchema) {
-		t.Error("the refusal does not answer to ErrSchema")
-	}
+	mustRefuseAtConstruction(t, func() { NewRegistry(StringValue(addrText, netip.ParseAddr)) },
+		"netip.Addr", `string("invalid IP")`, "decoding that back fails")
 }
 
 // TestAnEncodeFailureAtTheZeroValueIsRefused is the other half of the check,
@@ -395,94 +406,163 @@ func TestTheZeroCheckReportsWhatTheCodecEncodedTo(t *testing.T) {
 func TestAnEncodeFailureAtTheZeroValueIsRefused(t *testing.T) {
 	t.Parallel()
 
-	err := NewRegistry().Register(ValueCodec(KindString,
-		func(retryCount) (Value, error) { return Value{}, errNotAnInteger },
-		func(Value) (retryCount, error) { return 0, nil }))
-
-	mustRefuse(t, err, "encoding one failed")
+	mustRefuseAtConstruction(t, func() {
+		NewRegistry(StringValue(
+			func(retryCount) (string, error) { return "", errNotAnInteger },
+			func(string) (retryCount, error) { return 0, nil }))
+	}, "encoding one failed")
 }
 
-// TestACodecThatLiesAboutItsKindIsRefusedAtRegistration is the declared-kind
-// check reaching the registration rather than only the walk, which falls out of
-// the zero-value check running the same emit the walk runs.
-func TestACodecThatLiesAboutItsKindIsRefusedAtRegistration(t *testing.T) {
+// TestARegistrationRefusalKeepsItsOwnClass is #228: a refusal about a
+// registration call site stays a schema refusal whatever the registrant's own
+// error was made of.
+//
+// ADR-0011 invites a registrant to wrap ferry's sentinels in the errors their
+// codec returns, and the walk is where that opinion counts. A registration is
+// not that moment: nothing has been read and no plane has been reached, so a
+// codec whose zero value fails with an ErrPlane inside it must not turn "your
+// registration is wrong" into "the plane failed".
+func TestARegistrationRefusalKeepsItsOwnClass(t *testing.T) {
 	t.Parallel()
 
-	err := NewRegistry().Register(ValueCodec(KindNumber,
-		func(retryCount) (Value, error) { return String("4"), nil },
-		parseRetry))
+	err := refusalFrom(func() {
+		NewRegistry(StringValue(
+			countText,
+			func(string) (plainCount, error) { return 0, fmt.Errorf("%w: the store is down", ErrPlane) }))
+	})
 
-	mustRefuse(t, err, "declared number and produced string")
+	if err == nil {
+		t.Fatal("a codec that is not total over its zero value was accepted")
+	}
+
+	// The class is what the cause used to overwrite, and it is read off the
+	// report rather than off errors.Is: the registrant's own error stays in the
+	// chain by design, so errors.Is answers for it either way, and the class is
+	// the thing that was wrong.
+	report := fmt.Sprintf("%+v", err)
+
+	if !strings.Contains(report, momentRegister.String()+listSep+ErrSchema.Error()) {
+		t.Errorf("the report is\n\t%s\nand its class is not %s", report, ErrSchema)
+	}
+
+	if strings.Contains(report, ErrPlane.Error()) {
+		t.Errorf("the report is\n\t%s\nand it claims %s: a registration reached no plane", report, ErrPlane)
+	}
 }
 
-// TestWhatARegistrationMayNotBe is ADR-0009's three refusals plus the one case
-// that must be accepted, which is the escape the first refusal names.
+// TestWhatARegistrationMayNotBe is ADR-0009's three refusals plus the nil codec
+// a variadic constructor makes writable, plus the one case that must be
+// accepted, which is the escape the first refusal names.
 func TestWhatARegistrationMayNotBe(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name string
-		reg  Reg
-		want string
+		name  string
+		codec Codec
+		want  string
 	}{{
-		name: "a type core owns by identity",
-		reg:  DurationLike[time.Duration](),
-		want: "time.Duration is in core's own set",
+		name:  "a type core owns by identity",
+		codec: DurationLike[time.Duration](),
+		want:  "time.Duration is in core's own set",
 	}, {
-		name: "a type core owns by kind",
-		reg:  StringCodec(strconv.Itoa, strconv.Atoi),
-		want: "int is in core's own set",
+		name:  "a type core owns by kind",
+		codec: StringValue(itoa, strconv.Atoi),
+		want:  "int is in core's own set",
 	}, {
-		name: "a pointer type",
-		reg:  ValueCodec(KindNumber, func(*big.Int) (Value, error) { return Number("0"), nil }, parseBigPtr),
-		want: "pointer indirection is structural",
+		name:  "a pointer type",
+		codec: NumberValue(func(*big.Int) (string, error) { return "0", nil }, parseBigPtr),
+		want:  "pointer indirection is structural",
+	}, {
+		name:  "nothing at all",
+		codec: nil,
+		want:  "was given a nil codec",
 	}}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			mustRefuse(t, NewRegistry().Register(c.reg), c.want)
+			mustRefuseAtConstruction(t, func() { NewRegistry(c.codec) }, c.want)
 		})
 	}
 
 	t.Run("a named type over one core owns is accepted", func(t *testing.T) {
 		t.Parallel()
 
-		if err := NewRegistry().Register(DurationLike[pollInterval]()); err != nil {
+		if err := refusalFrom(func() { NewRegistry(DurationLike[pollInterval]()) }); err != nil {
 			t.Errorf("the named duration was refused: %+v", err)
 		}
 	})
 }
 
-func parseBigPtr(Value) (*big.Int, error) { return new(big.Int), nil }
+func itoa(n int) (string, error) { return strconv.Itoa(n), nil }
 
-// TestADuplicateIsRefused is the second refusal, and it needs two calls rather
-// than a table because what makes it a duplicate is a registration that
-// succeeded first.
+func parseBigPtr(string) (*big.Int, error) { return new(big.Int), nil }
+
+// TestADuplicateIsRefused is the second refusal, and under ADR-0017 it is one
+// call rather than two: a registry takes its whole codec set at once, so the
+// duplicate is two codecs in one list and is refused before the registry exists.
 func TestADuplicateIsRefused(t *testing.T) {
 	t.Parallel()
 
-	reg := registryWith(t, DurationLike[pollInterval]())
-
-	mustRefuse(t, reg.Register(DurationLike[pollInterval]()), "is already registered")
+	mustRefuseAtConstruction(t,
+		func() { NewRegistry(DurationLike[pollInterval](), DurationLike[pollInterval]()) },
+		"is already registered")
 }
 
-// TestAZeroRegIsRefused holds the one hole a struct leaves in "the only way to
-// make one is a constructor": Reg{} is writable, and it names no type.
-func TestAZeroRegIsRefused(t *testing.T) {
+// TestAHalfThatIsNilPanicsAtTheCompositionSite is ADR-0017's one departure from
+// "ferry returns errors and never panics", and it is scoped to a program's
+// construction.
+//
+// A nil half is a programming error at a program's birth, in the family of
+// regexp.MustCompile, and the alternative is an error return on a line nobody
+// checks. It fires at the constructor rather than at NewRegistry, because that
+// is where the missing half was written.
+func TestAHalfThatIsNilPanicsAtTheCompositionSite(t *testing.T) {
 	t.Parallel()
 
-	mustRefuse(t, NewRegistry().Register(Reg{}), "zero ferry.Reg")
+	cases := []struct {
+		name  string
+		build func()
+	}{{
+		name:  "a nil encode half",
+		build: func() { StringValue(nil, parseCount) },
+	}, {
+		name:  "a nil decode half",
+		build: func() { StringValue[plainCount](countText, nil) },
+	}, {
+		name:  "a nil null policy",
+		build: func() { NullValue(StringValue(countText, parseCount), nil, func(plainCount) bool { return false }) },
+	}}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			mustRefuseAtConstruction(t, c.build, "one of them is nil")
+		})
+	}
 }
 
-// TestTextCodecRefusesAValueReceiverDecodeHalf is the one refusal this
-// implementation adds to ADR-0009's three, and it is the constraint's own blind
-// spot: *T's method set contains T's, so an UnmarshalText on a value receiver
-// satisfies textPtr and decodes into a copy.
-func TestTextCodecRefusesAValueReceiverDecodeHalf(t *testing.T) {
+// TestANullPolicyOverAnotherTypesRegistrationIsRefused is the mismatch the
+// inference makes reachable: T comes from the two policies rather than from the
+// registration they wrap.
+func TestANullPolicyOverAnotherTypesRegistrationIsRefused(t *testing.T) {
 	t.Parallel()
 
-	mustRefuse(t, NewRegistry().Register(TextCodec[copies](KindString)), "value receiver")
+	mustRefuseAtConstruction(t, func() {
+		NullValue(StringValue(countText, parseCount),
+			func() (host, error) { return host{}, nil },
+			func(h host) bool { return h.Name == "" })
+	}, "one registration covers one type")
+}
+
+// TestATextRegistrationRefusesAValueReceiverDecodeHalf is #131's first item,
+// and it is the constraint's own blind spot: *T's method set contains T's, so an
+// UnmarshalText on a value receiver satisfies [TextPointer] and decodes into a
+// copy.
+func TestATextRegistrationRefusesAValueReceiverDecodeHalf(t *testing.T) {
+	t.Parallel()
+
+	mustRefuseAtConstruction(t, func() { StringText[copies]() }, "value receiver")
 }
 
 // copies declares both halves of the text pair with the decode half on the
@@ -512,10 +592,10 @@ func TestRegisteringATypeTheChainWouldClaimWins(t *testing.T) {
 		t.Errorf("unregistered, the chain wrote %#v, want %#v", unregistered, want)
 	}
 
-	reg := registryWith(t, ValueCodec(KindNumber,
-		func(s severity) (Value, error) { return Number(strconv.Itoa(int(s))), nil },
-		func(v Value) (severity, error) {
-			n, err := v.AsInt()
+	reg := registryWith(t, NumberValue(
+		func(s severity) (string, error) { return strconv.Itoa(int(s)), nil },
+		func(s string) (severity, error) {
+			n, err := strconv.Atoi(s)
 
 			return severity(n), err
 		}))
@@ -557,7 +637,7 @@ func TestRegisteringAnInterfaceClaimsTheInterfaceAlone(t *testing.T) {
 		G *wave `ferry:"g"`
 	}
 
-	reg := registryWith(t, ValueCodec(KindString, greeterValue, parseGreeter))
+	reg := registryWith(t, greeterCodec())
 
 	mustBeAddresses(t, boundBy(t, func(ctx context.Context, s Sink) error {
 		return Dump(ctx, asInterface{G: wave{Name: "hi"}}, s, WithRegistry(reg))
@@ -613,11 +693,11 @@ func TestAMapKeyedByARegisteredTypeNeedsAsMapKey(t *testing.T) {
 		Limits map[netip.Addr]int `ferry:"limits"`
 	}
 
-	plain := registryWith(t, TextCodec[netip.Addr](KindString))
+	plain := registryWith(t, StringText[netip.Addr]())
 
 	mustRefuse(t, Compile[conf](WithRegistry(plain)), "netip.Addr", "injective", ".AsMapKey()")
 
-	declared := registryWith(t, TextCodec[netip.Addr](KindString).AsMapKey())
+	declared := registryWith(t, StringText[netip.Addr]().AsMapKey())
 	if err := Compile[conf](WithRegistry(declared)); err != nil {
 		t.Fatalf("with .AsMapKey() the schema still refused: %+v", err)
 	}
@@ -633,7 +713,7 @@ func TestARegisteredMapKeyAddressesByItsOwnText(t *testing.T) {
 		Limits map[netip.Addr]int `ferry:"limits"`
 	}
 
-	reg := registryWith(t, TextCodec[netip.Addr](KindString).AsMapKey())
+	reg := registryWith(t, StringText[netip.Addr]().AsMapKey())
 	addr := netip.MustParseAddr("192.0.2.1")
 
 	p := newPlane(map[Path]Value{})
@@ -663,10 +743,10 @@ func TestARegisteredMapKeyAddressesByItsOwnText(t *testing.T) {
 // TestTheDeclaredKindIsADonationTargetOnly is criterion ten, and it is the
 // difference the bool this hook replaced could not express.
 //
-// The codec declares Number, because that is what it produces, and separately
-// accepts Null, which it never produces. A plain int refuses a Null, which is
-// ADR-0006's strictness, and it is recoverable exactly because a registration
-// can accept one.
+// The registration is a number codec under a null policy, so the kind it writes
+// and the kinds it accepts are two separate declarations. A plain int refuses a
+// Null, which is ADR-0006's strictness, and it is recoverable exactly because a
+// null policy accepts one.
 func TestTheDeclaredKindIsADonationTargetOnly(t *testing.T) {
 	t.Parallel()
 
@@ -674,14 +754,14 @@ func TestTheDeclaredKindIsADonationTargetOnly(t *testing.T) {
 		N retryCount `ferry:"n"`
 	}
 
-	reg := registryWith(t, ValueCodec(KindNumber, retryValue, parseRetry))
+	reg := registryWith(t, retryCodec())
 
 	cases := []struct {
 		name string
 		held Value
 		want retryCount
 	}{
-		{name: "a null the type's kind has no null for", held: Null(), want: 0},
+		{name: "a null the type's kind has no null for", held: Null, want: 0},
 		{name: "its own declared kind", held: Number("7"), want: 7},
 		{name: "a String donated to the declared kind", held: String("7"), want: 7},
 	}
@@ -710,20 +790,20 @@ func mustLoadRetry(t *testing.T, got, want retryCount, err error) {
 	}
 }
 
-// TestStringCodecCannotExpressTheNullEscapeHatch is the measured reason the
-// general constructor stays: a decode half over string never sees the kind, so
-// AsString refuses the Null before the registrant's own function runs.
-func TestStringCodecCannotExpressTheNullEscapeHatch(t *testing.T) {
+// TestARegistrationWithNoNullPolicyStillRefusesANull is the measured reason
+// NullValue exists: a payload-typed decode half never sees the kind, so core
+// refuses the Null before the registrant's own function runs.
+func TestARegistrationWithNoNullPolicyStillRefusesANull(t *testing.T) {
 	t.Parallel()
 
 	type conf struct {
 		N plainCount `ferry:"n"`
 	}
 
-	reg := registryWith(t, StringCodec(countText, parseCount))
+	reg := registryWith(t, StringValue(countText, parseCount))
 
 	_, err := Load[conf](t.Context(), planeSource{
-		p: newPlane(map[Path]Value{At("n"): Null()}),
+		p: newPlane(map[Path]Value{At("n"): Null}),
 	}, WithRegistry(reg))
 
 	if !errors.Is(err, ErrValue) {
@@ -740,112 +820,115 @@ func TestAPlainIntStillRefusesANull(t *testing.T) {
 		N int `ferry:"n"`
 	}
 
-	_, err := Load[conf](t.Context(), planeSource{p: newPlane(map[Path]Value{At("n"): Null()})})
+	_, err := Load[conf](t.Context(), planeSource{p: newPlane(map[Path]Value{At("n"): Null})})
 	if !errors.Is(err, ErrValue) {
 		t.Fatalf("the load reported %v, want a wrong-kind refusal", err)
 	}
 }
 
-// TestARegistryFreezesAtItsFirstRetainedCompile is the lifetime answer, and the
-// error is required to name the freeze point rather than the type.
-func TestARegistryFreezesAtItsFirstRetainedCompile(t *testing.T) {
-	t.Parallel()
-
-	type conf struct {
-		N int `ferry:"n"`
-	}
-
-	reg := registryWith(t, DurationLike[pollInterval]())
-
-	if _, err := Load[conf](t.Context(), planeSource{p: newPlane(map[Path]Value{})}, WithRegistry(reg)); err != nil {
-		t.Fatalf("load: %+v", err)
-	}
-
-	mustRefuse(t, reg.Register(DurationLike[lateInterval]()),
-		"the registry is frozen", "before the first Load, Dump or Bind")
-}
-
-// TestCompileDoesNotFreeze is the other half of "retained", and it is what
-// keeps Compile safe during init: it compiles a schema and discards it, so
-// there is no resolution for a later registration to invalidate.
-func TestCompileDoesNotFreeze(t *testing.T) {
+// TestARegistryAnswersTheSameFromTheMomentItExists is #227 and #262 stated as
+// the property that replaced the freeze.
+//
+// ADR-0009 arranged for a registry to freeze at its first retained compile, and
+// every defect in that class lived in the window between the two moments. There
+// is no window: a registry takes its whole codec set at construction and has no
+// mutator, so the answer a compile resolves is the answer every later call gets
+// and no ordering rule has to be kept.
+func TestARegistryAnswersTheSameFromTheMomentItExists(t *testing.T) {
 	t.Parallel()
 
 	type conf struct {
 		Poll pollInterval `ferry:"poll"`
 	}
 
-	reg := registryWith(t)
+	reg := registryWith(t, DurationLike[pollInterval]())
+	value := conf{Poll: pollInterval(90 * time.Second)}
 
 	if err := Compile[conf](WithRegistry(reg)); err != nil {
 		t.Fatalf("compile: %+v", err)
 	}
 
-	if err := reg.Register(DurationLike[pollInterval]()); err != nil {
-		t.Fatalf("a registration after a discarded compile was refused: %+v", err)
+	for _, when := range []string{"after a discarded compile", "after a retained one"} {
+		if got, want := dumpedValue(t, value, At("poll"), WithRegistry(reg)), String("1m30s"); got != want {
+			t.Errorf("%s the plane holds %#v, want %#v", when, got, want)
+		}
 	}
 }
 
-// init registers into the registry core ships, which is the shape ADR-0009 says
-// every consumer writes and the one the Go spec makes order-independent: every
-// init in the program runs to completion before main, so a registration in one
-// strictly precedes the first Load whatever the import graph is.
-func init() {
-	if err := Register(DurationLike[defaultInterval]()); err != nil {
-		panic(err)
-	}
-}
-
-// TestTheDefaultRegistryIsARegistryAndFreezesLikeAnyOther is survey item 5.14's
-// first entry avoided rather than repeated: a default registry plus a scoped one
-// is two ways to supply a codec only if they are two mechanisms, and they are
-// one.
+// TestTheBuiltInSetIsUnderEveryRegistry is ADR-0017's amendment: core's own type
+// set is a frozen base rather than a default a program writes to.
 //
-// The registration above is an ordinary Register with no Option anywhere, and
-// the verbs pick it up; the freeze below is the same freeze a scoped registry
-// gets. Both halves run in one test because the second is only assertable after
-// the first has already happened.
-func TestTheDefaultRegistryIsARegistryAndFreezesLikeAnyOther(t *testing.T) {
+// A call with no registry gets it, and a registry built for one domain type
+// still has it, so registering one type never costs a caller string, int, bool
+// or time.Duration. There is nothing to add to the base, which is the whole of
+// why a package-level registry is affordable here.
+func TestTheBuiltInSetIsUnderEveryRegistry(t *testing.T) {
 	t.Parallel()
 
 	type conf struct {
-		Poll defaultInterval `ferry:"poll"`
+		Name string        `ferry:"name"`
+		Port int           `ferry:"port"`
+		Wait time.Duration `ferry:"wait"`
+		Poll pollInterval  `ferry:"poll"`
 	}
 
-	got := dumpedValue(t, conf{Poll: defaultInterval(30 * time.Second)}, At("poll"))
-	if want := String("30s"); got != want {
-		t.Errorf("the default registry wrote %#v, want %#v", got, want)
+	value := conf{Name: "db", Port: 5432, Wait: 90 * time.Second, Poll: pollInterval(time.Minute)}
+
+	want := map[Path]Value{
+		At("name"): String("db"),
+		At("port"): Number("5432"),
+		At("wait"): String("1m30s"),
 	}
 
-	// The Dump above retained its schema, so the default registry is frozen now
-	// whether or not another test got there first. The freeze is monotonic, so
-	// this is a fact rather than a race.
-	mustRefuse(t, Register(DurationLike[lateInterval]()), "the registry is frozen")
+	// With no Option at all, which is the base on its own.
+	for at, w := range want {
+		if got := dumpedValue(t, value, at); got != w {
+			t.Errorf("with no registry named, %s holds %#v, want %#v", at, got, w)
+		}
+	}
+
+	// And with a registry built for one named duration, which adds a codec and
+	// takes nothing away.
+	reg := registryWith(t, DurationLike[pollInterval]())
+	want[At("poll")] = String("1m0s")
+
+	for at, w := range want {
+		if got := dumpedValue(t, value, at, WithRegistry(reg)); got != w {
+			t.Errorf("with one codec registered, %s holds %#v, want %#v", at, got, w)
+		}
+	}
+}
+
+// TestOverridingABuiltInIsRefused is the third sentence of the same amendment,
+// and it is the duplicate rule applied to the base with no special case:
+// overriding a built-in codec would make user code a second authority over the
+// standard types.
+func TestOverridingABuiltInIsRefused(t *testing.T) {
+	t.Parallel()
+
+	mustRefuseAtConstruction(t, func() { NewRegistry(StringValue(itoa, strconv.Atoi)) },
+		"int is in core's own set", "define a named type over it and register that")
 }
 
 // TestConcurrentCompilesAgainstOneRegistryAreClean is the race-detector case,
 // and what it asserts is the absence of a lock rather than the presence of one.
 //
-// A mutable registry read by a compile is a data race whether or not any ADR
-// mentions goroutines, and no mutex inside ferry fixes it, because the unlocked
-// read is the whole point. A frozen registry is written before its first reader
-// exists and never again, so the reads below have nothing to synchronise with
-// and the registrations racing them never touch the table.
+// A registry read by a compile while something writes it is a data race whether
+// or not any ADR mentions goroutines, and no mutex inside ferry fixes it,
+// because the unlocked read is the point. #227 found the shipped version of this
+// test blind: it performed one retained compile before starting any goroutine,
+// which froze the registry, so it never observed the unfrozen read Compile
+// actually took. There is nothing to warm up now, because the write happened
+// before the registry existed - so this starts cold, which is the case the old
+// arrangement could not survive.
 func TestConcurrentCompilesAgainstOneRegistryAreClean(t *testing.T) {
 	t.Parallel()
 
 	reg := registryWith(t,
 		DurationLike[pollInterval](),
-		ValueCodec(KindNumber, retryValue, parseRetry),
-		TextCodec[netip.Addr](KindString),
+		retryCodec(),
+		StringText[netip.Addr](),
 	)
-
-	// One retained compile first, so the freeze is a fact before any goroutine
-	// starts and the test is asserting the frozen read path rather than the
-	// user error of registering during a load.
-	if err := Dump(t.Context(), shared{}, planeSink{p: newPlane(map[Path]Value{})}, WithRegistry(reg)); err != nil {
-		t.Fatalf("dump: %+v", err)
-	}
 
 	const goroutines = 8
 
@@ -871,8 +954,9 @@ type shared struct {
 	Addr netip.Addr   `ferry:"addr"`
 }
 
-// readersPerRound is how many goroutines one round starts: two readers of the
-// frozen table, and one registration that has to bounce off the freeze.
+// readersPerRound is how many goroutines one round starts: a compile that
+// retains nothing, a load that retains its schema, and a read of the table
+// through Types.
 const readersPerRound = 3
 
 // readAgainst starts one round, out of line because a goroutine body inside a
@@ -886,65 +970,45 @@ func readAgainst(reg *Registry, done chan<- error) {
 		done <- err
 	}()
 
-	go func() { done <- expectFrozen(reg.Register(DurationLike[lateInterval]())) }()
+	go func() { done <- expectThreeTypes(reg.Types()) }()
 }
 
-// expectFrozen turns the refusal a concurrent registration must get into the
-// nil the collector above wants, so that a registration quietly succeeding
-// against a frozen registry fails the test.
-func expectFrozen(err error) error {
-	if err != nil && strings.Contains(err.Error(), "the registry is frozen") {
+// expectThreeTypes turns the table a concurrent reader saw into the nil the
+// collector above wants, so that a registry that lost or gained an entry under
+// concurrent reads fails the test.
+func expectThreeTypes(got []reflect.Type) error {
+	if len(got) == 3 {
 		return nil
 	}
 
-	return fmt.Errorf("a registration against a frozen registry did not report the freeze refusal: %w", err)
+	return fmt.Errorf("a concurrent read of the registry saw %d types, want 3", len(got))
 }
 
-// TestRegisterReportsEveryFailureJoinedAndSorted is ADR-0001's determinism
-// invariant applied to a startup error, which ADR-0009 defers to ADR-0011's
-// convention rather than deciding for itself.
-func TestRegisterReportsEveryFailureJoinedAndSorted(t *testing.T) {
+// TestNewRegistryRefusesTheFirstBadCodecAndNamesIt is ADR-0001's determinism
+// invariant under a constructor that panics.
+//
+// The shipped surface applied a variadic Register one registration at a time and
+// joined every failure, because a mutable registry could half succeed. This one
+// cannot: a refusal happens before the registry exists, so there is exactly one
+// report, it names the codec that caused it, and the same list produces the same
+// report every time.
+func TestNewRegistryRefusesTheFirstBadCodecAndNamesIt(t *testing.T) {
 	t.Parallel()
 
-	err := NewRegistry().Register(
-		StringCodec(netip.Prefix.String, netip.ParsePrefix),
-		DurationLike[time.Duration](),
-		StringCodec(netip.Addr.String, netip.ParseAddr),
-	)
-
-	got := Elements(err)
-	if len(got) != 3 {
-		t.Fatalf("Register reported %d failures, want 3:\n%+v", len(got), err)
+	build := func() {
+		NewRegistry(
+			DurationLike[pollInterval](),
+			DurationLike[time.Duration](),
+			StringValue(addrText, netip.ParseAddr),
+		)
 	}
 
-	lines := make([]string, 0, len(got))
-	for _, e := range got {
-		lines = append(lines, e.Error())
+	first := refusalFrom(build)
+	mustRefuse(t, first, "time.Duration is in core's own set")
+
+	if second := refusalFrom(build); second == nil || second.Error() != first.Error() {
+		t.Errorf("the same codec list reported\n\t%v\nand then\n\t%v", first, second)
 	}
-
-	if !slices.IsSorted(lines) {
-		t.Errorf("the failures are\n\t%v\nwhich is not sorted", lines)
-	}
-
-	// One registration in the call succeeded and is not reported, which is what
-	// "each is applied on its own" means.
-	if !strings.Contains(lines[0], "netip.Addr") {
-		t.Errorf("the first failure is %q, and the order is not the message order", lines[0])
-	}
-}
-
-// TestARegistrationBesideAFailingOneStillTakes is the other half of the same
-// rule: a variadic call is a list of registrations rather than a transaction.
-func TestARegistrationBesideAFailingOneStillTakes(t *testing.T) {
-	t.Parallel()
-
-	reg := NewRegistry()
-
-	if err := reg.Register(DurationLike[pollInterval](), DurationLike[time.Duration]()); err == nil {
-		t.Fatal("registering time.Duration was accepted")
-	}
-
-	mustHoldTypes(t, reg, []string{"github.com/onhotpath/ferry.pollInterval"})
 }
 
 // TestWithRegistryIsRefusedTwiceAndNil holds the Option to the same rule TagKey
@@ -985,9 +1049,9 @@ func TestTypesIsSortedAndTheCallersToKeep(t *testing.T) {
 	t.Parallel()
 
 	reg := registryWith(t,
-		ValueCodec(KindNumber, retryValue, parseRetry),
+		retryCodec(),
 		DurationLike[pollInterval](),
-		StringCodec(hostText, parseHost),
+		StringValue(hostText, parseHost),
 	)
 
 	first, second := reg.Types(), reg.Types()
@@ -1015,15 +1079,15 @@ func TestARegisteredKeyWhoseTextFailsIsReported(t *testing.T) {
 		Limits map[plainCount]int `ferry:"limits"`
 	}
 
-	reg := registryWith(t, ValueCodec(KindString,
-		func(c plainCount) (Value, error) {
+	reg := registryWith(t, StringKey(
+		func(c plainCount) (string, error) {
 			if c == 0 {
-				return String(""), nil
+				return "", nil
 			}
 
-			return Value{}, errNotAnInteger
+			return "", errNotAnInteger
 		},
-		func(Value) (plainCount, error) { return 0, nil }).AsMapKey())
+		func(string) (plainCount, error) { return 0, nil }).AsMapKey())
 
 	err := Dump(t.Context(), conf{Limits: map[plainCount]int{1: 1}},
 		planeSink{p: newPlane(map[Path]Value{})}, WithRegistry(reg))
@@ -1050,35 +1114,54 @@ func TestThereIsNoDynamicRegistration(t *testing.T) {
 		methods = append(methods, registry.Method(i).Name)
 	}
 
-	if want := []string{"Register", "Types"}; !slices.Equal(methods, want) {
+	if want := []string{"Types"}; !slices.Equal(methods, want) {
 		t.Errorf("*Registry exports the methods %v, want %v", methods, want)
 	}
 }
 
-// TestNothingIsExportedFromAReg holds the finding that keeps Reg opaque: a
-// proof exercises a codec through the ordinary walk, so a harness needs no
-// accessor on a registration, and an accessor would be exported surface for
-// ever.
-func TestNothingIsExportedFromAReg(t *testing.T) {
+// TestNothingIsExportedFromARegistration holds the finding that keeps a
+// registration opaque: a proof exercises a codec through the ordinary walk, so a
+// harness needs no accessor on one, and an accessor would be exported surface
+// for ever.
+//
+// The two types are asked separately because they carry different promises. A
+// Codec is an interface whose one method is unexported, so it cannot be
+// implemented outside this package and every one in existence came from a
+// constructor here; a KeyCodec is a struct, so it is asked about its fields too,
+// and AsMapKey is the one method it may have.
+func TestNothingIsExportedFromARegistration(t *testing.T) {
 	t.Parallel()
 
-	reg := reflect.TypeFor[Reg]()
+	if got := methodNames(reflect.TypeFor[Codec]()); len(got) != 0 {
+		t.Errorf("Codec exports the methods %v, and its whole method set is meant to be unexported", got)
+	}
 
-	for i := range reg.NumField() {
-		if reg.Field(i).IsExported() {
-			t.Errorf("Reg exports the field %s", reg.Field(i).Name)
+	key := reflect.TypeFor[KeyCodec]()
+
+	for i := range key.NumField() {
+		if key.Field(i).IsExported() {
+			t.Errorf("KeyCodec exports the field %s", key.Field(i).Name)
 		}
 	}
 
-	var methods []string
+	if want, got := []string{"AsMapKey"}, methodNames(key); !slices.Equal(got, want) {
+		t.Errorf("KeyCodec exports the methods %v, want %v", got, want)
+	}
+}
 
-	for i := range reg.NumMethod() {
-		methods = append(methods, reg.Method(i).Name)
+// methodNames is the exported methods reflect reports for a type. An
+// interface's method set includes its unexported methods, so the filter is what
+// separates "has an unexported method" from "exports one".
+func methodNames(t reflect.Type) []string {
+	var out []string
+
+	for i := range t.NumMethod() {
+		if m := t.Method(i); m.PkgPath == "" {
+			out = append(out, m.Name)
+		}
 	}
 
-	if want := []string{"AsMapKey"}; !slices.Equal(methods, want) {
-		t.Errorf("Reg exports the methods %v, want %v", methods, want)
-	}
+	return out
 }
 
 // bomb is a text pair whose encode half refuses one value and accepts the zero,
@@ -1103,17 +1186,18 @@ func (b *bomb) UnmarshalText(text []byte) error {
 	return nil
 }
 
-// TestATextCodecsEncodeFailureSurfaces is the failure arm of the one thing
-// TextCodec adds to the chain's own arm: the kind is the registrant's and the
-// text is still the type's, so the type's own refusal is what reaches the walk.
-func TestATextCodecsEncodeFailureSurfaces(t *testing.T) {
+// TestATextRegistrationsEncodeFailureSurfaces is the failure arm of the one
+// thing a text registration adds to the chain's own arm: the kind is the
+// registrant's and the text is still the type's, so the type's own refusal is
+// what reaches the walk.
+func TestATextRegistrationsEncodeFailureSurfaces(t *testing.T) {
 	t.Parallel()
 
 	type conf struct {
 		B bomb `ferry:"b"`
 	}
 
-	reg := registryWith(t, TextCodec[bomb](KindNumber))
+	reg := registryWith(t, NumberText[bomb]())
 
 	err := Dump(t.Context(), conf{B: boom}, planeSink{p: newPlane(map[Path]Value{})}, WithRegistry(reg))
 	if !errors.Is(err, ErrValue) {
@@ -1121,17 +1205,17 @@ func TestATextCodecsEncodeFailureSurfaces(t *testing.T) {
 	}
 }
 
-// TestAValueCodecsDecodeFailureSurfaces is the same on the way in, and it is
-// the arm the declared kind does not constrain: the codec is handed a Bool it
-// never declared and never emits, and what happens next is the codec's.
-func TestAValueCodecsDecodeFailureSurfaces(t *testing.T) {
+// TestARegistrationsDecodeFailureSurfaces is the same on the way in: the plane
+// holds a bool at a number registration, which is a kind that registration
+// neither writes nor takes, so it is refused at the field that could not have it.
+func TestARegistrationsDecodeFailureSurfaces(t *testing.T) {
 	t.Parallel()
 
 	type conf struct {
 		N retryCount `ferry:"n"`
 	}
 
-	reg := registryWith(t, ValueCodec(KindNumber, retryValue, parseRetry))
+	reg := registryWith(t, retryCodec())
 
 	_, err := Load[conf](t.Context(), planeSource{
 		p: newPlane(map[Path]Value{At("n"): Bool(true)}),
@@ -1153,7 +1237,7 @@ func TestAPointerToARegisteredTypeReachesTheSameCodec(t *testing.T) {
 		N *retryCount `ferry:"n"`
 	}
 
-	reg := registryWith(t, ValueCodec(KindNumber, retryValue, parseRetry))
+	reg := registryWith(t, retryCodec())
 
 	got, err := Load[conf](t.Context(), planeSource{
 		p: newPlane(map[Path]Value{At("n"): String("7")}),
@@ -1167,7 +1251,7 @@ func TestAPointerToARegisteredTypeReachesTheSameCodec(t *testing.T) {
 	}
 
 	unset, err := Load[conf](t.Context(), planeSource{
-		p: newPlane(map[Path]Value{At("n"): Null()}),
+		p: newPlane(map[Path]Value{At("n"): Null}),
 	}, WithRegistry(reg))
 	if err != nil {
 		t.Fatalf("load: %+v", err)
@@ -1178,7 +1262,8 @@ func TestAPointerToARegisteredTypeReachesTheSameCodec(t *testing.T) {
 	}
 }
 
-// TestTextCodecChangesTheKind is TextCodec's whole purpose, and it is narrower
+// TestTextRegistrationChangesTheKind is what a text registration is for, and it
+// is narrower
 // than "rescuing the type": the chain already claims big.Int through its text
 // pair, correctly, at kind String.
 //
@@ -1186,7 +1271,7 @@ func TestAPointerToARegisteredTypeReachesTheSameCodec(t *testing.T) {
 // against a flat plane and fail against a structured one that reports Number
 // for a run of digits; declaring Number loads from both, because String is the
 // universal donor and Number is not.
-func TestTextCodecChangesTheKind(t *testing.T) {
+func TestTextRegistrationChangesTheKind(t *testing.T) {
 	t.Parallel()
 
 	type conf struct {
@@ -1205,7 +1290,7 @@ func TestTextCodecChangesTheKind(t *testing.T) {
 		t.Errorf("unregistered, the chain wrote %#v, want %#v", got, want)
 	}
 
-	reg := registryWith(t, TextCodec[big.Int](KindNumber))
+	reg := registryWith(t, NumberText[big.Int]())
 
 	if got, want := dumpedValue(t, conf{Max: biggest}, At("max"), WithRegistry(reg)), Number(digits); got != want {
 		t.Errorf("registered, the table wrote %#v, want %#v", got, want)

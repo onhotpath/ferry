@@ -100,32 +100,32 @@ func encodeFailed(v reflect.Value, err error) error {
 // The rest of this file is one function per call into user code, and each body
 // is that call and nothing else.
 
-// formatted is [StringCodec]'s encode half.
-func formatted[T any](format func(T) string, in T) (text string, err error) {
+// fenced is both halves of every payload-typed registration, which are one
+// shape: a function from the payload to the type or back, that can fail.
+//
+// One function covers all eight of them because ADR-0017's constructors differ
+// in the payload type alone, and a generic parameter is exactly that difference.
+// What matters for the fence is unchanged: the body is the registrant's call and
+// nothing else.
+func fenced[A, B any](f func(A) (B, error), in A) (out B, err error) {
 	defer func() { err = fence(recover(), err) }()
 
-	return format(in), nil
+	return f(in)
 }
 
-// parsedFrom is [StringCodec]'s decode half.
-func parsedFrom[T any](parse func(string) (T, error), text string) (out T, err error) {
+// fencedLoad is [NullValue]'s load policy, which takes no argument.
+func fencedLoad[T any](load func() (T, error)) (out T, err error) {
 	defer func() { err = fence(recover(), err) }()
 
-	return parse(text)
+	return load()
 }
 
-// encodedValue is [ValueCodec]'s encode half.
-func encodedValue[T any](enc func(T) (Value, error), in T) (out Value, err error) {
+// fencedIsNull is [NullValue]'s dump policy, which cannot fail on its own and
+// can still panic, so the error it grows here is the fence's alone.
+func fencedIsNull[T any](isNull func(T) bool, in T) (yes bool, err error) {
 	defer func() { err = fence(recover(), err) }()
 
-	return enc(in)
-}
-
-// decodedValue is [ValueCodec]'s decode half.
-func decodedValue[T any](dec func(Value) (T, error), got Value) (out T, err error) {
-	defer func() { err = fence(recover(), err) }()
-
-	return dec(got)
+	return isNull(in), nil
 }
 
 // appendedText is the text pair's encode half in its appending spelling.

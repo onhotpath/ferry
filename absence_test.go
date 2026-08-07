@@ -91,7 +91,7 @@ func nullAt[T any](name string, seed T, admit bool) nullCase {
 	return nullCase{name: name, admit: admit, load: func(t *testing.T) (bool, error) {
 		t.Helper()
 
-		src := planeSource{p: newPlane(map[Path]Value{leafAddr: Null()})}
+		src := planeSource{p: newPlane(map[Path]Value{leafAddr: Null})}
 
 		out, err := LoadOver(t.Context(), leafHolder[T]{V: seed}, src)
 
@@ -253,7 +253,7 @@ func nullsWritten(t *testing.T, p *plane, nullable []Path) int {
 	n := 0
 
 	for _, addr := range p.set {
-		if p.values[addr] != Null() {
+		if p.values[addr] != Null {
 			continue
 		}
 

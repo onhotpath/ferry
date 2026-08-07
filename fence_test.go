@@ -18,14 +18,14 @@ const theFuse = "boom"
 
 // fuseCodec panics with a value the report has to carry, chosen so that a
 // report quoting it cannot be mistaken for a refusal ferry wrote.
-func fuseCodec() Reg {
-	return StringCodec(
-		func(f fuse) string {
+func fuseCodec() Codec {
+	return StringValue(
+		func(f fuse) (string, error) {
 			if f == theFuse {
 				panic("nil map write in the encode half")
 			}
 
-			return string(f)
+			return string(f), nil
 		},
 		func(text string) (fuse, error) {
 			if text == theFuse {

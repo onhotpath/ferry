@@ -12,18 +12,23 @@ import (
 	"github.com/onhotpath/ferry/ferrytest"
 )
 
-// registryWith is one registry holding one codec, built fresh per subtest
-// because a registry freezes and a shared one would make the second subtest
-// depend on the first.
-func registryWith(t *testing.T, regs ...ferry.Reg) *ferry.Registry {
+// registryWith is one registry holding the codecs one test needs, built fresh
+// per test because a registry is complete at birth and a registration claims its
+// type only within one registry - so two tests over one type cannot share.
+//
+// [ferry.NewRegistry] refuses by panicking, having no error to return, and a
+// probe this package can no longer register is a change to core's rules rather
+// than a failure of the test that names it.
+func registryWith(t *testing.T, codecs ...ferry.Codec) *ferry.Registry {
 	t.Helper()
 
-	reg := ferry.NewRegistry()
-	if err := reg.Register(regs...); err != nil {
-		t.Fatalf("register: %v", err)
-	}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("registering the probe: %v", r)
+		}
+	}()
 
-	return reg
+	return ferry.NewRegistry(codecs...)
 }
 
 // addrProof discharges netip.Addr, which is the type ADR-0014's registrant call
@@ -51,7 +56,7 @@ func TestCompleteOverCoreAlone(t *testing.T) {
 func TestCompleteReportsEveryTable(t *testing.T) {
 	t.Parallel()
 
-	reg := registryWith(t, ferry.TextCodec[netip.Addr](ferry.KindString))
+	reg := registryWith(t, ferry.StringText[netip.Addr]())
 
 	cases := []struct {
 		name   string
@@ -107,7 +112,7 @@ func without(drop reflect.Type) []ferrytest.Proof {
 func TestCompleteAcceptsARegistrantsOwnProof(t *testing.T) {
 	t.Parallel()
 
-	reg := registryWith(t, ferry.TextCodec[netip.Addr](ferry.KindString))
+	reg := registryWith(t, ferry.StringText[netip.Addr]())
 
 	proofs := append(ferrytest.CoreTypes(), addrProof())
 	if got := ferrytest.Complete(reg, proofs...); len(got) != 0 {
@@ -122,8 +127,8 @@ func TestCompleteSortsAndDeduplicates(t *testing.T) {
 	t.Parallel()
 
 	reg := registryWith(t,
-		ferry.TextCodec[netip.Addr](ferry.KindString),
-		ferry.TextCodec[netip.Prefix](ferry.KindString),
+		ferry.StringText[netip.Addr](),
+		ferry.StringText[netip.Prefix](),
 	)
 
 	got := ferrytest.Complete(reg)

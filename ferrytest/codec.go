@@ -10,15 +10,12 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// Codec is the codec conformance suite: six cases over the registration
+// Codec is the codec conformance suite: seven cases over the registration
 // machinery, and every one of them that the zero value can reach run again over
 // each codec the registry actually holds.
 //
 //	func TestCodec(t *testing.T) {
-//	    reg := ferry.NewRegistry()
-//	    if err := reg.Register(ferry.TextCodec[netip.Addr](ferry.KindString).AsMapKey()); err != nil {
-//	        t.Fatal(err)
-//	    }
+//	    reg := ferry.NewRegistry(ferry.StringText[netip.Addr]().AsMapKey())
 //
 //	    ferrytest.RoundTrip(t, ferrytest.MemPlane(), proofs, ferry.WithRegistry(reg))
 //	    ferrytest.Codec(t, reg)
@@ -46,23 +43,18 @@ import (
 // # What it does not promise
 //
 // It does not check your codec away from its zero value, and most of what makes
-// a codec wrong lives there. A lossy codec, a constant codec, and a codec that
-// declares one kind and emits another, all pass every case here, because all
-// three are correct at the zero value. So do two map keys that fold to one
-// address, which need two values to see at all.
+// a codec wrong lives there. A lossy codec and a constant codec pass every case
+// here, because both are correct at the zero value. So do two map keys that fold
+// to one address, which need two values to see at all, and so does a null policy
+// that disagrees with itself away from the zero value: where the disagreement is
+// at the zero value the per-registrant round trip catches it, and where it is
+// anywhere else nothing here has a value to find it with.
 //
 // What closes that gap is [RoundTrip], which drives your own values through the
 // real engine, [Injective] over the values you will use as map keys, and
 // [Complete], which reports a registered type you wrote no [Proof] for. Run all
 // four. A green Codec on its own says the machinery is sound and your codec is
 // sound at one value, and that is the whole of it.
-//
-// # It freezes reg
-//
-// A registry freezes at its first retained schema compile, and this suite
-// performs one for every type reg holds. So every
-// [ferry.Registry.Register] call has to happen before the call to Codec rather
-// than after it.
 func Codec(t T, reg *ferry.Registry, opts ...ferry.Option) {
 	t.Helper()
 
@@ -101,7 +93,7 @@ type codecRun struct {
 	opts []ferry.Option
 }
 
-// run is the six cases, in the order ADR-0014 lists them.
+// run is the seven cases, in the order ADR-0014 lists them.
 //
 // Each is guarded, because the defect cases 2 and 3 exist for was a panic rather
 // than an error: a registrant whose codec trips it should read which case went
@@ -115,6 +107,7 @@ func (c *codecRun) run() {
 	c.guard(codecKindNo, c.caseDeclaredKind)
 	c.guard(codecAcceptNo, c.caseAcceptsWhatItEmits)
 	c.guard(codecKeyNo, c.caseKeyText)
+	c.guard(codecNullNo, c.caseNullPolicy)
 
 	c.registered()
 }
@@ -122,12 +115,11 @@ func (c *codecRun) run() {
 // registered is the per-registrant half: cases 2, 3 and 5 again, over every
 // type the caller's registry actually holds, at the zero value.
 //
-// The six cases above are about the machinery, and they stay: a defect in the
+// The seven cases above are about the machinery, and they stay: a defect in the
 // wrapper is a defect in every codec anybody registers, and a caller whose
 // registry is empty still wants that answered. This pass is the other half of
-// the same question, and what it costs is stated where the cost lands - it
-// compiles a schema against the caller's registry, so the registry is frozen
-// when Codec returns.
+// the same question, and it costs one schema compile per registered type against
+// the caller's own registry.
 //
 // It stops at the zero value, and that bound is structural rather than an
 // omission. Cases 4 and 6 need a value away from the zero and two distinct keys
@@ -156,8 +148,8 @@ func (c *codecRun) registered() {
 // zeroEncodes is case 2 for one registered type: the wrapper encodes the zero
 // value without panicking and without an error.
 //
-// [ferry.Registry.Register] already runs the codec against this value, so the
-// gain here is not a new value but a named report: the two defects cases 2 and
+// [ferry.NewRegistry] already runs the codec against this value, so the gain
+// here is not a new value but a named report: the two defects cases 2 and
 // 3 exist for were panics, and a panic at registration is a stack trace out of
 // a package the registrant has never opened.
 func (c *codecRun) zeroEncodes(t reflect.Type) (ferry.Value, bool) {
@@ -255,7 +247,7 @@ func (c *codecRun) acceptsString(t reflect.Type, wrote ferry.Value) {
 //
 // The two spellings disagreeing only matters where ferry uses them, and
 // registration is step one of ADR-0007's chain and beats the text pair - so a
-// type registered through [ferry.StringCodec] or [ferry.ValueCodec] carries a
+// type registered through [ferry.StringValue] or [ferry.NumberValue] carries a
 // disagreement ferry will never consult. Reporting that is a false positive
 // with a false explanation attached, because the plane holds neither string
 // (#143).
@@ -264,7 +256,7 @@ func (c *codecRun) acceptsString(t reflect.Type, wrote ferry.Value) {
 // value through the caller's own registry and reads what ferry actually wrote,
 // and only then asks whether the pair is in play. That is a question about
 // behaviour rather than about a registration's internals, which is why it needs
-// no accessor on [ferry.Reg] and leaves ADR-0009's "no accessor" finding
+// no accessor on [ferry.Codec] and leaves ADR-0009's "no accessor" finding
 // standing.
 func (c *codecRun) caseTextPair() {
 	c.rep.Helper()
@@ -319,13 +311,14 @@ func (c *codecRun) textPairAgrees(t reflect.Type) {
 // type is the appender's bytes.
 //
 // It answers by dumping the zero value through the caller's registry and
-// reading what landed, so it cannot mistake a [ferry.StringCodec] registration
-// for a [ferry.TextCodec] one, and it needs to know nothing about how the
+// reading what landed, so it cannot mistake a [ferry.StringValue] registration
+// for a [ferry.StringText] one, and it needs to know nothing about how the
 // registration was built.
 //
 // Two shapes, and the second is the narrow one. Where the appender succeeds, it
 // is in play exactly when ferry wrote its text - kind included or not, because
-// a TextCodec may declare any kind and the question is about the bytes. Where
+// a text registration may name either kind and the question is about the bytes.
+// Where
 // the appender fails, it is in play exactly when the dump failed too, since a
 // registration that bypassed it would have written something.
 //
@@ -375,9 +368,9 @@ func (c *codecRun) caseNilInterfaceEncode() {
 		return
 	}
 
-	if v := got[probeAddrPath]; v != ferry.Null() {
+	if v := got[probeAddrPath]; v != ferry.Null {
 		c.fail(codecNilEncodeNo, fmt.Sprintf("a nil interface encoded to %#v, and its codec answers a nil with "+
-			"%#v: what reached the codec was not the value the field held", v, ferry.Null()))
+			"%#v: what reached the codec was not the value the field held", v, ferry.Null))
 	}
 }
 
@@ -395,7 +388,7 @@ func (c *codecRun) caseNilInterfaceDecode() {
 		return
 	}
 
-	src := Static(map[ferry.Path]ferry.Value{probeAddrPath: ferry.Null()})
+	src := Static(map[ferry.Path]ferry.Value{probeAddrPath: ferry.Null})
 
 	back, err := ferry.Load[ifaceHolder](context.Background(), src, c.with(reg)...)
 	if err != nil {
@@ -411,27 +404,95 @@ func (c *codecRun) caseNilInterfaceDecode() {
 	}
 }
 
-// caseDeclaredKind is case 4: a codec's declared kind matches what it emits
-// (ADR-0007).
+// caseDeclaredKind is case 4: the kind a registration writes is the one its
+// constructor names (ADR-0007, ADR-0017).
 //
-// The declared kind is what a plane is promised on the way out and what String
-// is donated to on the way back, so a codec that declares one kind and produces
-// another works on one plane class and fails on the next. The refusal has to
-// reach beyond the zero value, which registration already checks: a codec whose
-// zero encodes correctly and whose other values drift is exactly the shape a
-// registration-time check cannot see.
+// The kind is what a plane is promised on the way out and what a string is
+// donated to on the way back, so a registration landing at the wrong one works
+// on one plane class and fails on the next. It used to be a check core ran on
+// every encode, against a kind the registrant declared as an argument, and there
+// is no such argument any more: an encode half returns a bool, a string or a
+// []byte and ferry wraps it, so the kind is a property of which constructor was
+// called.
+//
+// That makes this a question about the machinery rather than about a
+// registrant's codec. It registers one codec per constructor and asserts that
+// each lands at its own kind, which is the promise every registration in the
+// program now rests on.
 func (c *codecRun) caseDeclaredKind() {
 	c.rep.Helper()
 
-	reg, ok := c.probeRegistry(codecKindNo, driftingCodec())
+	reg, ok := c.probeRegistry(codecKindNo, kindCodecs()...)
 	if !ok {
 		return
 	}
 
-	_, err := Record(context.Background(), driftHolder{Value: "x"}, c.with(reg)...)
-	if err == nil {
-		c.fail(codecKindNo, "a codec declaring string and producing a number at a value other than its zero was "+
-			"written to the plane: the declared kind is what every plane in ferry's range is promised")
+	got, err := Record(context.Background(), kindHolder{N: probeNumber, S: "s", Y: "y"}, c.with(reg)...)
+	if err != nil {
+		c.fail(codecKindNo, fmt.Sprintf("dumping one value per kind-named constructor failed with %v", err))
+
+		return
+	}
+
+	for addr, want := range kindWanted {
+		if v := got[ferry.At(addr)]; v.Kind() != want {
+			c.fail(codecKindNo, fmt.Sprintf("the codec built by the %s constructor wrote %#v: a registration's "+
+				"kind is the one its constructor names, and it is what every plane is promised", want, v))
+		}
+	}
+}
+
+// caseNullPolicy is case 7: a null policy round-trips through the null, and
+// through a value that is not the null (ADR-0017).
+//
+// A policy says what a plane's null becomes and which values write one back, and
+// its law is that the two agree: isNull(load()) must hold, or the round trip
+// lies silently and only on the null path. This drives both arms through the
+// real engine, which is the only place the two halves meet.
+func (c *codecRun) caseNullPolicy() {
+	c.rep.Helper()
+
+	reg, ok := c.probeRegistry(codecNullNo, nullCodec())
+	if !ok {
+		return
+	}
+
+	c.nullRoundTrips(reg, nullHolder{}, ferry.Null)
+	c.nullRoundTrips(reg, nullHolder{Value: probeNullable}, ferry.String(string(probeNullable)))
+}
+
+// nullRoundTrips dumps one value under a null policy, asserts what landed, and
+// loads it back into a value that encodes the same thing again.
+func (c *codecRun) nullRoundTrips(reg *ferry.Registry, in nullHolder, want ferry.Value) {
+	c.rep.Helper()
+
+	got, err := Record(context.Background(), in, c.with(reg)...)
+	if err != nil {
+		c.fail(codecNullNo, fmt.Sprintf("dumping %#v under a null policy failed with %v", in.Value, err))
+
+		return
+	}
+
+	if v := got[probeNullPath]; v != want {
+		c.fail(codecNullNo, fmt.Sprintf("%#v dumped as %#v, want %#v: a null policy writes a null for the values "+
+			"it calls null and the inner codec's own value for every other", in.Value, v, want))
+
+		return
+	}
+
+	src := Static(map[ferry.Path]ferry.Value{probeNullPath: want})
+
+	back, err := ferry.Load[nullHolder](context.Background(), src, c.with(reg)...)
+	if err != nil {
+		c.fail(codecNullNo, fmt.Sprintf("loading %#v back through a null policy failed with %v", want, err))
+
+		return
+	}
+
+	if back.Value != in.Value {
+		c.fail(codecNullNo, fmt.Sprintf("%#v dumped as %#v and loaded back as %#v: a policy that loads a value it "+
+			"does not recognise on the way back makes the round trip lie on the null path alone",
+			in.Value, want, back.Value))
 	}
 }
 
@@ -518,20 +579,25 @@ func (c *codecRun) keyCollisionRefused(reg *ferry.Registry) {
 	}
 }
 
-// probeRegistry builds a registry holding one probe registration, reporting a
-// refusal rather than running a case against a registry that does not hold what
-// the case is about.
-func (c *codecRun) probeRegistry(n int, g ferry.Reg) (*ferry.Registry, bool) {
+// probeRegistry builds a registry holding the probe registrations one case
+// needs, reporting a refusal rather than running that case against a registry
+// that does not hold what it is about.
+//
+// A refusal is a panic, because a registry is complete at birth and
+// [ferry.NewRegistry] has no error to return, so this recovers one and reports
+// it as the case it belongs to.
+func (c *codecRun) probeRegistry(n int, codecs ...ferry.Codec) (reg *ferry.Registry, ok bool) {
 	c.rep.Helper()
 
-	reg := ferry.NewRegistry()
-	if err := reg.Register(g); err != nil {
-		c.fail(n, "the suite's own probe codec was refused at registration: "+err.Error())
+	defer func() {
+		if r := recover(); r != nil {
+			c.fail(n, fmt.Sprintf("the suite's own probe codec was refused at registration: %v", r))
 
-		return nil, false
-	}
+			reg, ok = nil, false
+		}
+	}()
 
-	return reg, true
+	return ferry.NewRegistry(codecs...), true
 }
 
 // with is the caller's Option list plus the registry one case needs, which is
@@ -545,7 +611,7 @@ func (c *codecRun) with(reg *ferry.Registry) []ferry.Option {
 }
 
 // fail names the case a report came from, so that a registrant reading their own
-// CI output knows which of the six went red.
+// CI output knows which of the seven went red.
 func (c *codecRun) fail(n int, msg string) {
 	c.rep.Helper()
 

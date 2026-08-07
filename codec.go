@@ -261,5 +261,5 @@ func chainKeyMsg(t reflect.Type) string {
 	return fmt.Sprintf("%s may not key a map: ferry claims it through its text pair rather than through a "+
 		"registration, so nobody has declared its text injective over the key type, and two keys that render "+
 		"alike collapse into one address with no error anywhere - register a codec for it and mark it usable "+
-		"as a key with ferry.TextCodec[%s](ferry.KindString).AsMapKey()", t, t)
+		"as a key with ferry.StringText[%s]().AsMapKey()", t, t)
 }

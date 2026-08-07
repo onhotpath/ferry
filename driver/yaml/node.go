@@ -186,7 +186,7 @@ func valueOf(n *yamlv3.Node) (ferry.Value, error) {
 
 	switch kindOf(n.Tag) {
 	case ferry.KindNull:
-		return ferry.Null(), nil
+		return ferry.Null, nil
 	case ferry.KindBool:
 		return boolOf(n.Value)
 	case ferry.KindNumber:

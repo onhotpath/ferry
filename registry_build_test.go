@@ -12,11 +12,16 @@ import (
 //
 // "A codec is a pair" is enforced by the signature rather than by a check, so
 // there is no run-time behaviour to observe: what the rule produces is a build
-// error, and a rule nothing asserts is a rule the next refactor drops. Three
-// fixtures under internal/testdata name the three shapes a registrant can get
-// wrong - one half, both halves swapped, and two halves over different types -
-// and each is a package the go command never matches against ./..., so the
-// module still builds, vets and lints clean around them.
+// error, and a rule nothing asserts is a rule the next refactor drops. Four
+// fixtures under internal/testdata name the shapes a registrant can get wrong -
+// one half, both halves swapped, two halves over different types, and a
+// bytes-keyed map - and each is a package the go command never matches against
+// ./..., so the module still builds, vets and lints clean around them.
+//
+// The fourth is ADR-0017's key eligibility, which is a compile fact for the same
+// reason: AsMapKey exists on the return type of the two constructors whose kind
+// may address a map key and on nothing else, so a bytes registration declaring
+// itself a key does not compile rather than being refused at NewRegistry.
 //
 // The exact wording of a compiler diagnostic is Go's rather than ferry's, so
 // what is asserted is that the build fails and that the message names the
@@ -33,15 +38,19 @@ func TestAHalfPairDoesNotCompile(t *testing.T) {
 	}{{
 		name: "one half only",
 		pkg:  "./internal/testdata/badcodec/halfpair",
-		want: []string{"not enough arguments in call to ferry.StringCodec", "want (func(T) string"},
+		want: []string{"not enough arguments in call to ferry.StringValue", "want (func(T) (string, error)"},
 	}, {
 		name: "both halves, swapped",
 		pkg:  "./internal/testdata/badcodec/swapped",
-		want: []string{"in call to ferry.StringCodec", "does not match inferred type func(string) string"},
+		want: []string{"in call to ferry.StringValue"},
 	}, {
 		name: "two halves over two types",
 		pkg:  "./internal/testdata/badcodec/mismatched",
-		want: []string{"in call to ferry.StringCodec", "does not match inferred type func(string) (netip.Addr, error)"},
+		want: []string{"in call to ferry.StringValue"},
+	}, {
+		name: "a bytes registration declared usable as a map key",
+		pkg:  "./internal/testdata/badcodec/byteskey",
+		want: []string{"AsMapKey undefined"},
 	}}
 
 	for _, c := range cases {

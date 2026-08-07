@@ -290,50 +290,35 @@ func bindRefusesABadType(t *testing.T) {
 	}
 }
 
-// TestBindFreezesTheRegistryAndCompileStillDoesNot is ADR-0010's retention rule
-// with a new caller and no new wording: a binding keeps its schema for its whole
-// life, so it freezes.
-func TestBindFreezesTheRegistryAndCompileStillDoesNot(t *testing.T) {
+// TestABindingAndACompileReadOneRegistryWithNoOrderingRule is what replaced
+// ADR-0010's freeze arrangement, and it is #227 and #262 seen from the caller's
+// side: a registry is complete when it is built, so a compile, a bind and a bind
+// sink over one registry are the same registry every time and nothing has to
+// happen before anything else.
+func TestABindingAndACompileReadOneRegistryWithNoOrderingRule(t *testing.T) {
 	t.Parallel()
 
 	type conf struct {
 		Poll pollInterval `ferry:"poll"`
 	}
 
-	reg := registryWith(t)
+	reg := registryWith(t, DurationLike[pollInterval]())
 
 	if err := Compile[conf](WithRegistry(reg)); err != nil {
 		t.Fatalf("compile: %+v", err)
-	}
-
-	if err := reg.Register(DurationLike[pollInterval]()); err != nil {
-		t.Fatalf("a registration after a discarded compile was refused: %+v", err)
 	}
 
 	if _, err := Bind[conf](planeSource{p: answering()}, WithRegistry(reg)); err != nil {
 		t.Fatalf("bind: %+v", err)
 	}
 
-	mustRefuse(t, reg.Register(DurationLike[lateInterval]()),
-		"the registry is frozen", "before the first Load, Dump or Bind")
-}
-
-// TestBindSinkFreezesTheRegistryToo is the same rule on the write side, on a
-// registry of its own because a freeze is not reversible.
-func TestBindSinkFreezesTheRegistryToo(t *testing.T) {
-	t.Parallel()
-
-	type conf struct {
-		Poll pollInterval `ferry:"poll"`
-	}
-
-	reg := registryWith(t)
-
 	if _, err := BindSink[conf](planeSink{p: newPlane(map[Path]Value{})}, WithRegistry(reg)); err != nil {
 		t.Fatalf("bind sink: %+v", err)
 	}
 
-	mustRefuse(t, reg.Register(DurationLike[lateInterval]()), "the registry is frozen")
+	if got := len(reg.Types()); got != 1 {
+		t.Errorf("the registry holds %d types after three calls read it, want 1", got)
+	}
 }
 
 // TestABindingOutlivesItsConstructor is the shape a handler writes: the binding

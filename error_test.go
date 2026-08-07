@@ -1401,7 +1401,7 @@ func TestDriverMessages(t *testing.T) {
 // TestDeclaredClass covers the classification table directly, including the row
 // for an error that declares nothing.
 func TestDeclaredClass(t *testing.T) {
-	_, wrongKind := Null().AsString()
+	_, wrongKind := Null.AsString()
 
 	for _, c := range []struct {
 		name string

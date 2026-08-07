@@ -462,14 +462,14 @@ func presenceCases() []presenceCase {
 	}, {
 		name: "a null at a leaf that has one satisfies it, and yields the nil",
 		load: func(t *testing.T) error {
-			got, err := loadAt[reqBytes](t, Null())
+			got, err := loadAt[reqBytes](t, Null)
 
 			return mustHoldNil(t, err, got.V)
 		},
 	}, {
 		name: "a null at a pointer satisfies it, and yields nil",
 		load: func(t *testing.T) error {
-			got, err := loadAt[reqPointer](t, Null())
+			got, err := loadAt[reqPointer](t, Null)
 
 			return mustHoldNil(t, err, got.V)
 		},
@@ -701,7 +701,7 @@ func copyOf(v map[Path]Value) map[Path]Value {
 func nullSatisfiesRequired(t *testing.T) {
 	t.Parallel()
 
-	src := treeSource{p: newPlane(map[Path]Value{At("auth"): Null()})}
+	src := treeSource{p: newPlane(map[Path]Value{At("auth"): Null})}
 
 	got, err := Load[reqOptionalSection](t.Context(), src)
 	if err != nil {

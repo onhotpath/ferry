@@ -296,6 +296,21 @@ func (e *Error) withCause(cause error) *Error {
 	return e
 }
 
+// because attaches a cause and keeps core's own class, which is what a refusal
+// about a registration call site needs (#228).
+//
+// [Error.withCause] adopts a class the cause declares, and that rule is written
+// for the walk: a codec speaking about a value the plane held is entitled to say
+// which class its refusal belongs to. A registration is not that moment. Nothing
+// has been read, no plane has been reached, and a registrant who wrapped
+// [ErrPlane] in the error their codec returns for its own zero value would
+// otherwise turn "your registration is wrong" into "the plane failed".
+func (e *Error) because(cause error) *Error {
+	e.cause = cause
+
+	return e
+}
+
 // fromDriver wraps whatever a driver returned. Core supplies the address, the
 // moment and the provenance marker, and a driver can change none of them.
 //
