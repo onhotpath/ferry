@@ -100,6 +100,7 @@ Three things follow from that rather than being features bolted on top:
 | [`driver/env`](driver/env/) | environment variables | load |
 | [`driver/yaml`](driver/yaml/) | a YAML file, edited in place | load and dump |
 | [`driver/kv`](driver/kv/) | a Consul-shaped key-value store, client supplied by you | load and dump, experimental |
+| [`driver/http`](driver/http/) | one HTTP request's query parameters or header fields | load |
 
 Each is a module of its own, versioned separately, and each has a README of its own behind the link.
 Loading and dumping are separate interfaces, so a source with no honest write - environment variables are the case - is a compile error at the `ferry.Dump` call site rather than a runtime refusal.

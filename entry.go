@@ -8,7 +8,7 @@ import (
 // Load builds a value of T from src. The type is named because there is no
 // value to infer it from; [Dump] infers its own.
 //
-//	cfg, err := ferry.Load[Config](ctx, yaml.Source{Path: "app.yaml"})
+//	cfg, err := ferry.Load[Config](ctx, yaml.NewSource("app.yaml"))
 //
 // Every field the plane is silent about keeps T's zero value, and a field
 // declaring default= takes its default there instead.

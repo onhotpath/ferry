@@ -270,7 +270,7 @@ On `Load` every leaf accepts its own kind, and additionally accepts `String`, wh
 `String` is what a plane says when it has nothing to say, while `Number`, `Bool` and `Bytes` are assertions a plane made and ferry respects.
 So a `Number` is refused at a Go `string`, because accepting it would destroy the quoting distinction the boundary preserves.
 
-That one donation is what makes a flat plane work at all: an environment variable, a query parameter and an opaque KV value are all `String`, and two of the three drivers in this repository are that shape.
+That one donation is what makes a flat plane work at all: an environment variable, a query parameter and an opaque KV value are all `String`, and three of the four drivers in this repository are that shape.
 
 `Null` is accepted by exactly the types that have a null, which among the leaves is `[]byte` alone, plus `*T`, `[]T` and `map[K]V` among the composites.
 Every other leaf refuses it as a wrong kind.

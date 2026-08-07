@@ -9,7 +9,7 @@
 //	    Timeout time.Duration `ferry:"timeout,default=30s"`
 //	}
 //
-//	cfg, err := ferry.Load[Config](ctx, yaml.Source{Path: "app.yaml"})
+//	cfg, err := ferry.Load[Config](ctx, yaml.NewSource("app.yaml"))
 //
 // The store a value is read from or written to is called a plane: a YAML file,
 // the process environment, a KV bucket, a query string. Core knows nothing
