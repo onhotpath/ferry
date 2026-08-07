@@ -83,7 +83,7 @@ func ExampleDiffErrors() {
 		fmt.Println(s)
 	}
 	// Output:
-	// got /port: missing, and nothing wanted it: ferry: /port: required, and the plane holds nothing at this address
+	// got /port: missing, and nothing wanted it: ferry: /port: required, and nothing is set here
 	// want /port: invalid value, and nothing reported it
 }
 

@@ -233,7 +233,7 @@ Run against a real file, with `old` holding a nanosecond codec for a named durat
 before                        t: "30000000000"
 after                         t: 30s
 reload under the new codec -> 30s, err=<nil>
-the OLD codec on it        -> ferry: /t: the plane's value is not a valid Timeout
+the OLD codec on it        -> ferry: /t: what is set here is not a valid Timeout
 ```
 
 The last line is the property a dual read does not have and cannot have.

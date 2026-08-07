@@ -21,7 +21,7 @@ const planeKey = "K3YFR0MTHEPLANE"
 // leakRows is how many failure families TestNoMessageRepeatsWhatThePlaneHeld
 // drives, asserted against the table so that a family which stops firing fails
 // loudly rather than passing silently.
-const leakRows = 14
+const leakRows = 17
 
 // leakCase is one family of failure, driven through a real Load or Dump over a
 // plane whose every value is the planted secret and whose every minted name
@@ -160,7 +160,83 @@ func leakCases() []leakCase {
 		{"a value the plane holds is of the wrong kind", loadOverPlanted[leakLeaf](Bool(true))},
 	}
 
-	return append(rows, leakEnumerated()...)
+	rows = append(rows, leakEnumerated()...)
+
+	return append(rows, leakKeyed()...)
+}
+
+// leakKeyed is the three families that need a key type or a codec of their own:
+// two names that read back as one Go key, a name the key type cannot take, and a
+// codec that panicked inside the fence.
+//
+// They are here rather than beside the rest because each authors a message about
+// something the plane spelled, which is exactly where a leak would be easiest to
+// write by accident.
+func leakKeyed() []leakCase {
+	return []leakCase{
+		{"two names the plane lists read back as one key", func() error {
+			p := newPlane(map[Path]Value{
+				At("m").At("1"):  String(planeSecret),
+				At("m").At("01"): String(planeSecret),
+			})
+
+			_, err := Load[leakIntKeyed](context.Background(), treeSource{p: p})
+
+			return err
+		}},
+		{"the plane lists a name the key type cannot take", func() error {
+			p := newPlane(map[Path]Value{At("m").At(planeKey): String(planeSecret)})
+
+			_, err := Load[leakIntKeyed](context.Background(), treeSource{p: p})
+
+			return err
+		}},
+		{"a registered codec panicked", func() error {
+			reg, err := NewRegistry(leakFuseCodec())
+			if err != nil {
+				return err
+			}
+
+			p := newPlane(map[Path]Value{At("n"): String(planeSecret)})
+
+			_, err = Load[leakFused](context.Background(), planeSource{p: p}, WithRegistry(reg))
+
+			return err
+		}},
+	}
+}
+
+// leakIntKeyed is the fixture of the two key-side rows: a mapping whose key type
+// parses text, so a name the plane lists either fails to parse or collapses onto
+// a key another name already took.
+type leakIntKeyed struct {
+	M map[int]string `ferry:"m"`
+}
+
+// leakFused is one leaf over a type whose codec panics on anything the plane
+// could hold.
+type leakFused struct {
+	N leakFuse `ferry:"n"`
+}
+
+type leakFuse string
+
+// leakFuseCodec panics on every text but the empty one, so registration's
+// zero-value check passes and every address the plane answers reaches the fence.
+//
+// It panics with a constant. What a codec panics with is the codec author's to
+// keep clean, in the same shape as a driver's own text, and planting the value
+// here would be asserting that obligation rather than core's.
+func leakFuseCodec() Codec {
+	return StringValue(
+		func(f leakFuse) (string, error) { return string(f), nil },
+		func(text string) (leakFuse, error) {
+			if text != "" {
+				panic("the codec's own text, and none of the plane's")
+			}
+
+			return "", nil
+		})
 }
 
 // loadOverPlanted is one row's whole body for a family raised at a leaf: the

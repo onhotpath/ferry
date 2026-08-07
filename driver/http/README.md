@@ -214,7 +214,7 @@ Nesting joins with `.`, so a field tagged `db.host` and a nested `db`/`host` bot
 When that happens the load fails immediately, before anything is read, and names both:
 
 ```
-ferry: /db.host: query renders this address and /db/host to one plane key, "db.host", so one of the two would be lost
+ferry: /db.host: query gives this and /db/host the same name, "db.host", so one of the two would be lost
 ```
 
 Rename one of the fields, or widen the join: `ferryhttp.Separator("..")` keeps `db..host` and `db.host` apart.

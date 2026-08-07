@@ -623,7 +623,7 @@ func (l loadFrom) absent(s spot) error {
 		// [loadFrom.materialise]'s to decide and not this one's (#253).
 		return l.apply(s, s.n.def)
 	case s.n.required:
-		return newError(momentWalk, ErrMissing, s.at, "required, and the plane holds nothing at this address")
+		return newError(momentWalk, ErrMissing, s.at, "required, and nothing is set here")
 	default:
 		return nil
 	}
@@ -686,7 +686,7 @@ func (loadFrom) supplied(s spot, out outcome) error {
 		return nil
 	}
 
-	return newError(momentWalk, ErrMissing, s.at, "required, and the plane supplied nothing under it")
+	return newError(momentWalk, ErrMissing, s.at, "required, and nothing is set under it")
 }
 
 // atNullable materialises a pointer exactly where the plane spoke about it or
@@ -997,15 +997,15 @@ func contiguous(s spot, segs []Segment) error {
 	for at, seg := range segs {
 		if seg.Kind() != Index {
 			return newError(momentWalk, ErrValue, s.at, fmt.Sprintf(
-				"the plane holds a member named under a sequence, and a %s is addressed by position: model "+
-					"a container whose members the plane names as a map", s.v.Type()))
+				"there is a member here named rather than numbered, and a %s is addressed by position: "+
+					"model a container whose members carry names as a map", s.v.Type()))
 		}
 
 		if want := IndexSegment(uint(at)); seg != want {
 			return newError(momentWalk, ErrValue, s.at, fmt.Sprintf(
-				"the plane holds position %s under a sequence of %d, and a %s is addressed from 0 upwards "+
-					"with no position missing: fill the gap, or model a sequence whose positions are chosen "+
-					"by the plane as a map keyed by those positions",
+				"position %s is set under a sequence of %d, and a %s is addressed from 0 upwards with no "+
+					"position missing: fill the gap, or model a sequence whose positions are not "+
+					"contiguous as a map keyed by those positions",
 				seg.Text(), len(segs), s.v.Type()))
 		}
 	}
@@ -1035,8 +1035,8 @@ func (loadFrom) buildMap(s spot, segs []Segment, into descend) (outcome, error) 
 	// read. /m/1 and /m/01 are two addresses and one int.
 	if fresh.Len() != len(segs) {
 		return outcome{}, newError(momentWalk, ErrValue, s.at, fmt.Sprintf(
-			"the plane holds %d addresses under this mapping and %s takes %d of them: two plane keys read "+
-				"back as one Go key, so an entry would be lost", len(segs), s.v.Type(), fresh.Len()))
+			"%d entries are set under this one and %s takes %d of them: two of them read back as one Go "+
+				"key, so an entry would be lost", len(segs), s.v.Type(), fresh.Len()))
 	}
 
 	s.v.Set(fresh)
@@ -1056,7 +1056,7 @@ func atKey(s spot, fresh reflect.Value, seg Segment, into descend) (outcome, err
 	}
 
 	return outcome{}, newError(momentWalk, ErrValue, s.at, fmt.Sprintf(
-		"the plane holds a member by position under this mapping, and a %s takes one member per name",
+		"a member here is numbered rather than named, and a %s takes one member per name",
 		s.v.Type()))
 }
 
@@ -1070,7 +1070,7 @@ func atKey(s spot, fresh reflect.Value, seg Segment, into descend) (outcome, err
 // never be written back (#258).
 func atName(s spot, fresh reflect.Value, seg Segment, into descend) (outcome, error) {
 	if seg.Text() == "" {
-		return outcome{}, newError(momentWalk, ErrValue, s.at, emptySegmentMsg)
+		return outcome{}, newError(momentWalk, ErrValue, s.at, emptyNameLoadMsg)
 	}
 
 	key := reflect.New(s.v.Type().Key()).Elem()
@@ -1337,14 +1337,24 @@ func (d dumpTo) atMap(ctx context.Context, s spot, into descend) (outcome, error
 	return b.done()
 }
 
-// emptySegmentMsg is what an empty map key is refused with, and it is one
-// message because it is one rule read from two ends: a value that renders one
-// and a plane that spells one both name an address the model does not have
-// (#258). Measured before the dump-side refusal existed, a map key rendering to
-// empty text minted /m/ and the dump returned nil; the load side had no refusal
-// at all, so /m/ loaded clean and could not be written back.
-const emptySegmentMsg = "a key of this mapping renders to empty text, and an empty segment names no address: " +
-	"an entry at it could not be read back, and the address it would mint is not one"
+// emptyNameLoadMsg and emptyKeyDumpMsg are what an empty map key is refused
+// with, and they are one rule read from two ends: a value that renders one and a
+// plane that spells one both name an address the model does not have (#258).
+// Measured before the dump-side refusal existed, a map key rendering to empty
+// text minted /m/ and the dump returned nil; the load side had no refusal at
+// all, so /m/ loaded clean and could not be written back.
+//
+// Two constants rather than one because the two ends have two readers and the
+// rule reaches them from opposite sides (#159). On load it is somebody
+// configuring a service, who has a plane in front of them and no map key; on
+// dump it is the Go author whose key rendered to nothing. Neither says which
+// direction it is in, because the location prefix already does.
+const (
+	emptyNameLoadMsg = "there is a member here with no name at all, and nothing without a name can be " +
+		"addressed: it could never be written back"
+	emptyKeyDumpMsg = "a key of this map is empty text, and nothing without a name can be addressed: " +
+		"an entry at it could not be read back"
+)
 
 // entry is one map key with the text it addresses by, computed once.
 type entry struct {
@@ -1382,7 +1392,7 @@ func sortedKeys(s spot) ([]entry, error) {
 		// /m/ and the dump returned nil, so a plane was written at an address
 		// ferry declares illegal (#258).
 		if text == "" {
-			return nil, newError(momentWalk, ErrValue, s.at, emptySegmentMsg)
+			return nil, newError(momentWalk, ErrValue, s.at, emptyKeyDumpMsg)
 		}
 
 		out = append(out, entry{key: k, text: text})

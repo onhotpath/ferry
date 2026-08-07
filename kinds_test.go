@@ -273,8 +273,8 @@ func TestAMapKeyThatRendersEmptyIsRefused(t *testing.T) {
 		t.Fatal("dumping a map key that renders to empty text succeeded, so the plane holds /m/")
 	}
 
-	if !strings.Contains(err.Error(), "empty segment names no address") {
-		t.Errorf("the refusal reads %q, and it has to say that an empty segment names no address", err)
+	if !strings.Contains(err.Error(), "a key of this map is empty text") {
+		t.Errorf("the refusal reads %q, and it has to name the map key the Go value rendered to nothing", err)
 	}
 
 	if len(got) != 0 {
@@ -302,8 +302,8 @@ func TestAPlaneMemberSpelledWithAnEmptyNameIsRefused(t *testing.T) {
 		t.Fatal("a member spelled with an empty name loaded, and the value it produced cannot be dumped back")
 	}
 
-	if !strings.Contains(err.Error(), "empty segment names no address") {
-		t.Errorf("the refusal reads %q, and it has to say that an empty segment names no address", err)
+	if !strings.Contains(err.Error(), "a member here with no name at all") {
+		t.Errorf("the refusal reads %q, and it has to name the member the plane spelled without a name", err)
 	}
 }
 

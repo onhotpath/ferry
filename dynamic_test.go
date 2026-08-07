@@ -1067,29 +1067,29 @@ func TestAPlaneThatContradictsTheContainerIsLoud(t *testing.T) {
 		name: "a name under a sequence",
 		load: loadInto[tagsOnly],
 		src:  &listing{children: map[Path][]Segment{At("tags"): {NameSegment("0")}}},
-		want: "the plane holds a member named under a sequence",
+		want: "there is a member here named rather than numbered",
 	}, {
 		name: "a gap in a sequence",
 		load: loadInto[tagsOnly],
 		src: &listing{children: map[Path][]Segment{
 			At("tags"): {IndexSegment(0), IndexSegment(2)},
 		}},
-		want: "the plane holds position 2 under a sequence of 2",
+		want: "position 2 is set under a sequence of 2",
 	}, {
 		name: "a position under a mapping",
 		load: loadInto[limitsOnly],
 		src:  &listing{children: map[Path][]Segment{At("limits"): {IndexSegment(0)}}},
-		want: "the plane holds a member by position under this mapping",
+		want: "a member here is numbered rather than named",
 	}, {
 		name: "a key the type cannot parse",
 		load: loadInto[intKeyed],
 		src:  &listing{children: map[Path][]Segment{At("m"): {NameSegment("abc")}}},
-		want: "/m/abc: the plane's value is not a valid int",
+		want: "/m/abc: what is set here is not a valid int",
 	}, {
 		name: "and two keys that read back as one",
 		load: loadInto[intKeyed],
 		src:  &listing{children: map[Path][]Segment{At("m"): {NameSegment("1"), NameSegment("01")}}},
-		want: "two plane keys read back as one Go key",
+		want: "two of them read back as one Go key",
 	}}
 
 	for _, c := range cases {
@@ -1179,7 +1179,7 @@ func TestARefusalAtADynamicCompositeReachesTheCaller(t *testing.T) {
 			t.Errorf("a failed element published %v, want the sequence never set", got.Ports)
 		}
 
-		want := "/ports#0: the plane's value is not a valid int"
+		want := "/ports#0: what is set here is not a valid int"
 		if report := reportOf(err); !strings.Contains(report, want) {
 			t.Errorf("report\n\t%s\ndoes not contain\n\t%s", report, want)
 		}

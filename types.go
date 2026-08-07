@@ -184,7 +184,7 @@ func intoFresh(elem reflect.Type, parse func(reflect.Value, string) error) func(
 //
 // Without it a *T over a registered T decodes through core's own rule, gated by
 // a comparison against the declared kind, so the same codec that accepts a bool
-// at a T field refuses one at a *T field with "the plane holds bool and *T
+// at a T field refuses one at a *T field with "what is set here is bool, and *T
 // cannot take one". The accepted set is the codec's and is never derived from
 // the kind it declared (ADR-0009, #229).
 func pointerAccept(elem reflect.Type, inner leafCodec) func(reflect.Value, Value) error {
@@ -758,7 +758,7 @@ type wrongKind struct {
 }
 
 func (e *wrongKind) Error() string {
-	return fmt.Sprintf("the plane holds %s and %s cannot take one", e.got, e.typ)
+	return fmt.Sprintf("what is set here is %s, and %s cannot take one", e.got, e.typ)
 }
 
 // Unwrap keeps [ErrWrongKind] reachable, which is what makes the refusal answer
@@ -777,10 +777,10 @@ type parseFailure struct {
 
 func (e *parseFailure) Error() string {
 	if errors.Is(e.err, strconv.ErrRange) {
-		return "the plane's value is out of range for " + e.typ.String()
+		return "what is set here is out of range for " + e.typ.String()
 	}
 
-	return "the plane's value is not a valid " + e.typ.String() + parseHint(e.typ)
+	return "what is set here is not a valid " + e.typ.String() + parseHint(e.typ)
 }
 
 // parseHint is the two types whose stdlib error carried a reason ferry's
@@ -813,7 +813,7 @@ type lengthFailure struct {
 }
 
 func (e *lengthFailure) Error() string {
-	return fmt.Sprintf("the plane holds %d bytes and %s holds %d", e.got, e.typ, e.want)
+	return fmt.Sprintf("what is set here is %d bytes and %s holds %d", e.got, e.typ, e.want)
 }
 
 // encodeFailure is a Go value the leaf's representation does not cover.

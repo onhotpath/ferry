@@ -93,8 +93,8 @@ type Keys struct {
 // time, and each names both offending addresses:
 //
 //	ferry: 2 errors:
-//	  /DB_HOST: env renders this address and /DB/HOST to one plane key, "DB_HOST", ...
-//	  /feature_flags: env renders this address and /feature-flags to one plane key, ...
+//	  /DB_HOST: env gives this and /DB/HOST the same name, "DB_HOST", ...
+//	  /feature_flags: env gives this and /feature-flags the same name, ...
 //
 // A tree driver calls none of this. It walks the segments, builds no plane key
 // at all, and so carries no injectivity obligation.
@@ -231,8 +231,8 @@ func (k *Keys) reachable(m Member, scans []scan) error {
 		}
 
 		return newError(momentBind, ErrPlane, m.Path(), k.name+
-			" lists the members of "+s.at.String()+" out of every plane key beginning with "+
-			strconv.Quote(s.key)+", and this address renders to "+strconv.Quote(key)+
+			" lists the members of "+s.at.String()+" out of every name beginning with "+
+			strconv.Quote(s.key)+", and this one is named "+strconv.Quote(key)+
 			", so its value would be read back as a member of that composite")
 	}
 
@@ -332,8 +332,8 @@ func (k *Keys) mint(addr Path, minted map[Path]string, owner map[string]Path) (s
 // what the plane supplied: a plane key is computed from the address, and the
 // address is already in the line.
 func (k *Keys) collision(other Path, key string) string {
-	return k.name + " renders this address and " + other.String() +
-		" to one plane key, " + strconv.Quote(key) + ", so one of the two would be lost"
+	return k.name + " gives this and " + other.String() + " the same name, " +
+		strconv.Quote(key) + ", so one of the two would be lost"
 }
 
 // takenBy reports which address already holds a key, over the tiers in the order

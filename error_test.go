@@ -443,7 +443,7 @@ func TestSortingHappensAtConstruction(t *testing.T) {
 	base := []error{
 		valueErr(At("workers").Elem(7), "the plane has index 7 and [3]string holds 3"),
 		valueErr(At("db", "port"), "is not a valid int"),
-		newError(momentWalk, ErrMissing, At("tls", "cert"), "required, and the plane supplied nothing"),
+		newError(momentWalk, ErrMissing, At("tls", "cert"), "required, and nothing is set under it"),
 	}
 
 	picks := make([]string, 0, rounds*len(permutations))
@@ -581,7 +581,7 @@ func TestFortyErrorsAreOneLine(t *testing.T) {
 func TestSummaryDoesNotElideAtTheThreshold(t *testing.T) {
 	agg := join(
 		valueErr(At("db", "port"), "is not a valid int"),
-		newError(momentWalk, ErrMissing, At("tls", "cert"), "required, and the plane supplied nothing"),
+		newError(momentWalk, ErrMissing, At("tls", "cert"), "required, and nothing is set under it"),
 		valueErr(At("workers").Elem(7), "the plane has index 7 and [3]string holds 3"),
 	)
 
@@ -1172,9 +1172,9 @@ func ferryAuthored() []authored {
 		{"is not a valid float64", ErrValue, notFloat},
 		{"is not a valid time.Duration: a duration needs a unit, as in 30s or 1h30m", ErrValue, notDur},
 		{"is not a valid time.Time: a time is RFC 3339, as in 2026-08-02T12:00:00Z", ErrValue, notTime},
-		{"the plane holds string and int64 cannot take one", ErrValue, wrongKind},
+		{"what is set here is string, and int64 cannot take one", ErrValue, wrongKind},
 		{"is out of range for int64", ErrValue, ranged},
-		{"required, and the plane supplied nothing", ErrMissing, nil},
+		{"required, and nothing is set under it", ErrMissing, nil},
 	}
 
 	out := make([]authored, 0, len(rows)+1)
@@ -1260,7 +1260,7 @@ func TestTheTwoCarveOuts(t *testing.T) {
 func TestErrWrongKindComposesWithItsClass(t *testing.T) {
 	_, cause := String(planeSecret).AsInt()
 
-	core := valueErr(At("db", "port"), "the plane holds string and int64 cannot take one").withCause(cause)
+	core := valueErr(At("db", "port"), "what is set here is string, and int64 cannot take one").withCause(cause)
 	if !errors.Is(core, ErrWrongKind) || !errors.Is(core, ErrValue) {
 		t.Fatalf("a wrong-kind refusal through core matches wrong-kind=%t value=%t",
 			errors.Is(core, ErrWrongKind), errors.Is(core, ErrValue))
@@ -1324,7 +1324,7 @@ func TestConcurrentFormattingIsOneRendering(t *testing.T) {
 
 	agg := join(
 		valueErr(At("db", "port"), "is not a valid int"),
-		newError(momentWalk, ErrMissing, At("tls", "cert"), "required, and the plane supplied nothing"),
+		newError(momentWalk, ErrMissing, At("tls", "cert"), "required, and nothing is set under it"),
 		fromDriver(momentClose, Path{}, errors.New("kv: flush failed")),
 	)
 
