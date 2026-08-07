@@ -706,13 +706,18 @@ There is no per-field form and there will not be one: ferry's tag vocabulary is 
 1. `Parse` of what `Render` produced returns the value it started from.
 2. What `Render` writes is always something `Parse` accepts, and `Parse` may accept more. Wider in, canonical out.
 3. `Render` is deterministic: one value, one spelling.
-4. A refusal is an error, never a zero value and never a guess.
+4. A refusal is an error, never a zero value and never a guess, and it quotes the text it refused.
 5. A spelling changes how a value is written, never what it means.
 6. Both halves are pure functions.
 
 Law 2 is the one that does the work.
 `BoolWords("on", "off", "true", "false")` accepts four words and always writes `on`, and because `on` is itself accepted, law 1 closes.
 A spelling that wrote `yes` while accepting only `on` and `off` writes something it cannot read back.
+
+Law 4 is the one place ferry prints a value a plane supplied, and it is deliberate: `"onn" is not one of this plane's boolean words (on, off)` can be acted on and the same sentence without the word cannot ([ADR-0011](../adr/0011-the-error-model.md)).
+**Bound it.**
+Both first-party spellings quote at most 64 bytes, escape the text to a single printable line, and say when they cut - so a variable holding a token, a certificate or a folded blob cannot reach a log through a refusal.
+A plane that must quote nothing wraps its spelling in one whose `Parse` returns its own refusal; redaction composes as a `Spelling` and needs no option.
 
 Law 6 cannot be proved, and no shape of constructor closes the hole: a Go func value is a reference to arbitrary state.
 What fences it is an idiom - **your constructors take data, not functions** - so `BoolWords("on", "off")` builds its closures over words it owns and hands nobody a handle.

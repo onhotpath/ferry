@@ -1,7 +1,10 @@
 package env
 
 import (
-	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/onhotpath/ferry"
 )
@@ -62,7 +65,7 @@ func boolSpelling(words []string) (ferry.Spelling[bool, string], error) {
 		func(text string) (bool, error) {
 			b, ok := table[text]
 			if !ok {
-				return false, errNotAWord
+				return false, notAWord(text, words)
 			}
 
 			return b, nil
@@ -77,11 +80,57 @@ func boolSpelling(words []string) (ferry.Spelling[bool, string], error) {
 	), nil
 }
 
-// errNotAWord is what the spelling refuses text with, and it never reaches a
-// caller: on a plane whose values are all text, a variable holding no declared
-// word is not a broken boolean, it is a string, and [reader.Get] answers with
-// one (ADR-0018).
-var errNotAWord = errors.New("no word of this plane spells a bool that way")
+// notAWord is what the spelling refuses text with, and it quotes the text.
+//
+// A spelling's parse refusal is the one message class ADR-0011's rule against
+// naming a plane-supplied value does not cover, because the whole content of
+// the mistake is which word was written: "onn is not one of these" is the
+// message, and "some word is not one of these" is not one. The quoting is
+// bounded and escaped by [quoted], so the exception cannot become a leak of a
+// blob or of a multi-line value (ADR-0018 law 4, ADR-0011).
+//
+// It never reaches a caller through this driver. On a plane whose values are
+// all text a variable holding no declared word is not a broken boolean, it is a
+// string, and [config.observe] answers with one; the message is what a caller
+// holding the spelling itself sees.
+func notAWord(text string, words []string) error {
+	return fmt.Errorf("%s is not one of this plane's boolean words (%s)", quoted(text), strings.Join(words, ", "))
+}
+
+// quoteCap is how much of a value a refusal may quote, in bytes.
+//
+// It is chosen against the two things it has to be between. The whole of what a
+// refusal has to show is a word or a number somebody mistyped, and a generous
+// one of those - a long boolean word, a float with a full mantissa and an
+// exponent - is well inside 64 bytes. The values that must not appear are
+// tokens, keys, connection strings and PEM blocks, and the shortest of those is
+// already over it: an AWS access key ID is 20 bytes and its secret is 40, a
+// JWT's header alone is longer, and a PEM line is 64 before its header.
+// So a mistyped word is shown whole, and nothing a secret store holds is
+// (ADR-0018 law 4, ADR-0011).
+const quoteCap = 64
+
+// quoted renders text for a refusal: escaped to one line, and cut to
+// [quoteCap].
+//
+// strconv.Quote is what makes the bound hold in the second dimension: a value
+// carrying newlines, control bytes or invalid UTF-8 becomes one printable line,
+// so a message stays one line whatever the plane held (ADR-0018 law 4).
+//
+// It is duplicated in driver/yaml rather than shared. ADR-0018's rule of three
+// is the trigger for a common home, and two callers is not three.
+func quoted(text string) string {
+	if len(text) <= quoteCap {
+		return strconv.Quote(text)
+	}
+
+	cut := quoteCap
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+
+	return strconv.Quote(text[:cut]) + " (truncated)"
+}
 
 // boolTable is the accept set, and every refusal it can make.
 func boolTable(words []string) (map[string]bool, error) {

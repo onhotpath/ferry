@@ -3,6 +3,8 @@ package yaml_test
 import (
 	"errors"
 	"math"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/onhotpath/ferry"
@@ -162,6 +164,72 @@ func TestYAMLRefusesANumberItCannotSpell(t *testing.T) {
 	if got, want := read(t, path), "n: 1\n"; got != want {
 		t.Errorf("the plane holds %q, want the document it held before the refusal, %q", got, want)
 	}
+}
+
+// TestYAMLNumberRefusalQuotesTheScalar is law 4 as it was scoped: a spelling's
+// parse refusal says which text it refused, because the address alone cannot
+// say whether the scalar is a typo, a stray unit or a value that wanted
+// quoting.
+func TestYAMLNumberRefusalQuotesTheScalar(t *testing.T) {
+	for name, text := range map[string]string{
+		"a word":         "zzz",
+		"a stray unit":   "30s",
+		"a folded value": "1\n2",
+	} {
+		t.Run(name, func(t *testing.T) { checkQuoted(t, numberRefusal(t, text), text) })
+	}
+}
+
+// checkQuoted is the two things a quoting refusal must be, lifted out so that
+// the table above stays a table.
+func checkQuoted(t *testing.T, got, text string) {
+	t.Helper()
+
+	if !strings.Contains(got, strconv.Quote(text)) {
+		t.Errorf("refused with %q, want it to quote the scalar", got)
+	}
+
+	if strings.Contains(got, "\n") {
+		t.Errorf("refused with %q, want one line", got)
+	}
+}
+
+// TestYAMLNumberRefusalIsBounded is the other half: the quoting is capped, so a
+// scalar holding a certificate or a token cannot reach a log through a refusal.
+func TestYAMLNumberRefusalIsBounded(t *testing.T) {
+	for name, text := range map[string]string{
+		"a long single-byte scalar": strings.Repeat("x", 300),
+		"a long multi-byte scalar":  strings.Repeat("€", 30),
+	} {
+		t.Run(name, func(t *testing.T) { checkCut(t, numberRefusal(t, text), text) })
+	}
+}
+
+// checkCut is the same, for the bound rather than the quoting.
+func checkCut(t *testing.T, got, text string) {
+	t.Helper()
+
+	if strings.Contains(got, text) {
+		t.Errorf("refused with %q, which carries the whole scalar", got)
+	}
+
+	if !strings.Contains(got, "(truncated)") {
+		t.Errorf("refused with %q, want it to say the scalar was cut", got)
+	}
+}
+
+// numberRefusal is one refusal's message, taken from the spelling itself: what
+// a load reports is an aggregate whose wording is not API, and what this
+// asserts is the spelling's own statement.
+func numberRefusal(t *testing.T, text string) string {
+	t.Helper()
+
+	_, err := yaml.Numbers.Parse(text)
+	if err == nil {
+		t.Fatalf("Parse(%q) was accepted, want a refusal", text)
+	}
+
+	return err.Error()
 }
 
 // TestYAMLNumberSpellingObeysTheLaws runs the published proof over this plane's

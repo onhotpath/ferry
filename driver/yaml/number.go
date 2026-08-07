@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	yamlv3 "go.yaml.in/yaml/v3"
 
@@ -69,7 +70,24 @@ func readNumber(text string) (string, error) {
 		return strconv.FormatUint(n, decimal), nil
 	}
 
-	return floatText(plain)
+	if float, ok := floatText(plain); ok {
+		return float, nil
+	}
+
+	return "", notANumberSpelling(text)
+}
+
+// notANumberSpelling is the parse refusal, and it quotes the scalar.
+//
+// A spelling's parse refusal is the one message class ADR-0011's rule against
+// naming a plane-supplied value does not cover: what the operator has to fix is
+// the text itself, and a message that names the address alone cannot say
+// whether the scalar is a typo, a stray unit or a value that wanted quoting.
+// [quoted] is what keeps the exception an exception, bounding the length and
+// escaping the content to one line (ADR-0018 law 4, ADR-0011).
+func notANumberSpelling(text string) error {
+	return fmt.Errorf("%w: the plane tagged this scalar as a number and %s is spelled in none of the forms "+
+		"YAML gives a number: quote it to load it as text, or correct it", ferry.ErrValue, quoted(text))
 }
 
 // autoBase is strconv's base 0, which is YAML's own set of prefixes: 0x, 0o,
@@ -102,14 +120,40 @@ func signedText(plain string, n int64) string {
 //
 // A magnitude too large for a float64 is passed through for [readNumber]'s
 // reason rather than refused, so a codec reading the digits still sees them.
-func floatText(plain string) (string, error) {
+func floatText(plain string) (string, bool) {
 	_, err := strconv.ParseFloat(plain, numBits)
-	if err == nil || errors.Is(err, strconv.ErrRange) {
-		return plain, nil
+
+	return plain, err == nil || errors.Is(err, strconv.ErrRange)
+}
+
+// quoteCap is how much of a scalar a refusal may quote, in bytes, and [quoted]
+// is what applies it.
+//
+// The two are duplicated in driver/env rather than shared, and the same
+// reasoning picks the number: a mistyped number is far inside 64 bytes, and
+// every credential shape that must never appear in a log is at or over it. The
+// rule of three is ADR-0018's trigger for a common home, and two callers is not
+// three.
+const quoteCap = 64
+
+// quoted renders a scalar for a refusal: escaped to one line, and cut to
+// [quoteCap].
+//
+// The escaping is what bounds the message in its second dimension. A YAML
+// scalar may be folded over many lines and may carry control bytes, so a
+// refusal that interpolated it raw would print a paragraph where a line was
+// promised (ADR-0018 law 4).
+func quoted(text string) string {
+	if len(text) <= quoteCap {
+		return strconv.Quote(text)
 	}
 
-	return "", fmt.Errorf("%w: the plane tagged this scalar as a number and it is spelled in none of the "+
-		"forms YAML gives a number: quote it to load it as text, or correct it", ferry.ErrValue)
+	cut := quoteCap
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+
+	return strconv.Quote(text[:cut]) + " (truncated)"
 }
 
 // floatWord reads YAML's three worded floats, in any of the cases the spec

@@ -287,6 +287,15 @@ The class is `errors.Is`, and nobody branches on the moment.
 > ferry's own message text never contains a value the plane supplied.
 > The cause stays in the chain and is not printed.
 
+> **Amended under [#259](https://github.com/onhotpath/ferry/issues/259): a spelling's parse refusal is the one exception, and it is bounded.**
+>
+> [ADR-0018](0018-the-spelling-seam.md) puts a plane's own spellings on the driver side, and its law 4 requires a parse refusal to name the text it refused.
+> That is the one message whose entire content is the value: `"onn" is not one of this plane's boolean words (on, off)` is actionable, and the same sentence without the word is not, because the address already says where and nothing then says what.
+> **So the rule below is total for every message class except that one**, which quotes at most 64 bytes, escaped to a single printable line, and says when it cut.
+> The bound is what keeps this an exception rather than a hole: the shortest credential shape is already at or over the cap, and a folded or binary value cannot print as more than one line.
+> A plane that must quote nothing wraps its spelling in one whose `Parse` returns its own refusal - redaction composes as a `Spelling`, so it costs no option and no second surface.
+> Nothing else moves: ferry's own decode failures, the walk's diagnostics and every driver message outside a spelling still name structure and never the value.
+
 **This is the sharpest finding in the ticket, and the prototypes were leaking before it.**
 Every ferry driver named in ADR-0004 is `yaml`, `kv` and `env`, and the charter names Vault and Consul, where **every value is a secret**.
 `strconv.NumError` quotes its input unconditionally and `time.ParseDuration` puts the string in its message.

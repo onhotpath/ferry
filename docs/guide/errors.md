@@ -161,6 +161,10 @@ The cause is reachable through `errors.Unwrap`, which is what stops redaction be
 One carve-out, stated because it is real: a **map key** is a name and not a value, and ferry cannot name the address without it.
 So the rule is about values.
 
+One further exception, and it belongs to a driver rather than to core: a **spelling's parse refusal** quotes the text it refused, because that text is the whole content of the mistake ([ADR-0018](../adr/0018-the-spelling-seam.md) law 4, [ADR-0011](../adr/0011-the-error-model.md)).
+It is bounded - at most 64 bytes, escaped to one line, saying so when it cut - and it is the only message class that carries a plane value at all.
+A plane where even that is too much wraps its spelling in one whose `Parse` returns its own refusal.
+
 ## Dump writes nothing it could have known not to
 
 On `Dump` the aggregation is preceded by a phase: **every value is encoded before any of them is written**.

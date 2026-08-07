@@ -20,7 +20,10 @@ import (
 // is something it reads, that it writes one spelling per value, and that neither
 // half answers differently the second time. Each refusal is parsed twice, and a
 // spelling that returns a value instead of an error for one is reported: a
-// carrier with no reading is a failure and never a zero value.
+// carrier with no reading is a failure and never a zero value. What a refusal
+// says is not asserted here, because message text is not API - but a spelling
+// that quotes what it refused, bounded and escaped to one line, is what the
+// contract asks for, and that is yours to check where you author the message.
 //
 // The relation is positional and there is no default, for [Type]'s reason: a
 // payload type knows its own identity and reflect.DeepEqual is wrong for

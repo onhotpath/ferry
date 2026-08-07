@@ -28,7 +28,12 @@ import "fmt"
 //   - What Render writes is always something Parse accepts, and Parse may accept
 //     more than that. Wider in, canonical out.
 //   - Render is deterministic: one value, one spelling.
-//   - A refusal is an error and never a zero value, and never a guess.
+//   - A refusal is an error and never a zero value, and never a guess. Name the
+//     text you refused, bounded: quote a limited number of bytes, escape them to
+//     one line, and say when you cut. It is the one message in ferry that
+//     carries a value the plane supplied, because it is the one message whose
+//     whole content is that value, and the bound is what keeps a plane holding
+//     secrets from losing one through a refusal.
 //   - A spelling changes how a value is written, never what it means.
 //
 // Build one as a type with the two methods, or from a pair of functions with

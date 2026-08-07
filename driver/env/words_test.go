@@ -2,6 +2,7 @@ package env
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/onhotpath/ferry"
@@ -158,6 +159,96 @@ func TestBoolWordsWriteTheFirstPair(t *testing.T) {
 			t.Errorf("a %t is written %q, want %q", tc.v, got, tc.want)
 		}
 	}
+}
+
+// TestBoolWordsRefusalNamesTheTextAndTheWords is law 4 as it was scoped: a
+// spelling's parse refusal says which text was refused and what this plane
+// would have taken, because a message naming neither cannot be acted on.
+func TestBoolWordsRefusalNamesTheTextAndTheWords(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		text string
+		want string
+	}{
+		"a mistyped word":    {text: "onn", want: `"onn" is not one of this plane's boolean words (on, off)`},
+		"a folded value":     {text: "on\noff", want: `"on\noff" is not one of this plane's boolean words (on, off)`},
+		"an empty variable":  {text: "", want: `"" is not one of this plane's boolean words (on, off)`},
+		"invalid UTF-8 text": {text: "\xff", want: `"\xff" is not one of this plane's boolean words (on, off)`},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := refusalFor(t, tc.text); got != tc.want {
+				t.Errorf("refused with %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBoolWordsRefusalIsBounded is the other half of the same law: the quoting
+// is capped, so a variable holding a token or a blob cannot reach a log through
+// a refusal.
+func TestBoolWordsRefusalIsBounded(t *testing.T) {
+	t.Parallel()
+
+	for name, text := range map[string]string{
+		"a long single-byte value": strings.Repeat("x", 300),
+		"a long multi-byte value":  strings.Repeat("€", 30),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			checkBounded(t, refusalFor(t, text), text)
+		})
+	}
+}
+
+// checkBounded is the three things a bounded refusal must be, lifted out so
+// that the table above stays a table.
+func checkBounded(t *testing.T, got, text string) {
+	t.Helper()
+
+	if strings.Contains(got, text) {
+		t.Errorf("refused with %q, which carries the whole value", got)
+	}
+
+	if !strings.Contains(got, "(truncated)") {
+		t.Errorf("refused with %q, want it to say the value was cut", got)
+	}
+
+	if len(got) > quoteCap*boundedMessage {
+		t.Errorf("refused with %d bytes, want a message the cap actually bounds", len(got))
+	}
+}
+
+// boundedMessage is how many times [quoteCap] the whole refusal may run to: the
+// sentence around the quoted text is fixed, so a multiple of the cap is what
+// asserts that the value is the only part that varies.
+const boundedMessage = 4
+
+// refusalFor is one refusal's message, through the spelling the option builds.
+//
+// It goes to the spelling rather than through a load because this driver never
+// surfaces this refusal: a text no word spells is a String here, so the message
+// is the spelling's own statement and this is where it is assertable.
+func refusalFor(t *testing.T, text string) string {
+	t.Helper()
+
+	c := defaults()
+	BoolWords("on", "off").apply(&c)
+
+	if c.wordsErr != nil {
+		t.Fatalf("building the spelling: %v", c.wordsErr)
+	}
+
+	_, err := c.bools.Parse(text)
+	if err == nil {
+		t.Fatalf("Parse(%q) was accepted, want a refusal", text)
+	}
+
+	return err.Error()
 }
 
 // TestADuplicatedVariableResolvesTheWayGetenvDoes is #266: a list carrying one
