@@ -5,6 +5,8 @@ This is the whole contract, plus the one call that proves you got it right.
 
 The decision records are [ADR-0004](../adr/0004-source-and-sink.md) for the contract, [ADR-0003](../adr/0003-how-a-leaf-addresses-a-plane.md) for addressing, [ADR-0016](../adr/0016-the-sealed-address-model.md) for the address kinds the contract is signed over, and [ADR-0014](../adr/0014-what-ferrytest-exports.md) for the conformance suite.
 
+[The dump lifecycle](dump-lifecycle.md) is the same contract read the other way round, as seven stages and the ladder of what refuses at each one; read it if you want the shape before the signatures.
+
 Four drivers ship in this repository and are worth reading beside this page: [`driver/env`](../../driver/env/), a read-only flat plane; [`driver/kv`](../../driver/kv/), a flat plane in both directions with a caller-supplied client; [`driver/yaml`](../../driver/yaml/), a tree plane that edits a file in place; and [`driver/http`](../../driver/http/), a read-only plane over a query string or a header block, which is the one that has to spell one address two ways.
 `ferrytest.MemPlane` in [`ferrytest/memplane.go`](../../ferrytest/memplane.go) is a complete, working driver of about the size yours will be, and is the shortest thing to read first.
 
@@ -91,7 +93,8 @@ The cost is stated rather than hidden: a driver serving both directions ships **
 
 ### The three lifetimes
 
-`Bind` is a phase of its own because the three pieces of state have three lifetimes:
+`Bind` is a phase of its own because the three pieces of state have three lifetimes.
+Where the phase sits in the whole call, and what refuses in each of the others, is [the dump lifecycle](dump-lifecycle.md).
 
 | | holds | changes when |
 | --- | --- | --- |
