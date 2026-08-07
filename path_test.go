@@ -535,7 +535,7 @@ func TestANilAddressSetAnswersAsAnEmptyOne(t *testing.T) {
 		t.Errorf("Len() = %d on a nil set, want 0", got)
 	}
 
-	if set.Has(leafAt(At("a"))) {
+	if set.Has(leafOf(At("a"))) {
 		t.Error("Has(leaf /a) = true on a nil set")
 	}
 
