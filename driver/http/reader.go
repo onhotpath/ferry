@@ -17,13 +17,14 @@ import (
 type reader struct {
 	p      plane
 	sep    string
+	bytes  ferry.Spelling[[]byte, string]
 	keys   ferry.KeyFunc
 	static map[string]ferry.Path
 	vals   values
 }
 
-func newReader(p plane, sep string, keys ferry.KeyFunc, static map[string]ferry.Path, vals values) *reader {
-	return &reader{p: p, sep: sep, keys: keys, static: static, vals: vals}
+func newReader(p plane, cfg config, keys ferry.KeyFunc, static map[string]ferry.Path, vals values) *reader {
+	return &reader{p: p, sep: cfg.sep, bytes: cfg.bytes, keys: keys, static: static, vals: vals}
 }
 
 // The optional interfaces this reader carries. Enumeration is one of them
@@ -52,7 +53,8 @@ var (
 // zero-length string and not a null (ADR-0004): neither plane carries type
 // information of its own, so every value either holds is text, and the one
 // distinction they do carry - present against absent - is the one a required
-// field tests.
+// field tests. A source told how this plane spells a payload answers with Bytes
+// instead, and [reader.observe] is where that fork is (ADR-0018).
 //
 // A name the request holds more than one value at is refused here, and
 // [reader.atName] is where the reason is written down.
@@ -65,14 +67,37 @@ func (r *reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error
 	}
 
 	if vs := r.vals[key]; len(vs) > 0 {
-		return atName(vs)
+		return r.atName(vs)
 	}
 
-	if v, ok := r.atPosition(at); ok {
-		return v, nil
+	text, ok := r.atPosition(at)
+	if !ok {
+		return ferry.Value{}, nil
 	}
 
-	return ferry.Value{}, nil
+	return r.observe(text)
+}
+
+// observe is what one value of this plane is at the boundary.
+//
+// It is a String unless this plane was told how it spells a payload, and then
+// it is that spelling's own reading of the text. The fork is plane-wide because
+// a request carries no type information for this driver to consult: what a
+// value is here is what the plane was declared to hold, and a value the
+// spelling refuses is a refusal rather than a fallback to text, since a
+// payload spelling accepts far too much ordinary text for a fallback to mean
+// anything (ADR-0018).
+func (r *reader) observe(text string) (ferry.Value, error) {
+	if r.bytes == nil {
+		return ferry.String(text), nil
+	}
+
+	payload, err := r.bytes.Parse(text)
+	if err != nil {
+		return ferry.Value{}, err
+	}
+
+	return ferry.Bytes(payload), nil
 }
 
 // Probe answers whether the request holds a container at one address.
@@ -139,9 +164,9 @@ func (r *reader) anyUnder(key string) bool {
 // anything enumerated it (ADR-0015, #193, #208). The kind arrives with the
 // address now, so the refusal is made where it is about, during the walk, and
 // core attaches the address to it.
-func atName(vs []string) (ferry.Value, error) {
+func (r *reader) atName(vs []string) (ferry.Value, error) {
 	if len(vs) == 1 {
-		return ferry.String(vs[0]), nil
+		return r.observe(vs[0])
 	}
 
 	return ferry.Value{}, repeated(len(vs))
@@ -153,23 +178,23 @@ func atName(vs []string) (ferry.Value, error) {
 // A key function that refuses the parent is not an error here. The address was
 // asked for, so core already has a name for it, and this is the fallback for an
 // address whose own name holds nothing.
-func (r *reader) atPosition(addr ferry.Path) (ferry.Value, bool) {
+func (r *reader) atPosition(addr ferry.Path) (string, bool) {
 	parent, i, ok := splitIndex(addr)
 	if !ok {
-		return ferry.Value{}, false
+		return "", false
 	}
 
 	key, err := r.keys(parent)
 	if err != nil {
-		return ferry.Value{}, false
+		return "", false
 	}
 
 	vs := r.vals[key]
 	if i >= uint(len(vs)) {
-		return ferry.Value{}, false
+		return "", false
 	}
 
-	return ferry.String(vs[i]), true
+	return vs[i], true
 }
 
 // splitIndex is an address ending in a position, split into what it is under and

@@ -59,6 +59,27 @@
 // alike. Nothing else about a value's type survives either trip, because both
 // planes hold text and neither carries type information of its own.
 //
+// # A plane can carry payloads instead of text
+//
+// A []byte field takes the bytes of the text that arrived, which is what a
+// request holding text means. [BytesAs] says the plane carries payloads instead,
+// and how they are spelled:
+//
+//	src := ferryhttp.NewHeaderSource(ferryhttp.BytesAs(
+//	    ferry.With(ferryhttp.Base64(), ferryhttp.Gzip(), ferryhttp.MaxSize(4<<10))))
+//
+// [Base64] is the spelling and [Gzip] and [MaxSize] are payload steps stacked
+// under it. The step written last is closest to the payload and runs first on
+// the way out, so that source caps the payload, compresses it and spells the
+// result as base64, and a load undoes exactly that. [MaxSize] refuses in both
+// directions, and the outbound refusal happens before anything is written.
+//
+// A spelling is a fact about the whole plane, because a request carries no type
+// information for a driver to consult. Declare one and every value this source
+// reads is a payload, so a string or an int field over the same source is then a
+// value the field cannot take: give the fields that are not payloads a source of
+// their own.
+//
 // # There is no way to write back
 //
 // This package loads only. Nothing in it implements [ferry.Sink], so

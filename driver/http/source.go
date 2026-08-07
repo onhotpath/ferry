@@ -209,12 +209,12 @@ func newSource(p plane, opts []Option) *Source {
 // a request has been supplied. A load with no request in its context is refused
 // when that load starts, which is the first moment the absence is visible.
 func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
-	keys, static, err := bindPlane(s.p, s.cfg.sep, addrs)
+	keys, static, err := bindPlane(s.p, s.cfg, addrs)
 	if err != nil {
 		return nil, err
 	}
 
-	p, sep := s.p, s.cfg.sep
+	p, cfg := s.p, s.cfg
 
 	return func(ctx context.Context) (ferry.Reader, error) {
 		vals, err := p.from(ctx)
@@ -222,15 +222,21 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 			return nil, err
 		}
 
-		return newReader(p, sep, keys.Open(), static, vals), nil
+		return newReader(p, cfg, keys.Open(), static, vals), nil
 	}, nil
 }
 
-// bindPlane is the whole of binding, for either direction: check the separator,
+// bindPlane is the whole of binding, for either direction: check the options,
 // build the checked name table, and read it back the other way.
-func bindPlane(p plane, sep string, addrs *ferry.AddressSet) (*ferry.Keys, map[string]ferry.Path, error) {
+func bindPlane(p plane, cfg config, addrs *ferry.AddressSet) (*ferry.Keys, map[string]ferry.Path, error) {
+	sep := cfg.sep
+
 	if err := p.checkSep(sep); err != nil {
 		return nil, nil, err
+	}
+
+	if cfg.bytesErr != nil {
+		return nil, nil, cfg.bytesErr
 	}
 
 	keys, err := ferry.NewKeys(addrs, p.name, p.key(sep))

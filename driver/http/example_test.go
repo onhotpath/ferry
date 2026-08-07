@@ -206,3 +206,42 @@ func Example_noRequestInTheContext() {
 	// true
 	// true
 }
+
+// Certificate is the schema the payload example loads, and its one field is a
+// payload rather than text.
+type Certificate struct {
+	Cert []byte `ferry:"cert"`
+}
+
+// ExampleBytesAs loads a compressed certificate out of one request's query
+// parameters.
+//
+// The spelling is declared once, with the source, and it is a fact about the
+// whole plane: every value this source reads is a payload spelled that way. The
+// steps under it run innermost first on the way out, so what a client sends is
+// the base64 of the gzip of a payload the size cap already passed, and the load
+// undoes exactly that.
+func ExampleBytesAs() {
+	spelling := ferry.With(ferryhttp.Base64(), ferryhttp.Gzip(), ferryhttp.MaxSize(4<<10))
+	src := ferryhttp.NewQuerySource(ferryhttp.BytesAs(spelling))
+
+	// What a client would have put in the query string.
+	spelled, err := spelling.Render([]byte("-----BEGIN CERTIFICATE-----"))
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	ctx := ferryhttp.WithQuery(context.Background(), url.Values{"cert": {spelled}})
+
+	c, err := ferry.Load[Certificate](ctx, src)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Printf("%s\n", c.Cert)
+	// Output: -----BEGIN CERTIFICATE-----
+}
