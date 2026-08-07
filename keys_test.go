@@ -523,6 +523,24 @@ func (w flatWriter) Ensure(_ context.Context, addr ferry.Container, p ferry.Pres
 	return w.write(addr.Path(), ferry.Null)
 }
 
+// Unset forgets every key under the composite's own key, which is what makes a
+// dump of this fixture a replacement and what lets the open accept a schema
+// holding a map.
+func (w flatWriter) Unset(_ context.Context, addr ferry.CompositeAddr) error {
+	key, err := w.key(addr.Path())
+	if err != nil {
+		return err
+	}
+
+	for held := range w.s.plane {
+		if strings.HasPrefix(held, key) {
+			delete(w.s.plane, held)
+		}
+	}
+
+	return nil
+}
+
 func (w flatWriter) write(addr ferry.Path, v ferry.Value) error {
 	key, err := w.key(addr)
 	if err != nil {

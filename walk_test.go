@@ -41,6 +41,8 @@ type plane struct {
 	// a container address is never handed a Value (ADR-0016).
 	probed  []Path
 	ensured []Path
+	// forgot is every composite Unset was told to let go of, in order.
+	forgot []Path
 	// presence is what Ensure wrote at a container address, which is what a
 	// later Probe of the same plane reads back.
 	presence map[Path]Presence
@@ -143,6 +145,37 @@ func (p *plane) Ensure(_ context.Context, addr Container, held Presence) error {
 	}
 
 	p.presence[at] = held
+
+	return nil
+}
+
+// Unset is the retraction half of the write side: the plane lets go of a
+// composite's address and everything under it, which is what makes the writes
+// that follow a replacement rather than an addition.
+//
+// Every plane in these tests can forget an address, because both shipped sinks
+// can and because a schema holding a composite is refused at the open against
+// one that cannot. The sink that cannot is built where that refusal is
+// asserted, in unset_test.go.
+func (p *plane) Unset(_ context.Context, addr CompositeAddr) error {
+	at := addr.Path()
+	p.forgot = append(p.forgot, at)
+
+	if err := p.fail[at]; err != nil {
+		return err
+	}
+
+	for held := range p.values {
+		if at.isPrefixOf(held) {
+			delete(p.values, held)
+		}
+	}
+
+	for held := range p.presence {
+		if at.isPrefixOf(held) {
+			delete(p.presence, held)
+		}
+	}
 
 	return nil
 }

@@ -294,6 +294,10 @@ func (w renderWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.
 	return ensureThrough(ctx, w.inner, addr, p)
 }
 
+func (w renderWriter) Unset(ctx context.Context, addr ferry.CompositeAddr) error {
+	return unsetThrough(ctx, w.inner, addr)
+}
+
 // shoutingPlane is the memory plane with a reader that changes what it holds,
 // which is the one failure only a round trip can report.
 func shoutingPlane() ferrytest.Plane {
@@ -450,6 +454,10 @@ func (w stagingSpyWriter) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.
 
 func (w stagingSpyWriter) Ensure(ctx context.Context, addr ferry.Container, p ferry.Presence) error {
 	return ensureThrough(ctx, w.inner, addr, p)
+}
+
+func (w stagingSpyWriter) Unset(ctx context.Context, addr ferry.CompositeAddr) error {
+	return unsetThrough(ctx, w.inner, addr)
 }
 
 func (w stagingSpyWriter) Commit(context.Context) error {

@@ -260,6 +260,27 @@ func (a *AddressSet) Seq() iter.Seq[Member] {
 	return slices.Values(a.addrs)
 }
 
+// firstComposite is the earliest composite this set holds, and whether it holds
+// one at all.
+//
+// It is the question "can a dump of this schema need a retraction", answered off
+// the set the compiler already built (ADR-0004). One address is enough because
+// the answer is a yes or a no: a plane either can forget an address or cannot,
+// and the address is carried so that the refusal names a field rather than a
+// capability.
+//
+// The set is sorted segment-wise, so which composite that is does not vary
+// between builds of the same schema.
+func (a *AddressSet) firstComposite() (CompositeAddr, bool) {
+	for m := range a.Seq() {
+		if c, ok := m.(CompositeAddr); ok {
+			return c, true
+		}
+	}
+
+	return CompositeAddr{}, false
+}
+
 // Extension is one declared tag key's address-keyed view: for each address in
 // this set whose field carried that key, the words it carried and the text of
 // each.

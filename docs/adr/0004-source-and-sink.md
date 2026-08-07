@@ -182,6 +182,42 @@ Everything beyond that is opt-in.
 > **Two things moved and both are that amendment's, not this one's.** The address widened from `SectionAddr` to `Container`, because a composite has an own address to ensure exactly as a section does; and the `Presence` argument arrived, because what a value has to say at a container's own address is present-and-empty or null, and a call with no argument can say only one of them.
 > The two spellings are otherwise the same capability, and the earlier print is left in place as the record of what the capability looked like before it had a caller.
 
+> **Corrected under [#306](https://github.com/onhotpath/ferry/issues/306): a schema that needs a retraction is refused at the open against a writer that cannot make one, and the amendment two blocks above says otherwise.**
+>
+> As published, that amendment reads "**A sink without `Unsetter` is refused nothing**, and the sentence above saying otherwise is wrong", and it argues the asymmetry from a sink that forgets by construction: "a sink that builds its plane's whole contents out of the dump alone... already forgets by construction, and refusing it for want of a method would be refusing the driver that has least need of one".
+> That reading was never ratified.
+> The write-session grammar was settled in the first design board and it settled this: retraction is an optional capability, and a schema that needs it against a writer that lacks it refuses at the open, before any I/O.
+> [ADR-0006](0006-defaults-and-zero-values.md)'s own amendment stated the same rule from the value side, and the two ADRs then contradicted each other for as long as the interim reading stood.
+>
+> **The ground the interim reading stood on dissolved.**
+> It was written when nothing implemented `Unsetter`, and its worked example was a sink that writes its plane whole and has nothing to forget.
+> [#300](https://github.com/onhotpath/ferry/issues/300) gave `driver/yaml` an `Unsetter`, [#298](https://github.com/onhotpath/ferry/issues/298) gave `driver/kv` one, and both of them realise the retraction at `Commit` rather than at the call.
+> That is the evidence: a sink whose plane is replaced wholesale still **declares** the capability, because `Unsetter` says the plane can forget an address and never says when the deletion happens.
+> The two shipped sinks are exactly the drivers the interim reading said would be refused for want of a method, and neither is.
+>
+> **The rule, restored.**
+> A dump refuses at the open, addressed at a composite and carrying `ErrPlane`, when the compiled `AddressSet` holds at least one `CompositeAddr` and the opened `Writer` does not implement `Unsetter`.
+> Both halves are needed and neither is knowable earlier: whether the schema can need a retraction is the type's own property, fixed at compile; whether this plane can forget an address is a property of the value an open returns, which `Bind` never sees.
+>
+> **The predicate is the address set and not the value.**
+> A composite is the one place membership comes from the value rather than from the type, so a schema holding one is a schema whose dump has something to replace - whatever this particular value turns out to hold.
+> A dump of an empty slice needs the retraction most of all, so waiting for a value that reaches the composite would refuse later than the fact was known and would make the refusal depend on the data.
+>
+> **`Committer` is not an exemption from it.**
+> The question at the open is what the writer declares, not how or when the plane carries it out: `driver/kv` records the forgotten folders and subtracts them at `Commit`, `driver/yaml` does the same against its parsed document, and both assert `Unsetter` to say so.
+> A sink that satisfies dump-is-replace through its commit does not lack the capability, it implements it; core has no way to distinguish a `Committer` that replaces from one that patches, and inferring one from the other would be reading a promise nobody made.
+>
+> **`Ensurer` does not move, and the asymmetry between the two is now about knowability rather than about knowledge.**
+> Whether a value has anything to say at a container's own address depends on the value, so a missing `Ensurer` is refused no earlier than the address it is wanted at - mid-walk, as it ships.
+> Whether a schema can need a retraction is knowable the moment the writer is in hand, so it refuses there.
+> That is ADR-0011's ladder rule applied to both: nothing is refusable later than it is knowable.
+>
+> **This is breaking for a third-party sink that implements no `Unsetter`** and is handed a schema holding a slice or a map: a dump that used to succeed and quietly accumulate now refuses, at the open, naming the composite.
+> That is the failure the interim reading traded away, and the trade was never anybody's to make.
+>
+> **The suite gains the case**, capability-scaled the other way round from case 17: it runs for a sink that does **not** declare `Unsetter` and skips, out loud, for every sink that does.
+> That is [ADR-0014](0014-what-ferrytest-exports.md)'s list and the amendment is there.
+
 > **Amended under [#135](https://github.com/onhotpath/ferry/issues/135): the dynamic tier's collision rule was a promise this contract had no way to keep, and an eighth optional capability is what makes it keepable.**
 >
 > As published, the section below reads that both collision rules run in two tiers, the second "as each is minted, before the write it belongs to".

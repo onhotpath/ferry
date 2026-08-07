@@ -447,6 +447,23 @@ func (w foldingWriter) Ensure(_ context.Context, addr Container, p Presence) err
 	return nil
 }
 
+// Unset forgets what the composite's own key covers, which is what a dump of a
+// mapping needs of a plane before the open will accept the schema at all.
+func (w foldingWriter) Unset(_ context.Context, addr CompositeAddr) error {
+	key, err := w.key(addr.Path())
+	if err != nil {
+		return err
+	}
+
+	for held := range w.store {
+		if strings.HasPrefix(held, key) {
+			delete(w.store, held)
+		}
+	}
+
+	return nil
+}
+
 // TestOneSinkBindingDumpsTwoShapes is ADR-0012's amended key helper seen from
 // the public API: the minted set belongs to the open, so two dumps through one
 // binding are each injective and are not held injective against each other.

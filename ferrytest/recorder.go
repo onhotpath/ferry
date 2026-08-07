@@ -24,6 +24,7 @@ var (
 	_ ferry.Unsetter  = shellEverything{}
 	_ ferry.Sink      = nowhere{}
 	_ ferry.Writer    = nowhere{}
+	_ ferry.Unsetter  = nowhere{}
 )
 
 // Record reports every address a value maps to and the boundary [ferry.Value]
@@ -674,3 +675,9 @@ func (nowhere) Set(context.Context, ferry.LeafAddr, ferry.Value) error { return 
 // Ensure discards, so that a value with a nil section in it records rather than
 // refusing for want of a plane that was never there.
 func (nowhere) Ensure(context.Context, ferry.Container, ferry.Presence) error { return nil }
+
+// Unset discards, for the same reason and one more: a schema holding a composite
+// is refused at the open against a writer that cannot forget an address, so a
+// sink with nothing behind it would otherwise be unable to record what a map or
+// a slice maps to. Nothing here to forget is the strongest form of forgetting.
+func (nowhere) Unset(context.Context, ferry.CompositeAddr) error { return nil }

@@ -442,9 +442,12 @@ A field the value omits is not written and is not removed either, so silence nev
 A member this dump does write arrives after the unset covering it and has to survive.
 If you stage, resolve what to forget at commit time against what the dump staged, rather than deleting first and putting afterwards: `driver/kv` lists each forgotten folder and subtracts its own staged keys, which is one listing per composite on the commit path.
 
-**Implementing nothing is a legitimate answer, and here it is the quiet one.**
-Unlike `Ensurer`, a sink without this is refused nothing, because an unset is about what your plane *already holds* and core cannot know anything about that.
-A plane without it is additive at a composite - a save of a shorter list leaves the previous save's later positions in place - and that is a property of the plane, so say so in your own documentation.
+**Implementing nothing means your sink cannot take a schema holding a composite at all.**
+Unlike `Ensurer`, which is refused at the address it is wanted at, this one is refused at the **open**: a dump whose compiled address set holds a slice or a map, against a writer that does not implement `Unsetter`, fails before any write, with `ErrPlane`, addressed at the composite.
+A dump that cannot replace is a dump that leaves residue, and that is knowable the moment the writer is in hand rather than halfway through the walk.
+
+**Staging is not a way around it.**
+If your plane replaces its contents wholesale, or resolves what to remove at commit time, implement `Unsetter` and do the deletion where it suits you: the interface says your plane *can* forget an address, never when it does. Both drivers here implement it and both delete at `Commit`.
 `driver/yaml` implements it, and its reason is the one to read if your plane holds a document somebody maintains by hand: its save is atomic but its document is not fresh, so a list that lost members left them in the file and loaded straight back.
 It records the composites core named and subtracts them at `Commit`, which keeps the comments, the anchor and the tag on every member that stays exactly where they were.
 
@@ -1026,7 +1029,7 @@ func TestConformance(t *testing.T) {
 ```
 
 That is the whole file.
-`Driver` is eighteen cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
+`Driver` is nineteen cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
 
 ### The four fields
 
@@ -1074,7 +1077,7 @@ See [plane compatibility](compatibility.md).
 `Want` is one string, which puts an obligation on a plane holding more than one storage unit: what it renders for this comparison must be **deterministic and injective over stores**.
 That is the same obligation your key function already carries.
 
-### The eighteen cases
+### The nineteen cases
 
 1. Every proof the plane can express round-trips, and every kind it declared it cannot carry is refused loudly.
 2. `Bind` succeeds against an unreachable plane, and the refusal lands inside the open.
@@ -1094,6 +1097,7 @@ That is the same obligation your key function already carries.
 16. A reader declaring `Concurrent` produces, under every concurrency budget, the destination and the error report it produces serially.
 17. A sink declaring `Unsetter` replaces the composite it writes: a value whose list lost members, dumped over one that had them, loads back as the second value and only the second.
 18. A sink declaring `Committer` or `Preparer` leaves the plane untouched when a dump is refused: a mapping carrying two keys the plane renders to one key is refused with nothing of that dump observable afterwards.
+19. A sink whose writer declares no `Unsetter` is refused a schema holding a composite, at the open and before any write.
 
 Case 14 is where a driver that keeps mutable state in the closure it handed back is found, and the case creates the concurrency rather than judging it: run your own suite under `go test -race`, which is what actually reports the defect.
 It opens the write half concurrently and walks nothing, because what the contract obligates is the open.
@@ -1106,6 +1110,10 @@ Every load mints its own destination, which is the fresh-destination rule and th
 
 Case 18 is the other capability-scaled one, and it skips twice over: for a sink declaring neither `Committer` nor `Preparer`, which is obliged nothing, and for a plane that takes both of the two keys, which folds nothing and therefore has no refusal to be held to.
 It reads back a leaf and not the mapping, so a source that cannot list is asked nothing it cannot answer, and that leaf is written by the same dump and is not the address that collides - so what the plane holds at it is the whole assertion.
+
+Case 19 is case 17 scaled the other way round: it runs for a sink whose writer declares no `Unsetter` and skips, out loud, for every sink that does declare one, so the two are never both silent and never both run.
+Against such a sink it is a statement rather than a verdict - this plane carries schemas of leaves and sections, and a slice or a map needs a capability it has not declared - and the cases above that dump a composite report the same refusal.
+What it fails is a sink whose declaration follows the address set: a writer carrying the capability for one schema and not for another means nothing a single open declares answers for the next.
 
 Cases 8 and 9 reach a value-minted address by dumping a one-entry map rather than by calling `Set` directly, because the address kinds are sealed and only the compiler mints one.
 Case 9 mints case 8's first key as well as its own: case 8 stops where a write is refused, correctly, and a store that cannot spell a hyphen would otherwise be asked by nothing.

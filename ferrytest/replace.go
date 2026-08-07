@@ -60,22 +60,85 @@ func (d *driverRun) caseReplace() {
 	d.replacedLanded(inst)
 }
 
+// caseUnforgettable is case 19: a sink that cannot forget an address is refused
+// a schema holding a composite, at the open and before any write (ADR-0004).
+//
+// It is case 17 scaled the other way round. Case 17 asks a sink that declared it
+// can forget an address to prove that a dump replaces; this asks the sink that
+// declared nothing what happens instead, and the answer is a refusal rather than
+// a dump that quietly accumulates. So it runs for a sink that does not declare
+// [ferry.Unsetter] and is skipped, out loud, for every sink that does.
+//
+// What it holds the plane to is that the refusal arrives at all. The rung is
+// core's rather than the driver's, and a sink reaching it has one honest reading
+// - this plane carries schemas of leaves and sections, and a slice or a map
+// needs the capability - which is a sentence worth one case rather than the
+// several the same refusal would otherwise be reported by.
+func (d *driverRun) caseUnforgettable() {
+	d.rep.Helper()
+
+	inst := d.plane.Open()
+	if inst.Sink == nil {
+		return
+	}
+
+	declared, opened := d.forgetDeclaration(inst)
+	if !opened {
+		d.skip(caseUnforgettableNo, "the plane's write half could not be opened, so what its writer declares "+
+			"is not a question this case can ask, and cases 2 and 6 are where an open that fails is "+
+			"reported")
+
+		return
+	}
+
+	if declared {
+		d.skip(caseUnforgettableNo, "the plane's sink declares that it can forget an address, so a dump of a "+
+			"composite is a replacement and case 17 is where that is held to")
+
+		return
+	}
+
+	err := ferry.Dump(inst.ctx(), justMap{Map: map[string]string{"k": "v"}}, inst.Sink, d.opts...)
+	if err == nil {
+		d.fail(caseUnforgettableNo, "a dump of a schema holding a mapping succeeded against a sink that does "+
+			"not declare it can forget an address, so what an earlier dump left under "+addrMap.String()+
+			" survives this one and loads back as a value nobody wrote")
+
+		return
+	}
+
+	d.logf("plane %s: case %d: the plane's sink cannot forget an address, so every schema holding a slice or "+
+		"a map is refused at the open: %v", d.plane.Name, caseUnforgettableNo, err)
+}
+
 // declaresForget opens the write half once and asks whether it declared the
 // capability, which is the same question on the same value core's own dump asks:
 // on the writer an open returned, and never on the [ferry.Sink].
 func (d *driverRun) declaresForget(inst Instance) bool {
 	d.rep.Helper()
 
+	declared, _ := d.forgetDeclaration(inst)
+
+	return declared
+}
+
+// forgetDeclaration is the same question with the open kept apart from the
+// answer, because the two cases that ask it want different things of a write
+// half that could not be opened: case 17 has nothing to hold such a plane to,
+// and case 19 must not read a failed open as a plane that cannot forget.
+func (d *driverRun) forgetDeclaration(inst Instance) (declared, opened bool) {
+	d.rep.Helper()
+
 	w, ok := d.openedWriter(inst)
 	if !ok {
-		return false
+		return false, false
 	}
 
 	defer closeIf(w)
 
-	_, declared := w.(ferry.Unsetter)
+	_, declared = w.(ferry.Unsetter)
 
-	return declared
+	return declared, true
 }
 
 // replacedLanded is the other half: what the plane holds afterwards is the

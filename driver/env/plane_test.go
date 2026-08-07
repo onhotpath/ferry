@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/ferrytest"
@@ -107,7 +108,7 @@ func (s standInSink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error)
 	env := s.env
 
 	return func(context.Context) (ferry.Writer, error) {
-		return standInWriter{keys: keys.Open(), env: env}, nil
+		return standInWriter{keys: keys.Open(), env: env, sep: s.cfg.sep}, nil
 	}, nil
 }
 
@@ -116,6 +117,9 @@ func (s standInSink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error)
 type standInWriter struct {
 	keys ferry.KeyFunc
 	env  *fakeEnviron
+	// sep is the separator this plane's keys are built with, which is what the
+	// retraction needs to tell a key under a composite from a key beside it.
+	sep string
 }
 
 // Set writes one address, or refuses a value this plane cannot hold.
@@ -140,6 +144,28 @@ func (w standInWriter) Set(_ context.Context, addr ferry.LeafAddr, v ferry.Value
 	}
 
 	w.env.vars[key] = text
+
+	return nil
+}
+
+// Unset forgets every variable under a composite's own key, which is what makes
+// a dump of a slice or a map a replacement of it: an environment holding
+// TAGS_0, TAGS_1 and TAGS_2 from an earlier dump would otherwise load back as
+// three elements after a dump of one.
+//
+// The prefix is the composite's key followed by the separator, so a variable
+// whose name merely starts with the same letters is not swept up with it.
+func (w standInWriter) Unset(_ context.Context, addr ferry.CompositeAddr) error {
+	key, err := w.keys(addr.Path())
+	if err != nil {
+		return err
+	}
+
+	for held := range w.env.vars {
+		if held == key || strings.HasPrefix(held, key+w.sep) {
+			delete(w.env.vars, held)
+		}
+	}
 
 	return nil
 }

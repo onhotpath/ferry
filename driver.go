@@ -254,11 +254,16 @@ type Ensurer interface {
 // It is idempotent and takes no view of what is there: an address the plane
 // does not hold is not a failure.
 //
-// It is optional, and a Writer without one is refused nothing. Such a plane is
-// additive at a composite, which is a property of that plane rather than of the
-// value. A sink that replaces its whole plane on every dump - a file written
-// through a temporary and swapped into place - already forgets by construction
-// and has nothing to implement.
+// It is optional, and a Writer without one is refused at the open every schema
+// whose address set holds a composite: the refusal wraps [ErrPlane], is
+// addressed at that composite, and arrives before anything is written. So a
+// sink that does not implement it can be handed only schemas of leaves and
+// sections.
+//
+// Implement it whether or not your plane deletes anything at the moment Unset
+// is called. A sink that stages, or one that replaces its whole plane on every
+// dump, still declares the capability and does the forgetting where it suits
+// it: what the method says is that the plane can forget an address, never when.
 type Unsetter interface {
 	Unset(ctx context.Context, addr CompositeAddr) error
 }

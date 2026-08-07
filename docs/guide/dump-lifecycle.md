@@ -47,7 +47,7 @@ The walk is four sub-stages, and their order is the order the plane has to see.
 
 | sub-stage | what happens | the driver method |
 | --- | --- | --- |
-| **Pre-write** | every leaf is encoded and every dynamic address is minted, with no plane in sight | none |
+| **Pre-write** | every leaf is encoded and every dynamic address is minted, then the realised set is offered to the plane | `Prepare` |
 | **Unset** | each composite the dump writes is retracted, so what follows replaces rather than adds | `Unset` |
 | **Write** | each realised address is said, leaves at their own addresses and containers at theirs | `Set`, `Ensure` |
 | **Commit** | the staged writes land | `Commit` |
@@ -120,8 +120,12 @@ A schema can need it and a writer can lack it, and the refusal names the address
 `Unsetter` is about what the **plane already holds**.
 A schema that needs a retraction against a writer that lacks one refuses at **Open**, before any I/O, addressed at the composite: a dump that cannot replace is a dump that will leave residue, and that is knowable the moment the writer is in hand.
 
-> [In flight under [#306](https://github.com/onhotpath/ferry/issues/306): shipped core currently passes over a missing `Unsetter` in silence at the walk rather than refusing at open, and [ADR-0004](../adr/0004-source-and-sink.md) carries an amendment saying so.
-> The refuse-at-open rule above is the ratified one and the one [ADR-0006](../adr/0006-defaults-and-zero-values.md)'s amendment already states; restoring it is a separate pull request.]
+That refusal is ahead of `Prepare` and not beside it, which is the ladder's own order rather than a preference.
+Whether this schema can need a retraction is knowable from the writer alone, so it belongs to the open; which addresses this value realised is knowable only after every leaf is encoded, so `Prepare` belongs to the pre-write.
+A sink that cannot forget an address is therefore never asked to look at a realised set for a dump that was refused before the walk began.
+
+A schema needs one when its address set holds a composite, which is a slice or a map: the one place membership comes from the value rather than from the type, and therefore the one place a plane can be holding a member this dump does not.
+A sink that satisfies replace through its `Commit` still declares `Unsetter` - both shipped sinks do, and both do the deletion at commit time - so staging is not an exemption from the capability.
 
 ## Panics
 
