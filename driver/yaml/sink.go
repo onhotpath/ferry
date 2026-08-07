@@ -61,6 +61,13 @@ const indent = 2
 // everything has been written, and a save that fails leaves your file byte for
 // byte as it was with no temporary left behind.
 //
+// A path that is a symlink is written through rather than replaced: the file the
+// link names is the one a save reads, stages beside and renames over, and the
+// link itself is left exactly as it is. A link that names a file which does not
+// exist yet is followed all the same, and the save writes the file at the end of
+// it. The link is followed once per save, so re-pointing it between two saves
+// sends the second one to the new file.
+//
 // A save that started before somebody else edited the file refuses rather than
 // overwriting them. Because a save is a merge into the document it read, an edit
 // that lands between the read and the rename would be silently dropped, so the
@@ -131,6 +138,11 @@ func (s Sink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 // directory that takes no new file would otherwise be discovered half way
 // through a walk.
 func open(ctx context.Context, path string, cfg config, nodes map[ferry.Path]string) (*writer, error) {
+	// Every path this save uses afterwards is the file itself and never a link
+	// to it: the staging directory, the stat the commit compares, the mode the
+	// replacement inherits, and the rename (#256).
+	path = target(path)
+
 	doc, err := readDoc(ctx, path)
 	if err != nil {
 		return nil, err
@@ -155,6 +167,46 @@ func open(ctx context.Context, path string, cfg config, nodes map[ferry.Path]str
 		shared:  hasAlias(doc),
 		durable: cfg.durable,
 	}, nil
+}
+
+// linkLimit bounds how far a chain of symlinks is followed. It is here for the
+// reason [aliasLimit] is: a path this driver did not create cannot make a save
+// spin, and a cycle of links is the shape that would (#256).
+const linkLimit = 32
+
+// target is the file a save replaces: the path with every symlink on its last
+// component followed, one at a time.
+//
+// The rename is what makes this necessary (#256). Renaming the staged file over
+// a path that is a symlink replaces the link with a regular file, so the link is
+// destroyed, the file it named keeps the document the save was replacing, and
+// every reader of that file goes on reading it. Following the link first puts
+// the whole save - the staging, the stat the commit compares, the mode and the
+// rename - on the file the operator's path actually names.
+//
+// A link that names nothing is followed all the same, and the path at the end of
+// it is what comes back: a save through a dangling link creates that file, which
+// is what an ordinary write through one does.
+//
+// A path that is not a link, and one whose link cannot be read, both answer with
+// what they were handed, which is where an ordinary save comes out. So does a
+// chain longer than the bound, and there the read that follows is what reports
+// the cycle.
+func target(path string) string {
+	for range linkLimit {
+		dest, err := os.Readlink(path)
+		if err != nil {
+			return path
+		}
+
+		if !filepath.IsAbs(dest) {
+			dest = filepath.Join(filepath.Dir(path), dest)
+		}
+
+		path = dest
+	}
+
+	return path
 }
 
 // writer is one open dump: the document being built up, and the file that will
