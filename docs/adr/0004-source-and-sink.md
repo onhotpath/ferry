@@ -253,6 +253,30 @@ Everything beyond that is opt-in.
 >
 > **The sentence above therefore reads four required interfaces and eight optional ones** - `Releaser`, `Committer`, `Enumerator`, `Unsetter`, `Ensurer`, `Concurrent`, `Prober` and `Preparer` - and the count getting larger is [#201](https://github.com/onhotpath/ferry/issues/201)'s standing objection, answered here the way it is answered everywhere else: each one is opt-in by method presence, absence changes nothing, and each has a conformance case that has to exist anyway.
 
+> **Amended under [#159](https://github.com/onhotpath/ferry/issues/159): a ninth optional capability, and it is the first one that changes no behaviour at all.**
+>
+> As published, and after the eight amendments above, every capability on this ladder is a thing the plane can *do*: release, commit, list, forget, ensure, overlap, probe, be told in time.
+> This one is a thing the plane can *say*, and it is here rather than in a new ADR because it is discovered by assertion on a `Reader` or a `Writer` and is opt-in by method presence, which is what makes something a member of this ladder.
+>
+> ```go
+> type PlaneNamer interface { PlaneName(addr Path) (string, bool) }
+> ```
+>
+> It answers the plane's own name for an address, and [ADR-0011](0011-the-error-model.md)'s amendment under the same issue is where the decision it serves is recorded: a report opens with that name instead of ferry's own rendering of the address, and `Error.Address` does not move.
+> A `false` is an address this plane has no name for, and ferry's rendering stands.
+>
+> **It is on `Reader` and `Writer` rather than on `Source` and `Sink`**, which is what makes it a walk-moment capability like every other one here.
+> That is also the whole of why the key-collision refusal at `Bind` keeps ferry's rendering: no reader exists yet, and the refusal's content is that two addresses share one name, so opening it with that shared name would say the same thing twice and locate neither.
+>
+> **One obligation rides with it, and it is this ADR's kind of obligation rather than core's mechanism.**
+> The name must be a function of the address and of the driver's own configuration, and of nothing the plane holds.
+> ADR-0011's rule that ferry's own text never repeats a plane value is otherwise reachable through this channel, and core cannot inspect a string a driver computed.
+> So it is a conformance case, which is [ADR-0014](0014-what-ferrytest-exports.md)'s, and it asks both halves: the same address named twice, and the same address set named identically over an empty plane and a populated one.
+>
+> **The sentence above therefore reads four required interfaces and nine optional ones** - `Releaser`, `Committer`, `Enumerator`, `Unsetter`, `Ensurer`, `Concurrent`, `Prober`, `Preparer` and `PlaneNamer`.
+> All four drivers in this repository implement it, because all four already had the string: the three flattening ones forward the `Keys` they built at `Bind`, and `driver/yaml` renders its segments.
+> `MemPlane` deliberately does not, and that is the same argument it declines `Preparer` on: it keys by the canonical rendering of an address, so ferry's own rendering *is* the plane's own name, and a forwarding method there would be the `return nil` this ADR refuses in a driver for `Close`.
+
 ### `Bind` is a separate phase because the two halves have different lifetimes
 
 This is the one seam that survived every round of simplification, because it is the only thing carrying ADR-0003's before-any-I/O rule.

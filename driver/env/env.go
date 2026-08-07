@@ -83,6 +83,7 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 	return func(context.Context) (ferry.Reader, error) {
 		return &reader{
 			cfg:      cfg,
+			names:    keys,
 			keys:     keys.Open(),
 			declared: declared,
 			sections: sections,
@@ -258,7 +259,13 @@ func environMap(environ []string) map[string]string {
 // consistent environment: a variable that changes half way through a walk would
 // otherwise land in some fields and not others, with nothing saying so.
 type reader struct {
-	cfg      config
+	cfg config
+
+	// names is the binding's checked name table, and it is here for the reports
+	// rather than for the reads: it answers what this plane calls an address
+	// without touching what this open has minted (ADR-0011, #159).
+	names *ferry.Keys
+
 	keys     ferry.KeyFunc
 	declared map[ferry.LeafAddr]string
 	sections map[ferry.SectionAddr]sectionScope
@@ -269,14 +276,24 @@ type reader struct {
 // because listing the environment is trivial, and it is what makes a map-typed
 // or slice-typed field loadable from this plane at all (ADR-0004). Probing is
 // the other, and it is what lets a section be reported present without a value
-// ever being read at its own name (ADR-0016). There is no [ferry.Releaser],
-// because a map holds no resource and a Close that returns nil is
-// indistinguishable in the source from a release somebody forgot.
+// ever being read at its own name (ADR-0016). Naming is the third, and it is
+// what makes a report open with the variable somebody can go and set rather than
+// with ferry's own rendering of the address (ADR-0011, #159). There is no
+// [ferry.Releaser], because a map holds no resource and a Close that returns nil
+// is indistinguishable in the source from a release somebody forgot.
 var (
 	_ ferry.Reader     = (*reader)(nil)
 	_ ferry.Prober     = (*reader)(nil)
 	_ ferry.Enumerator = (*reader)(nil)
+	_ ferry.PlaneNamer = (*reader)(nil)
 )
+
+// PlaneName is the environment variable name an address is read from, which is
+// what a report opens with in place of the address: /db/host prints as DB_HOST.
+//
+// It goes through the table and never through this open's key function, so it
+// records nothing and cannot refuse (ADR-0011, #159).
+func (r *reader) PlaneName(addr ferry.Path) (string, bool) { return r.names.PlaneName(addr) }
 
 // Get answers with what the environment holds at one leaf.
 //

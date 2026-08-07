@@ -58,6 +58,13 @@ Four things follow from it, and they are why the rendering is a string rather th
 - Errors and diagnostics have one spelling for one address.
 - Determinism has something stable to sort, which ADR-0001 makes a package-wide invariant.
 
+> **Amended under [#159](https://github.com/onhotpath/ferry/issues/159): one address still has one canonical rendering, and a diagnostic may print the plane's name for it instead.**
+>
+> As published the third bullet reads that errors and diagnostics have one spelling for one address, and it is cited for the canonical form's value.
+> What it was arguing is that the *address* is single-valued, which is unmoved: `Path.String()` is still injective, still what `Address()` returns, and still what a report sorts on.
+> What moves is only what a report *prints*: a driver that can name the address in its own spelling supplies it through `PlaneNamer`, and `ferry: /db/host:` becomes `ferry: DB_HOST:` on the env plane.
+> Flattening is still the driver's, always - core prints a name it was handed and builds none.
+
 > **Corrected: ADR-0001 states no determinism invariant, and this ADR credits it with one in four places.**
 >
 > As published this line, two of the bullets under [Ordering is segment-wise](#ordering-is-segment-wise-and-this-is-not-the-same-as-sorting-the-rendering), and the map-key argument later on all rest an argument on "ADR-0001's determinism invariant".

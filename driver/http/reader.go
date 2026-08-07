@@ -15,16 +15,23 @@ import (
 // handler in: the binding holds the name table and never changes, and this holds
 // what one load observed.
 type reader struct {
-	p      plane
-	sep    string
-	bytes  ferry.Spelling[[]byte, string]
+	p     plane
+	sep   string
+	bytes ferry.Spelling[[]byte, string]
+
+	// names is the binding's checked name table, held for the reports rather
+	// than for the reads: it answers what this plane calls an address without
+	// minting anything (ADR-0011, #159).
+	names *ferry.Keys
+
 	keys   ferry.KeyFunc
 	static map[string]ferry.Path
 	vals   values
 }
 
-func newReader(p plane, cfg config, keys ferry.KeyFunc, static map[string]ferry.Path, vals values) *reader {
-	return &reader{p: p, sep: cfg.sep, bytes: cfg.bytes, keys: keys, static: static, vals: vals}
+func newReader(p plane, cfg config, names *ferry.Keys, static map[string]ferry.Path, vals values) *reader {
+	return &reader{p: p, sep: cfg.sep, bytes: cfg.bytes, names: names,
+		keys: names.Open(), static: static, vals: vals}
 }
 
 // The optional interfaces this reader carries. Enumeration is one of them
@@ -45,7 +52,17 @@ var (
 	_ ferry.Reader     = (*reader)(nil)
 	_ ferry.Prober     = (*reader)(nil)
 	_ ferry.Enumerator = (*reader)(nil)
+	_ ferry.PlaneNamer = (*reader)(nil)
 )
+
+// PlaneName is the parameter or field name an address arrived in, which is what
+// a report opens with in place of the address: /db/host prints as db.host on the
+// query plane and as Db-Host on the header plane.
+//
+// It reads the table Bind built and never this open's key function, so it mints
+// nothing and cannot refuse. An address this plane has no name for is a false,
+// and ferry's own rendering stands (ADR-0011, #159).
+func (r *reader) PlaneName(addr ferry.Path) (string, bool) { return r.names.PlaneName(addr) }
 
 // Get answers with what the request holds at an address.
 //

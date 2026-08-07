@@ -89,8 +89,8 @@ type OpenWriterFunc func(ctx context.Context) (Writer, error)
 // container where the schema says leaf is a mismatch, and a driver refuses it
 // with the address and what the plane holds rather than answering absence.
 //
-// A Reader may also implement [Prober], [Enumerator] and [Releaser]. All three
-// are discovered by assertion and none is required.
+// A Reader may also implement [Prober], [Enumerator], [Releaser] and
+// [PlaneNamer]. All four are discovered by assertion and none is required.
 type Reader interface {
 	Get(ctx context.Context, addr LeafAddr) (Value, error)
 }
@@ -106,8 +106,9 @@ type Reader interface {
 // null - goes to [Ensurer], because a plane that cannot spell either of those
 // should refuse rather than receive a write it will mis-store.
 //
-// A Writer may also implement [Ensurer], [Unsetter], [Preparer], [Committer]
-// and [Releaser]. All five are discovered by assertion and none is required.
+// A Writer may also implement [Ensurer], [Unsetter], [Preparer], [Committer],
+// [Releaser] and [PlaneNamer]. All six are discovered by assertion and none is
+// required.
 type Writer interface {
 	Set(ctx context.Context, addr LeafAddr, v Value) error
 }
@@ -294,4 +295,33 @@ type Unsetter interface {
 // the plane still holds nothing.
 type Preparer interface {
 	Prepare(ctx context.Context, addrs []Path) error
+}
+
+// PlaneNamer is implemented by a [Reader] or a [Writer] whose plane has a name
+// of its own for an address: the environment variable it is read from, the
+// store key it is written to, the parameter it arrived in.
+//
+// It is what a report opens with. A failure at an address is printed as
+// "ferry: DB_HOST: ..." where the plane names it DB_HOST, and as
+// "ferry: /db/host: ..." where nothing does, so the line names the thing the
+// person reading it can go and change. [Error.Address] is unmoved and still
+// returns the address, so what to match on does not change.
+//
+// PlaneName is called once per located failure, after the run has finished and
+// only where the run failed. Return false for an address this plane has no name
+// for, and ferry's own rendering of it stands. There is no error return: an
+// address the plane cannot name is a false, and a report is not the place to
+// find that out.
+//
+// One obligation, and it is the reason this is a separate interface rather than
+// something core computes. The name must be a function of the address and of
+// the driver's own configuration, and of nothing the plane holds. ferry's own
+// message text never repeats a value the plane supplied, and a name derived
+// from one would put it back in the line.
+//
+// It is optional, in the same idiom as [Releaser]. A driver that flattens gets
+// it from the [Keys] it already built, and a driver that walks segments as a
+// tree renders the segments itself.
+type PlaneNamer interface {
+	PlaneName(addr Path) (string, bool)
 }

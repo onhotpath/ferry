@@ -99,6 +99,11 @@ Note that `Error` is on the pointer receiver, so `errors.AsType[*ferry.Error]` i
 The location is the **plane address wherever the position has one**, and the **Go field path only where it has none**, because a field with no tag never named an address and the whole error is that it never did.
 The space is decided by whether the position has an address and never by the moment: most schema-compile refusals already locate at the plane address, because the field they refuse is tagged.
 
+What is **printed** at the location may be the plane's own name for it rather than ferry's rendering of the address.
+A driver implementing `ferry.PlaneNamer` supplies one, so a failure on the env plane opens `ferry: DB_HOST:` and one in a YAML file opens `ferry: servers[0].host:`, which names the thing the person reading the line can go and change.
+`Address()` is unmoved and still returns the `Path`, and the report still sorts on it, so a report is ordered by address and displayed by name and nothing programmatic changes.
+A driver with no name for an address, or no `PlaneNamer` at all, leaves ferry's own rendering standing.
+
 ### A driver's own error stays reachable
 
 Every element of an aggregate ferry constructs is a `*ferry.Error`.

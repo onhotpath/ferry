@@ -228,9 +228,9 @@ The set is sorted segment-wise and the order is stable across builds of one sche
 A driver that treats its precomputed table as a **closed** set refuses a legal write, because the addresses a value mints are in no address set.
 That is why core hands out a key function rather than a map.
 
-## The eight optional interfaces
+## The nine optional interfaces
 
-All eight are discovered by type assertion on your `Reader` or `Writer`, and none is required.
+All nine are discovered by type assertion on your `Reader` or `Writer`, and none is required.
 
 ```go
 type Releaser interface {
@@ -264,6 +264,10 @@ type Preparer interface {
 type Concurrent interface {
 	MaxConcurrent() int
 }
+
+type PlaneNamer interface {
+	PlaneName(addr ferry.Path) (string, bool)
+}
 ```
 
 | implement | if |
@@ -276,6 +280,7 @@ type Concurrent interface {
 | `Unsetter` | your plane can forget an address and everything under it |
 | `Preparer` | your plane can lose one of two addresses a value determined, and would rather say so before the writes |
 | `Concurrent` | your open instance tolerates overlapping calls |
+| `PlaneNamer` | your plane has a name of its own for an address, and a report reads better opening with it |
 
 Of the four drivers here, `driver/yaml` implements six of the eight and the flat planes implement fewer: `driver/kv` reads with `Prober` and `Enumerator` and writes with `Committer` and `Unsetter`, and its refusal to implement `Ensurer` is a declaration rather than an omission, because a store that holds bytes at keys has no way to say that a container is there and holds nothing.
 
@@ -283,6 +288,7 @@ That spread is the case for making them optional rather than methods on `Reader`
 The same argument holds for `Ensurer`: a stub that stored a zero-length value would make "the section is present and empty" and "the field is empty text" one observation, which is precisely the collision the kinds exist to keep apart.
 `Concurrent` is the one of the eight that is a promise rather than a capability, and it has a section of its own below.
 `Preparer` is the one no driver here implements, because all four either stage or ship no sink at all, and it has a section of its own below too.
+`PlaneNamer` is the one that changes nothing about what your plane does and only what a failure reads as, and it has a section of its own below as well.
 
 ### `Releaser` and `Committer`
 
@@ -534,6 +540,41 @@ A driver whose plane routes across several backends is where the second layer pa
 Declare `Concurrent` and conformance case 16 starts running: the same plane, loaded serially and again under several budgets, has to produce the same destination and the same error report.
 Nothing about the schedule may reach the answer.
 Run your own suite under `go test -race`, which is what reports the race itself - the case creates the concurrency and asserts the observable half, exactly as case 14 does.
+
+### `PlaneNamer`
+
+This is the one optional interface that changes nothing about what your plane does, and only what a failure reads as.
+
+```go
+type PlaneNamer interface {
+	PlaneName(addr ferry.Path) (string, bool)
+}
+```
+
+Implement it and a report opens with your plane's own name for the address instead of ferry's rendering of it: `ferry: DB_HOST: required, and the plane holds nothing at this address` rather than `ferry: /db/host: ...`.
+The line then names the thing the person reading it can go and change.
+
+**A flattening driver already has the answer.**
+`ferry.Keys` computes exactly this string, so the whole implementation is one line:
+
+```go
+func (r *reader) PlaneName(addr ferry.Path) (string, bool) { return r.keys.PlaneName(addr) }
+```
+
+`Keys.PlaneName` reads the precomputed table, computes an address a value minted without recording it, and never touches what an open has minted - so it is safe from any goroutine and cannot manufacture a refusal.
+A tree driver has no key table and renders its segments instead, which is what `driver/yaml` does: `/servers/0/host` prints as `servers[0].host`.
+
+**Return false where you have no name for the address**, and ferry's own rendering stands.
+That is the whole of the escape hatch, and it is what an address your key function refuses looks like from here.
+
+**One obligation, and it is the reason this is an interface rather than something core computes.**
+The name must be a function of the address and of your driver's own configuration, and of nothing the plane holds.
+ferry's own message text never repeats a value the plane supplied, and a name derived from one would put it straight back into the line.
+Conformance case 22 is that obligation made executable: your reader is asked to name the same address twice, and to name the same address set identically over an empty plane and a populated one.
+
+**`Error.Address()` does not move.**
+It still returns the `ferry.Path`, and the report still sorts on it, so a report is ordered by address and displayed by name.
+Nothing programmatic changes, and a caller matching on the address is unaffected.
 
 ## Links
 
@@ -1029,7 +1070,7 @@ func TestConformance(t *testing.T) {
 ```
 
 That is the whole file.
-`Driver` is twenty-one cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
+`Driver` is twenty-two cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
 
 ### The four fields
 
@@ -1077,7 +1118,7 @@ See [plane compatibility](compatibility.md).
 `Want` is one string, which puts an obligation on a plane holding more than one storage unit: what it renders for this comparison must be **deterministic and injective over stores**.
 That is the same obligation your key function already carries.
 
-### The twenty-one cases
+### The twenty-two cases
 
 1. Every proof the plane can express round-trips, and every kind it declared it cannot carry is refused loudly.
 2. `Bind` succeeds against an unreachable plane, and the refusal lands inside the open.
@@ -1100,6 +1141,7 @@ That is the same obligation your key function already carries.
 19. A sink whose writer declares no `Unsetter` is refused a schema holding a composite, at the open and before any write.
 20. A reader declaring `Enumerator` lists a sequence of twelve members by position: they come back where they were written, and not in the order their addresses render.
 21. An address a dump was silent at holds nothing afterwards: a value whose `omitzero` field is at its zero value is dumped, and a load over a seed reads the seed there.
+22. A reader declaring `PlaneNamer` names an address the same way twice, and names it identically over an empty plane and a populated one.
 
 Case 14 is where a driver that keeps mutable state in the closure it handed back is found, and the case creates the concurrency rather than judging it: run your own suite under `go test -race`, which is what actually reports the defect.
 It opens the write half concurrently and walks nothing, because what the contract obligates is the open.
@@ -1126,6 +1168,9 @@ Case 21 is the driver's half of a rule whose other half is core's.
 That `Writer.Set` is never called with an `Absent` is core's guarantee and core's own tests pin it; what a plane can still get wrong is to answer for the silence anyway ([ADR-0006](../adr/0006-defaults-and-zero-values.md)).
 A sink that stores an explicit null at an address the dump never wrote turns "ferry did not write here" into "the plane says this is null", which reads back as a value and refuses at a field that can hold no null.
 It reads one leaf and nothing else, so a source that cannot list is asked nothing it cannot answer.
+
+Case 22 is the third capability-scaled one, and it is skipped, out loud, for every reader that is no `PlaneNamer` - which is every plane keyed by the address itself, and correctly so.
+It asks the same address twice for the determinism, and asks the whole address set over an empty plane and over one carrying the fixture for the purity: what a report opens with may not depend on what the plane turned out to hold.
 
 Cases 8 and 9 reach a value-minted address by dumping a one-entry map rather than by calling `Set` directly, because the address kinds are sealed and only the compiler mints one.
 Case 9 mints case 8's first key as well as its own: case 8 stops where a write is refused, correctly, and a store that cannot spell a hyphen would otherwise be asked by nothing.

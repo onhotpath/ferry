@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	yamlv3 "go.yaml.in/yaml/v3"
 
@@ -328,6 +329,53 @@ func hasAlias(n *yamlv3.Node) bool {
 	}
 
 	return false
+}
+
+// nameInDocument is this document's own name for an address: the members joined with
+// ".", a position written as "[n]". It is what a report opens with in place of
+// ferry's own rendering, so a failure at /servers/0/host reads as
+// servers[0].host, which is how an operator refers to a key in a file
+// (ADR-0011, #159).
+//
+// It builds no plane key and nothing reads it back, so it carries none of the
+// obligations a flattened key has: two addresses rendering alike would be a
+// confusing report and never a lost value, and this driver still has no
+// injectivity question to answer.
+//
+// A member with no name at all has no spelling here, and the empty address has
+// none either, so both are a false and ferry's own rendering stands.
+func nameInDocument(addr ferry.Path) (string, bool) {
+	var b strings.Builder
+
+	for seg := range addr.Segments() {
+		if !writeName(&b, seg) {
+			return "", false
+		}
+	}
+
+	return b.String(), b.Len() > 0
+}
+
+// writeName writes one segment in the document's own spelling, and reports false
+// for a segment a document has no spelling for.
+func writeName(b *strings.Builder, seg ferry.Segment) bool {
+	if seg.Kind() == ferry.Index {
+		b.WriteString("[" + seg.Text() + "]")
+
+		return true
+	}
+
+	if seg.Text() == "" {
+		return false
+	}
+
+	if b.Len() > 0 {
+		b.WriteString(".")
+	}
+
+	b.WriteString(seg.Text())
+
+	return true
 }
 
 // children is the segments the document holds immediately under one address.
