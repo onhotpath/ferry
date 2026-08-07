@@ -115,7 +115,16 @@ func (r *reader) positions(prefixKey string) map[ferry.Segment]struct{} {
 //
 // The address the refusal carries is the container's, because core has one here
 // and core's wins. The position is in the message instead.
+//
+// Every overlap is collected before any of them is reported, and the refusal
+// names the lowest. A request can claim more than one position twice, and
+// returning at the first one found would name a position picked out of a range
+// over a map: the same schema and the same request would say 0 on one run and 2
+// on the next, which is the instability ADR-0003 asks a driver to sort away
+// (#267).
 func (r *reader) fromNames(prefix ferry.Path, prefixKey string, behind, kids map[ferry.Segment]struct{}) error {
+	var clashes []ferry.Segment
+
 	for key := range r.vals {
 		kid, ok := r.child(prefix, prefixKey, key)
 		if !ok {
@@ -123,15 +132,31 @@ func (r *reader) fromNames(prefix ferry.Path, prefixKey string, behind, kids map
 		}
 
 		if _, both := behind[kid]; both {
-			i, _ := position(kid.Text())
+			clashes = append(clashes, kid)
 
-			return twoSpellings(i)
+			continue
 		}
 
 		kids[kid] = struct{}{}
 	}
 
-	return nil
+	if len(clashes) == 0 {
+		return nil
+	}
+
+	return twoSpellings(lowest(clashes))
+}
+
+// lowest is the smallest position among the overlaps, which is the one the
+// refusal names.
+//
+// Smallest rather than first seen, because first seen is map order. It is also
+// the one a caller fixing the request meets first, since a sequence is read from
+// its own start.
+func lowest(clashes []ferry.Segment) uint {
+	out, _ := position(slices.MinFunc(clashes, compareSegments).Text())
+
+	return out
 }
 
 // child is one name resolved to the immediate child of prefix that it lies

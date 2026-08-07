@@ -273,6 +273,36 @@ func TestOnePositionSpelledTwiceIsRefused(t *testing.T) {
 	}
 }
 
+// TestTheRefusalNamesTheSamePositionEveryRun is the refusal above with more than
+// one position claimed twice, which is the shape that exposed where the position
+// came from.
+//
+// The names a request holds are a map, and a refusal picked out of a range over
+// one is picked in Go's randomised order: the same request would name position 0
+// on one run and position 1 on the next. A message that moves like that cannot
+// be asserted on and reads to whoever gets it as though the request had changed,
+// so the lowest position both spellings claim is the one named, every run.
+func TestTheRefusalNamesTheSamePositionEveryRun(t *testing.T) {
+	t.Parallel()
+
+	const query = "tags=a&tags=b&tags=c&tags.0=x&tags.1=y&tags.2=z"
+
+	first := loadErr[filter](t, query).Error()
+
+	if !strings.Contains(first, "position 0") {
+		t.Errorf("the refusal names a position other than the lowest one claimed twice: %v", first)
+	}
+
+	// Enough runs that a position chosen by map iteration order shows itself.
+	// One map with three colliding names lands on the same one every time with
+	// probability far below anything this suite tolerates as flake.
+	for range 64 {
+		if got := loadErr[filter](t, query).Error(); got != first {
+			t.Fatalf("two runs of one request gave %q and %q", first, got)
+		}
+	}
+}
+
 // TestANameAtASectionsOwnAddressIsRefused is the container-side mirror of
 // [TestARepeatedNameIsNeverReadAsOneValue], and it is the request and the
 // destination disagreeing about what an address is.
