@@ -147,6 +147,7 @@ Core supplies the moment and leaves the rest alone.
 **A driver is expected to transform segment text rather than to reject it.**
 A key function that only validates refuses `feature-flags`, which is an ordinary thing to write in a config struct.
 One that maps the hyphen to `_` accepts it and is not thereby less safe, because a many-to-one map out of the address set is precisely what the injectivity check catches.
+Which address sets each choice accepts is the four-column table in [ADR-0003](../adr/0003-how-a-leaf-addresses-a-plane.md), whose last column is the key function `driver/env` ships.
 
 **A hand-rolled key table opts out of both checks, silently.**
 Nothing obliges you to route lookups through `ferry.Keys`, and core is not in the call if you do not, so it can give you no diagnostic.
