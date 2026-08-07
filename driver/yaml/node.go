@@ -216,8 +216,12 @@ func valueOf(n *yamlv3.Node) (ferry.Value, error) {
 // the operator wrote and reaches whichever codec the field declared, and the
 // save writes the tag back untouched. Refusing it instead would fail a document
 // this driver can read perfectly well, and a permissive default cannot be
-// tightened once it has shipped. Reading a tag as some other kind is
-// interpretation, needs a mechanism to say so, and is #156.
+// tightened once it has shipped.
+//
+// It stayed a String when #156 landed, and that is what makes the node word
+// work rather than a gap in it: a field says which tag its value is written
+// under, the value comes back as the text under it, and the two agree. Reading
+// a tag as some other kind would be interpretation, and nothing asks for it.
 func kindOf(tag string) ferry.VKind {
 	switch tag {
 	case nullTag:
@@ -250,6 +254,10 @@ func ownTag(tag string) bool {
 
 // carryTag puts the operator's tag on the node replacing theirs, where this
 // driver has no spelling of its own for it (#155).
+//
+// It runs where nothing declared a tag at the address. A field that did wins,
+// for the reason [writer.retag] records: preserving is what is left to do when
+// nothing said what the address should be written under (#156).
 //
 // A tag at an address is the operator's in the way an anchor turned out to be
 // (#196). This driver never wrote !!timestamp, reads it as a String, and used

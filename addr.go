@@ -267,7 +267,7 @@ func (a *AddressSet) Seq() iter.Seq[Member] {
 //	func (s Sink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 //	    nodeTags := map[ferry.Path]string{}
 //	    for addr, words := range addrs.Extension("yamlext") {
-//	        nodeTags[addr] = "!" + words["node"]
+//	        nodeTags[addr] = words["node"]
 //	    }
 //	    ...
 //	}

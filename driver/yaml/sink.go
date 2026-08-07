@@ -77,18 +77,30 @@ func NewSink(path string, opts ...Option) Sink {
 	return Sink{path: path, cfg: c}
 }
 
-// Bind takes the address set and reads nothing out of it, for the reason
-// [Source.Bind] records.
+// Bind builds no flat key from the address set, for the reason [Source.Bind]
+// records.
 //
-// It does no I/O, so a file that cannot be written is not refused here. The
+// What it does take from the set is the node tag declared at each address,
+// where the registry this save resolves against was given [Extension]. A
+// declaration this driver cannot honour is refused here, which is before the
+// operator's file has been opened.
+//
+// It does no I/O, so a file that cannot be written is not refused here. That
 // refusal lands when the save starts, which is before anything has been
 // written, rather than part way through.
-func (s Sink) Bind(_ *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
-	// Both are read here and not inside the closure, so a Sink reconfigured
-	// after Bind cannot change a binding already handed out (ADR-0012).
+func (s Sink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
+	nodes, err := nodeTags(addrs)
+	if err != nil {
+		return nil, err
+	}
+
+	// All three are read here and not inside the closure, so a Sink reconfigured
+	// after Bind cannot change a binding already handed out (ADR-0012). The
+	// table is the schema's rather than the call's, which is why reading it once
+	// here is the whole idiom (ADR-0021).
 	path, cfg := s.path, s.cfg
 
-	return func(ctx context.Context) (ferry.Writer, error) { return open(ctx, path, cfg) }, nil
+	return func(ctx context.Context) (ferry.Writer, error) { return open(ctx, path, cfg, nodes) }, nil
 }
 
 // open reads the document that is there and stages the file that will replace
@@ -99,7 +111,7 @@ func (s Sink) Bind(_ *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 // document that does not parse would otherwise be silently overwritten, and a
 // directory that takes no new file would otherwise be discovered half way
 // through a walk.
-func open(ctx context.Context, path string, cfg config) (*writer, error) {
+func open(ctx context.Context, path string, cfg config, nodes map[ferry.Path]string) (*writer, error) {
 	doc, err := readDoc(ctx, path)
 	if err != nil {
 		return nil, err
@@ -115,7 +127,14 @@ func open(ctx context.Context, path string, cfg config) (*writer, error) {
 		return nil, fmt.Errorf("%w: no replacement could be staged beside it: %w", ferry.ErrReadOnly, err)
 	}
 
-	return &writer{path: path, doc: doc, tmp: tmp, shared: hasAlias(doc), durable: cfg.durable}, nil
+	return &writer{
+		path:    path,
+		doc:     doc,
+		tmp:     tmp,
+		nodes:   nodes,
+		shared:  hasAlias(doc),
+		durable: cfg.durable,
+	}, nil
 }
 
 // writer is one open dump: the document being built up, and the file that will
@@ -138,11 +157,16 @@ func open(ctx context.Context, path string, cfg config) (*writer, error) {
 // what says whether they can meet at all (#198). Only a document holding an
 // alias makes two addresses reach one node, so a document with none records
 // nothing and every ordinary dump pays for one bool.
+//
+// nodes is the schema's own answer for what tag an address is written under,
+// built at Bind and nil for every save under a registry that declares none
+// (ADR-0021, #156).
 type writer struct {
 	path   string
 	doc    *yamlv3.Node
 	tmp    *os.File
 	claims map[*yamlv3.Node]claim
+	nodes  map[ferry.Path]string
 
 	shared  bool
 	durable bool
@@ -226,12 +250,11 @@ func (w *writer) put(addr ferry.Path, spelled *yamlv3.Node, kind yamlv3.Kind) er
 	// being replaced. The value and the style are ferry's.
 	spelled.HeadComment, spelled.LineComment, spelled.FootComment = at.HeadComment, at.LineComment, at.FootComment
 
-	// So is the tag, where this driver has no spelling of its own for it and
-	// the kind at the address has not changed (#155). A !!timestamp is the
-	// operator's the way the anchor below is: this driver did not write it, it
-	// reads the scalar as a String whatever the tag says, and dropping it made
-	// a document lose on a save what a save had not been asked to touch.
-	carryTag(at, spelled)
+	// The tag is the schema's where a field declared one and the operator's
+	// otherwise, which is what [retag] settles (#155, #156).
+	if err := w.retag(addr, at, spelled); err != nil {
+		return ferry.ErrorAt(addr, err)
+	}
 
 	// So is the anchor, for the same reason and with a sharper consequence
 	// (#196): dropping it leaves every alias to this node dangling, so the save
@@ -243,6 +266,58 @@ func (w *writer) put(addr ferry.Path, spelled *yamlv3.Node, kind yamlv3.Kind) er
 	*at = *spelled
 
 	return nil
+}
+
+// retag settles which tag the node being written carries.
+//
+// Where the schema declared one at this address it wins, and it wins over the
+// operator's for the reason the declaration exists (#156): the tag in the file
+// is what a save had no way of knowing, and the tag on the field is the answer
+// to that, so a document that never carried one still comes out with it. Where
+// nothing declared one, [carryTag] keeps whatever the operator wrote, which is
+// what a save that was asked to change nothing must do (#155).
+//
+// A container write reaches here too, and never with a declaration on it:
+// [nodeTags] refuses one at a section's or a composite's own address, so the
+// kind check below is about the value and not about the shape.
+func (w *writer) retag(addr ferry.Path, at, spelled *yamlv3.Node) error {
+	tag, declared := w.nodes[addr]
+	if !declared || spelled.Kind != yamlv3.ScalarNode {
+		carryTag(at, spelled)
+
+		return nil
+	}
+
+	return writeUnder(tag, spelled)
+}
+
+// writeUnder puts a declared tag on the node, or refuses the value that cannot
+// come back from under it.
+//
+// The kind is the whole of the check, and it is [carryTag]'s guard read in the
+// other direction: this plane reads a tag it has no arm for as a String
+// (see [kindOf]), so a String is the value a declared tag returns unchanged and
+// anything else would come back as text. Refusing is louder than dropping the
+// tag, and it is the honest answer to a field that asked for a node type its
+// own value cannot survive.
+//
+// A Null is written plainly instead, and that is not an exception smuggled in:
+// there is no value at a null for a node type to describe, the address reads
+// back null under either spelling, and refusing would have made an optional
+// field that happens to be unset fail a save.
+func writeUnder(tag string, spelled *yamlv3.Node) error {
+	switch kindOf(spelled.Tag) {
+	case ferry.KindNull:
+		return nil
+	case ferry.KindString:
+		spelled.Tag, spelled.Style = tag, spelled.Style|yamlv3.TaggedStyle
+
+		return nil
+	default:
+		return fmt.Errorf("%w: this address declares the node tag %s and holds a value this plane writes as %s: "+
+			"a scalar under a tag this plane does not read comes back as a string, so the value would not "+
+			"survive the trip", ferry.ErrValue, tag, spelled.Tag)
+	}
 }
 
 // claim records that addr wrote this node, and refuses a second address that

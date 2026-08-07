@@ -81,6 +81,55 @@ owner: platform-team
 	// owner: platform-team
 }
 
+// ExampleExtension declares this driver's own struct tag key, so a field can
+// say what node type its value is written as.
+//
+// The document going in carries no tag at either address, and the one coming
+// out carries the one the field declared. That is the half a save could not do
+// before: the boundary hands a driver a value and not a Go type, so nothing in
+// a plain `wait: 30s` said this address wanted !mycompany:duration.
+//
+// It is quoted in this package's README.
+func ExampleExtension() {
+	type config struct {
+		Wait string `ferry:"wait" yamlext:"node=!mycompany:duration"`
+		Port int    `ferry:"port"`
+	}
+
+	registry := ferry.NewRegistry(ferry.WithTagKeys(yaml.Extension()))
+
+	path := writeExamplePlane("wait: 30s\nport: 8080\n")
+	defer func() { _ = os.RemoveAll(filepath.Dir(path)) }()
+
+	ctx := context.Background()
+
+	cfg, err := ferry.Load[config](ctx, yaml.NewSource(path), ferry.WithRegistry(registry))
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	if err := ferry.Dump(ctx, cfg, yaml.NewSink(path), ferry.WithRegistry(registry)); err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	back, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Print(string(back))
+
+	// Output:
+	// wait: !mycompany:duration 30s
+	// port: 8080
+}
+
 // writeExamplePlane puts the example's starting document in a directory of its
 // own, because the sink stages its replacement beside the plane.
 func writeExamplePlane(doc string) string {

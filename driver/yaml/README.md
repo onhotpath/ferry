@@ -69,7 +69,7 @@ That is the reason to use this rather than marshalling a struct to YAML: a confi
 
 A scalar's tag is not on that list.
 A tag this package has no reading of its own for survives a save at a key your struct maps, so `when: !!timestamp 2026-08-04` is saved back with its tag still on it.
-Two cases replace it: a tag this package writes itself, and a tag whose value is no longer the kind it was, which is stale in the way the old quoting would be.
+Three cases replace it: a tag this package writes itself, a tag whose value is no longer the kind it was, which is stale in the way the old quoting would be, and a tag your own field declared - see [A field can say what node type it is written as](#a-field-can-say-what-node-type-it-is-written-as).
 
 Such a tag is carried and not interpreted: `!!timestamp 2026-08-04` and `!mycompany:duration 30s` both load as the string after the tag, whatever the tag says, and reach whichever codec your field declared.
 
@@ -139,6 +139,48 @@ value: 8080  # a number, and "8080" would be a string
 
 A `[]byte` field is saved as standard YAML `!!binary`, base64.
 
+## A field can say what node type it is written as
+
+Keeping a tag the file already had is one thing.
+Putting one there is another, and a save cannot guess it: what crosses ferry's boundary is a value and not a Go type, so `wait: 30s` says nothing about wanting `!mycompany:duration`.
+
+`yaml.Extension()` is where a field says it.
+Declare this package's struct tag key on a registry, annotate the field, and pass the registry to the call:
+
+```go
+registry := ferry.NewRegistry(ferry.WithTagKeys(yaml.Extension()))
+
+type config struct {
+	Wait string `ferry:"wait" yamlext:"node=!mycompany:duration"`
+	Port int    `ferry:"port"`
+}
+
+cfg, err := ferry.Load[config](ctx, yaml.NewSource(path), ferry.WithRegistry(registry))
+err = ferry.Dump(ctx, cfg, yaml.NewSink(path), ferry.WithRegistry(registry))
+```
+
+`wait: 30s` in, and out:
+
+```yaml
+wait: !mycompany:duration 30s
+port: 8080
+```
+
+That is `ExampleExtension` in [`example_test.go`](example_test.go), trimmed of its setup.
+
+The tag is written whether or not the file had one there, and a tag the file did have at that address loses to the declared one.
+A load needs nothing, because the value arrives as the text after the tag either way - which is what lets the annotation survive a load, a save and a second load with nothing lost.
+
+Four things it refuses.
+A tag that is not a tag: one not starting with `!`, one naming nothing after it, or one with a space in it.
+A tag this package spells itself, `!!str` and `!!int` and the rest, because the value's own kind decides those.
+The address of a struct, a list or a map, because a node tag names how one value is written and those are places rather than values - annotate the fields under them.
+And a value this plane writes as a number, a boolean or bytes, refused when that value is written, because a scalar under a tag this plane does not read comes back as a string and the value would not survive the trip.
+A null is written plainly rather than refused, so an optional field that happens to be unset does not fail a save.
+
+The key is `yamlext` and not `yaml`, which is the key go-yaml's own marshaller reads: a field may carry both.
+A registry that was not given the declaration reads none of it, and a save writes what it always wrote.
+
 ## Loading and saving are separate types
 
 `yaml.NewSource(path)` reads and `yaml.NewSink(path)` writes, so the path is written twice.
@@ -173,7 +215,8 @@ So a string field holding bytes that are not valid UTF-8 cannot be saved to YAML
 Rather than mangling the value or inventing a private YAML tag for it, saving fails and names the field, and your file is left alone.
 If you need to move arbitrary bytes through a YAML file, declare that field `[]byte` instead, which is saved as `!!binary`.
 
-This is a known limitation and is tracked in [#156](https://github.com/onhotpath/ferry/issues/156).
+This is a known limitation and is tracked in [#157](https://github.com/onhotpath/ferry/issues/157).
+A node tag does not reach it: a `string` field carries no custom type to annotate, and which of your strings are not valid UTF-8 is not something you can know in advance.
 
 ## More
 
