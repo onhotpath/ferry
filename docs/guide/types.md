@@ -393,11 +393,21 @@ func TestMyCodecs(t *testing.T) {
 
 The third column of a proof - the golden - is the one that pins the representation.
 A round trip tests a function against its own inverse, so changing both halves together is invisible to it.
+
+The golden is required, and there is no golden that means "nothing was written".
+A composite carrying elements writes nothing at its own address, so a case for one names the address inside the value where its golden lives (ADR-0005):
+
+```go
+ferrytest.Inside([]string{""}, ferry.Path{}.Elem(0), ferry.String(""))
+ferrytest.Inside(map[string]string{"http": "1"}, ferry.At("http"), ferry.String("1"))
+```
+
+`ferrytest.At` is the same thing pinned at the value's own address, which is where a leaf and an element-free composite land.
 Measured: with `time.Duration`'s codec replaced by one writing `30000000000`, the round-trip property alone reports zero failures (ADR-0005).
 
 ## Where the promise ends
 
-The table above is nineteen rows and 57 cases in executable form, as `ferrytest.CoreTypes()` (ADR-0014), and it covers all eighteen members core admits.
+The table above is nineteen rows and 58 cases in executable form, as `ferrytest.CoreTypes()` (ADR-0014), and it covers all eighteen members core admits.
 **The promise is exactly as wide as that table.**
 An admitted member with no row is outside the promise by accident rather than by decision, which is why `ferrytest.Complete` joins the table against core's own set rather than trusting the count.
 

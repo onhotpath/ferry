@@ -75,9 +75,11 @@ func TestHeaderDriverAtWiderSeparator(t *testing.T) {
 //     dimensions and the two tiers compose, and the shape whose plane keys the
 //     static table never held.
 //
-// The golden column is Absent for all of them, which is not a gap: a composite
-// with elements writes nothing at its own address, so Absent is a true report
-// that ferry encoded nothing there (ADR-0005).
+// A composite with elements writes nothing at its own address (ADR-0005), so
+// each case pins its golden at a minted address inside the value instead: what
+// ferry encoded there is the only representation such a case has, and the
+// zero-length element is the one whose golden says in as many words that empty
+// is not absence here.
 func TestRoundTripDynamic(t *testing.T) {
 	t.Parallel()
 
@@ -93,17 +95,20 @@ func TestRoundTripDynamic(t *testing.T) {
 func dynamicProofs() []ferrytest.Proof {
 	return []ferrytest.Proof{
 		ferrytest.Type("[]string", ferrytest.SliceEq(ferrytest.Eq[string]),
-			ferrytest.At([]string{"a"}, ferry.Value{}),
-			ferrytest.At([]string{"a", "b", "c"}, ferry.Value{}),
-			ferrytest.At([]string{"a", "", "c"}, ferry.Value{}),
+			ferrytest.Inside([]string{"a"}, ferry.Path{}.Elem(0), ferry.String("a")),
+			ferrytest.Inside([]string{"a", "b", "c"}, ferry.Path{}.Elem(2), ferry.String("c")),
+			ferrytest.Inside([]string{"a", "", "c"}, ferry.Path{}.Elem(1), ferry.String("")),
 		),
 		ferrytest.Type("map[string]string", ferrytest.MapEq[string](ferrytest.Eq[string]),
-			ferrytest.At(map[string]string{"sort": "asc"}, ferry.Value{}),
-			ferrytest.At(map[string]string{"sort": "asc", "page": "2", "q": ""}, ferry.Value{}),
+			ferrytest.Inside(map[string]string{"sort": "asc"}, ferry.At("sort"), ferry.String("asc")),
+			ferrytest.Inside(map[string]string{"sort": "asc", "page": "2", "q": ""},
+				ferry.At("q"), ferry.String("")),
 		),
 		ferrytest.Type("map[string][]string", ferrytest.MapEq[string](ferrytest.SliceEq(ferrytest.Eq[string])),
-			ferrytest.At(map[string][]string{"origin": {"a"}}, ferry.Value{}),
-			ferrytest.At(map[string][]string{"origin": {"a", "b"}}, ferry.Value{}),
+			ferrytest.Inside(map[string][]string{"origin": {"a"}},
+				ferry.At("origin").Elem(0), ferry.String("a")),
+			ferrytest.Inside(map[string][]string{"origin": {"a", "b"}},
+				ferry.At("origin").Elem(1), ferry.String("b")),
 		),
 	}
 }
@@ -124,7 +129,8 @@ func TestRoundTripAtWiderSeparator(t *testing.T) {
 
 		ferrytest.RoundTrip(t, queryPlaneFor(Separator("..")), []ferrytest.Proof{
 			ferrytest.Type("map[string]string", ferrytest.MapEq[string](ferrytest.Eq[string]),
-				ferrytest.At(map[string]string{"db.host": "h", "db.port": "p"}, ferry.Value{}),
+				ferrytest.Inside(map[string]string{"db.host": "h", "db.port": "p"},
+					ferry.At("db.host"), ferry.String("h")),
 			),
 		})
 	})
@@ -134,7 +140,8 @@ func TestRoundTripAtWiderSeparator(t *testing.T) {
 
 		ferrytest.RoundTrip(t, headerPlaneFor(Separator("--")), []ferrytest.Proof{
 			ferrytest.Type("map[string]string", ferrytest.MapEq[string](ferrytest.Eq[string]),
-				ferrytest.At(map[string]string{"db-host": "h", "db-port": "p"}, ferry.Value{}),
+				ferrytest.Inside(map[string]string{"db-host": "h", "db-port": "p"},
+					ferry.At("db-host"), ferry.String("h")),
 			),
 		})
 	})

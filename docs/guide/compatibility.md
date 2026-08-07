@@ -49,7 +49,7 @@ Which tier every member of the type set is in is in [the type set guide](types.m
 
 ### Tier one is smaller than it looks
 
-`ferrytest.CoreTypes()` is nineteen rows and 57 cases (ADR-0014), covering all eighteen members core admits.
+`ferrytest.CoreTypes()` is nineteen rows and 58 cases (ADR-0014), covering all eighteen members core admits.
 
 **The promise is exactly as wide as that table.**
 An admitted member with no golden row is in tier three by accident rather than by decision, which is why `ferrytest.Complete` joins the table against core's own set rather than trusting a count.

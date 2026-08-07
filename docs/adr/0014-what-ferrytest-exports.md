@@ -32,7 +32,7 @@ Every number below is from that prototype unless it cites the survey.
 
 | The ticket asked | Closed | Where |
 | --- | --- | --- |
-| the package's exported surface, as a list | **yes**, 26 names *(19 as published; the reconciliation is [there](#the-surface))* | [The surface](#the-surface) |
+| the package's exported surface, as a list | **yes**, 27 names *(19 as published; the reconciliation is [there](#the-surface))* | [The surface](#the-surface) |
 | one entry point or two for the harness and the driver suite | **three**, and two of them are not what the ticket expected | [Three entry points, not five](#three-entry-points-not-five) |
 | how a registry reaches the harness | **as an Option**, and a parameter is refused on ADR-0004's own grounds | [How a registry reaches the harness](#how-a-registry-reaches-the-harness) |
 | whether the completeness check is one function over two tables | **yes, over three**, joined by `reflect.Type` | [One completeness check](#one-completeness-check-joined-by-type) |
@@ -236,16 +236,41 @@ func TestMyConfig(t *testing.T) {
 
 ### The surface
 
-**Twenty-six exported names, in one package.**
+**Twenty-seven exported names, in one package.**
 
 | group | names |
 | --- | --- |
 | what a caller describes | `Plane`, `Instance`, `Artefact`, `Golden`, `T` |
-| the proof | `Proof`, `Type`, `Case`, `At`, `Eq`, `BitEq`, `SliceEq`, `MapEq`, `PtrEq` |
+| the proof | `Proof`, `Type`, `Case`, `At`, `Inside`, `Eq`, `BitEq`, `SliceEq`, `MapEq`, `PtrEq` |
 | the suites | `RoundTrip`, `Driver`, `Codec`, `Complete`, `Injective` |
 | the apparatus | `MemPlane`, `Static`, `Record` |
 | the table | `CoreTypes` |
 | the assertion | `Want`, `DiffErrors`, `CheckErrors` |
+
+> **Amended under [#114](https://github.com/onhotpath/ferry/issues/114) and [#237](https://github.com/onhotpath/ferry/issues/237): a `Case` names the address it proves, the count is twenty-seven, and a `Case` with no golden fails.**
+>
+> As published a `Case` was a value and a golden, and the address it was read at was the harness's own wrapper address and nothing else.
+> Two things followed from that and both were defects.
+>
+> **A composite carrying elements had no golden it could carry.**
+> Such a composite writes its elements one address down and writes nothing at its own address, so the only `ferry.Value` a case pinned there could hold was `Absent`.
+> That is a plane reporting that it does not hold an address rather than a representation ferry chose, and it is why [the table](#one-completeness-check-joined-by-type) carried two of ADR-0005's three mandated composite values and not three.
+> #114 recorded the collision as an arithmetic one - three mandated values against a fixed 57 - and it is structural: no case could name an element.
+>
+> **And a forgotten golden passed in silence for exactly those types.**
+> `Case` is an exported struct, so `Case[T]{Value: v}` omits `Want`, and the zero `ferry.Value` is `Absent`.
+> For a leaf that failed, because ferry writes a value at the leaf's address; for a composite carrying elements the recorded value at the container address was `Absent` too, and the comparison succeeded against a golden nobody wrote.
+> `Case`'s own doc promised the opposite, and the promise was enforced by nothing shipped: the structural check lived in a `_test.go` and ran over `CoreTypes()` only, never over a third party's proofs.
+>
+> **What moves.**
+> `Case` gains an `Addr ferry.Path`, the address inside the value where the golden is pinned, relative to the value's own address, and the zero `Path` is the value's own address - so every case written before this reads exactly as it did.
+> `Inside(value, addr, want)` is the constructor for a case that names one, beside `At(value, want)` for a case that does not, and it is the twenty-seventh name.
+> A case whose `Want` is the zero `ferry.Value` is reported by `RoundTrip` rather than run, before the narrowing `Driver` applies, so a forgotten field is a forgotten field in both halves of case 1 rather than a demand that a driver refuse a dump nobody wrote.
+> **`Absent` is not a golden anywhere.** "The golden is required, not optional" is now true for the types where forgetting it was easiest, which is what #237 asked for.
+>
+> **The count of cases moves with it**, to 58: the composite row carries its mandated third value, `[]string{""}`, with its golden pinned at the element rather than at the container.
+> ADR-0005 is amended in place beside this, saying what the third value is for now that it is expressible.
+> Two shipped conformance tests leaned on the hole deliberately - `driver/env` and `driver/http` each ran dynamic composites with an `Absent` golden column - and both now pin what ferry encoded at a minted address inside the value, which is a stronger assertion than the one they replace and the only one those addresses ever had.
 
 > **Amended under [#175](https://github.com/onhotpath/ferry/issues/175): the count is twenty-six and the table is the whole of it.**
 >
@@ -361,9 +386,30 @@ ADR-0012's `Observe` is Load-side only, so there is no other way to see what fer
 The recording sink ADR-0002 admitted as apparatus is what makes column three possible on a real driver, which is the first time that admission has been load-bearing rather than convenient.
 
 **What it costs, counted.**
-Nineteen rows, **57 cases each carrying a golden**, against eighteen rows of bare values.
+Nineteen rows, **58 cases each carrying a golden**, against eighteen rows of bare values.
 *(As published this said "eleven rows", which was the count on the tip this prototype was cut from.
 [#41](https://github.com/onhotpath/ferry/issues/41) has since added seven, and none of them carries a golden.)*
+
+> **Amended under [#114](https://github.com/onhotpath/ferry/issues/114): the count is 58, and it is derived rather than fixed.**
+>
+> As published this read "57 cases", which was the total the table could reach while every case was pinned at one address.
+> The number is not a decision of this ADR's: it is the sum of ADR-0005's value lists, and each row's share is asserted from the property that put its values on the list rather than from the number.
+>
+> | rows | each | cases |
+> | --- | --- | --- |
+> | `bool` | the type | 2 |
+> | `string` | ADR-0005's four mandated values | 4 |
+> | `int`, `int8`, `int16`, `int32`, `int64` | the zero and both bounds of the width | 15 |
+> | `uint`, `uint8`, `uint16`, `uint32`, `uint64` | the upper bound and the zero, which is also the lower | 10 |
+> | `float32`, `float64` | ADR-0005's nine mandated values | 18 |
+> | `[]byte` | nil, empty and raw bytes, a leaf at kind `Bytes` | 3 |
+> | `[3]byte` | raw bytes | 1 |
+> | `time.Duration`, `time.Time` | the pinned representation ferry owns by type identity | 2 |
+> | `[]string` | ADR-0005's three mandated composite values | 3 |
+>
+> That is 58, and the row that moved is the last: it carried nil and empty, and now carries the third value ADR-0005 mandates, `[]string{""}`, whose golden is pinned at the element rather than at the container.
+> The arithmetic in #114 - "the minimum total is exactly 57, and there is no slack anywhere" - was right about the arithmetic and wrong about which number was load-bearing.
+> The 57 was a measurement of a table with no address column, so it is this figure that moves and not ADR-0005's list.
 That is the point rather than the price, in ADR-0005's own words: "a contributor adding a type cannot avoid stating what it looks like on a plane".
 
 **A golden file was considered and refused.**
@@ -736,11 +782,12 @@ That is weaker than a compile-time signal and it is the only shape available, be
 - **The golden column runs through the entry point for the first time.**
   ADR-0005 specified it, two prototypes implemented halves of it, and the half that ran through the engine could not see a representation.
   That is [ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md)'s promise acquiring the instrument it rests on.
-- **The table is nineteen rows and 57 cases, each carrying a golden**, where the one it replaces is eighteen rows of bare values.
+- **The table is nineteen rows and 58 cases, each carrying a golden**, where the one it replaces is eighteen rows of bare values.
   The cost is real: adding a type to core's set is now four columns of work.
   *(As published this read "grew from eleven rows to nineteen" and credited this ADR with closing [#41](https://github.com/onhotpath/ferry/issues/41)'s D18.
   #41 closed the membership half itself, at `0d86c00`.
-  The golden column is what this table adds.)*
+  The golden column is what this table adds.
+  The count read 57 until [#114](https://github.com/onhotpath/ferry/issues/114) gave a case an address, and the per-row derivation is recorded with the figure itself.)*
 - **A registry reaches the harness as an Option**, so the package adds no second way to say what `ferry.WithRegistry` says, and the proofs become a slice.
 - **The completeness check joins by `reflect.Type`**, so a proof's name is a label rather than a key and the `[N]byte` special case disappears.
   The prototype's own comment claimed the type could not be recovered; one method recovers it.

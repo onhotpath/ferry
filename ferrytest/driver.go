@@ -215,7 +215,7 @@ func (p typeProof[T]) refuseCase(h *harness, i int, c Case[T]) {
 
 	h.rep.Errorf("%s: %s, and took %#v at %s without refusing it: a value a plane cannot carry is a loud "+
 		"refusal and never a value quietly mangled",
-		h.label(p.name, i), h.disclaims(c.Want), c.Want, holderAddr)
+		h.label(p.name, i), h.disclaims(c.Want), c.Want, caseAddr(c.Addr))
 }
 
 // caseBind is case 2: Bind succeeds against an unreachable plane, and the

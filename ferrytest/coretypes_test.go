@@ -30,12 +30,12 @@ import (
 // promise and has to be a change somebody made on purpose.
 const (
 	wantRows  = 19
-	wantCases = 57
+	wantCases = 58
 )
 
-// TestCoreTypesIsNineteenRowsAndFiftySevenCases is the count, taken from the
+// TestCoreTypesIsNineteenRowsAndFiftyEightCases is the count, taken from the
 // table rather than from the comment above it.
-func TestCoreTypesIsNineteenRowsAndFiftySevenCases(t *testing.T) {
+func TestCoreTypesIsNineteenRowsAndFiftyEightCases(t *testing.T) {
 	t.Parallel()
 
 	rows := CoreTypes()
@@ -46,7 +46,7 @@ func TestCoreTypesIsNineteenRowsAndFiftySevenCases(t *testing.T) {
 	total := 0
 
 	for _, p := range rows {
-		_, goldens := p.columns()
+		_, _, goldens := p.columns()
 		total += len(goldens)
 	}
 
@@ -71,11 +71,11 @@ func TestEveryRowCarriesARelationAndEveryCaseAGolden(t *testing.T) {
 	}
 }
 
-// checkColumns is one row's two unreadable columns.
+// checkColumns is one row's unreadable columns.
 func checkColumns(t *testing.T, p Proof) {
 	t.Helper()
 
-	hasRelation, goldens := p.columns()
+	hasRelation, _, goldens := p.columns()
 	if !hasRelation {
 		t.Errorf("%s carries no equality relation", p.Name())
 	}
@@ -145,24 +145,70 @@ func TestCoreTypesCoversEveryAdmittedMember(t *testing.T) {
 	}
 }
 
-// goldensOf is one row's third column, looked up by the type it discharges,
-// which is the same join the completeness check makes.
+// goldensOf is one row's golden column, which is what most of the assertions
+// below read.
 func goldensOf[T any](t *testing.T) []ferry.Value {
+	t.Helper()
+
+	_, goldens := casesOf[T](t)
+
+	return goldens
+}
+
+// TestTheCompositeRowCarriesTheMandatedValues is ADR-0005's composite list: nil,
+// empty, and one containing an empty element.
+//
+// The three are asserted by the property that puts each on the list rather than
+// by restating the row. The first two write Null at the composite's own address,
+// which is the zero [ferry.Path] here, and are one observation through a plane;
+// the third writes nothing at that address at all, so its golden is pinned at the
+// element and is the only case in the table whose address is not the value's own.
+// That is the whole of what the third value is for, and it is what the count
+// moved for.
+func TestTheCompositeRowCarriesTheMandatedValues(t *testing.T) {
+	t.Parallel()
+
+	addrs, goldens := casesOf[[]string](t)
+
+	const mandated = 3
+	if len(goldens) != mandated {
+		t.Fatalf("[]string carries %d cases, want ADR-0005's %d values", len(goldens), mandated)
+	}
+
+	for i := range 2 {
+		if addrs[i] != (ferry.Path{}) || goldens[i] != ferry.Null {
+			t.Errorf("[]string: case %d pins %#v at %q, want null at the composite's own address",
+				i, goldens[i], addrs[i])
+		}
+	}
+
+	if want := (ferry.Path{}).Elem(0); addrs[2] != want {
+		t.Errorf("[]string: case 2 pins its golden at %q, want the element address %q", addrs[2], want)
+	}
+
+	if goldens[2] != ferry.String("") {
+		t.Errorf("[]string: case 2 pins %#v, want the empty element it contains", goldens[2])
+	}
+}
+
+// casesOf is one row's address and golden columns, looked up by the type it
+// discharges, which is the same join the completeness check makes.
+func casesOf[T any](t *testing.T) ([]ferry.Path, []ferry.Value) {
 	t.Helper()
 
 	want := reflect.TypeFor[T]()
 
 	for _, p := range CoreTypes() {
 		if p.Type() == want {
-			_, goldens := p.columns()
+			_, addrs, goldens := p.columns()
 
-			return goldens
+			return addrs, goldens
 		}
 	}
 
 	t.Fatalf("no row for %s", want)
 
-	return nil
+	return nil, nil
 }
 
 // TestNilAndEmptyBytesCarryDifferentGoldens is the case that earned the golden
@@ -250,7 +296,7 @@ func TestTheIntegerGoldensAreBaseTen(t *testing.T) {
 			continue
 		}
 
-		_, goldens := p.columns()
+		_, _, goldens := p.columns()
 		for i, g := range goldens {
 			checkBaseTen(t, p.Name(), i, g)
 		}
@@ -478,7 +524,7 @@ func TestTheIntegerRowsCarryTheZeroAndBothBounds(t *testing.T) {
 			continue
 		}
 
-		_, goldens := p.columns()
+		_, _, goldens := p.columns()
 		checkWidth(t, p.Name(), p.Type().Kind(), goldens)
 	}
 }
