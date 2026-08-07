@@ -605,6 +605,19 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 > The read half needs `Enumerator`, since a member the second dump did not write is exactly what no load can see without one, and a source that cannot list is asked nothing and says so.
 > `MemPlane` implements `Unsetter`, because the reference implementation is the one plane whose whole job is to demonstrate the contract, and a capability no plane in this repository carried would leave the case unexercised.
 
+> **Amended under [#135](https://github.com/onhotpath/ferry/issues/135): the list is eighteen cases, and the eighteenth is what a refused dump leaves behind.**
+>
+> As published, nothing in the list asks what the plane holds after a dump that failed, in either direction.
+> Case 7 asks whether a `Bind` that refuses a non-injective key function names both addresses, which is the static tier only; case 9 dumps a dynamic address and asserts it is taken.
+> The tier where a value determines the address had no case for the refusal at all, so the behaviour [ADR-0004](0004-source-and-sink.md)'s amendment changes was constrained by nothing.
+>
+> 18. **A refused dump leaves the plane untouched.** For a sink declaring `ferry.Committer` or `ferry.Preparer`, a value whose mapping carries two keys the plane renders to one key is refused with nothing of that dump observable afterwards ([ADR-0004](0004-source-and-sink.md), [ADR-0011](0011-the-error-model.md)).
+>
+> **It reads back a leaf and not the mapping**, so a source that cannot list is asked nothing it cannot answer.
+> The leaf is written by the same dump and is not the address that collides, so what the plane holds at it is the whole assertion: a fresh plane holds nothing there, and the refused dump is the only thing that could have.
+> **It is skipped, out loud, twice over.** A sink declaring neither capability is obliged nothing and is not asked; and a plane that takes both keys renders no two of them to one key, which is the ordinary answer for a tree plane and for any flat plane that folds nothing, so there is no refusal to hold it to.
+> **No plane in this repository runs it to a conclusion, and the case ships anyway.** `driver/kv` and `driver/yaml` stage and fold nothing, `driver/env` and `driver/http` have no sink, and `MemPlane`'s key function is the identity - so the case is written against the property rather than against an implementor, which is what a conformance suite is for when the reachable driver is a third party's.
+
 > **Amended under [#201](https://github.com/onhotpath/ferry/issues/201): a run says what it scaled to, and the description gains nothing.**
 >
 > #201 records that `Instance` carries capabilities as optional fields, that three of its four members mean a capability by being nil or not, and that a skipped case is indistinguishable from a passing one for any reporter that is not `*testing.T`.
@@ -811,8 +824,8 @@ That is weaker than a compile-time signal and it is the only shape available, be
 > Every figure below was true when the line carrying it was written, and each was moved by a later change that amended the section owning it and not the summary repeating it.
 > Nothing here is a new decision, and no case, name or interface moves: what moves is the arithmetic.
 >
-> - **The optional interfaces are seven, not six.** The bullet above and the #201 amendment both read "six": `Releaser`, `Committer`, `Prober`, `Enumerator`, `Ensurer` and `Unsetter`. [ADR-0019](0019-the-concurrency-model.md) added `Concurrent`, which is discovered by assertion on the reader exactly like the other six, and `ferrytest`'s own scaling line already names seven.
-> - **The `Driver` list is seventeen cases, not fifteen.** The bullet above ends its parenthetical at fifteen; the two amendments after it, the concurrency model's and [#220](https://github.com/onhotpath/ferry/issues/220)/[#221](https://github.com/onhotpath/ferry/issues/221)'s, carry the list to sixteen and then seventeen, and seventeen is what ships.
+> - **The optional interfaces are eight, not six.** The bullet above and the #201 amendment both read "six": `Releaser`, `Committer`, `Prober`, `Enumerator`, `Ensurer` and `Unsetter`. [ADR-0019](0019-the-concurrency-model.md) added `Concurrent`, which is discovered by assertion on the reader exactly like the other six, and [#135](https://github.com/onhotpath/ferry/issues/135) added `Preparer`, discovered on the writer the same way; `ferrytest`'s own scaling line names all eight.
+> - **The `Driver` list is eighteen cases, not fifteen.** The bullet above ends its parenthetical at fifteen; the amendments after it - the concurrency model's, [#220](https://github.com/onhotpath/ferry/issues/220)/[#221](https://github.com/onhotpath/ferry/issues/221)'s and [#135](https://github.com/onhotpath/ferry/issues/135)'s - carry the list to sixteen, seventeen and then eighteen, and eighteen is what ships.
 > - **The exported-name count is the surface table's**, and the first bullet of this section - "Nineteen exported names in one package", raised to twenty in its parenthetical - predates [#175](https://github.com/onhotpath/ferry/issues/175)'s re-total. The table under [The surface](#the-surface) and its amendments are the authority, and this section states no figure of its own.
 > - **The registrant's sample no longer compiles as printed.** It reads `reg := ferry.NewRegistry(...)` in one assignment, and [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md), amended under [#299](https://github.com/onhotpath/ferry/issues/299), makes `NewRegistry` return `(*Registry, error)` and puts the panicking spelling under `MustRegistry`. A test writes `reg := ferry.MustRegistry(...)` and stays the length this ADR argues it has to be; a caller that wants the report writes the two-value form and checks it.
 

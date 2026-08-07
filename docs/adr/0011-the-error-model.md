@@ -554,6 +554,18 @@ That is ADR-0004's own argument applied one layer in.
 It put `ErrReadOnly` at `OpenWriter` rather than at the first `Set` on the reasoning that "failing at open costs nothing, and failing at the first `Set` has already half-written the plane".
 Encoding is the last thing ferry can check without the plane, so it belongs on the same side of that line.
 
+> **Amended under [#135](https://github.com/onhotpath/ferry/issues/135): the property above is exactly as published, and one failure sat just outside it because no interface reached the driver in time.**
+>
+> The sentence says *ferry could have known*, and it is scoped to that deliberately.
+> A plane key is the driver's, and for an address the value determines - a map key, a sequence index - the driver cannot compute one until the walk has produced it, so a key function that folds two of them together says so from inside the write that carries the second, with everything before it already on the plane.
+> That is a failure nobody could have known without the plane and nobody could have known without the value either, so the promise never covered it and the code was right.
+>
+> **What ships is the moment that was missing rather than a wider promise.**
+> [ADR-0004](0004-source-and-sink.md)'s `Preparer` is handed the realised addresses after the encode phase and before the first write, so a driver that can fold them can refuse there, and for a sink that implements it the property reads: *if a Dump fails for a reason ferry or the sink could have known before the first write, the plane is untouched.*
+> For a sink that implements neither it nor `Committer`, the published sentence stands unchanged and the collision is found at the colliding write - which is the concession this section already makes for a `Set` refusal two paragraphs down, now made for one more failure and no longer silently.
+>
+> **The encode phase does not move**, and neither does the `Committer` exemption below it: `Prepare` runs where the encode phase runs and is not asked of a sink that stages, for the same reason the phase is not.
+
 **The `Set` half still aggregates**, and the case that decides it is the same one Load's rule turns on.
 A token with write access to some paths and not others reports both refused addresses under aggregation and one under fail-fast, and taking that away on Dump alone would be an asymmetry between the directions about the same fact.
 Both policies leave a broken plane there - six of eight addresses against one of eight - and under ADR-0006 an omission is not a deletion, so on a patching sink the unwritten addresses keep their old values either way.

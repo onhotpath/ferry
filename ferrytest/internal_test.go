@@ -94,11 +94,13 @@ func TestProofIsSealed(t *testing.T) {
 // Two of the four have a consequence the others do not. A shell dropping
 // [ferry.Ensurer] turns every nil pointer in a dump into a refusal the driver
 // never made (ADR-0016), and one dropping [ferry.Unsetter] turns a driver whose
-// dumps replace into one whose dumps accumulate (ADR-0004). So the table is all
-// sixteen combinations.
+// dumps replace into one whose dumps accumulate (ADR-0004). A third,
+// [ferry.Preparer], turns a driver that refuses a folded pair with the plane
+// untouched into one that refuses it half way through the dump. So the table is
+// all thirty-two combinations.
 //
 // The inner writer of each row is built by [shells] itself, because the shells
-// are exactly the sixteen method sets this asserts over: writing sixteen bespoke
+// are exactly the thirty-two method sets this asserts over: writing bespoke
 // writers beside them would be a second spelling of the same list, and the one
 // that drifted would be the one nobody noticed.
 func TestWrapWriterKeepsTheOptionalInterfaces(t *testing.T) {
@@ -107,11 +109,11 @@ func TestWrapWriterKeepsTheOptionalInterfaces(t *testing.T) {
 	}
 }
 
-// optionalCase is one combination of the four optional interfaces, as the bits
+// optionalCase is one combination of the five optional interfaces, as the bits
 // [caps.combination] reads.
 type optionalCase struct{ bits int }
 
-// assert reads the four optional interfaces off the wrapper, and holds each of
+// assert reads the five optional interfaces off the wrapper, and holds each of
 // them to the bit that built the writer underneath.
 func (c optionalCase) assert(t *testing.T) {
 	t.Helper()
@@ -122,11 +124,14 @@ func (c optionalCase) assert(t *testing.T) {
 	_, releases := w.(ferry.Releaser)
 	_, ensures := w.(ferry.Ensurer)
 	_, unsets := w.(ferry.Unsetter)
+	_, prepares := w.(ferry.Preparer)
 
-	got := caps{}.combination()
+	var none caps
+
+	got := none.combination()
 
 	for bit, has := range map[int]bool{
-		hasCommit: commits, hasRelease: releases, hasEnsure: ensures, hasUnset: unsets,
+		hasCommit: commits, hasRelease: releases, hasEnsure: ensures, hasUnset: unsets, hasPrepare: prepares,
 	} {
 		if has {
 			got |= bit
@@ -146,6 +151,7 @@ func combinationOf(bits int) ferry.Writer {
 		release: releases{},
 		ensure:  ensures{},
 		unset:   unsets{},
+		prepare: prepares{},
 	})
 }
 
@@ -160,6 +166,7 @@ func combinationName(bits int) string {
 		{hasRelease, "releases"},
 		{hasEnsure, "ensures"},
 		{hasUnset, "unsets"},
+		{hasPrepare, "prepares"},
 	}
 
 	out := make([]string, 0, len(named))
@@ -177,7 +184,7 @@ func combinationName(bits int) string {
 	return strings.Join(out, " and ")
 }
 
-// The four capabilities as stubs, which is all the sixteen combinations need:
+// The five capabilities as stubs, which is all the thirty-two combinations need:
 // what a shell carries is a method set, and these are the methods.
 type (
 	plainWriter struct{}
@@ -185,6 +192,7 @@ type (
 	releases    struct{}
 	ensures     struct{}
 	unsets      struct{}
+	prepares    struct{}
 )
 
 func (plainWriter) Set(context.Context, ferry.LeafAddr, ferry.Value) error { return nil }
@@ -196,6 +204,8 @@ func (releases) Close() error { return nil }
 func (ensures) Ensure(context.Context, ferry.Container, ferry.Presence) error { return nil }
 
 func (unsets) Unset(context.Context, ferry.CompositeAddr) error { return nil }
+
+func (prepares) Prepare(context.Context, []ferry.Path) error { return nil }
 
 // TestEveryAdmittedKindHasARepresentative is the drift the panic exists to
 // catch, asserted from inside because a table that agrees with itself has no
@@ -300,8 +310,20 @@ func TestShellWriterCallsTheFrontAndAnswersForTheInner(t *testing.T) {
 // theFrontTakesTheCall is the second half of the shell's rule: which interfaces
 // it has is the inner writer's answer, and which object each call goes to is the
 // front's where the front has the method.
+//
+// Three of the five are asked, one per shape a call can take: one the front
+// answers on its own, one that reaches the plane, and one handed the addresses
+// a dump realised.
 func theFrontTakesTheCall(t *testing.T) {
 	counted := &countingWriter{}
+
+	theFrontCommits(t, counted)
+	theFrontForgets(t, counted)
+	theFrontPrepares(t, counted)
+}
+
+func theFrontCommits(t *testing.T, counted *countingWriter) {
+	t.Helper()
 
 	c, ok := shellWriter(counted, combinationOf(hasCommit|hasRelease)).(ferry.Committer)
 	if !ok {
@@ -315,6 +337,10 @@ func theFrontTakesTheCall(t *testing.T) {
 	if counted.commitCount != 1 {
 		t.Errorf("the front was committed %d times, want once", counted.commitCount)
 	}
+}
+
+func theFrontForgets(t *testing.T, counted *countingWriter) {
+	t.Helper()
 
 	u, ok := shellWriter(counted, combinationOf(hasUnset)).(ferry.Unsetter)
 	if !ok {
@@ -327,6 +353,23 @@ func theFrontTakesTheCall(t *testing.T) {
 
 	if counted.unsets != 1 {
 		t.Errorf("the front was asked to forget %d times, want once", counted.unsets)
+	}
+}
+
+func theFrontPrepares(t *testing.T, counted *countingWriter) {
+	t.Helper()
+
+	p, ok := shellWriter(counted, combinationOf(hasPrepare)).(ferry.Preparer)
+	if !ok {
+		t.Fatal("the shell over a writer that is handed a dump's realised addresses is not a Preparer")
+	}
+
+	if err := p.Prepare(context.Background(), nil); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	if counted.prepares != 1 {
+		t.Errorf("the front was asked to prepare %d times, want once", counted.prepares)
 	}
 }
 
@@ -350,6 +393,11 @@ func theInnerDecidesTheInterfaces(t *testing.T) {
 		t.Error("the shell over a writer that cannot forget an address is an Unsetter, so a driver whose " +
 			"dumps accumulate would be reported as one whose dumps replace")
 	}
+
+	if _, ok := shellWriter(counted, plainWriter{}).(ferry.Preparer); ok {
+		t.Error("the shell over a writer that asks for nothing is a Preparer, so a driver that finds a folded " +
+			"pair at the colliding write would be reported as one that finds it before any of them")
+	}
 }
 
 // countingWriter is a front that declares every optional interface, so that
@@ -361,6 +409,7 @@ type countingWriter struct {
 	closes      int
 	ensured     int
 	unsets      int
+	prepares    int
 }
 
 func (w *countingWriter) Commit(context.Context) error {
@@ -383,6 +432,12 @@ func (w *countingWriter) Ensure(context.Context, ferry.Container, ferry.Presence
 
 func (w *countingWriter) Unset(context.Context, ferry.CompositeAddr) error {
 	w.unsets++
+
+	return nil
+}
+
+func (w *countingWriter) Prepare(context.Context, []ferry.Path) error {
+	w.prepares++
 
 	return nil
 }

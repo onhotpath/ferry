@@ -434,6 +434,12 @@ type flatSink struct {
 	// binding, so the set it minted outlives the open that filled it.
 	retain bool
 
+	// prepares is ADR-0004's Preparer: the writer is handed the addresses the
+	// dump realised from the value before the first write of that dump, which
+	// is the only phase in which a flat sink that does not stage can refuse a
+	// folded pair with the plane still untouched.
+	prepares bool
+
 	keys  *ferry.Keys
 	held  ferry.KeyFunc
 	opens int
@@ -465,7 +471,34 @@ func (s *flatSink) open(context.Context) (ferry.Writer, error) {
 		key = s.held
 	}
 
+	if s.prepares {
+		return preparingWriter{flatWriter{s: s, key: key}}, nil
+	}
+
 	return flatWriter{s: s, key: key}, nil
+}
+
+// preparingWriter is [flatWriter] with ADR-0004's Preparer, written the way the
+// capability is meant to be taken: the open's own key function, run over the
+// realised set before the first write, so a fold between two minted addresses is
+// found where the plane is still untouched.
+//
+// It mints through the same function the writes go through, and that is not a
+// second check. A key function serves an address it has already minted from its
+// own table, so the write that follows finds the key rather than issuing it
+// again.
+type preparingWriter struct{ flatWriter }
+
+func (w preparingWriter) Prepare(_ context.Context, addrs []ferry.Path) error {
+	errs := make([]error, 0, len(addrs))
+
+	for _, addr := range addrs {
+		if _, err := w.key(addr); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func (s *flatSink) written() []string { return slices.Sorted(maps.Keys(s.plane)) }
@@ -662,6 +695,72 @@ func TestALegitimateMapKeyIsNotADriverError(t *testing.T) {
 	if got := sink.written(); !slices.Equal(got, want) {
 		t.Errorf("the plane holds %v, want %v", got, want)
 	}
+}
+
+// foldedKeys is one value whose two map keys a transforming driver renders to
+// one plane key, beside a leaf the type determined.
+//
+// The leaf is the observable half: it is written by the same dump and is not the
+// address that collides, so what the plane holds at it says whether the refusal
+// arrived before the writes or among them.
+func foldedKeys() labelsConf {
+	return labelsConf{Name: "svc", Labels: map[string]string{"a-b": "1", "a_b": "2"}}
+}
+
+// TestADynamicCollisionOnAPreparingSinkWritesNothing is #135's fix through the
+// engine.
+//
+// The addresses under a map come from the value, so the plane key each renders
+// to is one the driver cannot compute until there is a value. A sink that asks
+// for the realised set is handed it after every value is encoded and before the
+// first write, which is the one moment at which the whole of what the dump will
+// say is known and the plane still holds nothing.
+func TestADynamicCollisionOnAPreparingSinkWritesNothing(t *testing.T) {
+	t.Parallel()
+
+	sink := newFlatSink(envTransform)
+	sink.prepares = true
+
+	err := ferry.Dump(t.Context(), foldedKeys(), sink)
+	if err == nil {
+		t.Fatal("two map keys render to one plane key and the dump succeeded")
+	}
+
+	if got := sink.written(); len(got) != 0 {
+		t.Errorf("the plane holds %v after a refused dump, want nothing: a sink handed the realised addresses "+
+			"before the first write refuses with the plane untouched", got)
+	}
+
+	mustLocate(t, err, ferry.At("labels", "a_b"))
+	mustName(t, err, "/labels/a-b", `"LABELS_A_B"`)
+}
+
+// TestADynamicCollisionWithoutAPreparerLandsAtTheWrite is the same dump against
+// the same key function on a sink that neither stages nor prepares, and it pins
+// what such a sink still does.
+//
+// The refusal arrives inside the write that carries the second of the folded
+// pair, so the first of them has landed and the addresses after it land too:
+// the plane keeps a value at one of two addresses that are one address to it,
+// which is the loss the injectivity rule exists to prevent, and the dump reports
+// it rather than hiding it. That is the behaviour the capability exists to let a
+// driver opt out of, and it is unchanged for one that does not.
+func TestADynamicCollisionWithoutAPreparerLandsAtTheWrite(t *testing.T) {
+	t.Parallel()
+
+	sink := newFlatSink(envTransform)
+
+	err := ferry.Dump(t.Context(), foldedKeys(), sink)
+	if err == nil {
+		t.Fatal("two map keys render to one plane key and the dump succeeded")
+	}
+
+	if got, want := sink.written(), []string{"LABELS_A_B", "NAME"}; !slices.Equal(got, want) {
+		t.Errorf("the plane holds %v, want %v: a sink that neither stages nor prepares learns of the fold at "+
+			"the colliding write, and the writes around it have landed", got, want)
+	}
+
+	mustLocate(t, err, ferry.At("labels", "a_b"))
 }
 
 // TestTwoDumpsThroughOneBinding is ADR-0012's amendment through the engine, and

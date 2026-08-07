@@ -228,9 +228,9 @@ The set is sorted segment-wise and the order is stable across builds of one sche
 A driver that treats its precomputed table as a **closed** set refuses a legal write, because the addresses a value mints are in no address set.
 That is why core hands out a key function rather than a map.
 
-## The seven optional interfaces
+## The eight optional interfaces
 
-All seven are discovered by type assertion on your `Reader` or `Writer`, and none is required.
+All eight are discovered by type assertion on your `Reader` or `Writer`, and none is required.
 
 ```go
 type Releaser interface {
@@ -257,6 +257,10 @@ type Unsetter interface {
 	Unset(ctx context.Context, addr ferry.CompositeAddr) error
 }
 
+type Preparer interface {
+	Prepare(ctx context.Context, addrs []ferry.Path) error
+}
+
 type Concurrent interface {
 	MaxConcurrent() int
 }
@@ -270,13 +274,15 @@ type Concurrent interface {
 | `Enumerator` | your plane can list what is under a composite |
 | `Ensurer` | your plane can spell a container at the container's own address |
 | `Unsetter` | your plane can forget an address and everything under it |
+| `Preparer` | your plane can lose one of two addresses a value determined, and would rather say so before the writes |
 | `Concurrent` | your open instance tolerates overlapping calls |
 
-Of the four drivers here, `driver/yaml` implements six of the seven and the flat planes implement fewer: `driver/kv` reads with `Prober` and `Enumerator` and writes with `Committer` and `Unsetter`, and its refusal to implement `Ensurer` is a declaration rather than an omission, because a store that holds bytes at keys has no way to say that a container is there and holds nothing.
+Of the four drivers here, `driver/yaml` implements six of the eight and the flat planes implement fewer: `driver/kv` reads with `Prober` and `Enumerator` and writes with `Committer` and `Unsetter`, and its refusal to implement `Ensurer` is a declaration rather than an omission, because a store that holds bytes at keys has no way to say that a container is there and holds nothing.
 
 That spread is the case for making them optional rather than methods on `Reader` and `Writer`: a required `Close` would be `return nil` boilerplate in four of ADR-0004's six sinks, and in the source that is indistinguishable from a driver that should have rolled back and did not.
 The same argument holds for `Ensurer`: a stub that stored a zero-length value would make "the section is present and empty" and "the field is empty text" one observation, which is precisely the collision the kinds exist to keep apart.
-`Concurrent` is the one of the seven that is a promise rather than a capability, and it has a section of its own below.
+`Concurrent` is the one of the eight that is a promise rather than a capability, and it has a section of its own below.
+`Preparer` is the one no driver here implements, because all four either stage or ship no sink at all, and it has a section of its own below too.
 
 ### `Releaser` and `Committer`
 
@@ -443,6 +449,33 @@ A plane without it is additive at a composite - a save of a shorter list leaves 
 It records the composites core named and subtracts them at `Commit`, which keeps the comments, the anchor and the tag on every member that stays exactly where they were.
 
 A section is never unset, because its membership comes from the type and not from the value.
+
+### `Preparer`
+
+This is for a plane that can **lose** one of two addresses a value determined, and would rather say so before it has written any of them.
+
+```go
+type Preparer interface {
+	Prepare(ctx context.Context, addrs []ferry.Path) error
+}
+```
+
+The addresses under a slice or a map come from the value, so the plane key each of them renders to is one no `Bind` could have checked: there was no value then.
+A flattening driver mints and checks those keys as they arrive, which is per address and before the write that carries that address - and every write before it has already happened.
+So a key function that folds `/labels/a-b` and `/labels/a_b` onto one key reports the collision from inside the second of the two writes, with the first already on the plane.
+
+Implement this and core hands you every address the value determined, sorted, once per dump, after everything is encoded and before the first write.
+Refuse and the dump stops there with nothing written; return nil and the writes proceed.
+Name the offending addresses with `ferry.ErrorAt`, exactly as your key function does, so each refusal is reported against the address it belongs to.
+The type's own addresses are not in the list: those went to `Bind`, and you already hold them.
+
+**A `Committer` is not asked**, and does not need to be: a staging sink is written to as the walk runs, so there is no moment at which the whole set is known and the plane still holds nothing, and a dump that fails is a `Commit` that never happens.
+If your sink stages, that is your answer to this and you should implement nothing here.
+
+**Implementing nothing is a legitimate answer, and it is the quiet one.**
+A sink without it is refused nothing.
+What it gets instead is the behaviour above: the fold is found at the colliding write, and the writes around it have landed.
+That is fine for a plane whose key function folds nothing - a tree driver builds no plane key at all - and it is the thing to weigh if yours does.
 
 ### `Concurrent`
 
@@ -928,7 +961,7 @@ func TestConformance(t *testing.T) {
 ```
 
 That is the whole file.
-`Driver` is seventeen cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
+`Driver` is eighteen cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
 
 ### The four fields
 
@@ -976,7 +1009,7 @@ See [plane compatibility](compatibility.md).
 `Want` is one string, which puts an obligation on a plane holding more than one storage unit: what it renders for this comparison must be **deterministic and injective over stores**.
 That is the same obligation your key function already carries.
 
-### The seventeen cases
+### The eighteen cases
 
 1. Every proof the plane can express round-trips, and every kind it declared it cannot carry is refused loudly.
 2. `Bind` succeeds against an unreachable plane, and the refusal lands inside the open.
@@ -995,6 +1028,7 @@ That is the same obligation your key function already carries.
 15. A second dump through one held sink binding, with a different value at the same addresses: it is taken, and it is what the plane holds afterwards.
 16. A reader declaring `Concurrent` produces, under every concurrency budget, the destination and the error report it produces serially.
 17. A sink declaring `Unsetter` replaces the composite it writes: a value whose list lost members, dumped over one that had them, loads back as the second value and only the second.
+18. A sink declaring `Committer` or `Preparer` leaves the plane untouched when a dump is refused: a mapping carrying two keys the plane renders to one key is refused with nothing of that dump observable afterwards.
 
 Case 14 is where a driver that keeps mutable state in the closure it handed back is found, and the case creates the concurrency rather than judging it: run your own suite under `go test -race`, which is what actually reports the defect.
 It opens the write half concurrently and walks nothing, because what the contract obligates is the open.
@@ -1004,6 +1038,9 @@ Case 16 is the gate on the one optional interface that is a promise, and it is s
 It asks both halves, because the promise is about both: one plane written once and read back under several budgets, and that same plane read for a second fixture's required addresses, which it holds none of, whose report has to read identically however the walk was scheduled.
 The report is compared in full rather than by its one-line summary, since two aggregates carrying different failures at the same addresses summarise alike.
 Every load mints its own destination, which is the fresh-destination rule and the trap this property has: a destination shared between the two schedules is what makes a broken second walk pass.
+
+Case 18 is the other capability-scaled one, and it skips twice over: for a sink declaring neither `Committer` nor `Preparer`, which is obliged nothing, and for a plane that takes both of the two keys, which folds nothing and therefore has no refusal to be held to.
+It reads back a leaf and not the mapping, so a source that cannot list is asked nothing it cannot answer, and that leaf is written by the same dump and is not the address that collides - so what the plane holds at it is the whole assertion.
 
 Cases 8 and 9 reach a value-minted address by dumping a one-entry map rather than by calling `Set` directly, because the address kinds are sealed and only the compiler mints one.
 Case 9 mints case 8's first key as well as its own: case 8 stops where a write is refused, correctly, and a store that cannot spell a hyphen would otherwise be asked by nothing.

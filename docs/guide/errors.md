@@ -169,6 +169,12 @@ On `Dump` the aggregation is preceded by a phase: **every value is encoded befor
 
 A sink implementing `ferry.Committer` is exempt, because staging already gives it that property, and it gets a better report for it: both kinds of failure in one run, where a sink that cannot stage learns the plane's own refusals only once the values it could not encode are fixed.
 
+**One failure sits just outside that sentence, and it says *could have known* for a reason.**
+The addresses under a slice or a map come from the value, so the plane key each renders to is one your driver cannot compute until the walk has produced it.
+A key function that folds two of them together therefore reports the collision from inside the write that carries the second, with the writes before it already on the plane.
+A sink implementing `ferry.Committer` never sees that, because nothing it wrote is durable until `Commit`; a sink implementing `ferry.Preparer` is handed those addresses before the first write and can refuse there.
+A sink implementing neither gets the refusal at the colliding write, and the plane keeps what the dump wrote on its way to it.
+
 ## What a failed Load returns
 
 **When a `Load` fails, ferry returns no value it built.**

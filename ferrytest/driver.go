@@ -10,7 +10,7 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// Driver is the driver conformance suite: seventeen cases over one plane, and the
+// Driver is the driver conformance suite: eighteen cases over one plane, and the
 // whole of what a driver author writes.
 //
 //	func TestConformance(t *testing.T) {
@@ -87,7 +87,7 @@ type driverRun struct {
 	carry map[ferry.VKind]bool
 }
 
-// run is the seventeen cases, in the order ADR-0014 lists them.
+// run is the eighteen cases, in the order ADR-0014 lists them.
 func (d *driverRun) run() {
 	d.rep.Helper()
 
@@ -109,6 +109,7 @@ func (d *driverRun) run() {
 	d.caseSecondDump()
 	d.caseSerialEquivalence()
 	d.caseReplace()
+	d.casePrepared()
 }
 
 // caseKinds is case 1: every value the plane can express, and a loud refusal for
@@ -1171,7 +1172,7 @@ func fixtureSet[T any](d *driverRun, n int) (*ferry.AddressSet, bool) {
 }
 
 // fail is what every case reports through, and it names the plane and the case
-// so that a driver author reading their own CI output knows which of seventeen
+// so that a driver author reading their own CI output knows which of eighteen
 // went red.
 func (d *driverRun) fail(n int, msg string) {
 	d.rep.Helper()

@@ -126,11 +126,12 @@ func shellWriter(front, w ferry.Writer) ferry.Writer {
 	c.release, _ = releasesThrough(front, w)
 	c.ensure, _ = ensuresThrough(front, w)
 	c.unset, _ = unsetsThrough(front, w)
+	c.prepare, _ = preparesThrough(front, w)
 
 	return shells[c.combination()](front, c)
 }
 
-// caps is which of the four optional interfaces the shell carries, and which
+// caps is which of the five optional interfaces the shell carries, and which
 // object each call goes to. A nil member is a capability the wrapped writer
 // does not have, so the shell must not claim it either.
 type caps struct {
@@ -138,21 +139,25 @@ type caps struct {
 	release ferry.Releaser
 	ensure  ferry.Ensurer
 	unset   ferry.Unsetter
+	prepare ferry.Preparer
 }
 
-// One bit per optional interface, so that the sixteen combinations are looked up
-// rather than branched through: four capabilities nested as conditions is over
-// the nesting the linter allows, and a table is the one shape that keeps every
-// combination visible in one place.
+// One bit per optional interface, so that the thirty-two combinations are looked
+// up rather than branched through: five capabilities nested as conditions is
+// well over the nesting the linter allows, and a table is the one shape that
+// keeps every combination visible in one place.
 const (
 	hasCommit = 1 << iota
 	hasRelease
 	hasEnsure
 	hasUnset
+	hasPrepare
 )
 
-// combination is which of the four the wrapped writer had, as an index.
-func (c caps) combination() int {
+// combination is which of the five the wrapped writer had, as an index. The
+// receiver is a pointer because five interface headers is a wide value to copy
+// for a question that reads them.
+func (c *caps) combination() int {
 	var i int
 
 	for bit, has := range map[int]bool{
@@ -160,6 +165,7 @@ func (c caps) combination() int {
 		hasRelease: c.release != nil,
 		hasEnsure:  c.ensure != nil,
 		hasUnset:   c.unset != nil,
+		hasPrepare: c.prepare != nil,
 	} {
 		if has {
 			i |= bit
@@ -169,12 +175,18 @@ func (c caps) combination() int {
 	return i
 }
 
-// shells is one constructor per combination of the four optional interfaces.
+// shells is one constructor per combination of the five optional interfaces.
 //
 // Every combination has an entry, because a combination with no shell is a
 // capability silently dropped from a wrapped driver, and the table is what makes
 // a missing one a hole somebody can see rather than a branch nobody wrote.
-var shells = [16]func(ferry.Writer, caps) ferry.Writer{
+//
+// The upper half is the lower half again with [ferry.Preparer] on top, and each
+// of its entries builds the shell below it rather than restating the fields: a
+// method promoted through an embedded struct is promoted through that struct's
+// own embedded interfaces too, so one line adds the capability and none of the
+// others move.
+var shells = [32]func(ferry.Writer, caps) ferry.Writer{
 	0: func(f ferry.Writer, _ caps) ferry.Writer { return shellPlain{Writer: f} },
 	hasCommit: func(f ferry.Writer, c caps) ferry.Writer {
 		return shellCommitter{Writer: f, Committer: c.commit}
@@ -221,6 +233,79 @@ var shells = [16]func(ferry.Writer, caps) ferry.Writer{
 	hasCommit | hasRelease | hasEnsure | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
 		return shellEverything{
 			Writer: f, Committer: c.commit, Releaser: c.release, Ensurer: c.ensure, Unsetter: c.unset,
+		}
+	},
+	hasPrepare: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellPlainPrepares{shellPlain{Writer: f}, c.prepare}
+	},
+	hasPrepare | hasCommit: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellCommitterPrepares{shellCommitter{Writer: f, Committer: c.commit}, c.prepare}
+	},
+	hasPrepare | hasRelease: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellReleaserPrepares{shellReleaser{Writer: f, Releaser: c.release}, c.prepare}
+	},
+	hasPrepare | hasEnsure: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellEnsurerPrepares{shellEnsurer{Writer: f, Ensurer: c.ensure}, c.prepare}
+	},
+	hasPrepare | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellUnsetterPrepares{shellUnsetter{Writer: f, Unsetter: c.unset}, c.prepare}
+	},
+	hasPrepare | hasCommit | hasRelease: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellBothPrepares{shellBoth{Writer: f, Committer: c.commit, Releaser: c.release}, c.prepare}
+	},
+	hasPrepare | hasCommit | hasEnsure: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellCommitEnsurerPrepares{
+			shellCommitEnsurer{Writer: f, Committer: c.commit, Ensurer: c.ensure}, c.prepare,
+		}
+	},
+	hasPrepare | hasCommit | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellCommitUnsetterPrepares{
+			shellCommitUnsetter{Writer: f, Committer: c.commit, Unsetter: c.unset}, c.prepare,
+		}
+	},
+	hasPrepare | hasRelease | hasEnsure: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellReleaseEnsurerPrepares{
+			shellReleaseEnsurer{Writer: f, Releaser: c.release, Ensurer: c.ensure}, c.prepare,
+		}
+	},
+	hasPrepare | hasRelease | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellReleaseUnsetterPrepares{
+			shellReleaseUnsetter{Writer: f, Releaser: c.release, Unsetter: c.unset}, c.prepare,
+		}
+	},
+	hasPrepare | hasEnsure | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellEnsureUnsetterPrepares{
+			shellEnsureUnsetter{Writer: f, Ensurer: c.ensure, Unsetter: c.unset}, c.prepare,
+		}
+	},
+	hasPrepare | hasCommit | hasRelease | hasEnsure: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellAllPrepares{
+			shellAll{Writer: f, Committer: c.commit, Releaser: c.release, Ensurer: c.ensure}, c.prepare,
+		}
+	},
+	hasPrepare | hasCommit | hasRelease | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellBothUnsetterPrepares{
+			shellBothUnsetter{Writer: f, Committer: c.commit, Releaser: c.release, Unsetter: c.unset}, c.prepare,
+		}
+	},
+	hasPrepare | hasCommit | hasEnsure | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellCommitEnsureUnsetterPrepares{
+			shellCommitEnsureUnsetter{Writer: f, Committer: c.commit, Ensurer: c.ensure, Unsetter: c.unset},
+			c.prepare,
+		}
+	},
+	hasPrepare | hasRelease | hasEnsure | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellReleaseEnsureUnsetterPrepares{
+			shellReleaseEnsureUnsetter{Writer: f, Releaser: c.release, Ensurer: c.ensure, Unsetter: c.unset},
+			c.prepare,
+		}
+	},
+	hasPrepare | hasCommit | hasRelease | hasEnsure | hasUnset: func(f ferry.Writer, c caps) ferry.Writer {
+		return shellEverythingPrepares{
+			shellEverything{
+				Writer: f, Committer: c.commit, Releaser: c.release, Ensurer: c.ensure, Unsetter: c.unset,
+			},
+			c.prepare,
 		}
 	},
 }
@@ -288,6 +373,24 @@ func unsetsThrough(front, w ferry.Writer) (ferry.Unsetter, bool) {
 	return inner, true
 }
 
+// preparesThrough is [commitsThrough] for [ferry.Preparer], which is the
+// capability that is handed a dump's realised addresses before the first write
+// (ADR-0004). A shell that dropped it would turn a driver which refuses a folded
+// pair with the plane untouched into one that refuses it half way through the
+// dump, which is the defect the capability exists to close.
+func preparesThrough(front, w ferry.Writer) (ferry.Preparer, bool) {
+	inner, ok := w.(ferry.Preparer)
+	if !ok {
+		return nil, false
+	}
+
+	if outer, ok := front.(ferry.Preparer); ok {
+		return outer, true
+	}
+
+	return inner, true
+}
+
 // recWriter is the recording itself: it is what [wrapWriter] puts in front of a
 // driver's writer, and the shells above are what give it the driver's own
 // answer to the two optional interfaces.
@@ -347,13 +450,14 @@ type shellPlain struct {
 	ferry.Writer
 }
 
-// The fifteen shells that carry at least one optional interface.
+// The fifteen shells that carry at least one of the four optional interfaces a
+// writer can have beside [ferry.Preparer].
 //
 // Each embeds the interfaces its combination has, so the promoted method is the
 // one [shellWriter] resolved and there is no forwarding body to get wrong. The
-// four optional interfaces make sixteen combinations and every one of them has a
-// name here, because a combination with no shell is a capability silently
-// dropped from a wrapped driver.
+// four make sixteen combinations and every one of them has a name here, because
+// a combination with no shell is a capability silently dropped from a wrapped
+// driver. The sixteen below pair each of them with [ferry.Preparer].
 type (
 	// shellCommitter is the shell for a staging sink.
 	shellCommitter struct {
@@ -454,6 +558,95 @@ type (
 		ferry.Releaser
 		ferry.Ensurer
 		ferry.Unsetter
+	}
+)
+
+// The sixteen shells that also carry [ferry.Preparer], one per shell above.
+//
+// Each embeds the shell it is the preparing form of rather than restating that
+// shell's fields, so Set and every optional method the inner shell promotes are
+// promoted again through it, and the combination is spelled in exactly one
+// place. A capability that is dropped when another is present is dropped, so
+// the sixteen are here for the same reason the sixteen above are.
+type (
+	shellPlainPrepares struct {
+		shellPlain
+		ferry.Preparer
+	}
+
+	shellCommitterPrepares struct {
+		shellCommitter
+		ferry.Preparer
+	}
+
+	shellReleaserPrepares struct {
+		shellReleaser
+		ferry.Preparer
+	}
+
+	shellEnsurerPrepares struct {
+		shellEnsurer
+		ferry.Preparer
+	}
+
+	shellUnsetterPrepares struct {
+		shellUnsetter
+		ferry.Preparer
+	}
+
+	shellBothPrepares struct {
+		shellBoth
+		ferry.Preparer
+	}
+
+	shellCommitEnsurerPrepares struct {
+		shellCommitEnsurer
+		ferry.Preparer
+	}
+
+	shellCommitUnsetterPrepares struct {
+		shellCommitUnsetter
+		ferry.Preparer
+	}
+
+	shellReleaseEnsurerPrepares struct {
+		shellReleaseEnsurer
+		ferry.Preparer
+	}
+
+	shellReleaseUnsetterPrepares struct {
+		shellReleaseUnsetter
+		ferry.Preparer
+	}
+
+	shellEnsureUnsetterPrepares struct {
+		shellEnsureUnsetter
+		ferry.Preparer
+	}
+
+	shellAllPrepares struct {
+		shellAll
+		ferry.Preparer
+	}
+
+	shellBothUnsetterPrepares struct {
+		shellBothUnsetter
+		ferry.Preparer
+	}
+
+	shellCommitEnsureUnsetterPrepares struct {
+		shellCommitEnsureUnsetter
+		ferry.Preparer
+	}
+
+	shellReleaseEnsureUnsetterPrepares struct {
+		shellReleaseEnsureUnsetter
+		ferry.Preparer
+	}
+
+	shellEverythingPrepares struct {
+		shellEverything
+		ferry.Preparer
 	}
 )
 
