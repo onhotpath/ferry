@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -479,9 +480,24 @@ func (setCapture) Get(context.Context, ferry.LeafAddr) (ferry.Value, error) {
 func TestDriverCase16ReportsADestinationThatDependsOnTheSchedule(t *testing.T) {
 	c := &capture{}
 
-	ferrytest.Driver(c, overlappingPlane(divergeAt, ferry.String("scheduled"), nil))
+	ferrytest.Driver(c, overlappingPlane(overlapping(divergeAt), ferry.String("scheduled"), nil))
 
 	assertCase16(t, c, "want the serial load's")
+}
+
+// TestDriverCase16ReportsALoadThatFailsOnlyWhenItOverlaps is the same half one
+// answer over: the overlapped load does not disagree about the value, it does
+// not produce one at all.
+//
+// A driver that reads correctly serially and fails under overlap is the shape a
+// client with a connection pool of one has, and it is a failure of the promise
+// rather than of the plane: the capability says the instance takes the overlap.
+func TestDriverCase16ReportsALoadThatFailsOnlyWhenItOverlaps(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, overlappingPlane(overlapping(divergeAt), ferry.Value{}, errScheduled))
+
+	assertCase16(t, c, "where the serial load of the same plane succeeded")
 }
 
 // TestDriverCase16ReportsAFailureThatDependsOnTheSchedule is the report half:
@@ -490,9 +506,117 @@ func TestDriverCase16ReportsADestinationThatDependsOnTheSchedule(t *testing.T) {
 func TestDriverCase16ReportsAFailureThatDependsOnTheSchedule(t *testing.T) {
 	c := &capture{}
 
-	ferrytest.Driver(c, overlappingPlane(refuseAt, ferry.Value{}, errScheduled))
+	ferrytest.Driver(c, overlappingPlane(overlapping(refuseAt), ferry.Value{}, errScheduled))
 
 	assertCase16(t, c, "want the serial load's")
+}
+
+// TestDriverCase16ReportsAFailureThatDisappearsWhenItOverlaps is the report
+// half's other direction, and it is the one worth having a case for.
+//
+// A report that shrinks under overlap is the failure a caller is never told
+// about: the serial walk says four addresses are missing and the overlapped one
+// says the load succeeded. A suite comparing only that both schedules failed
+// would pass this plane.
+func TestDriverCase16ReportsAFailureThatDisappearsWhenItOverlaps(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, overlappingPlane(overlapping(demandedAddrs()...), ferry.String("v"), nil))
+
+	assertCase16(t, c, "where the serial load of the same plane reported")
+}
+
+// TestDriverCase16SkipsWhereTheSerialLoadFails is the case declining to measure
+// a schedule it has no baseline for.
+//
+// The address fails on every schedule, so the serial load has no answer for a
+// concurrent one to be held to. That is a skip and not a failure: a load that
+// cannot succeed at all is cases 4 and 6's, and case 16 reporting it again
+// would be one defect reported twice.
+func TestDriverCase16SkipsWhereTheSerialLoadFails(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, overlappingPlane(always(divergeAt), ferry.Value{}, errScheduled))
+
+	assertCase16Silent(t, c, "the serial load failed")
+}
+
+// TestDriverCase16SkipsWhereThePlaneHoldsTheRequiredAddresses is the report
+// half declining for the opposite reason: this plane answers all four of them,
+// so there is no failure for two schedules to aggregate differently.
+//
+// It is an ordinary plane rather than a broken one - a process environment that
+// happens to hold those names is exactly this - so the half says so and stops
+// instead of manufacturing a failure to compare.
+func TestDriverCase16SkipsWhereThePlaneHoldsTheRequiredAddresses(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, overlappingPlane(always(demandedAddrs()...), ferry.String("v"), nil))
+
+	assertCase16Silent(t, c, "a load of four required addresses this plane holds none of succeeded")
+}
+
+// TestDriverCase16SkipsWhereTheFixtureCannotBeDumped is the same decline one
+// step earlier: the sink refuses the address set this case writes, so there is
+// nothing on the plane for two schedules to read.
+//
+// The refusal is scoped to case 16's own set, so every other case runs against
+// the plane the rest of these tests already trust.
+func TestDriverCase16SkipsWhereTheFixtureCannotBeDumped(t *testing.T) {
+	c := &capture{}
+
+	p := overlappingPlane(overlapping(), ferry.Value{}, nil)
+	inner := p.Open
+
+	p.Open = func() ferrytest.Instance {
+		inst := inner()
+		inst.Sink = refusingSink{inner: inst.Sink, when: isSpreadSet, err: errUnreachable}
+
+		return inst
+	}
+
+	ferrytest.Driver(c, p)
+
+	assertCase16Silent(t, c, "the fixture could not be dumped")
+}
+
+// TestDriverCase16IsSilentForAPlaneWithNoSink is the read-only plane: there is
+// nothing to write the fixture with, so the value half has no plane to compare
+// two schedules over and the report half runs on its own.
+//
+// A plane with no sink is ADR-0004's own case rather than a defect, so this
+// case says nothing about it at all.
+func TestDriverCase16IsSilentForAPlaneWithNoSink(t *testing.T) {
+	c := &capture{}
+
+	p := overlappingPlane(overlapping(), ferry.Value{}, nil)
+	inner := p.Open
+
+	p.Open = func() ferrytest.Instance {
+		inst := inner()
+		inst.Sink = nil
+
+		return inst
+	}
+
+	ferrytest.Driver(c, p)
+
+	assertNoCase16(t, c)
+}
+
+// TestDriverCase16IsSilentForAPlaneWithNoSource is the other half missing: a
+// plane nothing can be read out of has no schedule to compare, and the cases
+// that own a plane with no read half are the ones that report it.
+func TestDriverCase16IsSilentForAPlaneWithNoSource(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, ferrytest.Plane{
+		Name:  "write-only",
+		Kinds: allKinds(),
+		Open:  func() ferrytest.Instance { return ferrytest.Instance{Sink: ferrytest.MemPlane().Open().Sink} },
+	})
+
+	assertNoCase16(t, c)
 }
 
 // assertCase16 holds the run to reporting case 16 once per budget the suite
@@ -515,11 +639,35 @@ func assertCase16(t *testing.T, c *capture, want string) {
 	}
 }
 
+// assertCase16Silent holds a run to skipping case 16 for the stated reason and
+// failing nothing, which is what a case that declined to measure looks like.
+func assertCase16Silent(t *testing.T, c *capture, why string) {
+	t.Helper()
+
+	assertNoCase16(t, c)
+
+	if !anyLineContains(c.logs, "case 16 skipped: "+why) {
+		t.Errorf("the suite logged %q, want case 16 skipped for %q", c.logs, why)
+	}
+}
+
+// assertNoCase16 is the whole of what a plane this case does not apply to owes:
+// no failure carrying its number.
+func assertNoCase16(t *testing.T, c *capture) {
+	t.Helper()
+
+	for _, line := range c.lines {
+		if strings.Contains(line, "case 16") {
+			t.Errorf("report = %q, want nothing from case 16", line)
+		}
+	}
+}
+
 // case16Budgets is how many budgets case 16 holds a plane to, and therefore how
 // many lines one address answered wrongly produces.
 const case16Budgets = 3
 
-// The two addresses the planes below misbehave at, one in each of case 16's
+// The addresses the planes below misbehave at, one set in each of case 16's
 // fixtures, so that a plane wrong about the destination is not also wrong about
 // the report.
 var (
@@ -527,20 +675,54 @@ var (
 	refuseAt  = ferry.At("needone")
 )
 
-// errScheduled is what the refusing plane fails with.
+// demandedAddrs is every address of the fixture case 16 reads its report half
+// out of, which is what a plane has to answer all of for the overlapped load to
+// succeed where the serial one failed.
+func demandedAddrs() []ferry.Path {
+	return []ferry.Path{ferry.At("needone"), ferry.At("needtwo"), ferry.At("needthree"), ferry.At("needfour")}
+}
+
+// isSpreadSet is the address set case 16's value half binds, named by the one
+// address no other fixture in the suite holds.
+func isSpreadSet(addrs *ferry.AddressSet) bool { return hasPath(addrs, divergeAt) }
+
+// errScheduled is what the refusing planes fail with.
 var errScheduled = errors.New("this address is only unreadable when the walk overlaps")
 
+// scheduled is when a plane answers out of the staging rather than out of the
+// plane underneath: an address, and the schedule the walk is running under.
+//
+// The schedule is read off the context rather than observed, which is what
+// makes every fixture here deterministic. ferry.ConcurrencyBudget is the number
+// the caller granted, so a plane can answer one way where core is allowed to
+// overlap and another where it is not, with no goroutine of its own and nothing
+// for the race detector to find.
+type scheduled func(ctx context.Context, at ferry.Path) bool
+
+// overlapping matches these addresses on a walk core was allowed to overlap,
+// and nothing on a serial one.
+func overlapping(at ...ferry.Path) scheduled {
+	return func(ctx context.Context, p ferry.Path) bool {
+		return ferry.ConcurrencyBudget(ctx) > 1 && slices.Contains(at, p)
+	}
+}
+
+// always matches these addresses on every schedule, which is a plane that is
+// broken rather than one that is broken by overlapping.
+func always(at ...ferry.Path) scheduled {
+	return func(_ context.Context, p ferry.Path) bool { return slices.Contains(at, p) }
+}
+
 // overlappingPlane is the memory plane whose reader declares the concurrency
-// capability and answers one address differently once a budget rides the
-// context.
-func overlappingPlane(at ferry.Path, v ferry.Value, err error) ferrytest.Plane {
+// capability and answers the addresses when names out of the staging.
+func overlappingPlane(when scheduled, v ferry.Value, err error) ferrytest.Plane {
 	mem := ferrytest.MemPlane()
 	p := mem
 
 	p.Name = "overlapping"
 	p.Open = func() ferrytest.Instance {
 		inst := mem.Open()
-		inst.Source = overlappingSource{inner: inst.Source, at: at, value: v, err: err}
+		inst.Source = overlappingSource{inner: inst.Source, when: when, value: v, err: err}
 
 		return inst
 	}
@@ -550,7 +732,7 @@ func overlappingPlane(at ferry.Path, v ferry.Value, err error) ferrytest.Plane {
 
 type overlappingSource struct {
 	inner ferry.Source
-	at    ferry.Path
+	when  scheduled
 	value ferry.Value
 	err   error
 }
@@ -567,14 +749,14 @@ func (s overlappingSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error)
 			return nil, err
 		}
 
-		return overlappingReader{inner: r, at: s.at, value: s.value, err: s.err}, nil
+		return overlappingReader{inner: r, when: s.when, value: s.value, err: s.err}, nil
 	}, nil
 }
 
 // overlappingReader declares the capability and is not equivalent under it.
 type overlappingReader struct {
 	inner ferry.Reader
-	at    ferry.Path
+	when  scheduled
 	value ferry.Value
 	err   error
 }
@@ -583,10 +765,10 @@ type overlappingReader struct {
 // own, so the caller's budget stands alone.
 func (overlappingReader) MaxConcurrent() int { return 0 }
 
-// Get answers out of the plane, except at the one address this plane answers
-// differently once the walk was given a budget.
+// Get answers out of the plane, except where this plane was staged to answer
+// out of itself instead.
 func (r overlappingReader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
-	if addr.Path() == r.at && ferry.ConcurrencyBudget(ctx) > 1 {
+	if r.when(ctx, addr.Path()) {
 		return r.value, r.err
 	}
 

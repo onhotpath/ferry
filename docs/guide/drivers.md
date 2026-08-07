@@ -965,7 +965,7 @@ It opens the write half concurrently and walks nothing, because what the contrac
 Both halves run once on their own first, so a plane that cannot be opened at all is reported by the cases that own a broken open rather than three more times.
 
 Case 16 is the gate on the one optional interface that is a promise, and it is skipped, out loud, for every reader that does not declare `Concurrent` - so it cannot turn your CI red for a promise you never made.
-It asks both halves, because the promise is about both: one plane written once and read back under several budgets, and one plane holding none of a fixture's required addresses, whose report has to read identically however the walk was scheduled.
+It asks both halves, because the promise is about both: one plane written once and read back under several budgets, and that same plane read for a second fixture's required addresses, which it holds none of, whose report has to read identically however the walk was scheduled.
 The report is compared in full rather than by its one-line summary, since two aggregates carrying different failures at the same addresses summarise alike.
 Every load mints its own destination, which is the fresh-destination rule and the trap this property has: a destination shared between the two schedules is what makes a broken second walk pass.
 

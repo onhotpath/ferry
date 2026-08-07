@@ -541,7 +541,8 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 >
 > **Nothing here is a new rule**, which is why this is a note rather than an ADR: ADR-0019 states the gate and this is the case that runs it.
 > The case is skipped, out loud, for every reader that does not declare the capability, which is every driver that has not opted in - so it is not a case that can turn a CI red for a promise its author never made.
-> **Both halves are asked**, because the promise is about both: one plane written once and loaded under several budgets, and one plane holding none of a fixture's required addresses, whose aggregate must read identically however it was scheduled.
+> **Both halves are asked**, because the promise is about both: one plane written once and loaded under several budgets, and that same plane read for a second fixture's required addresses, which it holds none of, whose aggregate must read identically however it was scheduled.
+> The two fixtures are addressed apart so that one instance can serve both, which is the stronger statement as well as the cheaper one: a plane where they did overlap reports it.
 > Every load mints its own destination, which is this ADR's fresh-destination rule and ADR-0019's own named trap: a shared destination is what makes a broken second walk pass.
 > **What a driver declares is what runs**, so the capability joins the line a run says about itself under [#201](https://github.com/onhotpath/ferry/issues/201): a reader that tolerates overlap says so before any case runs.
 

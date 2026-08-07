@@ -48,7 +48,7 @@ func (d *driverRun) caseSerialEquivalence() {
 	}
 
 	d.equivalentValues(inst)
-	d.equivalentReports()
+	d.equivalentReports(inst)
 }
 
 // declaresOverlap opens the read half once and asks whether it declared the
@@ -141,18 +141,19 @@ func (d *driverRun) sameValue(n int, got, want *spread, err error) {
 // members in member order and never in completion order; a driver whose
 // overlapping reads report the same failures in a different order is a caller's
 // diff that changes between runs of one program.
-func (d *driverRun) equivalentReports() {
+//
+// It runs over the instance the other half already has rather than minting a
+// second one, and the two fixtures being addressed apart is what makes that
+// sound: [demanded] names no address of [spread], so a plane the other half has
+// just written holds none of these. Reusing it is also the stronger statement,
+// because a plane where the two did overlap would report here.
+func (d *driverRun) equivalentReports(inst Instance) {
 	d.rep.Helper()
-
-	inst := d.plane.Open()
-	if inst.Source == nil {
-		return
-	}
 
 	_, err := ferry.Load[demanded](inst.ctx(), inst.Source, d.opts...)
 	if err == nil {
-		d.skip(caseEquivalentNo, "a load of four required addresses against a freshly minted plane succeeded, "+
-			"so this plane holds them already and there is no report for two schedules to disagree about")
+		d.skip(caseEquivalentNo, "a load of four required addresses this plane holds none of succeeded, so "+
+			"there is no report for two schedules to disagree about")
 
 		return
 	}
