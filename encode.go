@@ -37,7 +37,9 @@ func written(ctx context.Context, w Writer, sch *schema, root reflect.Value) err
 	// every optional capability: a sink declares that it can stage by having
 	// the method, and ferry adds no interface to ask the question with.
 	if _, staging := w.(Committer); staging {
-		return dumpWalk(ctx, w, sch, root)
+		_, err := dumpWalk(ctx, w, sch, root)
+
+		return err
 	}
 
 	// Whether this buffers or re-walks is an implementation choice ADR-0011
@@ -45,43 +47,31 @@ func written(ctx context.Context, w Writer, sch *schema, root reflect.Value) err
 	// thousand addresses. Buffering is the cheaper of the two on an ordinary
 	// config struct, and nothing outside this function can tell which was
 	// taken: the property is what the plane was asked, not how ferry got there.
-	phase := &encodePhase{}
-	if err := dumpWalk(ctx, phase, sch, root); err != nil {
+	//
+	// The walk runs with no plane at all rather than against a stand-in that
+	// accepts every address, so every error it produces is one ferry reached
+	// without the plane, and what it encoded comes back in its outcome rather
+	// than in a buffer every subtree appends to (ADR-0019).
+	staged, err := dumpWalk(ctx, nil, sch, root)
+	if err != nil {
 		return err
 	}
 
-	return phase.flush(ctx, w)
+	return flush(ctx, w, staged.writes)
 }
 
 // dumpWalk is one walk of one compiled schema in the Dump direction, against
-// whichever Writer the policy above decided it writes to.
+// whichever Writer the policy above decided it writes to, or against none at
+// all where the encodes are staged in the outcome instead.
 //
-// The minted set is the walk's own and starts empty on every dump, because the
-// addresses in it came from this value and the next dump has another.
-func dumpWalk(ctx context.Context, w Writer, sch *schema, root reflect.Value) error {
-	dir := dumpTo{w: w, addrs: sch.addrs, minted: map[Path]struct{}{}}
+// What it hands back is the root's outcome: every address this value realised,
+// and every encode it staged. Both came from this value, and the next dump has
+// another, so neither outlives the call (ADR-0012).
+func dumpWalk(ctx context.Context, w Writer, sch *schema, root reflect.Value) (outcome, error) {
+	dir := dumpTo{w: w, addrs: sch.addrs}
 
 	return newWalker(dir).walk(ctx, spot{n: sch.root, v: root})
 }
-
-// encodePhase is the Writer the encode phase walks against: it accepts every
-// address and reaches no plane, so a walk over it performs every encode, every
-// address mint and every collision check, and touches nothing.
-//
-// It is a Writer rather than a second direction because the walk is written
-// once. A phase that asked the direction to behave differently would be axis
-// two of ADR-0010's duplication back again, at the one place Dump is allowed to
-// have two behaviours.
-//
-// The buffer is shared mutable state behind the scheduler seam, in the same
-// family as the walk's own minted set and presence counter and for the same
-// reason: the serial scheduler core ships needs nothing, and a concurrent one
-// has to carry every one of the three rather than only its errors. It is left
-// standing on purpose, because a lock here would answer the parked concurrency
-// question by accident.
-type encodePhase struct{ writes []stagedWrite }
-
-var _ Writer = (*encodePhase)(nil)
 
 // stagedWrite is one address and the Value the walk encoded for it, held in the
 // order the walk produced them so that the replay is the write order a staging
@@ -91,15 +81,6 @@ type stagedWrite struct {
 	v  Value
 }
 
-// Set records what would have been written. It never fails, which is the whole
-// point: every error a walk against this produces is one ferry could have
-// reached without the plane.
-func (p *encodePhase) Set(_ context.Context, at Path, v Value) error {
-	p.writes = append(p.writes, stagedWrite{at: at, v: v})
-
-	return nil
-}
-
 // flush hands the plane every encoded value, and aggregates its refusals.
 //
 // It does not stop at the first one, and the case that decides that is the same
@@ -107,10 +88,10 @@ func (p *encodePhase) Set(_ context.Context, at Path, v Value) error {
 // others reports both refused addresses here and one under fail-fast, and
 // taking that away on Dump alone would be an asymmetry between the directions
 // about the same fact.
-func (p *encodePhase) flush(ctx context.Context, w Writer) error {
-	errs := make([]error, 0, len(p.writes))
+func flush(ctx context.Context, w Writer, writes []stagedWrite) error {
+	errs := make([]error, 0, len(writes))
 
-	for _, write := range p.writes {
+	for _, write := range writes {
 		if err := w.Set(ctx, write.at, write.v); err != nil {
 			// The moment is the walk's rather than a phase of its own. The
 			// failure is the plane refusing one address, which is what an

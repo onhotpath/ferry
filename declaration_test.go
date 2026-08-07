@@ -244,6 +244,84 @@ func TestADefaultFillsAHoleAndNeverConjuresTheSection(t *testing.T) {
 	})
 }
 
+// defInline is defCred where nothing can be absent: the same fields at the same
+// address with no pointer over them, which is the twin the seeded section below
+// is read against.
+type defInline struct {
+	Auth defCred `ferry:"auth"`
+}
+
+// TestASeededSectionGetsItsDeclaredDefaults is the other half of the rule above,
+// and the half that used to be lost: a section that exists gets its defaults,
+// and a section the caller seeded exists.
+//
+// What publishes the section is now the subtree's own answer. Under a presence
+// bit read as a shared counter's difference across the subtree the default was
+// applied into the fresh pointee, counted as nothing, and discarded with it - so
+// a seeded section came back holding the zero value, and one unrelated address
+// anywhere on the plane brought the default back by making the difference
+// non-zero.
+func TestASeededSectionGetsItsDeclaredDefaults(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		plane map[Path]Value
+		want  defCred
+	}{{
+		name:  "over a plane holding nothing at all",
+		plane: map[Path]Value{},
+		want:  defCred{User: "admin", Pass: "seed"},
+	}, {
+		name:  "over a plane holding one address in the section itself",
+		plane: map[Path]Value{At("auth", "pass"): String("plane")},
+		want:  defCred{User: "admin", Pass: "plane"},
+	}, {
+		name:  "over a plane holding one address outside it entirely",
+		plane: map[Path]Value{At("port"): Number("7")},
+		want:  defCred{User: "admin", Pass: "seed"},
+	}}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			mustDefaultUnderTheSeed(t, c.plane, c.want)
+		})
+	}
+}
+
+// mustDefaultUnderTheSeed loads over a seeded section and reads the twin that
+// has no absence to have an opinion about beside it, over its own fresh plane.
+func mustDefaultUnderTheSeed(t *testing.T, values map[Path]Value, want defCred) {
+	t.Helper()
+
+	seed := defOptional{Auth: &defCred{Pass: "seed"}}
+
+	got, err := LoadOver(t.Context(), seed, planeSource{p: newPlane(values)})
+	if err != nil {
+		t.Fatalf("load over: %+v", err)
+	}
+
+	if got.Auth == nil {
+		t.Fatal("the seeded section came back nil, and a section the caller seeded exists")
+	}
+
+	if *got.Auth != want {
+		t.Errorf("the seeded section loaded %+v, want %+v", *got.Auth, want)
+	}
+
+	inline, err := LoadOver(t.Context(), defInline{Auth: defCred{Pass: "seed"}},
+		planeSource{p: newPlane(values)})
+	if err != nil {
+		t.Fatalf("load over the inline twin: %+v", err)
+	}
+
+	if inline.Auth != want {
+		t.Errorf("the inline twin loaded %+v, want %+v: the pointer is what differs, not the declaration",
+			inline.Auth, want)
+	}
+}
+
 func mustPointAt(t *testing.T, got *int, want int) {
 	t.Helper()
 

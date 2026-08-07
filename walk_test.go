@@ -417,6 +417,56 @@ func exportedIdents(ids ...*ast.Ident) []string {
 // TestLoadRefusesAKindAStringCannotTake is the other half of "Absent does not
 // write": every observation that is not Absent is a value the plane holds, and
 // it is handed to the type set, which either accepts it or refuses it loudly.
+// wide is a container of twenty leaves, which is the shape the scheduler seam
+// is priced on: what a container costs the walk is a function of how many
+// members it has, and twenty is an ordinary section rather than an extreme one.
+type wide struct {
+	A string `ferry:"a"`
+	B string `ferry:"b"`
+	C string `ferry:"c"`
+	D string `ferry:"d"`
+	E string `ferry:"e"`
+	F string `ferry:"f"`
+	G string `ferry:"g"`
+	H string `ferry:"h"`
+	I string `ferry:"i"`
+	J string `ferry:"j"`
+	K string `ferry:"k"`
+	L string `ferry:"l"`
+	M string `ferry:"m"`
+	N string `ferry:"n"`
+	O string `ferry:"o"`
+	P string `ferry:"p"`
+	Q string `ferry:"q"`
+	R string `ferry:"r"`
+	S string `ferry:"s"`
+	T string `ferry:"t"`
+}
+
+// BenchmarkLoadOverAWideContainer measures what one load spends over a single
+// twenty-member container, which is where the count-and-one-body seam shows: a
+// container costs one closure however many members it has, rather than one per
+// member plus the slice holding them.
+func BenchmarkLoadOverAWideContainer(b *testing.B) {
+	values := map[Path]Value{}
+	for _, name := range strings.Split("abcdefghijklmnopqrst", "") {
+		values[At(name)] = String(name)
+	}
+
+	bound, err := Bind[wide](planeSource{p: newPlane(values)})
+	if err != nil {
+		b.Fatalf("bind: %+v", err)
+	}
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if _, err := bound.Load(b.Context()); err != nil {
+			b.Fatalf("load: %+v", err)
+		}
+	}
+}
+
 func TestLoadRefusesAKindAStringCannotTake(t *testing.T) {
 	t.Parallel()
 

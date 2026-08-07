@@ -143,9 +143,9 @@ func (b *bound) load(ctx context.Context, dst reflect.Value) (err error) {
 
 	defer func() { err = join(err, released(r)) }()
 
-	dir := loadFrom{r: r, wrote: new(int)}
+	_, err = newWalker(loadFrom{r: r}).walk(ctx, spot{n: b.sch.root, v: loadRoot(dst)})
 
-	return newWalker(dir).walk(ctx, spot{n: b.sch.root, v: loadRoot(dst)})
+	return err
 }
 
 // boundSink is bound on the write side, and [SinkBinding] is this plus T.

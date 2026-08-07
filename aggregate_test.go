@@ -27,14 +27,19 @@ import (
 // It exists in this file and nowhere else. It is the comparison baseline
 // ADR-0011's table calls a counterfactual, and having it here rather than in
 // walk.go is the whole of what "no importer can select a scheduler" means.
-func firstError(tasks []func() error) error {
-	for _, task := range tasks {
-		if err := task(); err != nil {
-			return err
+func firstError(n int, run func(i int) (outcome, error)) (outcome, error) {
+	var b batch
+
+	for i := range n {
+		got, err := run(i)
+		b.add(got, err)
+
+		if err != nil {
+			return b.done()
 		}
 	}
 
-	return nil
+	return b.done()
 }
 
 // loadUnder runs the walk over walkConf under a scheduler the caller chooses.
@@ -62,10 +67,76 @@ func loadUnder(t *testing.T, run sched, p *plane) error {
 
 	var out walkConf
 
-	w := newWalker(loadFrom{r: r, wrote: new(int)})
+	w := newWalker(loadFrom{r: r})
 	w.run = run
 
-	return w.walk(t.Context(), spot{n: sch.root, v: reflect.ValueOf(&out).Elem()})
+	_, err = w.walk(t.Context(), spot{n: sch.root, v: reflect.ValueOf(&out).Elem()})
+
+	return err
+}
+
+// TestEverySubtreeReturnsItsOwnPresence is what makes the presence bit
+// composable rather than merely correct today.
+//
+// The scheduler is where a subtree's answer arrives, so it is where the claim
+// can be read: every member of a container hands back its own presence fact,
+// and the container's own answer is those combined. A bit written into one
+// location the whole walk shares looks the same from a caller and is a
+// different fact - it is the walk's running total, and a subtree reading it
+// across its own descent is reading whatever else ran in between.
+//
+// The plane holds one address, under /db, so exactly one member of the root
+// says yes and exactly one member of /db does.
+func TestEverySubtreeReturnsItsOwnPresence(t *testing.T) {
+	t.Parallel()
+
+	var said [][]bool
+
+	inspect := func(n int, run func(i int) (outcome, error)) (outcome, error) {
+		bits := make([]bool, 0, n)
+
+		var b batch
+
+		for i := range n {
+			got, err := run(i)
+			bits = append(bits, got.wrote)
+			b.add(got, err)
+		}
+
+		said = append(said, bits)
+
+		return b.done()
+	}
+
+	p := newPlane(map[Path]Value{At("db", "host"): String("db1")})
+	if err := loadUnder(t, inspect, p); err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	// The root's four members are /name, /env, /region and the /db container,
+	// and /db's two are its leaves. Each list holds exactly one yes, which is
+	// the subtree the plane spoke under and never a sibling of it.
+	for _, bits := range said {
+		if yes := countTrue(bits); yes != 1 {
+			t.Errorf("a container's members said %v, want exactly one of them to have written", bits)
+		}
+	}
+
+	if len(said) != 2 {
+		t.Fatalf("%d containers were scheduled, want the root and /db", len(said))
+	}
+}
+
+func countTrue(bits []bool) int {
+	n := 0
+
+	for _, bit := range bits {
+		if bit {
+			n++
+		}
+	}
+
+	return n
 }
 
 // badFive is a plane whose five addresses all hold a kind a string cannot take,
