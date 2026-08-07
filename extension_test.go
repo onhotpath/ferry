@@ -45,7 +45,12 @@ func docsExt() KeyExtension {
 func extRegistry(t *testing.T, exts ...KeyExtension) *Registry {
 	t.Helper()
 
-	return NewRegistry(WithTagKeys(exts...))
+	reg, err := NewRegistry(WithTagKeys(exts...))
+	if err != nil {
+		t.Fatalf("the declaration was refused: %+v", err)
+	}
+
+	return reg
 }
 
 // boundTo binds src to T and hands back the address set the driver received,
@@ -305,65 +310,57 @@ func TestWhatADeclarationMayNotBe(t *testing.T) {
 
 	cases := []struct {
 		name  string
-		build func()
+		items []Registration
 		want  []string
 	}{{
 		name:  "ferry's own key",
-		build: func() { NewRegistry(WithTagKeys(KeyExtension{TagKey: "ferry"})) },
+		items: []Registration{WithTagKeys(KeyExtension{TagKey: "ferry"})},
 		want:  []string{`"ferry" is the key ferry reads`},
 	}, {
 		name:  "no key at all",
-		build: func() { NewRegistry(WithTagKeys(KeyExtension{})) },
+		items: []Registration{WithTagKeys(KeyExtension{})},
 		want:  []string{"the empty string names none"},
 	}, {
 		name:  "a punctuated key",
-		build: func() { NewRegistry(WithTagKeys(KeyExtension{TagKey: "my.lib"})) },
+		items: []Registration{WithTagKeys(KeyExtension{TagKey: "my.lib"})},
 		want:  []string{`"my.lib" contains "."`},
 	}, {
 		name:  "a key holding a space",
-		build: func() { NewRegistry(WithTagKeys(KeyExtension{TagKey: "my lib"})) },
+		items: []Registration{WithTagKeys(KeyExtension{TagKey: "my lib"})},
 		want:  []string{`"my lib" contains " "`},
 	}, {
 		name:  "one key twice in one call",
-		build: func() { NewRegistry(WithTagKeys(mylibExt(), mylibExt())) },
+		items: []Registration{WithTagKeys(mylibExt(), mylibExt())},
 		want:  []string{`"mylib" is declared twice`},
 	}, {
 		name:  "one key across two calls",
-		build: func() { NewRegistry(WithTagKeys(mylibExt()), WithTagKeys(mylibExt())) },
+		items: []Registration{WithTagKeys(mylibExt()), WithTagKeys(mylibExt())},
 		want:  []string{`"mylib" is declared twice`},
 	}, {
-		name: "a word with no name",
-		build: func() {
-			NewRegistry(WithTagKeys(KeyExtension{TagKey: "mylib", Words: []Word{{}}}))
-		},
-		want: []string{"declares a word with no name"},
+		name:  "a word with no name",
+		items: []Registration{WithTagKeys(KeyExtension{TagKey: "mylib", Words: []Word{{}}})},
+		want:  []string{"declares a word with no name"},
 	}, {
-		name: "a word holding a comma",
-		build: func() {
-			NewRegistry(WithTagKeys(KeyExtension{TagKey: "mylib", Words: []Word{{Name: "a,b"}}}))
-		},
-		want: []string{`"a,b"`, `contains ","`},
+		name:  "a word holding a comma",
+		items: []Registration{WithTagKeys(KeyExtension{TagKey: "mylib", Words: []Word{{Name: "a,b"}}})},
+		want:  []string{`"a,b"`, `contains ","`},
 	}, {
-		name: "a word holding an equals sign",
-		build: func() {
-			NewRegistry(WithTagKeys(KeyExtension{TagKey: "mylib", Words: []Word{{Name: "a=b"}}}))
-		},
-		want: []string{`"a=b"`, `contains "="`},
+		name:  "a word holding an equals sign",
+		items: []Registration{WithTagKeys(KeyExtension{TagKey: "mylib", Words: []Word{{Name: "a=b"}}})},
+		want:  []string{`"a=b"`, `contains "="`},
 	}, {
 		name: "one word twice",
-		build: func() {
-			NewRegistry(WithTagKeys(KeyExtension{
-				TagKey: "mylib",
-				Words:  []Word{{Name: "node", TakesValue: true}, {Name: "node"}},
-			}))
-		},
+		items: []Registration{WithTagKeys(KeyExtension{
+			TagKey: "mylib",
+			Words:  []Word{{Name: "node", TakesValue: true}, {Name: "node"}},
+		})},
 		want: []string{`"node" under tag key "mylib" is declared twice`},
 	}}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			mustRefuseAtConstruction(t, c.build, c.want...)
+			mustRefuseAtConstruction(t, c.items, c.want...)
 		})
 	}
 }
@@ -411,8 +408,8 @@ func TestATagUnderADeclaredKeyIsScannedLikeFerrysOwn(t *testing.T) {
 func TestDeclarationOrderIsOneSchemaKey(t *testing.T) {
 	t.Parallel()
 
-	one := NewRegistry(WithTagKeys(mylibExt(), docsExt()))
-	other := NewRegistry(WithTagKeys(docsExt()), WithTagKeys(mylibExt()))
+	one := registryWith(t, WithTagKeys(mylibExt(), docsExt()))
+	other := registryWith(t, WithTagKeys(docsExt()), WithTagKeys(mylibExt()))
 
 	if one.exts.decl != other.exts.decl {
 		t.Errorf("the declarations canonicalise to %q and %q, and one form was expected",
@@ -423,7 +420,7 @@ func TestDeclarationOrderIsOneSchemaKey(t *testing.T) {
 		t.Error("two declared extensions canonicalise to the empty form, which is what declaring nothing is")
 	}
 
-	if NewRegistry().exts.decl != (extDecl{}) {
+	if MustRegistry().exts.decl != (extDecl{}) {
 		t.Error("a registry declaring nothing does not canonicalise to the empty form")
 	}
 }
@@ -431,7 +428,7 @@ func TestDeclarationOrderIsOneSchemaKey(t *testing.T) {
 // TestOneTypeUnderOneDeclarationIsOneEntry is the cache half: reading a
 // declared key adds nothing to how often a type compiles.
 func TestOneTypeUnderOneDeclarationIsOneEntry(t *testing.T) {
-	reg := NewRegistry(WithTagKeys(mylibExt()))
+	reg := registryWith(t, WithTagKeys(mylibExt()))
 
 	for range 3 {
 		if err := Compile[extConf](WithRegistry(reg)); err != nil {
@@ -574,7 +571,7 @@ func TestADeclarationIsNotACodec(t *testing.T) {
 		t.Error("a tag key declaration satisfies Codec, so it can be registered as one")
 	}
 
-	reg := NewRegistry(DurationLike[pollInterval](), WithTagKeys(mylibExt()))
+	reg := registryWith(t, DurationLike[pollInterval](), WithTagKeys(mylibExt()))
 
 	if got := len(reg.Types()); got != 1 {
 		t.Errorf("the registry holds %d types, and 1 was expected", got)

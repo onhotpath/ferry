@@ -30,9 +30,10 @@ import (
 // Registry is the set of codecs one program registers for types ferry does not
 // own, over the set core already owns.
 //
-// Build one with [NewRegistry], name it for a call with [WithRegistry], and keep
-// it. It is complete when it is built and there is nothing to add afterwards, so
-// a package-level var or a per-test local is the whole idiom.
+// Build one with [NewRegistry] or [MustRegistry], name it for a call with
+// [WithRegistry], and keep it. It is complete when it is built and there is
+// nothing to add afterwards, so a package-level var or a per-test local is the
+// whole idiom.
 //
 // A registry is a value to keep, because the compiled-schema cache hangs off
 // it. Nothing is ever evicted from that cache, so a registry that stays alive
@@ -71,7 +72,7 @@ type Registry struct {
 // set, plus one codec per [Codec] handed to it, plus whatever foreign struct tag
 // keys [WithTagKeys] declares.
 //
-//	var registry = ferry.NewRegistry(
+//	registry, err := ferry.NewRegistry(
 //	    ferry.NumberText[big.Int](),
 //	    ferry.StringText[netip.Addr]().AsMapKey(),
 //	    ferry.WithTagKeys(yaml.Extension()),
@@ -88,11 +89,9 @@ type Registry struct {
 // carries. Passing no codec at all is exactly the set core ships, which is what
 // a call with no [WithRegistry] resolves against.
 //
-// It panics rather than returning an error, in regexp.MustCompile's family: a
-// registration is written once, at a program's birth, and every refusal below is
-// a mistake in the source rather than a condition a running program meets. What
-// it panics with is an *[Error] of [ErrSchema]'s class, so a caller who recovers
-// one reads the same report ferry gives any other refusal.
+// Use [MustRegistry] where the registry is a package-level var, which is the
+// common case: there is no error to check on a var declaration and a registry
+// that will not build is a program that cannot start.
 //
 // It refuses five things about a codec. A nil one. A pointer type, because
 // pointer indirection is structural and a codec for one would lose the null a
@@ -108,22 +107,63 @@ type Registry struct {
 // through ferrytest.
 //
 // What it refuses about a declared tag key is listed on [WithTagKeys], and is
-// refused here for the same reason and in the same words.
-func NewRegistry(items ...Registration) *Registry {
+// refused here for the same reason and in the same words. A refusal a
+// constructor already found - a nil codec half, a text pair that cannot decode,
+// a null policy over something that cannot carry one - is reported here too,
+// because a constructor has a registration to return and no error.
+//
+// The error is an *[Error] of [ErrSchema]'s class at the register moment, so it
+// reads as every other ferry refusal reads, and a list holding several bad items
+// reports all of them. Nothing is built on a refusal: the registry is nil.
+func NewRegistry(items ...Registration) (*Registry, error) {
 	r := &Registry{
 		byType: make(map[reflect.Type]registration, len(items)),
 		exts:   extSet{words: map[string]map[string]Word{}},
 	}
 
+	errs := make([]error, 0, len(items))
+
 	for _, it := range items {
 		if it == nil {
-			panic(regError(nilRegistrationMsg))
+			errs = append(errs, regError(nilRegistrationMsg))
+
+			continue
 		}
 
-		it.registerOn(r)
+		errs = append(errs, it.registerOn(r))
+	}
+
+	if err := join(errs...); err != nil {
+		return nil, err
 	}
 
 	r.exts.seal()
+
+	return r, nil
+}
+
+// MustRegistry is [NewRegistry] for a registry that is written once, and it
+// panics where that one would return an error.
+//
+//	var Registry = ferry.MustRegistry(
+//	    ferry.NumberText[big.Int](),
+//	    ferry.StringText[netip.Addr]().AsMapKey(),
+//	)
+//
+// It is here for the declaration a var has no error to check on, in
+// regexp.MustCompile's family: a codec set is source rather than input, so a
+// refusal is a mistake in the program rather than a condition a running one
+// meets, and the alternative is an error return on a line nobody checks.
+//
+// What it panics with is exactly what [NewRegistry] returns, an *[Error] of
+// [ErrSchema]'s class, so a caller who recovers one reads the ordinary report.
+// Use [NewRegistry] anywhere there is somewhere to put an error, a test with a
+// *testing.T in hand being the plain case.
+func MustRegistry(items ...Registration) *Registry {
+	r, err := NewRegistry(items...)
+	if err != nil {
+		panic(err)
+	}
 
 	return r
 }
@@ -143,7 +183,7 @@ const nilRegistrationMsg = "ferry.NewRegistry was given a nil registration: a co
 // where a global mutable table is not: there is no window, no ordering rule, and
 // no way for one package's registration to reach another package's load
 // (ADR-0017, amended under #273).
-var builtins = NewRegistry()
+var builtins = MustRegistry()
 
 // Types is every type this registry holds a codec for, sorted.
 //
@@ -178,20 +218,31 @@ func (r *Registry) Types() []reflect.Type {
 // add applies one registration, while the registry is still inside
 // [NewRegistry] and has not escaped.
 //
-// Every refusal is a panic, because the constructor has no error to return and
-// the reason it has none is the decision: a registry is complete at birth, so a
-// refusal here is a program that cannot start rather than a call that failed
-// (ADR-0017).
-func (r *Registry) add(g registration) {
+// The refusal a constructor already found is read first, because a registration
+// carrying one has no working codec for the rest of this to be about: a
+// constructor has a registration to return and no error, so it holds its refusal
+// in the value and this is where the value is opened (ADR-0017, amended under
+// #299: panics live only under a Must name).
+//
+// A refusal does not stop the list. Every item is offered, so a caller who wrote
+// two bad codecs reads about both, which is what [newConfig] does with a bad
+// Option list (ADR-0011).
+func (r *Registry) add(g registration) error {
+	if g.err != nil {
+		return g.err
+	}
+
 	if err := r.refuse(g); err != nil {
-		panic(err)
+		return err
 	}
 
 	if err := g.total(); err != nil {
-		panic(err)
+		return err
 	}
 
 	r.byType[g.typ] = g
+
+	return nil
 }
 
 // refuse is everything a registration is held to before its codec is run.

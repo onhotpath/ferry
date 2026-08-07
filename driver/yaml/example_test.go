@@ -97,7 +97,7 @@ func ExampleExtension() {
 		Port int    `ferry:"port"`
 	}
 
-	registry := ferry.NewRegistry(ferry.WithTagKeys(yaml.Extension()))
+	registry := ferry.MustRegistry(ferry.WithTagKeys(yaml.Extension()))
 
 	path := writeExamplePlane("wait: 30s\nport: 8080\n")
 	defer func() { _ = os.RemoveAll(filepath.Dir(path)) }()

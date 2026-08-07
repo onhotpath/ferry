@@ -128,7 +128,8 @@ A binding is safe to use from many goroutines.
 It applies to every struct in that call, so pass it everywhere you load that type.
 
 `ferry.WithRegistry(reg)` names a registry other than the one core ships.
-`ferry.NewRegistry(codecs...)` builds one: it takes its whole codec set at once, holds core's own type set underneath, and has no mutators, so it is complete on the line it is born.
+`ferry.NewRegistry(codecs...)` builds one and reports what it refused: it takes its whole codec set at once, holds core's own type set underneath, and has no mutators, so it is complete on the line it is born.
+`ferry.MustRegistry(codecs...)` is the same thing for a package-level var, and panics where the other returns an error.
 A registry also caches the compiled schema, so it is a value to keep: one per program, or one per test.
 
 ## Documentation

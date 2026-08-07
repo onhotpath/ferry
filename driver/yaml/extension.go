@@ -47,7 +47,7 @@ const bang = "!"
 // Extension declares this driver's struct tag key, for a registry to read
 // beside ferry's own.
 //
-//	var Registry = ferry.NewRegistry(ferry.WithTagKeys(yaml.Extension()))
+//	var Registry = ferry.MustRegistry(ferry.WithTagKeys(yaml.Extension()))
 //
 //	type Config struct {
 //	    Wait string `ferry:"wait" yamlext:"node=!mycompany:duration"`

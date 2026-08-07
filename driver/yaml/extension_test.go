@@ -25,7 +25,7 @@ type tagged struct {
 // declared is the registry these tests resolve against: core's own type set,
 // plus this driver's tag key.
 func declared() ferry.Option {
-	return ferry.WithRegistry(ferry.NewRegistry(ferry.WithTagKeys(yaml.Extension())))
+	return ferry.WithRegistry(ferry.MustRegistry(ferry.WithTagKeys(yaml.Extension())))
 }
 
 // TestADeclaredNodeTagSurvivesThreeStages is #156's acceptance bar: a load, a

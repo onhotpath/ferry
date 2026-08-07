@@ -15,7 +15,7 @@ import (
 // each codec the registry actually holds.
 //
 //	func TestCodec(t *testing.T) {
-//	    reg := ferry.NewRegistry(ferry.StringText[netip.Addr]().AsMapKey())
+//	    reg := ferry.MustRegistry(ferry.StringText[netip.Addr]().AsMapKey())
 //
 //	    ferrytest.RoundTrip(t, ferrytest.MemPlane(), proofs, ferry.WithRegistry(reg))
 //	    ferrytest.Codec(t, reg)
@@ -77,7 +77,7 @@ func Codec(t T, reg *ferry.Registry, opts ...ferry.Option) {
 	// these probes were written under leaves them unable to compile, and so does
 	// a second [ferry.WithRegistry]: core resolves against exactly one registry
 	// and each case below needs its own.
-	if err := ferry.Compile[onlyLeaf](c.with(ferry.NewRegistry())...); err != nil {
+	if err := ferry.Compile[onlyLeaf](c.with(ferry.MustRegistry())...); err != nil {
 		t.Errorf("these Options leave the codec suite unable to compile the struct it dumps a probe in: %v", err)
 
 		return
@@ -583,21 +583,20 @@ func (c *codecRun) keyCollisionRefused(reg *ferry.Registry) {
 // needs, reporting a refusal rather than running that case against a registry
 // that does not hold what it is about.
 //
-// A refusal is a panic, because a registry is complete at birth and
-// [ferry.NewRegistry] has no error to return, so this recovers one and reports
-// it as the case it belongs to.
-func (c *codecRun) probeRegistry(n int, codecs ...ferry.Registration) (reg *ferry.Registry, ok bool) {
+// A registry is complete at birth, so the refusal arrives from
+// [ferry.NewRegistry] rather than from the case that would have used it, and
+// this reports it as the case it belongs to.
+func (c *codecRun) probeRegistry(n int, codecs ...ferry.Registration) (*ferry.Registry, bool) {
 	c.rep.Helper()
 
-	defer func() {
-		if r := recover(); r != nil {
-			c.fail(n, fmt.Sprintf("the suite's own probe codec was refused at registration: %v", r))
+	reg, err := ferry.NewRegistry(codecs...)
+	if err != nil {
+		c.fail(n, fmt.Sprintf("the suite's own probe codec was refused at registration: %v", err))
 
-			reg, ok = nil, false
-		}
-	}()
+		return nil, false
+	}
 
-	return ferry.NewRegistry(codecs...), true
+	return reg, true
 }
 
 // with is the caller's Option list plus the registry one case needs, which is

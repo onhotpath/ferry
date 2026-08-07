@@ -195,7 +195,7 @@
 // claims a type ferry does not own, in both directions at once, and the
 // guarantee about that type transfers to whoever registered it:
 //
-//	var registry = ferry.NewRegistry(
+//	var registry = ferry.MustRegistry(
 //	    ferry.NumberText[big.Int](),
 //	    ferry.DurationLike[PollInterval](),
 //	)
@@ -214,9 +214,11 @@
 // [NewRegistry] is the whole registry API and [WithRegistry] names a registry
 // for one call. A registry takes its whole codec set at construction and has no
 // mutators, so it is complete when it is born and there is no ordering rule
-// between building it and using it; every refusal is a panic there rather than
-// an error on a line nobody checks. Core's own type set is always underneath,
-// and a codec claiming a type core owns is refused like any duplicate.
+// between building it and using it, and every refusal a constructor found along
+// the way is reported there. Core's own type set is always underneath, and a
+// codec claiming a type core owns is refused like any duplicate. [MustRegistry]
+// is the same constructor for the package-level var a refusal cannot be checked
+// on, and it panics.
 //
 // A registration claims its type unconditionally: there is no decline, and "fall
 // through to the next step" is spelled by not registering the type.
@@ -230,7 +232,7 @@
 // struct tag key of its own instead. [WithTagKeys] declares one on a registry,
 // beside the codecs:
 //
-//	var registry = ferry.NewRegistry(
+//	var registry = ferry.MustRegistry(
 //	    ferry.WithTagKeys(ferry.KeyExtension{
 //	        TagKey: "docs",
 //	        Words:  []ferry.Word{{Name: "desc", TakesValue: true}},

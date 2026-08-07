@@ -214,22 +214,27 @@ func mustRefuse(t *testing.T, err error, want ...string) {
 func registryWith(t *testing.T, codecs ...Registration) *Registry {
 	t.Helper()
 
-	return NewRegistry(codecs...)
+	reg, err := NewRegistry(codecs...)
+	if err != nil {
+		t.Fatalf("the registry was refused: %+v", err)
+	}
+
+	return reg
 }
 
-// mustRefuseAtConstruction is [mustRefuse] for the refusals [NewRegistry] and
-// the constructors raise, which are panics rather than errors: a registry is
-// complete at birth, so there is no call left to return an error from.
+// mustRefuseAtConstruction is [mustRefuse] for the refusals a registry build
+// makes.
 //
-// It recovers the panic and asserts the value is ferry's own located error, so
-// that a caller who wraps a NewRegistry in a recover reads the report ferry
-// gives every other refusal rather than a bare string (ADR-0017).
-func mustRefuseAtConstruction(t *testing.T, build func(), want ...string) {
+// It is where a constructor's own refusal surfaces too: a constructor has a
+// registration to return and no error, so it carries what was wrong with it and
+// NewRegistry is the one call that opens the value (ADR-0017 as amended under
+// #299). What it asserts is ferry's own located error rather than a bare string.
+func mustRefuseAtConstruction(t *testing.T, items []Registration, want ...string) {
 	t.Helper()
 
-	err := refusalFrom(build)
+	err := refusalFrom(items...)
 	if err == nil {
-		t.Fatalf("no panic was raised, and one containing %q was expected", want)
+		t.Fatalf("the registry was built, and a refusal containing %q was expected", want)
 	}
 
 	mustRefuse(t, err, want...)
@@ -239,26 +244,12 @@ func mustRefuseAtConstruction(t *testing.T, build func(), want ...string) {
 	}
 }
 
-// refusal runs build and reports the *Error it panicked with, or nil where it
-// returned. A panic with anything else fails the test where it happened.
-func refusalFrom(build func()) (err error) {
-	defer func() {
-		p := recover()
-		if p == nil {
-			return
-		}
+// refusalFrom builds a registry out of items and reports what it refused, or
+// nil where it built one.
+func refusalFrom(items ...Registration) error {
+	_, err := NewRegistry(items...)
 
-		fe, ok := p.(*Error)
-		if !ok {
-			panic(p)
-		}
-
-		err = fe
-	}()
-
-	build()
-
-	return nil
+	return err
 }
 
 // TestInferenceWorksAtEveryCallSiteWithAValueArgument is ADR-0009's ergonomic
@@ -276,7 +267,7 @@ func refusalFrom(build func()) (err error) {
 func TestInferenceWorksAtEveryCallSiteWithAValueArgument(t *testing.T) {
 	t.Parallel()
 
-	reg := NewRegistry(
+	reg := registryWith(t,
 		StringValue(macText, parseMAC),
 		StringValue(countText, parseCount),
 		StringValue(hostText, parseHost),
@@ -350,7 +341,7 @@ func TestTheZeroValueCheckRefuses(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			mustRefuseAtConstruction(t, func() { NewRegistry(c.codec) }, "not total over the zero value")
+			mustRefuseAtConstruction(t, []Registration{c.codec}, "not total over the zero value")
 		})
 	}
 }
@@ -383,7 +374,7 @@ func TestTheZeroValueCheckAccepts(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 
-			if err := refusalFrom(func() { NewRegistry(c.codec) }); err != nil {
+			if err := refusalFrom(c.codec); err != nil {
 				t.Fatalf("the registration was refused: %+v", err)
 			}
 		})
@@ -396,7 +387,7 @@ func TestTheZeroValueCheckAccepts(t *testing.T) {
 func TestTheZeroCheckReportsWhatTheCodecEncodedTo(t *testing.T) {
 	t.Parallel()
 
-	mustRefuseAtConstruction(t, func() { NewRegistry(StringValue(addrText, netip.ParseAddr)) },
+	mustRefuseAtConstruction(t, []Registration{StringValue(addrText, netip.ParseAddr)},
 		"netip.Addr", `string("invalid IP")`, "decoding that back fails")
 }
 
@@ -406,11 +397,9 @@ func TestTheZeroCheckReportsWhatTheCodecEncodedTo(t *testing.T) {
 func TestAnEncodeFailureAtTheZeroValueIsRefused(t *testing.T) {
 	t.Parallel()
 
-	mustRefuseAtConstruction(t, func() {
-		NewRegistry(StringValue(
-			func(retryCount) (string, error) { return "", errNotAnInteger },
-			func(string) (retryCount, error) { return 0, nil }))
-	}, "encoding one failed")
+	mustRefuseAtConstruction(t, []Registration{StringValue(
+		func(retryCount) (string, error) { return "", errNotAnInteger },
+		func(string) (retryCount, error) { return 0, nil })}, "encoding one failed")
 }
 
 // TestARegistrationRefusalKeepsItsOwnClass is #228: a refusal about a
@@ -425,11 +414,9 @@ func TestAnEncodeFailureAtTheZeroValueIsRefused(t *testing.T) {
 func TestARegistrationRefusalKeepsItsOwnClass(t *testing.T) {
 	t.Parallel()
 
-	err := refusalFrom(func() {
-		NewRegistry(StringValue(
-			countText,
-			func(string) (plainCount, error) { return 0, fmt.Errorf("%w: the store is down", ErrPlane) }))
-	})
+	err := refusalFrom(StringValue(
+		countText,
+		func(string) (plainCount, error) { return 0, fmt.Errorf("%w: the store is down", ErrPlane) }))
 
 	if err == nil {
 		t.Fatal("a codec that is not total over its zero value was accepted")
@@ -485,14 +472,14 @@ func TestWhatARegistrationMayNotBe(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			mustRefuseAtConstruction(t, func() { NewRegistry(c.codec) }, c.want)
+			mustRefuseAtConstruction(t, []Registration{c.codec}, c.want)
 		})
 	}
 
 	t.Run("a named type over one core owns is accepted", func(t *testing.T) {
 		t.Parallel()
 
-		if err := refusalFrom(func() { NewRegistry(DurationLike[pollInterval]()) }); err != nil {
+		if err := refusalFrom(DurationLike[pollInterval]()); err != nil {
 			t.Errorf("the named duration was refused: %+v", err)
 		}
 	})
@@ -509,39 +496,76 @@ func TestADuplicateIsRefused(t *testing.T) {
 	t.Parallel()
 
 	mustRefuseAtConstruction(t,
-		func() { NewRegistry(DurationLike[pollInterval](), DurationLike[pollInterval]()) },
+		[]Registration{DurationLike[pollInterval](), DurationLike[pollInterval]()},
 		"is already registered")
 }
 
-// TestAHalfThatIsNilPanicsAtTheCompositionSite is ADR-0017's one departure from
-// "ferry returns errors and never panics", and it is scoped to a program's
-// construction.
+// TestMustRegistryIsNewRegistryWithThePanic is the one place ferry panics, and
+// it is the pair Go writes: the plain name returns the refusal and the Must name
+// raises the same value.
 //
-// A nil half is a programming error at a program's birth, in the family of
-// regexp.MustCompile, and the alternative is an error return on a line nobody
-// checks. It fires at the constructor rather than at NewRegistry, because that
-// is where the missing half was written.
-func TestAHalfThatIsNilPanicsAtTheCompositionSite(t *testing.T) {
+// What it panics with is asserted rather than assumed, because the whole of what
+// a Must form owes a caller who recovers is the report the other form returns.
+func TestMustRegistryIsNewRegistryWithThePanic(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a codec set that builds", func(t *testing.T) {
+		t.Parallel()
+
+		reg := MustRegistry(DurationLike[pollInterval]())
+
+		mustHoldTypes(t, reg, []string{"github.com/onhotpath/ferry.pollInterval"})
+	})
+
+	t.Run("a codec set that does not", func(t *testing.T) {
+		t.Parallel()
+
+		want := refusalFrom(DurationLike[time.Duration]())
+		mustRefuse(t, want, "time.Duration is in core's own set")
+
+		defer func() {
+			p := recover()
+
+			got, ok := p.(*Error)
+			if !ok {
+				t.Fatalf("it panicked with %v, and ferry's own located error was expected", p)
+			}
+
+			if got.Error() != want.Error() {
+				t.Errorf("it panicked with\n\t%v\nand NewRegistry returns\n\t%v", got, want)
+			}
+		}()
+
+		MustRegistry(DurationLike[time.Duration]())
+
+		t.Error("a codec set core refuses built a registry")
+	})
+}
+
+// TestAHalfThatIsNilIsFoundAtTheCompositionSite is the eager check a
+// constructor makes and cannot report: it is found where the missing half was
+// written, and it is carried in the registration to the build that reads it.
+func TestAHalfThatIsNilIsFoundAtTheCompositionSite(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		name  string
-		build func()
+		codec Codec
 	}{{
 		name:  "a nil encode half",
-		build: func() { StringValue(nil, parseCount) },
+		codec: StringValue(nil, parseCount),
 	}, {
 		name:  "a nil decode half",
-		build: func() { StringValue[plainCount](countText, nil) },
+		codec: StringValue[plainCount](countText, nil),
 	}, {
 		name:  "a nil null policy",
-		build: func() { NullValue(StringValue(countText, parseCount), nil, func(plainCount) bool { return false }) },
+		codec: NullValue(StringValue(countText, parseCount), nil, func(plainCount) bool { return false }),
 	}}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			mustRefuseAtConstruction(t, c.build, "one of them is nil")
+			mustRefuseAtConstruction(t, []Registration{c.codec}, "one of them is nil")
 		})
 	}
 }
@@ -552,10 +576,10 @@ func TestAHalfThatIsNilPanicsAtTheCompositionSite(t *testing.T) {
 func TestANullPolicyOverAnotherTypesRegistrationIsRefused(t *testing.T) {
 	t.Parallel()
 
-	mustRefuseAtConstruction(t, func() {
+	mustRefuseAtConstruction(t, []Registration{
 		NullValue(StringValue(countText, parseCount),
 			func() (host, error) { return host{}, nil },
-			func(h host) bool { return h.Name == "" })
+			func(h host) bool { return h.Name == "" }),
 	}, "one registration covers one type")
 }
 
@@ -566,7 +590,7 @@ func TestANullPolicyOverAnotherTypesRegistrationIsRefused(t *testing.T) {
 func TestATextRegistrationRefusesAValueReceiverDecodeHalf(t *testing.T) {
 	t.Parallel()
 
-	mustRefuseAtConstruction(t, func() { StringText[copies]() }, "value receiver")
+	mustRefuseAtConstruction(t, []Registration{StringText[copies]()}, "value receiver")
 }
 
 // copies declares both halves of the text pair with the decode half on the
@@ -910,7 +934,7 @@ func TestTheBuiltInSetIsUnderEveryRegistry(t *testing.T) {
 func TestOverridingABuiltInIsRefused(t *testing.T) {
 	t.Parallel()
 
-	mustRefuseAtConstruction(t, func() { NewRegistry(StringValue(itoa, strconv.Atoi)) },
+	mustRefuseAtConstruction(t, []Registration{StringValue(itoa, strconv.Atoi)},
 		"int is in core's own set", "define a named type over it and register that")
 }
 
@@ -988,29 +1012,37 @@ func expectThreeTypes(got []reflect.Type) error {
 	return fmt.Errorf("a concurrent read of the registry saw %d types, want 3", len(got))
 }
 
-// TestNewRegistryRefusesTheFirstBadCodecAndNamesIt is ADR-0001's determinism
-// invariant under a constructor that panics.
+// TestNewRegistryReportsEveryBadCodecDeterministically is ADR-0001's
+// determinism invariant over a constructor that returns its refusals.
 //
-// The shipped surface applied a variadic Register one registration at a time and
-// joined every failure, because a mutable registry could half succeed. This one
-// cannot: a refusal happens before the registry exists, so there is exactly one
-// report, it names the codec that caused it, and the same list produces the same
-// report every time.
-func TestNewRegistryRefusesTheFirstBadCodecAndNamesIt(t *testing.T) {
+// A registry is built or it is not, so nothing half succeeds; what a caller gets
+// back is every item that was wrong rather than the first, which is what an
+// Option list already does, and the same list reports the same thing every time.
+func TestNewRegistryReportsEveryBadCodecDeterministically(t *testing.T) {
 	t.Parallel()
 
-	build := func() {
-		NewRegistry(
+	build := func() error {
+		return refusalFrom(
 			DurationLike[pollInterval](),
 			DurationLike[time.Duration](),
 			StringValue(addrText, netip.ParseAddr),
 		)
 	}
 
-	first := refusalFrom(build)
-	mustRefuse(t, first, "time.Duration is in core's own set")
+	first := build()
+	if first == nil {
+		t.Fatal("a list holding two bad codecs built a registry")
+	}
 
-	if second := refusalFrom(build); second == nil || second.Error() != first.Error() {
+	report := fmt.Sprintf("%+v", first)
+
+	for _, want := range []string{"time.Duration is in core's own set", "not total over the zero value"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("the report is\n\t%s\nand does not contain %q", report, want)
+		}
+	}
+
+	if second := build(); second == nil || second.Error() != first.Error() {
 		t.Errorf("the same codec list reported\n\t%v\nand then\n\t%v", first, second)
 	}
 }
@@ -1033,7 +1065,7 @@ func TestWithRegistryIsRefusedTwiceAndNil(t *testing.T) {
 		{name: "nil", opts: []Option{WithRegistry(nil)}, want: "nil registry"},
 		{
 			name: "twice",
-			opts: []Option{WithRegistry(NewRegistry()), WithRegistry(NewRegistry())},
+			opts: []Option{WithRegistry(MustRegistry()), WithRegistry(MustRegistry())},
 			want: "given twice",
 		},
 	}

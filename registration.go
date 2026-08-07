@@ -23,10 +23,13 @@ import (
 // does not compile rather than being refused at registration (ADR-0009's "a key
 // codec says so" made a compile fact).
 //
-// A half that cannot work panics here, at the composition site, rather than
-// being carried as an error to whatever call happens to read it. That is a
-// programming error at a program's birth, in regexp.MustCompile's family, and
-// the alternative is an error return on a line nobody checks (ADR-0017).
+// A half that cannot work is refused eagerly, here at the composition site, and
+// the refusal is carried in the registration to the [NewRegistry] that reads it.
+// No constructor here panics and none returns an error: a constructor has one
+// result and it is a registration, so the refusal rides in the value and
+// surfaces once, at the build, beside every other thing that was wrong with the
+// same list. That is [TagKey]'s pattern, and it is what ADR-0017's panic became
+// when panics were confined to Must-named functions (#299).
 
 // Registration is one item [NewRegistry] is built from, and the set is closed
 // at two: a [Codec], and the tag key declaration [WithTagKeys] returns.
@@ -37,8 +40,9 @@ import (
 type Registration interface {
 	// registerOn applies this item to a registry that is still inside
 	// NewRegistry and has not escaped, which is where every refusal about it
-	// fires (ADR-0017, ADR-0021).
-	registerOn(*Registry)
+	// fires, including the one an eager constructor already found (ADR-0017,
+	// ADR-0021).
+	registerOn(*Registry) error
 }
 
 // Codec is one registration: a type, and both halves of the codec that carries
@@ -70,11 +74,17 @@ type registration struct {
 	// type, which is what [KeyCodec.AsMapKey] says and what nothing else can
 	// check.
 	key bool
+
+	// err is the refusal the constructor that built this found, carried rather
+	// than raised: a constructor returns a registration and nothing else, so the
+	// value is where a refusal waits until [NewRegistry] opens it (#299). A
+	// registration carrying one holds no usable codec and is never added.
+	err error
 }
 
 func (g registration) entry() registration { return g }
 
-func (g registration) registerOn(r *Registry) { r.add(g) }
+func (g registration) registerOn(r *Registry) error { return r.add(g) }
 
 // KeyCodec is a registration whose kind may address a map key, which is String
 // and Number and nothing else.
@@ -87,7 +97,7 @@ type KeyCodec struct{ reg registration }
 
 func (k KeyCodec) entry() registration { return k.reg }
 
-func (k KeyCodec) registerOn(r *Registry) { r.add(k.reg) }
+func (k KeyCodec) registerOn(r *Registry) error { return r.add(k.reg) }
 
 // AsMapKey declares this codec's text injective over its type under Go's ==,
 // which is what a map key needs.
@@ -213,8 +223,8 @@ func asBytes(v Value) ([]byte, error) {
 // it: true and false and the spellings strconv.ParseBool takes, and a refusal
 // for everything else. A null never reaches it; [NullValue] is what takes one.
 //
-// Both halves are required, and a nil one panics here rather than at the load
-// that would have called it.
+// Both halves are required, and a nil one is refused at the [NewRegistry] this
+// is handed to rather than at the load that would have called it.
 func BoolValue[T any](enc func(T) (bool, error), dec func(bool) (T, error)) Codec {
 	return codecFor(boolPayload, enc, dec)
 }
@@ -314,7 +324,9 @@ func StringKey[T any](enc func(T) (string, error), dec func(string) (T, error)) 
 // codecFor is every payload-typed constructor above, which differ only in which
 // payload they name.
 func codecFor[T, P any](p payload[P], enc func(T) (P, error), dec func(P) (T, error)) registration {
-	mustHalves(enc, dec)
+	if err := checkHalves(enc, dec); err != nil {
+		return registration{typ: reflect.TypeFor[T](), err: err}
+	}
 
 	accept := acceptVia(p, dec)
 
@@ -384,10 +396,10 @@ func acceptVia[T, P any](p payload[P], dec func(P) (T, error)) func(reflect.Valu
 // there is no value argument to infer it from. PT is inferred from T, so a call
 // site writes one type argument and never two.
 //
-// It panics where T declares UnmarshalText on a value receiver: that method is
-// in *T's method set and satisfies the constraint, and it decodes into a copy
+// It is refused where T declares UnmarshalText on a value receiver: that method
+// is in *T's method set and satisfies the constraint, and it decodes into a copy
 // and leaves the field unchanged, so it is not a decode half a registration can
-// use.
+// use. The refusal is reported by the [NewRegistry] this is handed to.
 func StringText[T any, PT TextPointer[T]]() KeyCodec { return textCodec[T](KindString) }
 
 // NumberText registers a type that already declares its own text form and its
@@ -401,7 +413,7 @@ func StringText[T any, PT TextPointer[T]]() KeyCodec { return textCodec[T](KindS
 // loads from both, because a plane's string is donated to the declared kind on
 // the way in.
 //
-// It panics on the value-receiver UnmarshalText [StringText] describes.
+// It refuses the value-receiver UnmarshalText [StringText] describes.
 func NumberText[T any, PT TextPointer[T]]() KeyCodec { return textCodec[T](KindNumber) }
 
 // textCodec is both text constructors, which differ only in the kind they name.
@@ -416,9 +428,11 @@ func textCodec[T any](kind VKind) KeyCodec {
 	// is still incomplete is the one it cannot express: an UnmarshalText on a
 	// value receiver is in *T's method set and writes to a copy anyway (#131).
 	if !armOf(t).complete() {
-		panic(regError(t.String() + " declares UnmarshalText on a value receiver, which decodes into a copy and " +
-			"leaves the field unchanged, so it is not the decode half a registration can use - move UnmarshalText " +
-			"to *" + t.String() + ", or register a ferry.StringValue whose decode half returns the value"))
+		return KeyCodec{reg: registration{typ: t, err: regError(
+			t.String() + " declares UnmarshalText on a value receiver, which decodes into a copy and " +
+				"leaves the field unchanged, so it is not the decode half a registration can use - move " +
+				"UnmarshalText to *" + t.String() + ", or register a ferry.StringValue whose decode half " +
+				"returns the value")}}
 	}
 
 	return KeyCodec{reg: registration{
@@ -499,15 +513,33 @@ func DurationLike[T ~int64]() KeyCodec {
 // a null whatever isNull says, and a null loads as a nil pointer without running
 // load. A policied T dumped through a *T field therefore comes back nil.
 //
-// It panics where inner is nil, where either policy is nil, where inner is not a
-// registration for T, and where inner declared itself usable as a map key: a key
-// becomes the segment text of an address and never crosses the boundary as a
-// value, so it has no null to carry and two null-ish keys would render to one
-// empty segment.
+// It is refused where inner is nil, where either policy is nil, where inner is
+// not a registration for T, and where inner declared itself usable as a map key:
+// a key becomes the segment text of an address and never crosses the boundary as
+// a value, so it has no null to carry and two null-ish keys would render to one
+// empty segment. Every one of those is reported by the [NewRegistry] this is
+// handed to.
 func NullValue[T any](inner Codec, load func() (T, error), isNull func(T) bool) Codec {
-	mustHalves(load, isNull)
+	g, err := nullPolicy[T](inner, load, isNull)
+	if err != nil {
+		return registration{typ: reflect.TypeFor[T](), err: err}
+	}
 
-	g := mustInner[T](inner)
+	return g
+}
+
+// nullPolicy is [NullValue]'s body, split out so the constructor is the one
+// shape every constructor here has: build, or carry the refusal.
+func nullPolicy[T any](inner Codec, load func() (T, error), isNull func(T) bool) (registration, error) {
+	if err := checkHalves(load, isNull); err != nil {
+		return registration{}, err
+	}
+
+	g, err := innerFor[T](inner)
+	if err != nil {
+		return registration{}, err
+	}
+
 	base := g.codec
 
 	// The text half stays the inner codec's: a null is a kind and never a
@@ -516,7 +548,7 @@ func NullValue[T any](inner Codec, load func() (T, error), isNull func(T) bool) 
 	g.codec.encode = nullOrEncode(base.encode, isNull)
 	g.codec.accept = loadOrDecode(base.decode, load)
 
-	return g
+	return g, nil
 }
 
 // nullOrEncode is [NullValue]'s dump policy in front of the inner encode half.
@@ -559,7 +591,7 @@ func loadOrDecode[T any](
 	}
 }
 
-// mustInner holds [NullValue]'s inner registration to what a null policy can be
+// innerFor holds [NullValue]'s inner registration to what a null policy can be
 // grafted onto at all, at the composition site.
 //
 // The type mismatch is reachable because T is inferred from load and isNull
@@ -576,44 +608,52 @@ func loadOrDecode[T any](
 // registrant think about. A null is about a kind and a key has no kind, so the
 // two are structurally incompatible and this is a refusal rather than a rule
 // (ADR-0017, ADR-0009).
-func mustInner[T any](inner Codec) registration {
+//
+// An inner registration that is itself carrying a refusal hands that refusal
+// on unchanged, so the sentence a registrant reads is the one about what they
+// actually wrote rather than a second one about the wrapper (#299).
+func innerFor[T any](inner Codec) (registration, error) {
 	if inner == nil {
-		panic(regError("ferry.NullValue was given no registration to wrap: it is a modifier over one of the " +
-			"kind-named constructors, which is where the codec it adds a null policy to comes from"))
+		return registration{}, regError("ferry.NullValue was given no registration to wrap: it is a modifier " +
+			"over one of the kind-named constructors, which is where the codec it adds a null policy to comes from")
 	}
 
 	g := inner.entry()
 
-	if want := reflect.TypeFor[T](); g.typ != want {
-		panic(regError("ferry.NullValue was given a registration for " + g.typ.String() + " and a null policy " +
-			"over " + want.String() + ": one registration covers one type, and a policy for another type would " +
-			"be read against values it was never written for"))
+	switch {
+	case g.err != nil:
+		return registration{}, g.err
+	case g.typ != reflect.TypeFor[T]():
+		return registration{}, regError("ferry.NullValue was given a registration for " + g.typ.String() +
+			" and a null policy over " + reflect.TypeFor[T]().String() + ": one registration covers one type, " +
+			"and a policy for another type would be read against values it was never written for")
+	case g.key:
+		return registration{}, regError(g.typ.String() + ": a null policy may not be grafted onto a registration " +
+			"declared usable as a map key, because a key becomes the segment text of an address and never crosses " +
+			"the boundary as a value, so it has no null to carry - two null-ish keys would render to one empty " +
+			"segment and one entry would be lost with no error anywhere. Declare the key without the policy, or " +
+			"wrap a registration that is not a key")
 	}
 
-	if g.key {
-		panic(regError(g.typ.String() + ": a null policy may not be grafted onto a registration declared usable " +
-			"as a map key, because a key becomes the segment text of an address and never crosses the boundary " +
-			"as a value, so it has no null to carry - two null-ish keys would render to one empty segment and " +
-			"one entry would be lost with no error anywhere. Declare the key without the policy, or wrap a " +
-			"registration that is not a key"))
-	}
-
-	return g
+	return g, nil
 }
 
-// mustHalves is the nil-half refusal, and it is a panic at the composition site
-// rather than an error (ADR-0017).
+// checkHalves is the nil-half refusal, found eagerly at the composition site and
+// carried in the registration to the build that reports it (ADR-0017 as amended
+// under #299).
 //
-// A nil half is a programming error at a program's birth, in the family of
-// regexp.MustCompile, and the alternative is an error return on a line nobody
-// checks. It is written over any rather than over the two function types because
-// every constructor here has a different pair, and a typed nil function is only
-// visible through reflect.
-func mustHalves(enc, dec any) {
+// A nil half is a mistake in the source of a program that has not started, and
+// finding it here rather than at the load that would have called the missing
+// half is the point. It is written over any rather than over the two function
+// types because every constructor here has a different pair, and a typed nil
+// function is only visible through reflect.
+func checkHalves(enc, dec any) error {
 	if isNilFunc(enc) || isNilFunc(dec) {
-		panic(regError("a registration takes both halves and one of them is nil: a codec ferry can only run in " +
-			"one direction would fail at whichever of Load and Dump reached the missing half first"))
+		return regError("a registration takes both halves and one of them is nil: a codec ferry can only run in " +
+			"one direction would fail at whichever of Load and Dump reached the missing half first")
 	}
+
+	return nil
 }
 
 // valueOf reads a T back out of the reflect.Value the walk holds, in the

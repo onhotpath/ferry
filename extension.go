@@ -82,7 +82,7 @@ type Word struct {
 // WithTagKeys declares foreign struct tag keys for a registry to read beside
 // ferry's own, and is handed to [NewRegistry] like a codec.
 //
-//	var Registry = ferry.NewRegistry(
+//	var Registry = ferry.MustRegistry(
 //	    ferry.NumberText[big.Int](),
 //	    ferry.WithTagKeys(yaml.Extension()),
 //	)
@@ -104,7 +104,7 @@ type Word struct {
 // It refuses four things, at the [NewRegistry] that was given it rather than at
 // any later compile: a key that is not a bare word, a key ferry itself reads, a
 // key declared twice, and a word that is empty or is spelled with a comma or an
-// equals sign in it. It panics with what [NewRegistry] panics with, for the
+// equals sign in it. Each is reported as what [NewRegistry] reports, for the
 // reason given there.
 func WithTagKeys(exts ...KeyExtension) Registration {
 	return keyDecl{exts: slices.Clone(exts)}
@@ -116,12 +116,14 @@ func WithTagKeys(exts ...KeyExtension) Registration {
 // (ADR-0021).
 type keyDecl struct{ exts []KeyExtension }
 
-func (d keyDecl) registerOn(r *Registry) {
+func (d keyDecl) registerOn(r *Registry) error {
+	errs := make([]error, 0, len(d.exts))
+
 	for _, e := range d.exts {
-		if err := r.exts.declare(e); err != nil {
-			panic(err)
-		}
+		errs = append(errs, r.exts.declare(e))
 	}
+
+	return join(errs...)
 }
 
 // extDecl is a registry's whole declaration reduced to one comparable value,

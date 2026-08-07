@@ -609,7 +609,7 @@ func assertRefused(t *testing.T, opts []Option, says string) {
 func TestTheBudgetIsNotPartOfTheSchemaKey(t *testing.T) {
 	t.Parallel()
 
-	reg := NewRegistry()
+	reg := MustRegistry()
 
 	for _, opts := range [][]Option{
 		{WithRegistry(reg)},

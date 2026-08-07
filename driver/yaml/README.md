@@ -180,7 +180,7 @@ Putting one there is another, and a save cannot guess it: what crosses ferry's b
 Declare this package's struct tag key on a registry, annotate the field, and pass the registry to the call:
 
 ```go
-registry := ferry.NewRegistry(ferry.WithTagKeys(yaml.Extension()))
+registry := ferry.MustRegistry(ferry.WithTagKeys(yaml.Extension()))
 
 type config struct {
 	Wait string `ferry:"wait" yamlext:"node=!mycompany:duration"`

@@ -275,7 +275,7 @@ func TestCodecRefusesToRunWithoutTheSeam(t *testing.T) {
 
 	c := &lines{}
 
-	Codec(c, ferry.NewRegistry())
+	Codec(c, ferry.MustRegistry())
 
 	if len(c.got) != 1 {
 		t.Fatalf("a build with no seam reported %q, want exactly one line and no case run", c.got)
@@ -750,7 +750,7 @@ func TestTheCodecCasesReportAWalkThatFailed(t *testing.T) {
 
 			// A second registry, which core refuses: it resolves against exactly
 			// one, and each case above supplies its own.
-			run(&codecRun{rep: c, opts: []ferry.Option{ferry.WithRegistry(ferry.NewRegistry())}})
+			run(&codecRun{rep: c, opts: []ferry.Option{ferry.WithRegistry(ferry.MustRegistry())}})
 
 			if len(c.got) == 0 {
 				t.Error("a case whose walk was refused reported nothing, which is a case that cannot fail")
@@ -761,20 +761,17 @@ func TestTheCodecCasesReportAWalkThatFailed(t *testing.T) {
 
 // probesIn is the suite's own fixtures in a registry of their own.
 //
-// [ferry.NewRegistry] refuses by panicking, having no error to return (ADR-0017),
-// and a probe this package can no longer register is a change to core's rules
-// rather than a failure of the test that names it - so it is reported as one
-// line here rather than as a stack trace that aborts the run.
+// A probe this package can no longer register is a change to core's rules rather
+// than a failure of the test that names it, so it is reported as one line here.
 func probesIn(t *testing.T, codecs ...ferry.Registration) *ferry.Registry {
 	t.Helper()
 
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("the suite's own probes were refused: %v", r)
-		}
-	}()
+	reg, err := ferry.NewRegistry(codecs...)
+	if err != nil {
+		t.Fatalf("the suite's own probes were refused: %v", err)
+	}
 
-	return ferry.NewRegistry(codecs...)
+	return reg
 }
 
 // TestProbeRegistryReportsARegistrationCoreRefuses is the arm that fires when

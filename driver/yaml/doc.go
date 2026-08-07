@@ -110,7 +110,7 @@
 // [Extension] is where a field says it. Declare this package's struct tag key
 // on a registry, annotate the field, and pass the registry to the call:
 //
-//	var registry = ferry.NewRegistry(ferry.WithTagKeys(yaml.Extension()))
+//	var registry = ferry.MustRegistry(ferry.WithTagKeys(yaml.Extension()))
 //
 //	type Config struct {
 //	    Wait string `ferry:"wait" yamlext:"node=!mycompany:duration"`
