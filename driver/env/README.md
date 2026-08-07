@@ -107,6 +107,17 @@ Rename one of the fields, or change the separator: `env.Separator("__")` joins n
 At the default separator a key containing `_` is read as nesting: `LIMITS_RPS_BURST` fills `limits.rps.burst` rather than a key `rps_burst`.
 Use `env.Separator("__")` if your keys contain underscores.
 
+## A bool is true or false, unless you say otherwise
+
+An environment variable is text, so a `bool` field reads the text a bool's own parser reads: `true` and `false`.
+`ENABLED=on` is refused, because ferry does not guess at what a word was meant to mean.
+
+`env.BoolWords("on", "off", "true", "false")` says which words this environment spells a boolean with.
+All four are then accepted, and `on` is the one a `true` is written as.
+
+It is a fact about the whole environment rather than about one field.
+A variable holding one of these words arrives as a boolean wherever it is read, so pick words your text values do not use.
+
 ## There is no way to write back
 
 This package loads only.

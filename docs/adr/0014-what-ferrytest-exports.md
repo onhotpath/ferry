@@ -236,16 +236,24 @@ func TestMyConfig(t *testing.T) {
 
 ### The surface
 
-**Twenty-seven exported names, in one package.**
+**Twenty-eight exported names, in one package.**
 
 | group | names |
 | --- | --- |
 | what a caller describes | `Plane`, `Instance`, `Artefact`, `Golden`, `T` |
 | the proof | `Proof`, `Type`, `Case`, `At`, `Inside`, `Eq`, `BitEq`, `SliceEq`, `MapEq`, `PtrEq` |
-| the suites | `RoundTrip`, `Driver`, `Codec`, `Complete`, `Injective` |
+| the suites | `RoundTrip`, `Driver`, `Codec`, `Complete`, `Injective`, `Spelling` |
 | the apparatus | `MemPlane`, `Static`, `Record` |
 | the table | `CoreTypes` |
 | the assertion | `Want`, `DiffErrors`, `CheckErrors` |
+
+> **Amended under [#259](https://github.com/onhotpath/ferry/issues/259): the count is twenty-eight, and the twenty-eighth is `Spelling`.**
+>
+> As published the table had no row for a plane's own spellings, because there were none: [ADR-0018](0018-the-spelling-seam.md) is what put them on the driver side, and it is later than this document.
+> That ADR states the obligation in its own laws - "the docs state it as a contract and `ferrytest` enforces it, with a round-trip proof and a purity probe" - and hands the surface question here, exactly as ADR-0011 handed over the error assertion.
+> **`Spelling` joins `the suites` row**, because it runs cases against a thing the caller supplies and may gain more of them as the laws are sharpened, which is the line [the stability section](#two-stability-promises-and-only-one-of-them-is-semvers) draws.
+> It takes its relation positionally and has no default one, which is this ADR's own rule for [`Type`](#the-proof) applied unchanged.
+> **Nothing here is a new decision**: the laws are ADR-0018's, and what moves is that the package which enforces ferry's rules now has a name for the newest of them.
 
 > **Amended under [#114](https://github.com/onhotpath/ferry/issues/114) and [#237](https://github.com/onhotpath/ferry/issues/237): a `Case` names the address it proves, the count is twenty-seven, and a `Case` with no golden fails.**
 >

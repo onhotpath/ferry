@@ -72,3 +72,29 @@ func Example_tagKey() {
 	fmt.Printf("%+v\n", svc)
 	// Output: {Name:checkout Timeout:30}
 }
+
+// Feature is a schema with a boolean an operator writes in words.
+type Feature struct {
+	Enabled bool `ferry:"enabled"`
+}
+
+// ExampleBoolWords loads a bool from an environment that spells one on and off.
+//
+// Without the option the field takes true and false and nothing else, because
+// that is what a bool's own parser reads. With it, this environment's own words
+// are what a boolean is spelled with here, and the four below are accepted while
+// on is the one a true is written as.
+func ExampleBoolWords() {
+	environ := func() []string { return []string{"ENABLED=on"} }
+
+	cfg, err := ferry.Load[Feature](context.Background(),
+		env.New(env.Environ(environ), env.BoolWords("on", "off", "true", "false")))
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Printf("%+v\n", cfg)
+	// Output: {Enabled:true}
+}

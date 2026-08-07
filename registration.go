@@ -171,11 +171,15 @@ var (
 // asBool reads a bool out of an observation, parsing a String rather than
 // guessing at one.
 //
-// This is where #223's class went. The accessor used to compare the text to
-// "true" and answer false for TRUE, yes, 1 and junk alike, with a nil error;
-// the payload is a Go bool now, so the only text left to read is a String the
-// plane spelled, and strconv.ParseBool refuses what it does not recognise
-// exactly as core's own bool leaf does.
+// The guessing #223 reported is gone because the payload is a Go bool: an
+// accessor that used to compare text to "true" and answer false for TRUE, yes,
+// 1 and junk alike, with a nil error, now has nothing to guess from. What is
+// left is a String the plane spelled, and strconv.ParseBool refuses what it
+// does not recognise exactly as core's own bool leaf does.
+//
+// That refusal is not core claiming the spelling. A plane whose booleans are
+// spelled some other way declares that at the plane and hands over a Bool, and
+// this arm is only ever reached by a plane that hands over text (ADR-0018).
 func asBool(v Value) (bool, error) {
 	if v.kind != KindString {
 		return v.AsBool()

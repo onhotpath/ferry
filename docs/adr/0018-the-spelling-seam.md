@@ -87,8 +87,15 @@ Nested calls read worse than a pipeline:
 ferry.With(ferryhttp.Base64(), ferryhttp.Gzip(), ferryhttp.MaxSize(4<<10))
 ```
 
-Render is `spell(apply(v))` and parse is `invert(unspell(c))`, so the transforms compose in written order on the way out and in reverse on the way in.
+Render is `spell(apply(v))` and parse is `invert(unspell(c))`, so the written order reads as a nesting: the step written **last** is closest to the payload and runs **first** on the way out, and the way in undoes them in the reverse of that.
 The composed value is an unexported type, which keeps it off the surface.
+
+> **Amended under [#259](https://github.com/onhotpath/ferry/issues/259): the ordering sentence above is rewritten, because as published it contradicted this ADR's own worked case.**
+>
+> It read "the transforms compose in written order on the way out and in reverse on the way in", which says the step written *first* runs first outbound.
+> Three lines below, the worked case says `With(Base64(), Gzip(), MaxSize)` dumps as "cap, gzip, base64", which is the step written *last* running first, and the prototype this ADR is written from implements that.
+> **The worked case and the prototype are the decision**, and the sentence was the slip: `With(s, t1, t2)` is `s(t1(t2(v)))` outbound, read left to right as outermost to innermost.
+> Nothing about the implementation moves.
 
 ### A spelling is declared where the plane is, which is a driver Option
 
@@ -108,6 +115,19 @@ So `ferry:"transform=uppercase"` is refused now and stays refused: ferry's names
 
 > `env.BoolWords`, `env.Negated`, `ferryhttp.Base64`, `ferryhttp.Gzip`, `ferryhttp.MaxSize`, `kv.Raw`.
 > Nothing is shared, and consolidation waits for a third caller.
+
+> **Amended under [#259](https://github.com/onhotpath/ferry/issues/259): `env.Negated` is struck from the list above, and nothing ships under that name.**
+>
+> As published the list named six compositions, `env.Negated` among them, carried over from the prototype where it demonstrated a `Transform[bool]` over a negative-polarity variable such as `DISABLE_CACHE`.
+> **It is not expressible under this ADR's own rules.**
+> A driver Option is plane-wide, so a plane-wide `Negated` inverts every boolean the plane holds, which is meaningless; and the form it actually wants is per-address, which the section above refuses here and [ADR-0021](0021-the-multi-key-extension-mechanism.md) refuses again from the other side.
+> So it was a prototype artefact in a list of shipped names, and the list now reads `env.BoolWords`, `ferryhttp.Base64`, `ferryhttp.Gzip`, `ferryhttp.MaxSize`, `kv.Raw`.
+> `Transform` itself is unaffected: `Gzip` and `MaxSize` are what it is for, and both are plane-wide facts.
+>
+> **`env.BoolWords` is plane-wide as written, and that is ratified rather than tolerated.**
+> The words decide what a boolean is on a plane that carries no type information, so a variable holding a declared word arrives as a `Bool` wherever it is read and a `string` field over it is then refused; the doc says so, and the answer is to choose words your text values do not use.
+> A kind-gated refinement - consulting the schema's kind at the address before applying a spelling - is contingent on the address set exposing a per-address kind, which it does not, and is parked at [#309](https://github.com/onhotpath/ferry/issues/309).
+> Nothing here anticipates it.
 
 Some duplication between drivers, zero shared surface, and every vocabulary stays honest to its plane.
 Core's `require` block stays empty, which is a module rule and not a preference: a shared spelling module would be a fourth thing to version and a place for a plane-untrue rendering to hide.
@@ -134,6 +154,24 @@ Five are about the spelling itself, and every spelling, shipped or supplied, mus
 3. **`render` is deterministic**: one value, one spelling.
 4. **A parse refusal carries the address and the offending text.** Never a zero value, never a guess.
 5. **An override changes spelling only, never semantics.** No rendering may turn a `Bool` into a tri-state.
+
+> **Amended under [#259](https://github.com/onhotpath/ferry/issues/259): law 4 is scoped, and the offending text it carries is bounded.**
+>
+> As published law 4 read "a parse refusal carries the address and the offending text", which [ADR-0011](0011-the-error-model.md) forbids outright: ferry's own message text never contains a value the plane supplied, and that rule is total because ferry cannot know which addresses hold secrets.
+> The two were in flat contradiction and the implementation had to pick one.
+>
+> **Law 4 wins here and only here.** A spelling's parse refusal is the one message whose entire content is the text: `"onn" is not one of this plane's boolean words (on, off)` is actionable and `a value at /enabled is not one of this plane's boolean words` is not, because the operator cannot see which of the words they missed.
+> Every other message class keeps ADR-0011's rule unchanged.
+>
+> **The exception is bounded in both dimensions, which is what stops it becoming the leak the rule exists to prevent.**
+> The quoted text is cut to **64 bytes** and escaped to a single printable line.
+> 64 is chosen against what the message has to show and what it must never show: a mistyped word or number is far inside it, and the shortest credential shape is already at or over it - an AWS key ID is 20 bytes and its secret 40, a PEM line is 64 before its header, and a JWT is longer than any of them.
+> A value that was cut says so.
+> Escaping is not decoration: a folded YAML scalar or a variable holding newlines would otherwise print a paragraph where a line was promised.
+>
+> **Redaction composes rather than being configured.** A plane that must quote nothing wraps its spelling in one whose `Parse` returns its own refusal, which is `Spelling` composing with itself and needs no option, no flag and no second surface.
+>
+> The bound is the driver's to apply, since core ships no spelling; `driver/env` and `driver/yaml` each implement it, and consolidating waits for the third caller under the rule of three above.
 
 Law 2 with its worked case: `BoolWords("on", "off", "true", "false")` accepts four spellings and always writes `on`.
 Because `on` is itself in the accept set, law 1 closes.

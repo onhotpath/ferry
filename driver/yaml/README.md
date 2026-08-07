@@ -171,6 +171,10 @@ value: 8080  # a number, and "8080" would be a string
 
 A `[]byte` field is saved as standard YAML `!!binary`, base64.
 
+A number is read in YAML's own spellings, so `0x1F`, `0o17`, `0b101`, `1_000`, `.inf` and `.nan` all load, and a leading zero is octal as every YAML reader reads it: `017` is fifteen.
+Saving writes spellings any YAML reader takes back, `.inf` and `.nan` among them.
+A number you spelled your own way survives a save that did not change it, so `mask: 0x1F` stays `0x1F`.
+
 ## A field can say what node type it is written as
 
 Keeping a tag the file already had is one thing.

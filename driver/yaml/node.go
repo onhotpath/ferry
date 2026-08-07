@@ -86,19 +86,38 @@ func spellBool(v ferry.Value) (*yamlv3.Node, error) {
 	return leaf(boolTag, strconv.FormatBool(b)), nil
 }
 
-// spellNumber writes the plane's own spelling of the number, unparsed.
+// spellNumber writes the number in this plane's own spelling of it.
 //
 // The text is whatever ferry produced - "0", "-0", "1e-45", "+Inf", "NaN",
-// "18446744073709551615" - and it is written through unmodified, because
-// ADR-0004 carries a number as source text precisely so that no stage in the
-// middle rounds it.
+// "18446744073709551615" - and all but the three worded floats are written
+// through unmodified, because ADR-0004 carries a number as source text
+// precisely so that no stage in the middle rounds it. The three that do move
+// are the ones Go and YAML spell differently, and [numbers] is where the two
+// vocabularies meet (#259).
 func spellNumber(v ferry.Value) (*yamlv3.Node, error) {
 	text, err := v.AsNumber()
 	if err != nil {
 		return nil, err
 	}
 
-	return leaf(numberTag(text), text), nil
+	written, err := numbers.Render(text)
+	if err != nil {
+		return nil, err
+	}
+
+	return leaf(numberTag(written), written), nil
+}
+
+// numberOf is the read half of the same seam: what the document spelled,
+// canonical, so that a leaf's own base-10 parser sees a number it can read
+// (#259).
+func numberOf(text string) (ferry.Value, error) {
+	got, err := numbers.Parse(text)
+	if err != nil {
+		return ferry.Value{}, err
+	}
+
+	return ferry.Number(got), nil
 }
 
 // numberTag guesses which of YAML's two numeric tags the text belongs to, and
@@ -107,9 +126,11 @@ func spellNumber(v ferry.Value) (*yamlv3.Node, error) {
 // The emitter drops a tag the text would resolve to anyway and keeps one it
 // would not, and both tags read back as [ferry.KindNumber] here, so a wrong
 // guess costs a visible !!int or !!float in the file and never a wrong kind.
-// What the tag does buy is the values YAML's own resolution will not take:
-// +Inf, -Inf and NaN are strings to the resolver, so without a tag on them a
-// float would come back as a String and fail its codec.
+//
+// It is given the text after [numbers] has spelled it, which is why .inf and
+// .nan reach it rather than +Inf and NaN: both contain a byte this guess reads
+// as floating, and both are what YAML's own resolution takes, so the tag it
+// chooses is one the emitter can drop again (#259).
 func numberTag(text string) string {
 	if strings.ContainsAny(text, ".eEnN") {
 		return floatTag
@@ -200,7 +221,7 @@ func valueOf(n *yamlv3.Node) (ferry.Value, error) {
 	case ferry.KindBool:
 		return boolOf(n.Value)
 	case ferry.KindNumber:
-		return ferry.Number(n.Value), nil
+		return numberOf(n.Value)
 	case ferry.KindBytes:
 		return bytesOf(n.Value)
 	default:

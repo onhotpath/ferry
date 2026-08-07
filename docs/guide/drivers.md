@@ -673,6 +673,71 @@ It is a **predicate** rather than a list of values, because what is being declar
 The suite routes it to case 1's refusal half, which is exactly where a kind you never declared goes.
 Reach for it only when the limit is a property of the format, and record it in the ADR that owns the type set.
 
+## How your plane spells a payload
+
+A kind says what your plane carries.
+A spelling says how it writes one down, and it is yours rather than core's: core parses a number in base ten and a bool as `true` or `false`, which is right for a plane whose values are already spelled that way and wrong for every plane that spells them some other way ([ADR-0018](../adr/0018-the-spelling-seam.md)).
+
+Core publishes the contract and no spelling at all:
+
+```go
+type Spelling[T, C any] interface {
+	Parse(c C) (T, error)   // what the plane carries -> the payload
+	Render(v T) (C, error)  // the payload -> what the plane carries
+}
+
+type Transform[T any] interface {
+	Apply(v T) (T, error)   // on the way out, before the payload is spelled
+	Invert(v T) (T, error)  // on the way in, after it is read
+}
+
+func With[T, C any](s Spelling[T, C], ts ...Transform[T]) Spelling[T, C]
+```
+
+`C` is the carrier and is a type parameter because it is not always text: `string` for an environment or a query string, `[]byte` for a store that keeps bytes, so a bytes plane never passes its bytes through a string.
+
+**Where it is declared is where the plane is.**
+A spelling is a fact about your plane, so it goes in your own `Option` set or is simply what your driver does.
+`driver/env` takes the words its environment spells a boolean with, `env.BoolWords("on", "off", "true", "false")`; `driver/yaml` owns its numbers outright, because `0x1F`, `0o17`, `1_000` and `.inf` are YAML's spellings and no caller has to ask for them.
+There is no per-field form and there will not be one: ferry's tag vocabulary is frozen, and a per-address representation is a key your driver declares ([ADR-0021](../adr/0021-the-multi-key-extension-mechanism.md)).
+
+**Five rules bind a spelling, and one binds the closures.**
+
+1. `Parse` of what `Render` produced returns the value it started from.
+2. What `Render` writes is always something `Parse` accepts, and `Parse` may accept more. Wider in, canonical out.
+3. `Render` is deterministic: one value, one spelling.
+4. A refusal is an error, never a zero value and never a guess, and it quotes the text it refused.
+5. A spelling changes how a value is written, never what it means.
+6. Both halves are pure functions.
+
+Law 2 is the one that does the work.
+`BoolWords("on", "off", "true", "false")` accepts four words and always writes `on`, and because `on` is itself accepted, law 1 closes.
+A spelling that wrote `yes` while accepting only `on` and `off` writes something it cannot read back.
+
+Law 4 is the one place ferry prints a value a plane supplied, and it is deliberate: `"onn" is not one of this plane's boolean words (on, off)` can be acted on and the same sentence without the word cannot ([ADR-0011](../adr/0011-the-error-model.md)).
+**Bound it.**
+Both first-party spellings quote at most 64 bytes, escape the text to a single printable line, and say when they cut - so a variable holding a token, a certificate or a folded blob cannot reach a log through a refusal.
+A plane that must quote nothing wraps its spelling in one whose `Parse` returns its own refusal; redaction composes as a `Spelling` and needs no option.
+
+Law 6 cannot be proved, and no shape of constructor closes the hole: a Go func value is a reference to arbitrary state.
+What fences it is an idiom - **your constructors take data, not functions** - so `BoolWords("on", "off")` builds its closures over words it owns and hands nobody a handle.
+
+Prove one with `ferrytest.Spelling`:
+
+```go
+ferrytest.Spelling(t, onOff, ferrytest.Eq[bool],
+	[]bool{true, false},          // payloads it must carry
+	[]string{"yes", "1", ""},     // carriers it must refuse
+)
+```
+
+Each payload is rendered twice, parsed back and parsed again; each refusal is parsed twice.
+That is laws 1, 2, 3 and 4, with the observable half of law 6 behind them.
+
+**What crosses the boundary is the payload and never the spelling.**
+`rate: 0x1F` arrives as `Number("31")`, because `0x` is plane knowledge and `Value` carries semantics.
+If you want the operator's own spelling back on a dump, that is yours to keep: `driver/yaml` compares what it is about to write against what the document already holds and leaves the original text where the value did not change.
+
 ## Errors
 
 Core's six sentinels are `ErrSchema`, `ErrMissing`, `ErrValue`, `ErrPlane`, `ErrDriver` and `ErrReadOnly`.
