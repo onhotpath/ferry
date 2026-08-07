@@ -1029,7 +1029,7 @@ func TestConformance(t *testing.T) {
 ```
 
 That is the whole file.
-`Driver` is nineteen cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
+`Driver` is twenty-one cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
 
 ### The four fields
 
@@ -1077,7 +1077,7 @@ See [plane compatibility](compatibility.md).
 `Want` is one string, which puts an obligation on a plane holding more than one storage unit: what it renders for this comparison must be **deterministic and injective over stores**.
 That is the same obligation your key function already carries.
 
-### The nineteen cases
+### The twenty-one cases
 
 1. Every proof the plane can express round-trips, and every kind it declared it cannot carry is refused loudly.
 2. `Bind` succeeds against an unreachable plane, and the refusal lands inside the open.
@@ -1098,6 +1098,8 @@ That is the same obligation your key function already carries.
 17. A sink declaring `Unsetter` replaces the composite it writes: a value whose list lost members, dumped over one that had them, loads back as the second value and only the second.
 18. A sink declaring `Committer` or `Preparer` leaves the plane untouched when a dump is refused: a mapping carrying two keys the plane renders to one key is refused with nothing of that dump observable afterwards.
 19. A sink whose writer declares no `Unsetter` is refused a schema holding a composite, at the open and before any write.
+20. A reader declaring `Enumerator` lists a sequence of twelve members by position: they come back where they were written, and not in the order their addresses render.
+21. An address a dump was silent at holds nothing afterwards: a value whose `omitzero` field is at its zero value is dumped, and a load over a seed reads the seed there.
 
 Case 14 is where a driver that keeps mutable state in the closure it handed back is found, and the case creates the concurrency rather than judging it: run your own suite under `go test -race`, which is what actually reports the defect.
 It opens the write half concurrently and walks nothing, because what the contract obligates is the open.
@@ -1114,6 +1116,16 @@ It reads back a leaf and not the mapping, so a source that cannot list is asked 
 Case 19 is case 17 scaled the other way round: it runs for a sink whose writer declares no `Unsetter` and skips, out loud, for every sink that does declare one, so the two are never both silent and never both run.
 Against such a sink it is a statement rather than a verdict - this plane carries schemas of leaves and sections, and a slice or a map needs a capability it has not declared - and the cases above that dump a composite report the same refusal.
 What it fails is a sink whose declaration follows the address set: a writer carrying the capability for one schema and not for another means nothing a single open declares answers for the next.
+
+Case 20 needs twelve members because nine would not do.
+Sorted as text, twelve positions give `0 1 10 11 2`; sorted segment-wise they give `0 1 2` through `11`, and the two orders agree everywhere below ten ([ADR-0003](../adr/0003-how-a-leaf-addresses-a-plane.md)).
+Every other fixture in the suite carries two members, so a plane that lists by text passes all of them and produces a list that will not load the first time a user writes ten entries: core refuses a position it has no place for.
+The case asks only about the order, and which members came back is case 5's, which sorts your answer before comparing it.
+
+Case 21 is the driver's half of a rule whose other half is core's.
+That `Writer.Set` is never called with an `Absent` is core's guarantee and core's own tests pin it; what a plane can still get wrong is to answer for the silence anyway ([ADR-0006](../adr/0006-defaults-and-zero-values.md)).
+A sink that stores an explicit null at an address the dump never wrote turns "ferry did not write here" into "the plane says this is null", which reads back as a value and refuses at a field that can hold no null.
+It reads one leaf and nothing else, so a source that cannot list is asked nothing it cannot answer.
 
 Cases 8 and 9 reach a value-minted address by dumping a one-entry map rather than by calling `Set` directly, because the address kinds are sealed and only the compiler mints one.
 Case 9 mints case 8's first key as well as its own: case 8 stops where a write is refused, correctly, and a store that cannot spell a hyphen would otherwise be asked by nothing.

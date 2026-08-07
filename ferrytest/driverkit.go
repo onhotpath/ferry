@@ -32,6 +32,8 @@ const (
 	caseReplaceNo       = 17
 	casePreparedNo      = 18
 	caseUnforgettableNo = 19
+	caseOrderingNo      = 20
+	caseOmissionNo      = 21
 )
 
 // The suite's own fixtures, and their addresses.
@@ -127,6 +129,27 @@ type (
 		Six  string `ferry:"six"`
 	}
 
+	// dozen is case 20's fixture: a sequence long enough for the two orders to
+	// disagree, which twelve members is the smallest round number that does.
+	//
+	// Below ten positions the rendering and the segments sort alike, so a
+	// sequence of two - which is what every other fixture here carries - cannot
+	// tell a driver that orders by text from one that orders by position.
+	dozen struct {
+		List []string `ferry:"list"`
+	}
+
+	// omitted is case 21's fixture: one leaf a dump writes and one the dump is
+	// silent at, because it carries omitzero and holds its zero value.
+	//
+	// It is leaf-only, so a plane that cannot list is asked nothing it cannot
+	// answer, and the silent address is a string rather than a composite so that
+	// what the plane holds there is read back by an ordinary load.
+	omitted struct {
+		Leaf string `ferry:"leaf"`
+		Gone string `ferry:"gone,omitzero"`
+	}
+
 	// demanded is case 16's other fixture: several addresses a plane that holds
 	// nothing cannot answer, so a load of it reports one failure per member.
 	//
@@ -154,6 +177,36 @@ func spreadFixture() spread {
 		Under: spreadUnder{Five: "5", Six: "6"},
 	}
 }
+
+// dozenFixture is twelve members whose values name their own positions, minted
+// per use like every other fixture here.
+//
+// The text says where the member belongs, so a report of what came back reads as
+// the order the plane answered in rather than as twelve strings that have to be
+// counted.
+func dozenFixture() dozen {
+	return dozen{List: []string{
+		"at0", "at1", "at2", "at3", "at4", "at5",
+		"at6", "at7", "at8", "at9", "at10", "at11",
+	}}
+}
+
+// omittedFixture is case 21's value: the written leaf, and the omitzero field at
+// its zero value, which is what makes the dump silent at the second address.
+func omittedFixture() omitted {
+	return omitted{Leaf: fixtureLeaf}
+}
+
+// omittedSeed is what the load of case 21's fixture starts from at the address
+// the dump was silent at.
+//
+// Absence does not write, so a plane that was told nothing there leaves this
+// text exactly where it was, and a plane that stored something instead reports
+// that something.
+const omittedSeed = "seeded"
+
+// fixtureLeaf is the value at the one leaf address the fixtures share.
+const fixtureLeaf = "x"
 
 // fixtureKey is the one map key the fixtures carry, and the one a dynamic
 // address is minted at.
@@ -184,6 +237,7 @@ var (
 	addrNilList  = ferry.At("nillist")
 	addrEmptyMap = ferry.At("emptymap")
 	addrSection  = ferry.At("section")
+	addrGone     = ferry.At("gone")
 )
 
 // setOf compiles T and hands back the address set core built for it, typed.
@@ -242,7 +296,7 @@ func filledFixture() filled {
 	return filled{
 		List: []string{"a", "b"},
 		Map:  map[string]string{fixtureKey: "v"},
-		Leaf: "x",
+		Leaf: fixtureLeaf,
 	}
 }
 
@@ -281,7 +335,7 @@ func shrunkFixture() filled {
 	return filled{
 		List: []string{"z"},
 		Map:  map[string]string{fixtureKey: "v"},
-		Leaf: "x",
+		Leaf: fixtureLeaf,
 	}
 }
 
@@ -294,7 +348,7 @@ func shrunkFixture() filled {
 // takes the dump, and the case says so and stops.
 func foldedFixture() foldedPair {
 	return foldedPair{
-		Leaf: "x",
+		Leaf: fixtureLeaf,
 		Map:  map[string]string{retentionFirst: "1", retentionSecond: "2"},
 	}
 }
@@ -311,6 +365,8 @@ func driverFixturesCompile(opts []ferry.Option) error {
 		ferry.Compile[demanded](opts...),
 		ferry.Compile[justSection](opts...),
 		ferry.Compile[neighbour](opts...),
+		ferry.Compile[dozen](opts...),
+		ferry.Compile[omitted](opts...),
 	)
 }
 

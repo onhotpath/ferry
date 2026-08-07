@@ -925,6 +925,10 @@ Where a declaration attaches is decided here, not there: it attaches to the stat
 - An array element with a declaration behaves like a struct field and a slice element does not, which is the second place ADR-0005's static-against-dynamic difference surfaces as a behavioural difference between two types a user will treat as interchangeable.
 - `Absent` is a `Reader`-side kind only, so ferry's value model is asymmetric between the directions, and that asymmetry is a conformance case rather than a note.
   A sink is never handed an observation it has no honest answer for, which is the prototype defect ADR-0004 recorded on itself.
+  *(Built under [#306](https://github.com/onhotpath/ferry/issues/306), and it is two checks rather than one, because the rule has two halves with two owners.
+  That no `Set` call carries an `Absent` is core's, provable inside core with no plane in sight, and core's own tests count it.
+  What a driver can still get wrong is the consequence, so `Driver` case 20 is the plane-side half: an address a dump was silent at holds nothing afterwards, read back over a seed that has to survive.
+  [ADR-0014](0014-what-ferrytest-exports.md) records the case.)*
 - An omission is the absence of a `Set` call and not a deletion, so the plane is untouched at every address the dump was silent at.
   *(Amended under [#254](https://github.com/onhotpath/ferry/issues/254): as published this bullet read that a replacing sink and a patching sink give different results for one dump and both are correct, and that ferry has no delete verb and this ADR does not add one.
   Both halves are false now.
