@@ -224,6 +224,33 @@
 // A registry also holds the compiled-schema cache, and nothing evicts from it,
 // so a registry is a value to keep. Build one per program, or one per test.
 //
+// # Tag key extensions
+//
+// ferry's own tag vocabulary is closed, and a library built on ferry gets a
+// struct tag key of its own instead. [WithTagKeys] declares one on a registry,
+// beside the codecs:
+//
+//	var registry = ferry.NewRegistry(
+//	    ferry.WithTagKeys(ferry.KeyExtension{
+//	        TagKey: "docs",
+//	        Words:  []ferry.Word{{Name: "desc", TakesValue: true}},
+//	    }),
+//	)
+//
+//	Host string `ferry:"host,required" docs:"desc=where the service lives"`
+//
+// A declared key is parsed with that declaration's vocabulary, with the same
+// near-miss diagnostics ferry gives its own words, and handed back inert: core
+// validates and never acts. An undeclared key is another library's business and
+// is never claimed, so a json or a validate tag on the same field is untouched.
+// Nothing is added to what ferry's own tag accepts, and ferry:"host,docs.desc=x"
+// is refused exactly as it was.
+//
+// The words ride the [AddressSet], keyed by the address the field named, so a
+// driver reads its own key at its own Bind with [AddressSet.Extension] and a
+// caller plumbs nothing. A consumer that never meets a plane reads the same
+// table with [ExtensionTable].
+//
 // # Addresses
 //
 // Every place a plane holds something has an address: a [Path], an ordered

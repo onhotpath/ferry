@@ -97,7 +97,7 @@ func schemaWith(t reflect.Type, cfg config, keep retention) (*schema, error) {
 		return compileSchema(t, cfg)
 	}
 
-	return cfg.registry.schemaFor(schemaKey{typ: t, tagKey: cfg.tagKey}, cfg)
+	return cfg.registry.schemaFor(schemaKey{typ: t, tagKey: cfg.tagKey, decl: cfg.registry.exts.decl}, cfg)
 }
 
 // schema is a compiled type: the node tree a walk iterates, and the address set
@@ -194,6 +194,11 @@ type compiler struct {
 	// makes a recursive type detectable from reflect.TypeFor[T]() alone
 	// (ADR-0005).
 	stack []reflect.Type
+
+	// ext is what the declared foreign tag keys carried, address by address. It
+	// is accumulated here and lands on the address set, because that is the
+	// handoff a driver already receives (ADR-0021).
+	ext ExtTable
 }
 
 // leaf pairs a leaf address with the Go field path that named it, so a
@@ -372,7 +377,7 @@ func (c *compiler) compileField(f *reflect.StructField, parent *node, s site) in
 		return 0
 	}
 
-	return c.compileTagged(f.Type, parent, at, r.value)
+	return c.compileTagged(f.Type, parent, at, r.value, string(f.Tag))
 }
 
 // compileUnexported is the field rule for a field reflect cannot set. It reads
@@ -401,7 +406,7 @@ func (c *compiler) compileUnexported(f *reflect.StructField, s site) int {
 // would drop a mapped field in silence.
 func (c *compiler) compileEmbedded(f *reflect.StructField, parent *node, s site, r read) int {
 	if r.found {
-		return c.compileTagged(f.Type, parent, s, r.value)
+		return c.compileTagged(f.Type, parent, s, r.value, string(f.Tag))
 	}
 
 	if f.Type.Kind() != reflect.Struct {
@@ -461,7 +466,7 @@ func (c *compiler) noTagMsg(name string) string {
 // compileTagged parses a tag and compiles the field at the address it named.
 // The first tier ends here: a field whose tag does not parse is asked nothing
 // below, and its address never joins the set.
-func (c *compiler) compileTagged(t reflect.Type, parent *node, s site, value string) int {
+func (c *compiler) compileTagged(t reflect.Type, parent *node, s site, value, raw string) int {
 	tg, errs := parseTag(value, c.cfg.tagKey)
 	if len(errs) > 0 {
 		for _, err := range errs {
@@ -475,13 +480,64 @@ func (c *compiler) compileTagged(t reflect.Type, parent *node, s site, value str
 		return 0
 	}
 
-	return c.compileValue(t, parent, site{
+	at := site{
 		addr:    s.addr.At(tg.name),
 		field:   s.field,
 		index:   s.index,
 		dynamic: s.dynamic,
 		owned:   true,
-	}, tg)
+	}
+
+	c.readExtensions(at, raw)
+
+	return c.compileValue(t, parent, at, tg)
+}
+
+// readExtensions reads every declared foreign tag key off this field, at the
+// address the field's own tag just named.
+//
+// It runs after the name is known and never before, because the table is
+// address-keyed: an address is what a tag declared, and a table keyed by field
+// name instead drifts on the first rename (ADR-0021). So a field marked "-",
+// and a field ferry reads no tag on at all, carry their extension words
+// nowhere.
+func (c *compiler) readExtensions(s site, raw string) {
+	for _, key := range c.cfg.registry.exts.keys {
+		c.readExtension(s, raw, key)
+	}
+}
+
+// readExtension reads one declared key, and refuses what that key's own
+// declaration does not admit.
+//
+// The scan is ferry's own, run under the foreign key, so a tag that cannot be
+// read is diagnosed with the same three sentences and the attribution rule that
+// keeps another library's malformed tag out of ferry's report still applies
+// (ADR-0008, ADR-0021).
+func (c *compiler) readExtension(s site, raw, key string) {
+	r, err := scanTag(raw, key)
+	if err != nil {
+		c.errFor(s.locate(), err)
+
+		return
+	}
+
+	if !r.found {
+		return
+	}
+
+	words, errs := c.cfg.registry.exts.parse(key, r.value)
+	for _, e := range errs {
+		c.errFor(s.locate(), e)
+	}
+
+	// Validated wherever it is written, and recorded only where the position is
+	// an address. Under a slice or a map what is compiled is an address shape,
+	// which is in no address set, so a word recorded there would be extension
+	// data for something the driver was never bound to (ADR-0003, ADR-0021).
+	if len(errs) == 0 && !s.dynamic {
+		c.ext.put(key, s.addr, words)
+	}
 }
 
 // compileValue is the second and third tiers: is each option legal at this
@@ -1171,7 +1227,10 @@ func (c *compiler) addressSet() *AddressSet {
 		members = append(members, compositeOf(k.addr))
 	}
 
-	return newAddressSet(members...)
+	a := newAddressSet(members...)
+	a.ext = c.ext
+
+	return a
 }
 
 // errAt records one refusal. Every refusal a compile produces is one of these:

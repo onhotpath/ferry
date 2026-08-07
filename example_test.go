@@ -305,3 +305,39 @@ func ExampleValue() {
 func namesTextPointer[T any, PT ferry.TextPointer[T]]() {}
 
 var _ = namesTextPointer[netip.Addr, *netip.Addr]
+
+// Documented carries a declared extension key beside ferry's own. The docs tag
+// is another library's vocabulary, and ferry reads it because it was told to.
+type Documented struct {
+	Host string `ferry:"host,required" docs:"desc=where the service lives"`
+	Port int    `ferry:"port,default=8080" docs:"desc=the port it listens on"`
+}
+
+// ExampleWithTagKeys declares a foreign struct tag key and reads what it
+// carried, address by address.
+//
+// ferry's own vocabulary is unchanged: the words live under a key the declaring
+// library owns, they are validated against the declaration, and core acts on
+// none of them. A driver reads the same view at its own Bind, through
+// [ferry.AddressSet.Extension], so nothing is plumbed through the caller.
+func ExampleWithTagKeys() {
+	reg := ferry.NewRegistry(ferry.WithTagKeys(ferry.KeyExtension{
+		TagKey: "docs",
+		Words:  []ferry.Word{{Name: "desc", TakesValue: true}},
+	}))
+
+	table, err := ferry.ExtensionTable[Documented](ferry.WithRegistry(reg))
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	view := table.Extension("docs")
+	for _, addr := range []ferry.Path{ferry.At("host"), ferry.At("port")} {
+		fmt.Println(addr, "-", view[addr]["desc"])
+	}
+	// Output:
+	// /host - where the service lives
+	// /port - the port it listens on
+}

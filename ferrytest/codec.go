@@ -586,7 +586,7 @@ func (c *codecRun) keyCollisionRefused(reg *ferry.Registry) {
 // A refusal is a panic, because a registry is complete at birth and
 // [ferry.NewRegistry] has no error to return, so this recovers one and reports
 // it as the case it belongs to.
-func (c *codecRun) probeRegistry(n int, codecs ...ferry.Codec) (reg *ferry.Registry, ok bool) {
+func (c *codecRun) probeRegistry(n int, codecs ...ferry.Registration) (reg *ferry.Registry, ok bool) {
 	c.rep.Helper()
 
 	defer func() {

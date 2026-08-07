@@ -100,9 +100,18 @@ func normaliseWord(w string) string {
 
 // nearestWord is the option word within maxEdits edits of w, or "".
 func nearestWord(w string) string {
+	return nearestOf(w, optionWords[:])
+}
+
+// nearestOf is the near-miss search over a vocabulary supplied by the caller.
+//
+// It is ADR-0008's search with the list as a parameter, so that a declared
+// extension's words get the same remedy under their own key without ferry's own
+// neighbourhood being widened by a single word (ADR-0021).
+func nearestOf(w string, words []string) string {
 	best, bestDist := "", maxEdits+1
 
-	for _, word := range optionWords {
+	for _, word := range words {
 		if d := editDistance(w, word); d < bestDist {
 			best, bestDist = word, d
 		}

@@ -28,6 +28,19 @@ import (
 // programming error at a program's birth, in regexp.MustCompile's family, and
 // the alternative is an error return on a line nobody checks (ADR-0017).
 
+// Registration is one item [NewRegistry] is built from, and the set is closed
+// at two: a [Codec], and the tag key declaration [WithTagKeys] returns.
+//
+// It exists so that one constructor takes the whole of what a registry is, and
+// a declaration is not spelled as a codec over no type. Nothing outside this
+// package implements it, for the reason [Codec] gives.
+type Registration interface {
+	// registerOn applies this item to a registry that is still inside
+	// NewRegistry and has not escaped, which is where every refusal about it
+	// fires (ADR-0017, ADR-0021).
+	registerOn(*Registry)
+}
+
 // Codec is one registration: a type, and both halves of the codec that carries
 // it across the boundary.
 //
@@ -39,6 +52,8 @@ import (
 //
 // Hand it to [NewRegistry], which is the only thing that takes one.
 type Codec interface {
+	Registration
+
 	// entry keeps the set closed. An interface with an unexported method cannot
 	// be implemented outside this package, so every Codec in existence came from
 	// a constructor here and carries a kind that constructor chose (ADR-0017).
@@ -59,6 +74,8 @@ type registration struct {
 
 func (g registration) entry() registration { return g }
 
+func (g registration) registerOn(r *Registry) { r.add(g) }
+
 // KeyCodec is a registration whose kind may address a map key, which is String
 // and Number and nothing else.
 //
@@ -69,6 +86,8 @@ func (g registration) entry() registration { return g }
 type KeyCodec struct{ reg registration }
 
 func (k KeyCodec) entry() registration { return k.reg }
+
+func (k KeyCodec) registerOn(r *Registry) { r.add(k.reg) }
 
 // AsMapKey declares this codec's text injective over its type under Go's ==,
 // which is what a map key needs.

@@ -213,6 +213,11 @@ func compareMembers(a, b Member) int {
 type AddressSet struct {
 	// addrs is sorted by compareMembers and holds no duplicates.
 	addrs []Member
+
+	// ext is what the registry's declared foreign tag keys carried, and it rides
+	// here rather than being plumbed because this is the handoff a driver
+	// already receives (ADR-0021).
+	ext ExtTable
 }
 
 // newAddressSet builds a set from the members given, sorting them segment-wise.
@@ -253,6 +258,38 @@ func (a *AddressSet) Seq() iter.Seq[Member] {
 	}
 
 	return slices.Values(a.addrs)
+}
+
+// Extension is one declared tag key's address-keyed view: for each address in
+// this set whose field carried that key, the words it carried and the text of
+// each.
+//
+//	func (s Sink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
+//	    nodeTags := map[ferry.Path]string{}
+//	    for addr, words := range addrs.Extension("yamlext") {
+//	        nodeTags[addr] = "!" + words["node"]
+//	    }
+//	    ...
+//	}
+//
+// It is how a driver reads its own key without a caller plumbing anything: the
+// registry carries the declaration, this set carries the table, and the sink is
+// still constructed the way it always was. Reading it once at Bind is the whole
+// idiom, since the answer is a property of the schema and not of a call.
+//
+// A driver sees extension data only for addresses it was bound to. A key
+// nothing declared, and a key no field carried, both yield an empty view rather
+// than an error, and the result is freshly allocated and the caller's to keep.
+//
+// What is in it is inert to ferry: core validated the words against their
+// declaration and acts on none of them. Acting is yours, and so is the proof
+// that what you write can be read back.
+func (a *AddressSet) Extension(key string) map[Path]map[string]string {
+	if a == nil {
+		return map[Path]map[string]string{}
+	}
+
+	return a.ext.Extension(key)
 }
 
 // Has reports whether the set holds this address, at this kind.

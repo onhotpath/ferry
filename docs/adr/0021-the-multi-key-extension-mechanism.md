@@ -74,8 +74,27 @@ Nothing in this ADR may land before that is fixed, and it is worth fixing regard
 >
 > ```go
 > type KeyExtension struct { TagKey string; Words []Word }
-> type Word         struct { Name string; TakesVal bool }
+> type Word         struct { Name string; TakesValue bool }
 > ```
+
+> **Amended under [#34](https://github.com/onhotpath/ferry/issues/34), on the merge of the mechanism this ADR describes: `NewRegistry`'s parameter is widened to a sealed union, because the example above does not compile against the constructor as it shipped.**
+>
+> As published the snippet passes `ferry.WithTagKeys(...)` as a vararg beside a `Codec`, and [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md)'s constructor is `NewRegistry(codecs ...Codec)` with `Codec` sealed by an unexported method.
+> A declaration is not a codec, so there was no type the example's two arguments both had.
+> The ruling: `NewRegistry(items ...Registration)`, where `Registration` is a new sealed interface satisfied by `Codec` and by what `WithTagKeys` returns.
+> The example above is then exactly what compiles, and [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md) is amended to record the signature.
+>
+> Two alternatives were refused.
+> A second explicit parameter for declarations breaks this ADR's own pasted-together literal and splits one complete-set constructor into two lists a caller keeps in step.
+> Making `WithTagKeys` return a `Codec`-shaped no-op over no type spells a declaration as a codec, which is the thing this section is at pains not to do, and it would have put a value in the codec table that claims nothing.
+>
+> **What a declaration is refused for is unchanged**, and it is refused at the same moment and with the same `*ferry.Error` a codec's refusal carries.
+> Two riders follow from the shipped shape and are recorded rather than decided quietly.
+> The key ferry itself reads is a caller Option and not the registry's, so "claiming `ferry`'s own key" is refused at the registry against the default key, and a call whose `TagKey` names a key its registry declares is refused at that call, with the Option list, before any type is described.
+> A declared key's words are read at the address the field's own `ferry` tag named, so a field marked `-`, and a field ferry reads no tag on, carry their extension words nowhere: the table is address-keyed and there is no address for them to sit at.
+> A field under a slice or a map is the same case for [ADR-0003](0003-how-a-leaf-addresses-a-plane.md)'s reason - what is compiled there is an address shape, which joins no address set - so its words are held to the declaration and recorded nowhere, which is what "a driver sees extension data only for addresses it was bound to" means when the two rules meet.
+>
+> `Word`'s boolean field shipped as `TakesValue`, not `TakesVal` as first published, and every snippet above is corrected to match.
 
 The registry is already the **outer level of the schema cache**, so a declaration joins the cache key with no new machinery.
 [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md)'s construction-is-the-freeze applies here too: the declarations are complete at the registry's birth and there is no window in which they are not.
@@ -89,7 +108,7 @@ Hashability is asserted at build time with core's own `map[...]struct{}{}` trick
 Fixing it at `Bind` is what stops a live watcher's binding being invalidated by anything downstream.
 
 **A typed declaration is what makes diagnostics possible**, which is [#34](https://github.com/onhotpath/ferry/issues/34)'s third item.
-`Word{Name, TakesVal}` is enough for the near-miss table to cover an extension's vocabulary without degrading ferry's own:
+`Word{Name, TakesValue}` is enough for the near-miss table to cover an extension's vocabulary without degrading ferry's own:
 
 ```
 mylib:"rerty=3"   ->  unknown option "rerty": did you mean "retry"?   (mylib's vocabulary)

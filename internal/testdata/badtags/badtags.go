@@ -153,3 +153,9 @@ type Transposed struct {
 type TransposedAgain struct {
 	F string `ferry:"f,deafult=x"`
 }
+
+// DuplicateExtension carries two tags under one declared extension key, which
+// is the same silence Duplicate is and is diagnosed by the same scanner.
+type DuplicateExtension struct {
+	Host string `ferry:"host" mylib:"node=a" mylib:"node=b"`
+}

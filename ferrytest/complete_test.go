@@ -19,7 +19,7 @@ import (
 // [ferry.NewRegistry] refuses by panicking, having no error to return, and a
 // probe this package can no longer register is a change to core's rules rather
 // than a failure of the test that names it.
-func registryWith(t *testing.T, codecs ...ferry.Codec) *ferry.Registry {
+func registryWith(t *testing.T, codecs ...ferry.Registration) *ferry.Registry {
 	t.Helper()
 
 	defer func() {

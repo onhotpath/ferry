@@ -189,6 +189,16 @@ That is a programming error at a program's birth, in the same family as `regexp.
 >
 > Two resolution defects were found while making this real, and both are fixed in the same change because each is a place the shipped code already disagreed with a decision recorded elsewhere. [#229](https://github.com/onhotpath/ferry/issues/229): a pointer leaf dropped the pointee codec's whole-observation half, so a `*T` over a registered `T` decoded through a gate derived from the declared kind, which [ADR-0009](0009-typed-codec-registration.md) forbids in as many words. [#230](https://github.com/onhotpath/ferry/issues/230): map key resolution never consulted the text-pair arm, so a chain-claimed type whose underlying kind is a string or an integer was admitted as a key by kind and had one representation at the leaf position and another at the key position.
 
+> **Amended under [#34](https://github.com/onhotpath/ferry/issues/34): the constructor's parameter is a sealed union, so it takes what a registry is built from rather than codecs alone.**
+>
+> As published the signature above reads `func NewRegistry(codecs ...Codec) *Registry`, and it is now `func NewRegistry(items ...Registration) *Registry`, where `Registration` is a new sealed interface satisfied by `Codec` and by the value [ADR-0021](0021-the-multi-key-extension-mechanism.md)'s `WithTagKeys` returns.
+> ADR-0021 registers a tag key declaration here, beside the codecs, for this section's own reason - construction is the freeze - and a declaration is not a pair of halves over a type, so typing one as a `Codec` would have made the union a lie at the one place the API states what a registration is.
+> The alternative, a second explicit parameter for declarations, was refused because it splits one complete-set constructor into two lists a caller has to keep in step, which is the mutable-window defect in a different shape.
+>
+> **Nothing else in this section moves.** One type, one complete-set constructor, no mutators; a registry is complete at birth; every refusal is still a panic of `ErrSchema`'s class at the register moment, and the declaration's own refusals join the codec's on that list.
+> The change is source-compatible for a caller who passes codecs one by one, which is every spelling this ADR shows.
+> It is not source-compatible for a caller who spreads a `[]ferry.Codec`, since Go does not convert a slice's element type: such a call site changes its slice to `[]ferry.Registration`, and the only ones in this repository were inside `ferrytest`'s own probes.
+
 ### `NullValue` is one modifier over any registration
 
 A registration says how a `T` crosses the boundary.
