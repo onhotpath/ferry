@@ -22,13 +22,16 @@ import (
 // members it has, and every property the seam was built for survives, because a
 // first-error scheduler still swaps in against this one.
 //
-// It is unexported, core ships exactly one implementation, and no exported name
-// takes or returns one. That is deliberate: whether ferry ever walks
-// concurrently is an open question, and an importer able to select a scheduler
-// today would answer it by accident.
+// It is unexported and no exported name takes or returns one, which is what
+// keeps [MaxConcurrency] the only door onto the choice: core ships two
+// implementations, [serial] and one fanout per walk, and which of them a walk
+// runs under is decided by the caller's budget and the instance's declared
+// tolerance together (ADR-0019).
 type sched func(n int, run func(i int) (outcome, error)) (outcome, error)
 
-// serial is core's only scheduler: every member, in order, and every failure.
+// serial is core's default scheduler: every member, in order, and every
+// failure. It is what a walk runs under unless the caller set a budget and the
+// open instance declared it tolerates overlap (ADR-0019).
 //
 // Aggregation lives here rather than in the walk, which is ADR-0011's rule and
 // ADR-0010's measurement of it: the same walk function under a first-error
@@ -292,10 +295,14 @@ type walker struct {
 	run sched
 }
 
-// newWalker binds a direction to the value it walks. The scheduler is not a
-// parameter, because there is one and nobody chooses it.
-func newWalker(dir direction) *walker {
-	return &walker{dir: dir, run: serial}
+// newWalker binds a direction and the scheduler this one walk runs under.
+//
+// The scheduler is a parameter of the walk rather than of a container, which is
+// what makes ADR-0019's budget a number about the whole walk: a fanout carries
+// one semaphore, and every container the walk enters shares it, so a nested
+// struct cannot spend the budget once per level. Dump always passes [serial].
+func newWalker(dir direction, run sched) *walker {
+	return &walker{dir: dir, run: run}
 }
 
 // ctxEndedMsg is what a cancellation says at whichever node it arrived at. It
@@ -310,8 +317,10 @@ const ctxEndedMsg = "the context ended before this part of the walk ran"
 // walk is the shared half of both directions, and the whole of it.
 //
 // The context is checked at every node entry, which is a placement rather than
-// a policy: it had to be somewhere for the walk to be written at all, and the
-// concurrency ticket owns whether it is per leaf, per subtree or not at all.
+// a policy: it had to be somewhere for the walk to be written at all, and
+// ADR-0019 left it exactly there. Per node entry is per task under either
+// scheduler, so a cancellation is observed the same number of times whether or
+// not the walk overlapped, which is one fewer way for the two to diverge.
 func (w *walker) walk(ctx context.Context, s spot) (outcome, error) {
 	if err := ctx.Err(); err != nil {
 		return outcome{}, newError(momentWalk, nil, s.at, ctxEndedMsg).withCause(err)
@@ -353,6 +362,13 @@ func (w *walker) into(ctx context.Context, s spot) descend {
 
 // element is what one member of a dynamic composite is walked with: the element
 // shape, compiled once, at the address the direction minted for this member.
+//
+// It walks one member and does not run the scheduler, because a dynamic
+// container's members are not a count the walk holds: the direction mints them
+// as it lists them, and it aggregates them itself. So fanout reaches the members
+// a type names and not the members a plane names, which is where ADR-0019 leaves
+// it: a map filled from several goroutines is a write to one Go map, and the
+// restructuring that would make it safe is not a scheduler.
 func (w *walker) element(ctx context.Context, s spot) descend {
 	return func(v reflect.Value, at Path) (outcome, error) {
 		return w.walk(ctx, spot{n: s.n.fields[elemShape], v: v, at: at})

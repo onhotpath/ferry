@@ -30,9 +30,10 @@
 //   - [BindSink] is the same on the write side, and [Dump] is [BindSink] plus
 //     one method.
 //
-// Every verb takes the same [Option] values, and there are two of those:
-// [TagKey] names the struct tag key to read, and [WithRegistry] names the codec
-// table to resolve types against.
+// Every verb takes the same [Option] values, and there are three of those:
+// [TagKey] names the struct tag key to read, [WithRegistry] names the codec
+// table to resolve types against, and [MaxConcurrency] allows a load to overlap
+// its calls into a plane that said it tolerates overlap.
 //
 // # The tag grammar
 //

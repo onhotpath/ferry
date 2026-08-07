@@ -82,6 +82,17 @@ func schemaOf(t reflect.Type, opts []Option, keep retention) (*schema, error) {
 		return nil, err
 	}
 
+	return schemaWith(t, cfg, keep)
+}
+
+// schemaWith is the same door for a caller that already resolved the Options
+// and still needs them afterwards.
+//
+// The split exists because a load-affecting Option has to reach the load from
+// the caller's own resolved config: a cache entry closes over whichever config
+// won the race for its slot, and that is sound only for what is in the key
+// (ADR-0019, and the rule at [schemaKey]).
+func schemaWith(t reflect.Type, cfg config, keep retention) (*schema, error) {
 	if !keep {
 		return compileSchema(t, cfg)
 	}

@@ -6,15 +6,19 @@ import (
 )
 
 // Option is a setting a caller hands to [Load], [LoadOver], [Dump], [Compile],
-// [Bind] or [BindSink]. There are two: [TagKey] and [WithRegistry].
+// [Bind] or [BindSink]. There are three: [TagKey], [WithRegistry] and
+// [MaxConcurrency].
 //
 // The set is closed, because the interface's one method is unexported. A
 // library built on ferry can therefore change where ferry reads its annotation
 // from, and cannot change what the annotation means.
 //
-// Both of today's Options change what a type compiles to, so both are part of
-// the key a compiled schema is cached under, and both are refused when supplied
-// twice in one call.
+// Every one of them is refused when supplied twice in one call.
+//
+// [TagKey] and [WithRegistry] change what a type compiles to, so both are part
+// of the key a compiled schema is cached under. [MaxConcurrency] changes only
+// how a load is run, so it is not in that key and two loads of one type under
+// two budgets still compile once.
 type Option interface {
 	apply(*config) error
 }
@@ -25,12 +29,19 @@ type optionFunc func(*config) error
 
 func (f optionFunc) apply(c *config) error { return f(c) }
 
-// config is the resolved Option set one compile runs under.
+// config is the resolved Option set one call runs under.
 //
-// Everything in it is compile-affecting in ADR-0010's sense - one reflect.Type
-// yields two different schemas under two values of it - which is what makes it
-// the thing a schema cache is keyed by. A load-affecting Option would not
-// belong here.
+// It used to hold compile-affecting settings alone, in ADR-0010's sense - one
+// reflect.Type yields two different schemas under two values of it - because
+// that is what a schema cache is keyed by. ADR-0019's MaxConcurrency is the
+// first load-affecting member, and it is here rather than beside here so that
+// there is one resolved Option set and one refusal path for a bad one.
+//
+// The cache key is what keeps the two apart, and the rule is stated at
+// [schemaKey]: a compile-affecting Option is in the key and a load-affecting one
+// must not be. So a load-affecting field is read from the caller's own resolved
+// config and never off a cache entry, whose config is whichever one won the race
+// for the slot.
 type config struct {
 	// tagKey is the struct tag key the compiler reads, and tagKeySet is what
 	// makes a second TagKey a refusal rather than a silent last-wins.
@@ -44,6 +55,13 @@ type config struct {
 	// that disagree about one member type (ADR-0009).
 	registry    *Registry
 	registrySet bool
+
+	// budget is how many calls into one open plane a load may overlap, and
+	// budgetSet is what makes a second MaxConcurrency a refusal. It is the one
+	// load-affecting member, so it is deliberately absent from [schemaKey]
+	// (ADR-0019).
+	budget    int
+	budgetSet bool
 }
 
 // defaultTagKey is the key ferry reads when nobody says otherwise.
@@ -57,7 +75,7 @@ const defaultTagKey = "ferry"
 // apiece, and an Option list built by appending whatever a helper returned is
 // the ordinary way a nil arrives in one.
 func newConfig(opts []Option) (config, error) {
-	c := config{tagKey: defaultTagKey, registry: builtins}
+	c := config{tagKey: defaultTagKey, registry: builtins, budget: serialBudget}
 
 	errs := make([]error, 0, len(opts))
 
@@ -77,9 +95,9 @@ func newConfig(opts []Option) (config, error) {
 // nilOptionMsg names the position, because an Option is opaque and a list of
 // three has nothing else to tell one member from another.
 func nilOptionMsg(i int) string {
-	return fmt.Sprintf("the Option at position %d is nil: an Option is built by ferry.TagKey or "+
-		"ferry.WithRegistry, so a nil one is a helper that returned nothing rather than a setting - "+
-		"drop it, or return the Option it was meant to build", i)
+	return fmt.Sprintf("the Option at position %d is nil: an Option is built by ferry.TagKey, "+
+		"ferry.WithRegistry or ferry.MaxConcurrency, so a nil one is a helper that returned nothing rather "+
+		"than a setting - drop it, or return the Option it was meant to build", i)
 }
 
 // TagKey names the struct tag key ferry reads, which defaults to "ferry".
@@ -152,6 +170,64 @@ func WithRegistry(reg *Registry) Option {
 				"tables that disagree about one type are two representations and nothing here chooses between them")
 		default:
 			c.registry, c.registrySet = reg, true
+
+			return nil
+		}
+	})
+}
+
+// MaxConcurrency allows a load to overlap up to n calls into the plane, where
+// today it makes exactly one at a time.
+//
+//	cfg, err := ferry.Load[Config](ctx, consul.New(client), ferry.MaxConcurrency(8))
+//
+// It is a ceiling and never a target. Overlap happens only where the driver's
+// open instance also declared it tolerates overlap, by implementing
+// [Concurrent], and never past the smaller of the two numbers. A source that
+// does not implement it - a file, a process environment - is walked serially
+// whatever n says, so setting this changes nothing about a driver that did not
+// offer it.
+//
+// The same n reaches the driver behind its own open, where it reads it with
+// [ConcurrencyBudget], so a driver that batches its own requests sizes the batch
+// inside the budget instead of beside it. One number is spent once, however many
+// layers spend it.
+//
+// n must be at least 1, and 1 is legal and means serial. It changes only how a
+// load is run and never what a type compiles to, so it is not part of the schema
+// cache key and two loads under two budgets compile once. It is refused when
+// supplied twice.
+//
+// Reading it back out is not the point of it, and there are three sharp edges.
+//
+// A concurrent load reports exactly what a serial one reports: the members of a
+// container are combined in the order the container lists them and never in the
+// order they finished, so the destination and the failure are the same value and
+// the same text either way.
+//
+// Fanout covers the members a type names - a struct's fields, an array's
+// elements, what is under a pointer. The members a plane names, under a slice or
+// a map field, are walked in order. So a wide struct of leaves overlaps and a
+// five-hundred-key map does not.
+//
+// A panic ferry itself raises inside an overlapped member ends the process
+// rather than unwinding into the caller, because it is raised on a goroutine the
+// caller does not own. A panic out of your own codec is unaffected: it is
+// recovered at the call and arrives in the report at the address that produced
+// it, whether or not the walk was overlapped.
+func MaxConcurrency(n int) Option {
+	return optionFunc(func(c *config) error {
+		switch {
+		case n < serialBudget:
+			return optionError(fmt.Sprintf(
+				"MaxConcurrency was given %d: a budget is a count of overlapping calls into the plane, so the "+
+					"smallest one is 1, which is the serial walk ferry does when nobody asks", n))
+		case c.budgetSet:
+			return optionError(fmt.Sprintf(
+				"the concurrency budget is given twice, as %d and %d: ferry spends exactly one, because two "+
+					"ceilings let a caller who asked for the smaller one get the larger", c.budget, n))
+		default:
+			c.budget, c.budgetSet = n, true
 
 			return nil
 		}

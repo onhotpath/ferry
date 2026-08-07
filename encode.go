@@ -70,7 +70,10 @@ func written(ctx context.Context, w Writer, sch *schema, root reflect.Value) err
 func dumpWalk(ctx context.Context, w Writer, sch *schema, root reflect.Value) (outcome, error) {
 	dir := dumpTo{w: w, addrs: sch.addrs}
 
-	return newWalker(dir).walk(ctx, spot{n: sch.root, v: root})
+	// Serial always: nothing in ADR-0019 fans out the write path, because the
+	// staging decision is already the sink's and a sink that batches does it at
+	// Commit.
+	return newWalker(dir, serial).walk(ctx, spot{n: sch.root, v: root})
 }
 
 // stagedWrite is one thing the walk has to say to the plane, held in the order

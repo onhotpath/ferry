@@ -100,6 +100,11 @@ func Dump[T any](ctx context.Context, v T, sink Sink, opts ...Option) error {
 type bound struct {
 	sch  *schema
 	open OpenFunc
+
+	// budget is the caller's MaxConcurrency, resolved at bind and spent per
+	// load. It is held here rather than read off the compiled schema because it
+	// is load-affecting and the schema is cached across configs (ADR-0019).
+	budget int
 }
 
 // newBound is [Bind] with the type as a value. The order is load-bearing: the
@@ -107,7 +112,12 @@ type bound struct {
 // driver is reached, and the retention is retained rather than discarded,
 // because whatever holds the result holds the schema (ADR-0009, ADR-0010).
 func newBound(t reflect.Type, src Source, opts []Option) (*bound, error) {
-	sch, err := schemaOf(t, opts, retained)
+	cfg, err := newConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	sch, err := schemaWith(t, cfg, retained)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +135,7 @@ func newBound(t reflect.Type, src Source, opts []Option) (*bound, error) {
 		return nil, driverNil(momentBind, nilOpenMsg)
 	}
 
-	return &bound{sch: sch, open: open}, nil
+	return &bound{sch: sch, open: open, budget: cfg.budget}, nil
 }
 
 // load is the per-load half: open, walk, release. dst is the addressable copy
@@ -138,8 +148,16 @@ func newBound(t reflect.Type, src Source, opts []Option) (*bound, error) {
 // The release is deferred, which is ADR-0004's "Close always runs" written so
 // that it holds on every exit rather than on the two the straight line covers.
 // A panic the fence does not catch unwinds through here, and the reader was
-// left open by a release the unwind skipped (#254).
+// left open by a release the unwind skipped (#254). It stays correct under
+// fanout because the scheduler returns only once every task has, so nothing is
+// still writing into dst when the release runs (ADR-0019).
+//
+// The budget is put on the context before the open rather than after it, so the
+// driver's own open reads the same number core's scheduler is about to spend
+// (ADR-0019).
 func (b *bound) load(ctx context.Context, dst reflect.Value) (err error) {
+	ctx = budgeted(ctx, b.budget)
+
 	r, err := b.open(ctx)
 	if err != nil {
 		return fromDriver(momentOpen, Path{}, err)
@@ -151,7 +169,9 @@ func (b *bound) load(ctx context.Context, dst reflect.Value) (err error) {
 
 	defer func() { err = join(err, released(r)) }()
 
-	_, err = newWalker(loadFrom{r: r, addrs: b.sch.addrs}).walk(ctx, spot{n: b.sch.root, v: loadRoot(dst)})
+	w := newWalker(loadFrom{r: r, addrs: b.sch.addrs}, schedulerFor(b.budget, r))
+
+	_, err = w.walk(ctx, spot{n: b.sch.root, v: loadRoot(dst)})
 
 	return err
 }
@@ -160,6 +180,12 @@ func (b *bound) load(ctx context.Context, dst reflect.Value) (err error) {
 type boundSink struct {
 	sch  *schema
 	open OpenWriterFunc
+
+	// budget is the caller's MaxConcurrency. The write path never fans out, so
+	// nothing here spends it; it rides the open's context so that a sink which
+	// batches at Commit can spend it there, which is the only place a dump has
+	// left to spend anything (ADR-0019).
+	budget int
 }
 
 // newBoundSink is [BindSink] with the type as a value.
@@ -168,7 +194,12 @@ type boundSink struct {
 // refusal ahead of the nil-root one: a call that named no plane at all failed
 // before the value was ever relevant.
 func newBoundSink(t reflect.Type, sink Sink, opts []Option) (*boundSink, error) {
-	sch, err := schemaOf(t, opts, retained)
+	cfg, err := newConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	sch, err := schemaWith(t, cfg, retained)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +217,7 @@ func newBoundSink(t reflect.Type, sink Sink, opts []Option) (*boundSink, error) 
 		return nil, driverNil(momentBind, nilOpenWriterMsg)
 	}
 
-	return &boundSink{sch: sch, open: open}, nil
+	return &boundSink{sch: sch, open: open, budget: cfg.budget}, nil
 }
 
 // dump is the per-dump half: refuse a nil root, open, encode and write, commit,
@@ -201,6 +232,8 @@ func (b *boundSink) dump(ctx context.Context, v reflect.Value) (err error) {
 	if err != nil {
 		return err
 	}
+
+	ctx = budgeted(ctx, b.budget)
 
 	w, err := b.open(ctx)
 	if err != nil {
