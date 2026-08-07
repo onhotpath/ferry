@@ -97,7 +97,7 @@ func TestNilClientIsRefused(t *testing.T) {
 }
 
 // TestSinkRefusesWithBatch is an Option refusing to be silently ignored: a sink
-// stages every write and commits them together, so there is no per-address half
+// stages every write and commits them together, so there is no per-key half
 // for the batch choice to select against, and ADR-0001 rules out ignoring
 // anything quietly.
 func TestSinkRefusesWithBatch(t *testing.T) {

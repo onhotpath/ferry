@@ -85,6 +85,30 @@ func refusesTheEmptyKey(t *testing.T, src *Source) {
 	}
 }
 
+// TestTheEmptyAddressHasNoName is the third way an address fails to have a name
+// at all, and it is asserted on the key function because nothing else can reach
+// it: every address in a schema's set names at least one part, so the empty one
+// is a guard the seam never hands over.
+func TestTheEmptyAddressHasNoName(t *testing.T) {
+	t.Parallel()
+
+	for name, key := range map[string]ferry.KeyFunc{
+		"query":  flatKey("."),
+		"header": headerKey("-"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := key(ferry.Path{})
+			if err == nil {
+				t.Fatalf("the empty address was named %q", got)
+			}
+
+			assertWraps(t, err, ErrIllegalName, ferry.ErrPlane)
+		})
+	}
+}
+
 // TestAMapKeyAHeaderNameMayHoldIsNotRefused is the control: the check above is
 // about the name and not about maps, so an ordinary key goes through.
 func TestAMapKeyAHeaderNameMayHoldIsNotRefused(t *testing.T) {

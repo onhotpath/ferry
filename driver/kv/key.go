@@ -87,12 +87,12 @@ const segmentsHint = 4
 func nameable(text string) error {
 	switch {
 	case text == "":
-		return fmt.Errorf("%w: this address has an empty segment, and a key-value store has no name for one: "+
-			"two separators with nothing between them are one separator, so the address would be written at "+
-			"another address's key", ferry.ErrPlane)
+		return fmt.Errorf("%w: this key has an empty part, and a key-value store has no name for one: "+
+			"two separators with nothing between them are one separator, so it would be written at "+
+			"another key", ferry.ErrPlane)
 	case strings.Contains(text, separator):
-		return fmt.Errorf("%w: this address has a segment containing %q, and a key-value store reads that as "+
-			"another step in the hierarchy: it would be written under a folder of that name and read back as a "+
+		return fmt.Errorf("%w: this key has a part containing %q, and the store reads that as "+
+			"another step in its hierarchy: it would be written under a folder of that name and read back as a "+
 			"different, empty member", ferry.ErrPlane, separator)
 	default:
 		return nil

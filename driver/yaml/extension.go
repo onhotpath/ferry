@@ -136,9 +136,9 @@ func nodeTags(addrs *ferry.AddressSet) (map[ferry.Path]string, error) {
 // can write, at an address that holds a value.
 func checkNodeAddr(addr ferry.Path, tag string, leaves map[ferry.Path]bool) error {
 	if !leaves[addr] {
-		return ferry.ErrorAt(addr, fmt.Errorf("%w: a node tag names how one value is written and this address "+
-			"holds a struct, a list or a map: annotate the fields under it, whose addresses this plane writes "+
-			"a value at", ferry.ErrPlane))
+		return ferry.ErrorAt(addr, fmt.Errorf("%w: a node tag names how one value is written and this key "+
+			"holds a struct, a list or a map: annotate the fields under it, whose keys the document holds "+
+			"one value at", ferry.ErrPlane))
 	}
 
 	if err := checkNodeTag(tag); err != nil {
@@ -165,7 +165,7 @@ func checkNodeTag(tag string) error {
 		return fmt.Errorf("%w: the node tag %q holds a space, and a tag ends where the value begins",
 			ferry.ErrPlane, tag)
 	case ownTag(tag):
-		return fmt.Errorf("%w: the node tag %q is one this plane spells itself: the kind of the value decides "+
+		return fmt.Errorf("%w: the node tag %q is one this driver spells itself: the kind of the value decides "+
 			"that tag, so declaring it could only agree with the value or contradict it", ferry.ErrPlane, tag)
 	}
 

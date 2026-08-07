@@ -53,7 +53,7 @@ func NewSink(client Client, opts ...Option) (*Sink, error) {
 
 	if cfg.batch {
 		return nil, errors.New("kv: WithBatch is a source's Option: a sink stages every write and commits them " +
-			"together, so there is no per-address half of it to choose against")
+			"together, so there is no per-key half of it to choose against")
 	}
 
 	return &Sink{client: client, prefix: cfg.prefix, raw: cfg.raw}, nil
@@ -215,8 +215,8 @@ func (w *writer) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) er
 	}
 
 	if _, taken := w.staged[key]; taken {
-		return fmt.Errorf("%w: this dump has already written the store key this address renders to, and a store "+
-			"holds one value per key, so one of the two writes would be lost", ferry.ErrPlane)
+		return fmt.Errorf("%w: this dump has already written this store key, and a store holds one value per "+
+			"key, so one of the two writes would be lost", ferry.ErrPlane)
 	}
 
 	w.staged[key] = staged{addr: addr.Path(), value: value}
@@ -261,7 +261,7 @@ func (w *writer) permits(ctx context.Context, key string) error {
 	}
 
 	if err := w.acl.CanWrite(ctx, key); err != nil {
-		return fmt.Errorf("%w: this client's credentials do not permit writing at this address: %w",
+		return fmt.Errorf("%w: this client's credentials do not permit writing at this key: %w",
 			ferry.ErrPlane, err)
 	}
 
@@ -460,6 +460,6 @@ func bytesOf(text string, err error) ([]byte, error) {
 
 // errNoNull is the refusal that makes this a plane with no null rather than a
 // plane that quietly has one.
-var errNoNull = fmt.Errorf("%w: a key-value store holds bytes and has no null, and this address was handed one: "+
+var errNoNull = fmt.Errorf("%w: a key-value store holds bytes and has no null, and this key was handed one: "+
 	"a nil pointer to a value has nothing to be written as here, and storing a zero-length value for it would "+
 	"make it indistinguishable from empty text", ferry.ErrValue)

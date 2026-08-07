@@ -251,8 +251,8 @@ An edit that lands in that window would be swapped away without a word.
 So the save compares the file against what it read, one stat before the rename, and refuses with `ferry.ErrPlane` where it changed:
 
 ```
-the plane changed after this save read it, and saving now would discard that change:
-load the plane again, apply the same edits to what it holds now, and save again
+the file changed after this save read it, and saving now would discard that change:
+load the file again, apply the same edits to what it holds now, and save again
 ```
 
 Your file is left exactly as the other writer left it.

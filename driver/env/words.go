@@ -149,7 +149,7 @@ func boolTable(words []string) (map[string]bool, error) {
 
 		if _, taken := table[w]; taken {
 			return nil, optionError("env.BoolWords was given one word twice: a word means one of true and " +
-				"false on this plane, and a word meaning both is a value that cannot be read back")
+				"false, and a word meaning both is a value that cannot be read back")
 		}
 
 		table[w] = i%2 == 0

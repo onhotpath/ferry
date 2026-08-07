@@ -86,7 +86,7 @@ func readNumber(text string) (string, error) {
 // [quoted] is what keeps the exception an exception, bounding the length and
 // escaping the content to one line (ADR-0018 law 4, ADR-0011).
 func notANumberSpelling(text string) error {
-	return fmt.Errorf("%w: the plane tagged this scalar as a number and %s is spelled in none of the forms "+
+	return fmt.Errorf("%w: the document tags this scalar as a number and %s is spelled in none of the forms "+
 		"YAML gives a number: quote it to load it as text, or correct it", ferry.ErrValue, quoted(text))
 }
 

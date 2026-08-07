@@ -266,8 +266,8 @@ func (r reader) holdable(addr ferry.Container, at *yamlv3.Node) error {
 		return nil
 	}
 
-	return fmt.Errorf("%w: the plane holds %s here and the destination's members are %s: change the document, "+
-		"or model the field as what the plane holds", ferry.ErrValue, shapeOf(at), membersOf(want))
+	return fmt.Errorf("%w: the document holds %s here and the destination's members are %s: change the file, "+
+		"or model the field as what it holds", ferry.ErrValue, shapeOf(at), membersOf(want))
 }
 
 // collection reports whether a node is one of the two kinds that hold members.
@@ -321,7 +321,7 @@ func readDoc(ctx context.Context, path string) (*yamlv3.Node, error) {
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("%w: reading the plane: %w", ferry.ErrPlane, err)
+		return nil, fmt.Errorf("%w: reading the file: %w", ferry.ErrPlane, err)
 	}
 
 	return parseDoc(data)
@@ -351,7 +351,7 @@ func parseDoc(data []byte) (*yamlv3.Node, error) {
 			return &yamlv3.Node{Kind: yamlv3.DocumentNode}, nil
 		}
 
-		return nil, fmt.Errorf("%w: the plane is not a YAML document: %w", ferry.ErrValue, err)
+		return nil, fmt.Errorf("%w: this file is not a YAML document: %w", ferry.ErrValue, err)
 	}
 
 	if err := onlyDocument(dec); err != nil {
@@ -376,9 +376,9 @@ func onlyDocument(dec *yamlv3.Decoder) error {
 	case errors.Is(err, io.EOF):
 		return nil
 	case err != nil:
-		return fmt.Errorf("%w: the plane is not a YAML document: %w", ferry.ErrValue, err)
+		return fmt.Errorf("%w: this file is not a YAML document: %w", ferry.ErrValue, err)
 	default:
-		return fmt.Errorf("%w: the plane holds more than one document, and an address names a place in one of "+
+		return fmt.Errorf("%w: this file holds more than one document, and a key names a place in one of "+
 			"them: a dump would write the first and drop the rest", ferry.ErrValue)
 	}
 }
