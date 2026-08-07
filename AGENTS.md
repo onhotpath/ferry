@@ -12,8 +12,7 @@ This file is the short form.
 ## The API is decided, and the ADRs are where
 
 Twenty-one ADRs in `docs/adr/` settle what ferry supports, the module layout, the address model and its sealed kinds, the source and sink contract, the type set, defaults and absence, the codec chain, the tag grammar, typed codec registration and the `Value` it builds, the entry point and schema cache, the error model, the caller-held binding, plane compatibility, the conformance package, the plane that spells one address two ways, the spelling seam, the concurrency model, watch and reload, and the multi-key extension mechanism.
-Every one is Accepted.
-All are implemented except [ADR-0018](docs/adr/0018-the-spelling-seam.md), the spelling seam, which is Accepted and not yet built.
+Every one is Accepted, and all of them are implemented.
 
 **The ADRs are the specification.**
 Where an issue and an ADR disagree, the ADR wins.

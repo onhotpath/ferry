@@ -58,6 +58,23 @@
 // which this package supplies no way to write, so ferry refuses them for it and
 // they carry [ferry.ErrPlane]. Match both, or match neither and read the error.
 //
+// # Or a store that holds payloads
+//
+// [Raw] says the store's values are bytes rather than text, so a value crosses
+// ferry's boundary as the bytes the store holds and nothing in the middle turns
+// them into a string:
+//
+//	src, err := kv.NewSource(store, kv.WithPrefix("app"), kv.Raw())
+//
+// It is symmetric: a sink built with it writes a []byte field's bytes exactly as
+// they are, through the same spelling, so the two directions cannot drift apart.
+//
+// It is a fact about the whole store, because a key carries no type for a driver
+// to consult. Once it is declared every value is a payload, so an int, a string
+// or a duration field over the same store is a value the field cannot take:
+// declare it for a store whose values are payloads, and read the fields that are
+// not through a source of their own.
+//
 // # One call or one call per key
 //
 // By default each field is fetched as it is needed. [WithBatch] fetches the

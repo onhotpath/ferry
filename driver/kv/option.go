@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/onhotpath/ferry"
 )
 
 // Option is a setting handed to [NewSource] or [NewSink]. The set is closed at
-// two: [WithPrefix] and [WithBatch].
+// three: [WithPrefix], [WithBatch] and [Raw].
 type Option func(*config) error
 
 // config is the resolved Option set one source or sink runs under.
@@ -21,6 +23,11 @@ type config struct {
 	// batch is the whole of the batch-versus-lazy choice: one bool, read once
 	// per open, which ferry never sees (ADR-0004).
 	batch bool
+
+	// raw is the spelling [Raw] declared, and it is nil until it is asked for:
+	// a store carries no type of its own, so a value is text unless this plane
+	// was declared to hold payloads (ADR-0018).
+	raw ferry.Spelling[[]byte, []byte]
 }
 
 // newConfig resolves an Option list, reporting every Option that was wrong
@@ -114,6 +121,37 @@ func prefixSegments(segments []string) error {
 func WithBatch() Option {
 	return func(c *config) error {
 		c.batch = true
+
+		return nil
+	}
+}
+
+// Raw says this store holds byte payloads, so that a value crosses ferry's
+// boundary as the bytes the store holds and is never turned into text on the
+// way.
+//
+//	src, err := kv.NewSource(store, kv.WithPrefix("app"), kv.Raw())
+//	cfg, err := ferry.Load[Certs](ctx, src)
+//
+// Without it a stored value arrives as text, which every field parses with its
+// own parser: an int field reads the digits, a bool field reads true and false,
+// and a []byte field takes the bytes of that text. With it a stored value
+// arrives as bytes, which is the same []byte with one conversion fewer and no
+// step in the middle that could have decided the bytes were a string.
+//
+// The sharp edge is that this is a fact about the whole store and not about one
+// field, because a key carries no type for a driver to consult. Once it is
+// declared every value is a payload, so an int, a string or a duration field
+// over the same store is then a value the field cannot take: declare it for a
+// store whose values are payloads, and read the fields that are not through a
+// source of their own.
+//
+// It is symmetric. A [Sink] built with it writes a []byte field's bytes exactly
+// as they are, which is what it already did, and takes them through the same
+// spelling so that the two directions cannot drift apart.
+func Raw() Option {
+	return func(c *config) error {
+		c.raw = rawBytes()
 
 		return nil
 	}

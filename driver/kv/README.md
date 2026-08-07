@@ -186,6 +186,45 @@ The failures are two classes, and a caller matching on one of them misses the ot
 A null at a leaf is this package's own refusal and carries `ferry.ErrValue`.
 The other three are a container speaking at its own address, which this package supplies no way to write, so ferry refuses them for it and they carry `ferry.ErrPlane`.
 
+## Unless the store holds payloads
+
+`kv.Raw()` says the values are bytes rather than text, so they cross ferry's boundary as the bytes the store holds:
+
+```go
+store := memory{}
+ctx := context.Background()
+
+sink, err := kv.NewSink(store, kv.WithPrefix("app"), kv.Raw())
+if err != nil {
+	panic(err)
+}
+
+if err := ferry.Dump(ctx, Certs{Cert: []byte{0x1f, 0x8b, 0x00}}, sink); err != nil {
+	panic(err)
+}
+
+src, err := kv.NewSource(store, kv.WithPrefix("app"), kv.Raw())
+if err != nil {
+	panic(err)
+}
+
+cfg, err := ferry.Load[Certs](ctx, src)
+if err != nil {
+	panic(err)
+}
+
+fmt.Printf("% x\n", cfg.Cert)
+
+// Output:
+// 1f 8b 00
+```
+
+It is symmetric, and the same spelling serves both directions, so a load and a save cannot drift apart.
+
+It is a fact about the whole store, because a key carries no type for a driver to consult.
+Once it is declared every value is a payload, so an `int`, a `string` or a `time.Duration` field over the same store is a value the field cannot take.
+Declare it for a store whose values are payloads, and read the fields that are not through a source of their own.
+
 ## Whether you can write is discovered when you open, not before
 
 Implement `ACL` and the package asks your client before writing anything:

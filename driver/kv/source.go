@@ -29,6 +29,10 @@ type Source struct {
 	// batch is the whole of ADR-0004's "the difference is one boolean inside
 	// the driver", and it is read once, in the open.
 	batch bool
+
+	// raw is the spelling [Raw] declared, or nil where this plane's values are
+	// text (ADR-0018).
+	raw ferry.Spelling[[]byte, []byte]
 }
 
 var _ ferry.Source = (*Source)(nil)
@@ -50,7 +54,7 @@ func NewSource(client Client, opts ...Option) (*Source, error) {
 		return nil, errNoClient
 	}
 
-	return &Source{client: client, prefix: cfg.prefix, batch: cfg.batch}, nil
+	return &Source{client: client, prefix: cfg.prefix, batch: cfg.batch, raw: cfg.raw}, nil
 }
 
 // errNoClient is both constructors' refusal of a plane that was never supplied.
@@ -193,7 +197,7 @@ func (s *Source) opener(keys *ferry.Keys, sections map[ferry.SectionAddr]section
 			return nil, err
 		}
 
-		r := &reader{client: s.client, key: keys.Open(), sections: sections}
+		r := &reader{client: s.client, key: keys.Open(), sections: sections, raw: s.raw}
 		if !s.batch {
 			return r, nil
 		}
@@ -245,6 +249,12 @@ type reader struct {
 	// sections is the presence table Bind built, and it is read and never
 	// written, so one binding's opens share it.
 	sections map[ferry.SectionAddr]sectionScope
+
+	// raw is this plane's spelling of a stored value, or nil where the plane
+	// carries text. It is read and never written, and its two halves are pure,
+	// so it is reachable from every goroutine one open is entered from
+	// (ADR-0018, ADR-0019).
+	raw ferry.Spelling[[]byte, []byte]
 
 	// pairs is the whole plane, and batched is what tells "fetched and empty"
 	// from "not fetched". A store that holds nothing answers List with an empty
@@ -330,7 +340,7 @@ func (r *reader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, err
 		return ferry.Value{}, nil
 	}
 
-	return held(value), nil
+	return r.held(value)
 }
 
 // fetch reads one key, out of the snapshot a batch open already has or out of
@@ -357,15 +367,34 @@ func (r *reader) fetch(ctx context.Context, key string) (value []byte, found boo
 // held is the one place a stored value becomes a [ferry.Value], so that a batch
 // read and a lazy read cannot disagree about what the store said.
 //
-// It is a String and never a Bytes, which is the decision that makes this plane
-// round-trip anything at all. The store carries no type information, so the
-// kind cannot be recovered from what is stored; core's own rule is that a leaf
-// takes its own kind and a String, so a String is the one kind every Go type
-// accepts - a number parses it, a bool parses it, and a []byte takes its bytes.
-// Answering Bytes instead would refuse every string, integer and duration field
-// on the plane (ADR-0004: such a driver returns Absent or a String, and never a
-// Null).
-func held(value []byte) ferry.Value { return ferry.String(string(value)) }
+// It is a String and never a Bytes by default, which is the decision that makes
+// this plane round-trip anything at all. The store carries no type information,
+// so the kind cannot be recovered from what is stored; core's own rule is that a
+// leaf takes its own kind and a String, so a String is the one kind every Go
+// type accepts - a number parses it, a bool parses it, and a []byte takes its
+// bytes. Answering Bytes instead refuses every string, integer and duration
+// field on the plane (ADR-0004: such a driver returns Absent or a String, and
+// never a Null).
+//
+// [Raw] is a caller declaring that this plane holds payloads and accepting
+// exactly that consequence, and it is the only way the other answer is given
+// (ADR-0018).
+func (r *reader) held(value []byte) (ferry.Value, error) {
+	if r.raw == nil {
+		return ferry.String(string(value)), nil
+	}
+
+	payload, err := r.raw.Parse(value)
+	if err != nil {
+		// Unreachable: this plane's spelling is the identity and refuses
+		// nothing, because every byte sequence a store holds is a payload. It
+		// is returned rather than dropped because a reader that swallowed a
+		// spelling's refusal would answer with a value the spelling refused.
+		return ferry.Value{}, err
+	}
+
+	return ferry.Bytes(payload), nil
+}
 
 // Children lists what the store holds immediately under an address.
 //
