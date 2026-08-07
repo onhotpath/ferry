@@ -212,7 +212,7 @@ const (
 // and answering absence would leave the field at its zero value with nothing
 // saying why.
 func (r reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
-	v, err := valueOf(deref(lookup(r.doc, addr.Path())))
+	v, err := valueOf(deref(visible(r.doc, addr.Path())))
 	if err != nil {
 		return ferry.Value{}, ferry.ErrorAt(addr.Path(), err)
 	}
@@ -234,7 +234,7 @@ func (r reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error)
 // disagreeing about the shape of the data: reading it as a section that is there
 // would fill every field with the Go zero and drop what the document held.
 func (r reader) Probe(_ context.Context, addr ferry.Container) (ferry.SectionInfo, error) {
-	at := deref(lookup(r.doc, addr.Path()))
+	at := deref(visible(r.doc, addr.Path()))
 
 	info, err := presenceOf(at)
 	if err == nil {

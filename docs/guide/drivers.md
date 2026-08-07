@@ -582,6 +582,7 @@ A plane whose grammar has aliases, a YAML anchor or a filesystem symlink, has tw
 
 **Resolve it yourself and report nothing.**
 That is what `driver/yaml` does: it follows an anchor on the read side and writes through it on the write side, and core never learns that a link was there.
+It resolves a merge key the same way and only on the read side, so a key a mapping inherits through `<<` is a member core is told about and an override a save writes lands in the mapping that inherits rather than in the one it merges from.
 Everything about the alias, including the cycle discipline and the write rule, is yours.
 
 **Or report one hop and let core follow the chain.**

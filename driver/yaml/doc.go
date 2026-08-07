@@ -86,6 +86,37 @@
 // to it, and there is nothing to be gained, because a scalar has no keys of its
 // own to keep.
 //
+// # A merge key is read, and written as an override
+//
+// A mapping that says `<<: *defaults` holds what defaults holds, and a load
+// reads it that way. Given
+//
+//	defaults: &d
+//	  host: localhost
+//	  port: 1
+//	db:
+//	  <<: *d
+//	  port: 5432
+//
+// db loads as host "localhost" and port 5432: the key the mapping spells itself
+// wins, the merge fills in the rest, and `<<` is never a key of your own. A
+// map-typed field over db holds host and port and no member named `<<`. Written
+// as a list, `<<: [*a, *b]`, the earlier source wins; a source that merges in
+// turn is followed too.
+//
+// A save does not write through one. Saving db's host writes a `host` key into
+// db, which shadows the merged one, and leaves defaults exactly as it is -
+// because writing through would move the value under every other mapping that
+// merges defaults, which is not what one field of one struct asked for.
+//
+// The one place that costs you something is a map or a list, which a save
+// replaces whole. The mapping's own members are what the replacement keeps, so a
+// map-typed field over db is written back with host and port spelled out and the
+// `<<` line gone. The values are the ones your value held either way; the line
+// that produced them is not kept, because keeping it would leave behind every
+// inherited key the replacement meant to drop. Model a merged mapping as a
+// struct if the `<<` line has to survive.
+//
 // # Types survive the trip
 //
 // YAML resolves a scalar's tag, so `port: 8080` is a number, `port: "8080"` is

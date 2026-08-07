@@ -35,6 +35,14 @@ const (
 // otherwise touching, for the reason [untagMerges] records.
 const mergeTag = "!!merge"
 
+// mergeKey is the key YAML gives a mapping to take another mapping's members.
+// It is the document's own syntax and never a member the document holds, which
+// is what [merged] and [keys] read it as (#234).
+//
+// The text is what says so rather than [mergeTag], because [untagMerges] takes
+// that tag off before a save and the same document is walked afterwards.
+const mergeKey = "<<"
+
 // nullText is how this driver writes a Null. The emitter would accept an empty
 // scalar for it and write `key:` with nothing after the colon, which reads back
 // identically and reads worse to a human, so the word is written out.
