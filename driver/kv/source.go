@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/onhotpath/ferry"
 )
@@ -176,6 +177,14 @@ func under(prefix, p ferry.Path) bool {
 // address. Both hand back the same [ferry.Reader] type, because the difference
 // is data rather than behaviour and nothing above this function can tell which
 // it was given.
+//
+// The batch is one List and is deliberately not subdivided inside the caller's
+// budget. ADR-0019 leaves subdivision to the driver because only the driver has
+// the cost model, and this one has the flattest possible answer: a store lists
+// a folder in one round trip, so splitting the prefix into several would be
+// more requests for the same bytes. A driver whose plane routes across several
+// backends is where [ferry.ConcurrencyBudget] earns its keep, and it is read at
+// the open rather than here for that reason.
 func (s *Source) opener(keys *ferry.Keys, sections map[ferry.SectionAddr]sectionScope) ferry.OpenFunc {
 	root := rootKey(s.prefix)
 
@@ -207,14 +216,30 @@ func (s *Source) opener(keys *ferry.Keys, sections map[ferry.SectionAddr]section
 // the store holds something below it. It does not implement [ferry.Releaser],
 // because it holds no resource: the client is the source's and outlives every
 // open of it.
+//
+// It implements [ferry.Concurrent], which is what obliges everything below it
+// to be safe from many goroutines at once (ADR-0019). Two of the three things
+// it holds are safe by construction - the snapshot and the presence table are
+// written before the reader exists and only read afterwards - and the third is
+// the key function, which is not, so this type is where it is serialised.
 type reader struct {
 	client Client
+
+	// mu guards key and nothing else.
+	//
+	// A [ferry.KeyFunc] belongs to its open and is not safe for concurrent use:
+	// minting an address a value produced writes the open's own minted set, and
+	// per open is not per goroutine (ADR-0012). Declaring [ferry.Concurrent] is
+	// a promise about everything the instance reaches, so the lock is this
+	// driver's obligation rather than core's, which is what keeps a driver that
+	// declares nothing paying nothing (ADR-0019).
+	mu sync.Mutex
 
 	// key is this open's key function. It serves the static tier from the table
 	// Bind built and mints an address that came from a value - a map key, a
 	// sequence index - as it is asked for, checking it against everything this
 	// open has already minted. It belongs to the open and nothing it mints
-	// outlives one (ADR-0012).
+	// outlives one (ADR-0012). Every call to it goes through [reader.keyOf].
 	key ferry.KeyFunc
 
 	// sections is the presence table Bind built, and it is read and never
@@ -232,7 +257,39 @@ var (
 	_ ferry.Reader     = (*reader)(nil)
 	_ ferry.Prober     = (*reader)(nil)
 	_ ferry.Enumerator = (*reader)(nil)
+	_ ferry.Concurrent = (*reader)(nil)
 )
+
+// MaxConcurrent reports that this reader tolerates overlapping calls and
+// imposes no bound of its own, so a caller's [ferry.MaxConcurrency] stands
+// alone.
+//
+// Zero rather than a number, because the bound that exists is not this
+// package's to name. A lazy open turns every overlapping read into a call to
+// your [Client], so how many of those the store behind it will take is a fact
+// about your store and your token, and the caller is the one holding both. A
+// batch open makes no call here at all, so there is nothing left to bound.
+//
+// What it commits this package to is that everything an open reaches is safe
+// from many goroutines at once. The snapshot and the presence table are written
+// before the reader exists, the key function is serialised inside this package,
+// and what is left is your [Client] - which this package already requires to be
+// safe for use from many goroutines, because one source serves many loads.
+func (*reader) MaxConcurrent() int { return 0 }
+
+// keyOf is this open's plane key for one address, and the one place the key
+// function is entered.
+//
+// The lock is what declaring [ferry.Concurrent] costs: a key function belongs
+// to its open and is not safe for concurrent use, so the driver that declares
+// the tolerance is the one that serialises it (ADR-0012, ADR-0019). It is held
+// over the call and never over the store, so nothing waits here for I/O.
+func (r *reader) keyOf(at ferry.Path) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.key(at)
+}
 
 // Get answers with what the store holds at this address.
 //
@@ -256,7 +313,7 @@ func (r *reader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, err
 		return ferry.Value{}, err
 	}
 
-	key, err := r.key(addr.Path())
+	key, err := r.keyOf(addr.Path())
 	if err != nil {
 		return ferry.Value{}, err
 	}
@@ -432,7 +489,7 @@ func (r *reader) folderOf(ctx context.Context, at ferry.Path) (string, error) {
 		return "", err
 	}
 
-	key, err := r.key(at)
+	key, err := r.keyOf(at)
 	if err != nil {
 		return "", err
 	}

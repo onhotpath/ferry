@@ -25,6 +25,13 @@ import "context"
 // held for the life of a process, so one client is reached from wherever a load
 // or a save happens. A real backend's own client is usually safe already, and a
 // test double over a plain map is usually not.
+//
+// One load can reach it from many goroutines too. This package's reader tells
+// ferry that it tolerates overlapping calls, so a caller who sets
+// ferry.MaxConcurrency has several of a single load's reads in your client at
+// once. That is the same obligation as the paragraph above rather than a new
+// one, and it is why ferry.MaxConcurrency is the caller's to set: how much
+// overlap your store will take is a fact about your store and your token.
 type Client interface {
 	// Get answers with the bytes stored at key, and with found false where the
 	// store does not hold it.

@@ -63,6 +63,7 @@ An instance holding mutable state per open guards it, or does not declare the ca
 A driver that does not implement `Concurrent` is walked serially no matter what the caller asked for.
 `env` and `yaml` never implement it: a file read and a process environment want one call, not eight.
 Networked planes implement it because overlap is where their latency goes to die.
+`driver/kv` is the one in this repository that does, and it is the worked example of what the promise costs: the [driver guide](drivers.md#concurrent) walks through it, including the one line every declaring driver owes its own key function.
 
 ## Batching beats fanout
 

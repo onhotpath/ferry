@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -584,4 +585,183 @@ func openReader(t *testing.T, src *kv.Source, set *ferry.AddressSet) ferry.Reade
 	}
 
 	return r
+}
+
+// wide is the schema the concurrency measurement is taken over: eight leaves at
+// two depths, which is enough members for a walk to have something to overlap
+// and a container inside a container for it to overlap at more than one level.
+//
+// Every member is a map key of its own in the store, so a lazy load makes eight
+// Gets and each of them is a place the walk can be scheduled.
+type wide struct {
+	One   string    `ferry:"one"`
+	Two   string    `ferry:"two"`
+	Three string    `ferry:"three"`
+	Four  string    `ferry:"four"`
+	Five  string    `ferry:"five"`
+	Six   string    `ferry:"six"`
+	Under wideUnder `ferry:"under"`
+}
+
+type wideUnder struct {
+	Seven string `ferry:"seven"`
+	Eight string `ferry:"eight"`
+}
+
+// wideValue is what every load in the concurrency tests reads back.
+func wideValue() wide {
+	return wide{
+		One: "1", Two: "2", Three: "3", Four: "4", Five: "5", Six: "6",
+		Under: wideUnder{Seven: "7", Eight: "8"},
+	}
+}
+
+// TestLazyReadsOverlapUnderABudget is the capability this driver declares,
+// measured rather than asserted: a lazy reader under a caller's budget has more
+// than one read in the store at once, and produces the struct the serial load
+// produces.
+//
+// The overlap is what the declaration promises core, and the equality is what
+// makes the promise worth having. A driver that overlapped and answered
+// differently would be faster and wrong.
+func TestLazyReadsOverlapUnderABudget(t *testing.T) {
+	t.Parallel()
+
+	const budget = 4
+
+	store := newFake().meterGets(2)
+	if err := ferry.Dump(t.Context(), wideValue(), mustSink(t, store)); err != nil {
+		t.Fatalf("seeding the store: %v", err)
+	}
+
+	got, err := ferry.Load[wide](t.Context(), mustSource(t, store), ferry.MaxConcurrency(budget))
+	if err != nil {
+		t.Fatalf("load under a budget of %d: %v", budget, err)
+	}
+
+	if got != wideValue() {
+		t.Errorf("the load produced %+v, want %+v", got, wideValue())
+	}
+
+	if peak := store.peaked(); peak < 2 {
+		t.Errorf("the store held %d reads at once under a budget of %d, want at least 2: a reader declaring "+
+			"the capability is one core is allowed to overlap", peak, budget)
+	}
+
+	if peak := store.peaked(); peak > budget {
+		t.Errorf("the store held %d reads at once, want no more than the budget of %d", peak, budget)
+	}
+}
+
+// TestABudgetChangesNothingAboutWhatIsRead is the equivalence, from this
+// driver's own side: every budget produces the value the serial load produces,
+// and a batch open produces it too.
+//
+// The conformance suite holds this driver to the same property over its own
+// fixtures. This is the same question asked over a store seeded by hand, which
+// is what makes a failure here readable as this driver's rather than as a
+// conformance case's.
+func TestABudgetChangesNothingAboutWhatIsRead(t *testing.T) {
+	t.Parallel()
+
+	opens := map[string][]kv.Option{
+		"lazy":  nil,
+		"batch": {kv.WithBatch()},
+	}
+
+	for _, n := range []int{1, 2, 3, 8} {
+		t.Run("budget "+strconv.Itoa(n), func(t *testing.T) {
+			t.Parallel()
+
+			for how, opts := range opens {
+				assertWideLoads(t, n, how, opts)
+			}
+		})
+	}
+}
+
+// assertWideLoads loads the fixture out of a store of its own under one budget,
+// which is the fresh-destination rule: a store shared between two schedules is
+// what makes a broken second walk pass.
+func assertWideLoads(t *testing.T, n int, how string, opts []kv.Option) {
+	t.Helper()
+
+	store := newFake()
+	if err := ferry.Dump(t.Context(), wideValue(), mustSink(t, store)); err != nil {
+		t.Fatalf("seeding the store: %v", err)
+	}
+
+	got, err := ferry.Load[wide](t.Context(), mustSource(t, store, opts...), ferry.MaxConcurrency(n))
+	if err != nil {
+		t.Fatalf("%s load under a budget of %d: %v", how, n, err)
+	}
+
+	if got != wideValue() {
+		t.Errorf("a %s load under a budget of %d produced %+v, want %+v", how, n, got, wideValue())
+	}
+}
+
+// TestMintingUnderABudgetIsSerialised is the obligation the capability carries:
+// a key function belongs to its open and is not safe for concurrent use, and a
+// driver that declares it tolerates overlap is the one that serialises its own.
+//
+// The addresses are minted rather than static - a map's keys come from the
+// value, so every one of them goes through the open's minted set - and what
+// reports a failure here is the race detector, which is why the assertion is
+// only that the load produced what was stored.
+func TestMintingUnderABudgetIsSerialised(t *testing.T) {
+	t.Parallel()
+
+	want := wideMap()
+
+	store := newFake()
+	if err := ferry.Dump(t.Context(), want, mustSink(t, store)); err != nil {
+		t.Fatalf("seeding the store: %v", err)
+	}
+
+	got, err := ferry.Load[mapped](t.Context(), mustSource(t, store), ferry.MaxConcurrency(4))
+	if err != nil {
+		t.Fatalf("load under a budget: %v", err)
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the load produced %+v, want %+v", got, want)
+	}
+}
+
+// mapped is a schema whose members are minted from the value: four maps, each
+// under a container of its own, so a walk that overlaps enters the key function
+// from more than one goroutine and does so many times.
+//
+// Four rather than two, and six keys rather than three, because what is being
+// looked for is an unsynchronised write and the race detector finds one by
+// meeting it: every read this store answers takes the store's own lock, which
+// orders whatever came before it, so the pairs that are genuinely unordered are
+// the ones that got there first. Widening the schema widens that window until
+// the defect is reported on every run rather than on some of them.
+type mapped struct {
+	One   map[string]string `ferry:"one"`
+	Two   map[string]string `ferry:"two"`
+	Three map[string]string `ferry:"three"`
+	Four  map[string]string `ferry:"four"`
+}
+
+func wideMap() mapped {
+	return mapped{
+		One:   mintedKeys("a"),
+		Two:   mintedKeys("b"),
+		Three: mintedKeys("c"),
+		Four:  mintedKeys("d"),
+	}
+}
+
+// mintedKeys is six map entries under one prefix, and no two maps share a key,
+// so every address this schema reaches is minted exactly once.
+func mintedKeys(at string) map[string]string {
+	out := make(map[string]string, 6)
+	for i := range 6 {
+		out[at+strconv.Itoa(i)] = strconv.Itoa(i)
+	}
+
+	return out
 }

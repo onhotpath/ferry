@@ -105,6 +105,22 @@ Pick by what your store costs you: batch is one round trip and a consistent snap
 Nothing else changes - the struct you get back is identical either way.
 It is a load-time option, and `NewSink` rejects it rather than quietly ignoring it.
 
+## One load, several reads at once
+
+A reader from this package tells ferry that it tolerates overlapping calls, so `ferry.MaxConcurrency(n)` overlaps a single load's reads:
+
+```go
+cfg, err := ferry.Load[Config](ctx, src, ferry.MaxConcurrency(4))
+```
+
+It declares no bound of its own, because how much overlap your store will take is a fact about your store and your token, and you are the one holding both.
+
+What it costs you is what `Client` already asks for: your client has to be safe for use from many goroutines at once.
+Nothing else inside one open is shared - a batch open's snapshot is only ever read, and this package serialises the key function that turns an address into a store key.
+
+A batch open has nothing left to overlap, since it already made its one call.
+The struct you get back is the same either way, under any budget, and ferry's conformance suite holds this driver to exactly that.
+
 ## Everything is bytes
 
 A store key carries no type, so `8080` in an `int` field and `"8080"` in a `string` field are both stored as `8080`, and each field parses what it reads.
