@@ -74,7 +74,7 @@ type Registry struct {
 //	var registry = ferry.NewRegistry(
 //	    ferry.NumberText[big.Int](),
 //	    ferry.StringText[netip.Addr]().AsMapKey(),
-//	    ferry.WithTagKeys(yamlext.Extension()),
+//	    ferry.WithTagKeys(yaml.Extension()),
 //	)
 //
 //	cfg, err := ferry.Load[Config](ctx, src, ferry.WithRegistry(registry))

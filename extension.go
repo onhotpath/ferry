@@ -50,7 +50,7 @@ import (
 // The key is yours and never ferry's: a field then carries both tags, and each
 // is read with its own vocabulary.
 //
-//	Wait time.Duration `ferry:"wait,required" yamlext:"node=mycompany:duration"`
+//	Wait time.Duration `ferry:"wait,required" yamlext:"node=!mycompany:duration"`
 type KeyExtension struct {
 	// TagKey is the struct tag key this extension owns. It may not be the key
 	// ferry reads, and it is a bare word: no space, quote, colon, comma, dot or
@@ -84,7 +84,7 @@ type Word struct {
 //
 //	var Registry = ferry.NewRegistry(
 //	    ferry.NumberText[big.Int](),
-//	    ferry.WithTagKeys(yamlext.Extension()),
+//	    ferry.WithTagKeys(yaml.Extension()),
 //	)
 //
 // A declared key is parsed with that extension's vocabulary and handed back
@@ -393,7 +393,7 @@ type ExtTable struct {
 // carried that key, the words it carried and the text of each.
 //
 //	for addr, words := range table.Extension("yamlext") {
-//	    nodeTags[addr] = "!" + words["node"]
+//	    nodeTags[addr] = words["node"]
 //	}
 //
 // A word declared without a value reads as the empty string, and asking whether

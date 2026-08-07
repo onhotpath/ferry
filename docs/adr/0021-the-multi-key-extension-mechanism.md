@@ -134,11 +134,23 @@ The `Bind` handoff is what makes this cost a caller nothing:
 func (s Sink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
     nodeTags := map[ferry.Path]string{}
     for addr, words := range addrs.Extension("yamlext") {
-        nodeTags[addr] = "!" + words["node"]     // memoised once per schema
+        nodeTags[addr] = words["node"]           // memoised once per schema
     }
     ...
 }
 ```
+
+> **Amended under [#156](https://github.com/onhotpath/ferry/issues/156), on the merge of the first consumer: the `node` word carries the tag as a document spells it, `!` and all, and the snippet above prefixes one it should not.**
+>
+> As published the line reads `nodeTags[addr] = "!" + words["node"]`, so a field would have been annotated `yamlext:"node=mycompany:duration"`.
+> YAML has two shorthand forms, `!local` and `!!standard`, and the prefix rule can spell only the first: `!!timestamp` - which is [#156](https://github.com/onhotpath/ferry/issues/156)'s own second case, a tag the driver knows nothing about - would have to be written `node=!timestamp`, which reads as a mistake.
+> Shipped, the word's value is the tag verbatim, `yamlext:"node=!mycompany:duration"`, so what a field declares is what the file holds and a round trip compares one against the other with nothing in between.
+> `driver/yaml` refuses a value that is not a tag at its own `Bind`.
+> The snippet above, and the same two lines in core's godoc, are corrected to `nodeTags[addr] = words["node"]`.
+>
+> **Two riders on the first consumer, recorded because they are this ADR's rung-three permission being spent.**
+> The declaration is `yaml.Extension()` in `driver/yaml` itself and not a `yamlext` package: the tag key stays `yamlext`, because `yaml` is the key go-yaml's own marshaller reads, and a package of its own buys nothing until a second word wants one.
+> The precedence question [#156](https://github.com/onhotpath/ferry/issues/156) asks - a schema annotation and the tag already in the file, both naming one address - is settled for the schema: preserving the operator's tag exists for the addresses nothing declared, and the declaration is the thing a save could not otherwise know.
 
 The caller writes `yaml.Sink{Path: "app.yaml"}` and `ferry.Dump(ctx, cfg, sink)`, unchanged, because the registry carries the declaration and the `AddressSet` carries the table.
 **A driver can only ever see extension data for addresses it was bound to**, which is a scoping property rather than a convenience.

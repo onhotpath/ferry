@@ -24,9 +24,10 @@
 //
 // A scalar's tag is not on that list. A tag this package has no reading of its
 // own for survives a save at a key your struct maps, so `when: !!timestamp
-// 2026-08-04` is saved back with its tag still on it. Two cases replace it: a
-// tag this package writes itself, and a tag whose value is no longer the kind
-// it was, which is stale in the way the old quoting would be.
+// 2026-08-04` is saved back with its tag still on it. Three cases replace it: a
+// tag this package writes itself, a tag whose value is no longer the kind it
+// was, which is stale in the way the old quoting would be, and a tag your own
+// field declared through [Extension].
 //
 // A file holding a stream of several documents is refused rather than
 // half-written, because an address names a place in one of them.
@@ -75,6 +76,30 @@
 // tag, whatever the tag says, and reach whichever codec your field declared. So
 // a field of a type that parses that text works today, and the tag itself
 // changes nothing about how the value is read.
+//
+// # A field can say what node type it is written as
+//
+// Keeping a tag the file already had is one thing; putting one there is
+// another, and a save cannot guess it: what crosses ferry's boundary is a value
+// and not a Go type, so `wait: 30s` says nothing about wanting
+// !mycompany:duration.
+//
+// [Extension] is where a field says it. Declare this package's struct tag key
+// on a registry, annotate the field, and pass the registry to the call:
+//
+//	var registry = ferry.NewRegistry(ferry.WithTagKeys(yaml.Extension()))
+//
+//	type Config struct {
+//	    Wait string `ferry:"wait" yamlext:"node=!mycompany:duration"`
+//	}
+//
+//	err := ferry.Dump(ctx, cfg, yaml.NewSink(path), ferry.WithRegistry(registry))
+//
+// The save writes `wait: !mycompany:duration 30s`, whether or not the file had
+// a tag there, and a tag it did have at that address loses to the declared one.
+// A load needs nothing: the value arrives as the text after the tag either way,
+// which is what lets the annotation survive a load, a save and a second load
+// with nothing lost. Read [Extension] for what it refuses.
 //
 // # Saving is atomic, and durable if you ask
 //
