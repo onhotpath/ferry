@@ -250,6 +250,25 @@ jobs:
         uses: peter-evans/create-pull-request@v8
         with:
           path: ferry
+          # PERF_PR_TOKEN is what makes the opened pull request mergeable, and
+          # the fallback is what makes this line safe to commit before the
+          # secret exists (#250).
+          #
+          # With GITHUB_TOKEN the pull request is authored by
+          # github-actions[bot], and a run on it is held at `action_required`
+          # under this repository's "require approval for first-time
+          # contributors" setting. Held means no jobs, no jobs means no check
+          # runs, and `main` requires twenty of them, so the pull request is
+          # blocked with nothing on the page saying why. GitHub's recursion
+          # guard sits behind the same door: a push made with GITHUB_TOKEN is
+          # not supposed to start a workflow at all.
+          #
+          # A token belonging to an account with write access makes the pull
+          # request an ordinary one: the full required set runs on it and none
+          # of it is waived. Unset, this falls back to today's behaviour rather
+          # than failing the job, and the pull request still opens - it just
+          # needs a human to press "Approve and run" before it can merge.
+          token: ${{ secrets.PERF_PR_TOKEN || secrets.GITHUB_TOKEN }}
           branch: perf/results
           base: main
           # Only the two published files. bench/ is grafted into the working
@@ -432,6 +451,8 @@ jobs:
         uses: peter-evans/create-pull-request@v8
         with:
           path: ferry
+          # The same token, for the same reason the measure path gives (#250).
+          token: ${{ secrets.PERF_PR_TOKEN || secrets.GITHUB_TOKEN }}
           # A branch of its own, so a re-render and a measurement can never
           # overwrite each other's pull request.
           branch: perf/rerender
