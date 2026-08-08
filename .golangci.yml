@@ -63,8 +63,14 @@ linters:
     #
     # TODO: re-enable with the golangci-lint bump that ships a staticcheck able
     # to read Go 1.27 source. This expires with the same event as the
-    # workarounds in .github/workflows/ci.yml: Go 1.27 going GA. `unused` is
-    # unaffected and stays on.
+    # workarounds in .github/workflows/ci.yml: Go 1.27 going GA.
+    #
+    # `unused` is unaffected and stays on - but it shares the metalinter runner
+    # named above, so "unaffected" is a property of which analyser golangci-lint
+    # happens to bundle and not a property of this file. Renovate moves that pin
+    # (#271). `make lint-canary` asserts it on every run instead, by feeding
+    # `unused` a function that is dead on purpose and failing when it goes
+    # unreported.
     - unused
     - bodyclose        # driver/kv will speak HTTP to a KV backend (ADR-0002).
     - copyloopvar

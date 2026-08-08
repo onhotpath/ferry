@@ -168,6 +168,18 @@ A driver's `Get` with a kind switch, and a sink's staging logic, are the shapes 
 `make lint` is what CI runs.
 A stale cache from a deleted worktree can report failures in files that no longer exist; `./.bin/golangci-lint cache clean` fixes that.
 
+### The canary
+
+`make lint` starts with `make lint-canary`, which asserts that the `unused` linter still reports dead code.
+
+A linter that never ran and a linter that found nothing both print `0 issues`, so a linter can go missing without anything turning red.
+`unused` is the one at risk: golangci-lint runs it inside the same metalinter as `staticcheck`, which is switched off today because the analyser bundled with the pinned release cannot parse Go 1.27 source and takes the whole runner down with it.
+Renovate moves that pin, so whether `unused` survives a bump is not something `.golangci.yml` can promise on its own.
+
+The canary is `lintcanary.go`, a single dead function behind the `ferrylintcanary` build tag.
+No ordinary build, vet, test or lint run sets that tag, so the function is invisible everywhere else.
+If the canary target fails, `unused` stopped reporting: find out why rather than editing the canary.
+
 ## Issues, branches and commits
 
 Issues live in this repository's GitHub Issues.
