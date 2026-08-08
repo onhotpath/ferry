@@ -88,7 +88,7 @@ check: vet imports-check ## go vet, assert gofmt cleanliness, assert import orde
 	@echo "OK: gofmt -l printed nothing."
 
 .PHONY: lint
-lint: $(GOLANGCI_LINT) ## golangci-lint every module, after verifying the config.
+lint: lint-canary ## golangci-lint every module, after verifying the config.
 	@echo "==> golangci-lint config verify"
 	@$(GOLANGCI_LINT) config verify
 	@fail=0; for m in $(MODULES); do \
@@ -96,6 +96,39 @@ lint: $(GOLANGCI_LINT) ## golangci-lint every module, after verifying the config
 		( cd "$(PROJECT_DIR)/$$m" && $(GOLANGCI_LINT) run ./... ) || fail=1; \
 	done; \
 	exit $$fail
+
+# The linter set is only worth what it actually reports, and "0 issues" is the
+# same output whether a linter ran and found nothing or never ran at all (#271).
+#
+# unused is the one that needs saying out loud. golangci-lint hosts it inside
+# the shared goanalysis_metalinter runner alongside staticcheck, so a bundled
+# analyser that cannot read the toolchain's source takes unused down with it -
+# which is exactly why staticcheck is switched off in .golangci.yml today. That
+# pin is moved by Renovate, not by anyone who has read the comment there, so the
+# claim "unused is unaffected" is asserted here rather than believed.
+#
+# lintcanary.go carries a build tag no ordinary run sets, so the dead function
+# it holds is invisible to build, vet, test and `make lint` itself.
+CANARY_TAG := ferrylintcanary
+CANARY_FUNC := deadOnPurpose
+
+.PHONY: lint-canary
+lint-canary: $(GOLANGCI_LINT) ## Assert the unused linter still reports dead code.
+	@echo "==> golangci-lint canary (unused)"
+	@out=$$(cd $(PROJECT_DIR) && $(GOLANGCI_LINT) run \
+		--build-tags=$(CANARY_TAG) --enable-only=unused ./... 2>&1); \
+	case "$$out" in \
+		*"func $(CANARY_FUNC) is unused"*) ;; \
+		*) \
+			echo "$$out"; \
+			echo "FAIL: unused did not report lintcanary.go's $(CANARY_FUNC)."; \
+			echo "      Either the linter is no longer running - a golangci-lint"; \
+			echo "      bump can take it down with the analyser it shares a"; \
+			echo "      runner with - or the canary file was edited. Do not"; \
+			echo "      silence this; find out which."; \
+			exit 1; \
+	esac
+	@echo "OK: unused reported the canary, so it is running."
 
 ## ---- tests -----------------------------------------------------------------
 
