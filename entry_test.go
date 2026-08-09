@@ -625,3 +625,112 @@ func mustRefuseANilPlane(t *testing.T, err error, half string) {
 		t.Errorf("%+v does not say %q, so it does not name the half that was nil", err, half)
 	}
 }
+
+// TestARootPointerToALeafCarriesItsNull is the pointer-to-leaf root, in both
+// directions.
+//
+// *int resolves to a leaf carrying a null rather than to a pointer the walk
+// descends through, so nothing here dereferences it: the codec is built for
+// *int and is the one thing that decides what nil means. Dereferencing it in
+// the entry point handed an int to that codec, which panicked inside the shared
+// walk and escaped the fence.
+func TestARootPointerToALeafCarriesItsNull(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a nil one dumps its null at the root", aNilRootPointerDumpsItsNull)
+	t.Run("and a plane holding a null loads back nil", aNullAtTheRootLoadsAsNil)
+	t.Run("and a plane holding a number loads back a pointer to it", aNumberAtTheRootLoadsAsAPointer)
+}
+
+func aNilRootPointerDumpsItsNull(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+
+	if err := withoutPanicking(t, func() error {
+		return Dump(t.Context(), (*int)(nil), planeSink{p: p})
+	}); err != nil {
+		t.Fatalf("dump: %+v", err)
+	}
+
+	mustBeAddresses(t, p.set, []string{""})
+
+	if got := p.values[Path{}]; got != Null {
+		t.Errorf("the plane holds %#v at the root, want the null the leaf carries", got)
+	}
+}
+
+func aNullAtTheRootLoadsAsNil(t *testing.T) {
+	t.Parallel()
+
+	got, err := loadRootPointer(t, newPlane(map[Path]Value{{}: Null}))
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if got != nil {
+		t.Errorf("loaded %v, want the nil the plane's null says", *got)
+	}
+}
+
+func aNumberAtTheRootLoadsAsAPointer(t *testing.T) {
+	t.Parallel()
+
+	got, err := loadRootPointer(t, newPlane(map[Path]Value{{}: Number("8080")}))
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if got == nil || *got != 8080 {
+		t.Errorf("loaded %v, want a pointer to the number the plane held", got)
+	}
+}
+
+// loadRootPointer is one load of a *int root, with the panic the fix is about
+// turned into this test's own failure rather than a crash with no name on it.
+func loadRootPointer(t *testing.T, p *plane) (*int, error) {
+	t.Helper()
+
+	var (
+		got *int
+		err error
+	)
+
+	if panicked := withoutPanicking(t, func() error {
+		got, err = Load[*int](t.Context(), planeSource{p: p})
+
+		return nil
+	}); panicked != nil {
+		return nil, panicked
+	}
+
+	return got, err
+}
+
+// TestANilRootPointerToAStructIsStillRefused is what stops the narrowing going
+// too far.
+//
+// A struct is not an address of its own, so the Null a nil composite writes has
+// nowhere to sit, and a dump of one would write nothing and report success.
+func TestANilRootPointerToAStructIsStillRefused(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+
+	err := Dump(t.Context(), (*walkDB)(nil), planeSink{p: p})
+	if err == nil {
+		t.Fatal("dumping a nil pointer to a struct returned no error")
+	}
+
+	if !errors.Is(err, ErrValue) {
+		t.Errorf("%+v is not an ErrValue", err)
+	}
+
+	if !strings.Contains(reportOf(err), "nil pointer to a struct") {
+		t.Errorf("the report is %+v, want it to name the struct it is about", err)
+	}
+
+	if len(p.set) != 0 {
+		t.Errorf("the plane was written to at %v, want untouched", p.set)
+	}
+}

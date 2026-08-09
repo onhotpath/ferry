@@ -232,12 +232,14 @@ func (p typeProof[T]) checkTrip(h *harness, i int, inst Instance, c Case[T]) {
 
 // holder is the struct a case's value travels in.
 //
-// A proof's type is usually a leaf, and ADR-0010 refuses a root that compiles
-// to one: the empty path is not an address, and a root leaf measured without
-// the refusal wrote "{}" with a nil error, so the value was silently and
-// totally lost. Wrapping it in a struct is what that refusal names as the whole
-// remedy, so the harness writes the wrapper once rather than every proof
-// carrying its own.
+// A proof's type is usually a leaf, and a leaf at the root sits at the root
+// address, which a plane names by a rule of its own or refuses at Bind
+// (ADR-0003, ADR-0010). The suite runs against the caller's plane, and until
+// the driver spellings land no real driver names the root - so the wrapper is
+// what gives a proof an address every plane can spell, and it stays for that
+// reason rather than because a root leaf is refused. [driverRun.caseRootLeaf]
+// is where the root address itself is exercised, and it skips where the plane
+// has no name for it.
 type holder[T any] struct {
 	// The tag must spell holderAddr's one segment. They are two spellings of
 	// one name because a struct tag cannot reference a constant, and nothing

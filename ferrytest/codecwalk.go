@@ -35,37 +35,6 @@ type valueWalker interface {
 // before its own variables are, and core installs the seam from an init.
 var coreWalk, coreWalkOK = valuewalk.Seam.(valueWalker)
 
-// wrapperName is the one field a runtime-built root carries, and wrapperTag is
-// the tag that gives it an address.
-//
-// ADR-0010 refuses a root that compiles to a leaf, because the empty path is
-// not an address, so a leaf type has to be wrapped in a struct before ferry
-// will walk it. reflect.StructOf builds exactly that struct from a
-// reflect.Type, tag and all.
-const (
-	wrapperName = "Value"
-	wrapperTag  = `ferry:"value"`
-)
-
-// wrapperPath is where a wrapper's one field lands, and it is the same address
-// the hand-written probes in codeckit.go use.
-var wrapperPath = ferry.At("value")
-
-// wrapperOf is the annotated single-field root for a type the suite knows only
-// as a reflect.Type.
-//
-// The tag key is spelled literally rather than taken from the caller's Option
-// list, and that is consistent rather than sloppy: [Codec] resolves the Option
-// list against onlyLeaf before any case runs, so a [ferry.TagKey] the probes
-// were not written under is already one report and an early return.
-func wrapperOf(t reflect.Type) reflect.Type {
-	return reflect.StructOf([]reflect.StructField{{
-		Name: wrapperName,
-		Type: t,
-		Tag:  wrapperTag,
-	}})
-}
-
 // dumpZero is what ferry writes for the zero value of one registered type,
 // through the caller's own registry and the real walk.
 //
@@ -73,10 +42,11 @@ func wrapperOf(t reflect.Type) reflect.Type {
 // the same bound [Register]'s totality check works under. Anything wider needs
 // values, and values are what a [Proof] carries.
 func (c *codecRun) dumpZero(t reflect.Type) (ferry.Value, error) {
-	return c.dumpRoot(reflect.New(wrapperOf(t)).Elem())
+	return c.dumpRoot(reflect.New(t).Elem())
 }
 
-// dumpRoot records what ferry encodes at the wrapper's one address.
+// dumpRoot records what ferry encodes at the root address, which is where a
+// type resolving to a leaf sits (ADR-0003, ADR-0010).
 func (c *codecRun) dumpRoot(root reflect.Value) (ferry.Value, error) {
 	rec := recording(nowhere{})
 
@@ -84,14 +54,14 @@ func (c *codecRun) dumpRoot(root reflect.Value) (ferry.Value, error) {
 		return ferry.Value{}, err
 	}
 
-	return rec.seen[wrapperPath], nil
+	return rec.seen[ferry.Path{}], nil
 }
 
-// loadInto builds a wrapper of t from a plane holding exactly v at the
-// wrapper's address, and hands back the populated root.
+// loadInto builds a t from a plane holding exactly v at the root address, and
+// hands back the populated value.
 func (c *codecRun) loadInto(t reflect.Type, v ferry.Value) (reflect.Value, error) {
-	dst := reflect.New(wrapperOf(t)).Elem()
-	src := Static(map[ferry.Path]ferry.Value{wrapperPath: v})
+	dst := reflect.New(t).Elem()
+	src := Static(map[ferry.Path]ferry.Value{{}: v})
 
 	if err := coreWalk.LoadValue(context.Background(), dst, src, c.with(c.reg)); err != nil {
 		return reflect.Value{}, err

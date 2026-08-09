@@ -16,9 +16,9 @@ import (
 // refusals are the driver's half of ADR-0003's legality obligation: core refuses
 // an empty minted name at the mapping before this driver is asked (#258), so the
 // empty-part row has no other way in and would otherwise be a guard nothing
-// proves. The root rows are here for the same reason twice over: no schema can
-// mint a root-leaf address yet, so this is the only place the empty path reaches
-// this driver at all (#334).
+// proves. The root rows are here because this is where the mapping is stated in
+// one table; what they mean at the verbs is in rootleaf_test.go, through Bind,
+// Dump and Load (#334, #335).
 //
 // RootKey("") and no RootKey at all are one configuration and one refusal, since
 // the name a caller did not give and the empty name they did give are the same

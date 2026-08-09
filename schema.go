@@ -272,7 +272,7 @@ func compileSchema(t reflect.Type, cfg config) (*schema, error) {
 }
 
 // compileRoot holds the root to the one rule an entry point's signature cannot
-// express: the root must be a struct ferry walks (ADR-0010).
+// express: the root is either a leaf or a struct ferry walks (ADR-0010).
 //
 // "Walks" is asked of the compiled node and never of the Go kind, which is why
 // the registry and the chain are consulted here first, in the order
@@ -283,16 +283,14 @@ func compileSchema(t reflect.Type, cfg config) (*schema, error) {
 // netip.Addr was refused for mapping no address rather than for being the leaf
 // it resolves to (#306).
 //
-// A root leaf mints the empty path, which ADR-0003 says an address may not be.
-// Measured with the refusal removed, a YAML sink wrote "{}" and returned a nil
-// error and a KV sink wrote no key at all, so the value is silently and totally
-// lost rather than refused. Whether a root leaf should ever be legal is #309's
-// question, and this refusal neither answers it nor anticipates it.
+// A root leaf sits at the empty path, which ADR-0003 names the root address: a
+// plane names it by its own rule or refuses it at Bind. What stays refused is a
+// root map, slice or array, for the reason ADR-0010 gives - an empty one writes
+// its Null at its own address, that address is the root, and the value is lost
+// with a nil error.
 func (c *compiler) compileRoot(t reflect.Type) *node {
-	if c.rootIsLeaf(t) {
-		c.errAt(Path{}, rootLeafMsg(t))
-
-		return nil
+	if cd, ok := c.rootLeafCodec(t); ok {
+		return c.compileRootLeaf(cd)
 	}
 
 	if t.Kind() == reflect.Pointer {
@@ -312,33 +310,34 @@ func (c *compiler) compileRoot(t reflect.Type) *node {
 	return n
 }
 
-// rootIsLeaf reports whether the root type resolves to a leaf, asking exactly
-// what the compiler asks at every position below the root.
+// rootLeafCodec resolves the root type to the leaf behaviour that carries it,
+// asking exactly what the compiler asks at every position below the root, and
+// reports whether the root is a leaf at all.
 //
 // A pointer goes through pointerLeaf and everything else through leafFor,
 // which is [compiler.compileValue]'s own split: *int is a leaf carrying a null
 // rather than a container, so a root *int is a root leaf and not a root
-// pointer to one (ADR-0005, ADR-0007).
-func (c *compiler) rootIsLeaf(t reflect.Type) bool {
+// pointer to one (ADR-0005, ADR-0007). The question and the answer are asked
+// once here so that "is the root a leaf" and "which codec carries it" cannot
+// drift apart.
+func (c *compiler) rootLeafCodec(t reflect.Type) (leafCodec, bool) {
 	if t.Kind() == reflect.Pointer {
-		_, ok := c.cfg.registry.pointerLeaf(t)
-
-		return ok
+		return c.cfg.registry.pointerLeaf(t)
 	}
 
-	_, ok := c.cfg.registry.leafFor(t)
-
-	return ok
+	return c.cfg.registry.leafFor(t)
 }
 
-// rootLeafMsg refuses a type that resolved to a leaf at the root, and it names
-// what the type compiled to rather than what its Go kind is: netip.Addr and a
-// registered struct are both structs, and being a struct is not what makes them
-// refusable here (ADR-0010).
-func rootLeafMsg(t reflect.Type) string {
-	return fmt.Sprintf("%s compiles to a leaf, so at the root it would sit at the empty path, which is not an "+
-		"address: a leaf there is written nowhere and the write reports no error - wrap it in a struct whose "+
-		"field names the address it should sit at", t)
+// compileRootLeaf compiles a root that resolves to a leaf, at the root address
+// (ADR-0003, ADR-0010).
+//
+// It carries no default and no required flag, because the root has no tag to
+// write either on: a leaf below the root reads them off the field that names
+// it, and the root is named by nothing.
+func (c *compiler) compileRootLeaf(cd leafCodec) *node {
+	c.recordLeaf(site{owned: true})
+
+	return &node{kind: nodeLeaf, addr: Path{}, codec: cd}
 }
 
 // compileStruct compiles every field of a struct at the address the struct

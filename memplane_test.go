@@ -2,7 +2,10 @@ package ferry_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/netip"
+	"reflect"
 	"testing"
 
 	"github.com/onhotpath/ferry"
@@ -185,6 +188,68 @@ func (s *heldWriter) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error)
 
 		return s.w, err
 	}, nil
+}
+
+// TestARootLeafRoundTripsThroughAMemoryPlane is every shape a root leaf takes,
+// dumped and loaded back over the plane that adds nothing of its own.
+//
+// Each row is a type that resolves to a leaf by a different route: a kind, a
+// named slice of bytes, a struct the chain claims through its text pair, and a
+// pointer to one. Each gets a fresh plane, because a shared one is the defect
+// that hides a broken second walk.
+func TestARootLeafRoundTripsThroughAMemoryPlane(t *testing.T) {
+	t.Parallel()
+
+	for _, row := range rootLeafRows() {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			row.check(t)
+		})
+	}
+}
+
+// rootLeafRow is one type round tripped at the root, closed over its own value
+// so that the table holds no type parameter it cannot name.
+type rootLeafRow struct {
+	name  string
+	check func(*testing.T)
+}
+
+func rootLeafRows() []rootLeafRow {
+	port := 8080
+
+	return []rootLeafRow{
+		rootLeaf("int", 8080),
+		rootLeaf("string", "the whole configuration"),
+		rootLeaf("[]byte", []byte("hi")),
+		rootLeaf("json.RawMessage", json.RawMessage(`{"a":1}`)),
+		rootLeaf("netip.Addr", netip.MustParseAddr("192.0.2.1")),
+		rootLeaf("*int", &port),
+	}
+}
+
+// rootLeaf builds one row: dump v at the root of a fresh plane, load it back,
+// and compare through reflect.DeepEqual, which is what compares a []byte and a
+// pointer alike.
+func rootLeaf[T any](name string, v T) rootLeafRow {
+	return rootLeafRow{name: name, check: func(t *testing.T) {
+		t.Helper()
+
+		inst := ferrytest.MemPlane().Open()
+
+		if err := ferry.Dump(t.Context(), v, inst.Sink); err != nil {
+			t.Fatalf("dump: %+v", err)
+		}
+
+		got, err := ferry.Load[T](t.Context(), inst.Source)
+		if err != nil {
+			t.Fatalf("load: %+v", err)
+		}
+
+		if !reflect.DeepEqual(got, v) {
+			t.Errorf("loaded %v, want %v", got, v)
+		}
+	}}
 }
 
 func mustBeDriverRefusal(t *testing.T, err error) {
