@@ -609,6 +609,37 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
+  # The one job that is not ubuntu-latest, and the one module that needs it.
+  #
+  # driver/windows puts the real registry behind //go:build windows over a small
+  # seam, and an in-memory store fills that seam in a _test.go so the conformance
+  # suite runs on every platform - which is what lets the module join the ubuntu
+  # matrix above like every other one. What ubuntu cannot run is the tagged half:
+  # the syscalls, the value types as Windows actually records them, and the change
+  # notification a watch is built on.
+  #
+  # So this job exists to run the same suite over the real thing. It is named
+  # rather than globbed, deliberately: the glob above is over modules that must
+  # pass the suite, and this is over the one module whose plane is an operating
+  # system. A second such module adds a line here.
+  windows:
+    name: Windows registry
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build, vet and test driver/windows on Windows
+        working-directory: driver/windows
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
+          go test -race ./...
+
   # The one check `main`'s ruleset needs to require (#108).
   #
   # `build`, `lint` and `coverage` are matrix jobs fanned out over whatever the
@@ -632,7 +663,7 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     if: always()
-    needs: [modules, invariants, build, nojsonv2, format, lint, race, coverage]
+    needs: [modules, invariants, build, nojsonv2, format, lint, race, coverage, windows]
     steps:
       - uses: actions/checkout@v7
 
