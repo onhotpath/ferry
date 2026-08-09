@@ -1,8 +1,8 @@
 # Watch and reload
 
-ferry ships no watcher, and that is a decision, not a gap.
-Everything a watcher needs is already exported, a complete watcher is about thirty lines, and the parts ferry cannot know - what signals a change, how to debounce it, where to publish the new value - are yours.
-This page is the pattern; the runnable version lives in `examples/watcher` and is what this page quotes.
+ferry ships a watch helper and no watcher, and the difference is the point.
+Package [`ferry/watch`](https://pkg.go.dev/github.com/onhotpath/ferry/watch) turns a driver's change callback into a stream of freshly loaded values; what signals a change, how often, and where the new value goes are still yours.
+This page is the pattern, and it quotes the runnable `Example`s in `watch/example_test.go`.
 
 ## Reload is Load
 
@@ -20,18 +20,18 @@ If your loop needs "current config, refreshed", call `Load`.
 
 ## The loop
 
-The driver owns the change signal: fsnotify for a file, a watch plan for Consul, a channel in a test.
-The loop turns signals into fresh values.
+The driver owns the change signal: fsnotify for a file, a poll for another file, a watch plan for Consul.
+The helper turns those announcements into fresh values.
 
-Three parties, and only one of them is yours to write:
+Three parties, and only one of them is yours to decide:
 
 ```mermaid
 flowchart LR
   subgraph driver["DRIVER - owns the signal"]
-    SIG["fsnotify / watch plan / channel<br/>says only: the plane MAY have changed<br/>no payload, may coalesce"]
+    SIG["fsnotify / poll / watch plan<br/>says only: the plane MAY have changed<br/>no payload, may coalesce"]
   end
-  subgraph caller["CALLER - owns the loop and the policy"]
-    LOOP["the thirty-line loop<br/>debounce, coalesce, where to publish"]
+  subgraph caller["CALLER - owns the policy"]
+    LOOP["watch.Signal + watch.Values<br/>when to stop, what to do with an error"]
     PUB["publish by replacement<br/>held values never mutate"]
   end
   subgraph core["CORE - unchanged and unaware"]
@@ -43,69 +43,80 @@ flowchart LR
   PUB --> LOOP
 ```
 
-Core cannot tell a reload from a first load, and that is the design: bind-once, open-many was built long before watching, and watching is just a caller driving it on a signal.
+Core cannot tell a reload from a first load, and that is the design: bind-once, open-many was built long before watching, and watching is just something driving it on a signal.
+
+`watch.Signal` is the thing a driver announces into.
+Its `Changed` method value has type `func(context.Context)`, which is exactly what all three watchable drivers' Options take, so wiring is passing a method value.
 
 ```go
-func Watch[T any](
-	ctx context.Context, b *ferry.Binding[T], signal <-chan struct{},
-) (seq iter.Seq[T], errf func() error) {
-	var streamErr error
-	seq = func(yield func(T) bool) {
-		streamErr = stream(ctx, b, signal, yield)
-	}
-	return seq, func() error { return streamErr }
+s := watch.New()
+plane.OnChange(s.Changed) // what a driver's watch option takes
+
+b, err := ferry.Bind[Config](plane)
+if err != nil {
+	fmt.Println("bind:", err)
+
+	return
 }
 
-// stream is the loop itself, returning the error that ended it: nil when the
-// driver closed the signal or the caller stopped ranging.
-func stream[T any](ctx context.Context, b *ferry.Binding[T], signal <-chan struct{}, yield func(T) bool) error {
-	for {
-		v, ok, err := reload(ctx, b, signal)
-		if err != nil {
-			return err
-		}
-		if !ok || !yield(v) {
-			return nil
-		}
-	}
+held, err := b.Load(ctx) // the value this goroutine is holding
+if err != nil {
+	fmt.Println("load:", err)
+
+	return
 }
 
-// reload waits for one signal and loads through the binding.
-//
-// ok is false with a nil error for the one clean ending it can see, which is
-// the driver closing the signal. A cancelled context and a failed load are both
-// errors, and both end the stream.
-func reload[T any](ctx context.Context, b *ferry.Binding[T], signal <-chan struct{}) (v T, ok bool, err error) {
-	var zero T
-	select {
-	case <-ctx.Done():
-		return zero, false, ctx.Err()
-	case _, open := <-signal:
-		if !open {
-			return zero, false, nil
-		}
-	}
-	v, err = b.Load(ctx)
-	if err != nil {
-		return zero, false, err
-	}
-	return v, true, nil
+seq, errf := watch.Values(ctx, s, b)
+
+for cfg := range seq {
+	fmt.Printf("reloaded: %s:%d\n", cfg.Host, cfg.Port)
+
+	break // one turn is enough for an example; a server keeps ranging
 }
+
+fmt.Printf("held:     %s:%d\n", held.Host, held.Port)
+fmt.Println("stream error:", errf())
 ```
 
-The shape is `(iter.Seq[T], func() error)` deliberately.
+That is `Example` in `watch/example_test.go`, trimmed of its setup, so `go test` compiles and runs it.
+The plane it watches is a memory plane, and a real one substitutes its own source built with the driver's watch Option.
+
+`Values` yields nothing until the first change, so load once through the binding for the value to start from - that is what `held` is above.
+The alternative is calling `s.Changed(ctx)` before ranging, which opens the stream with the plane's current contents.
+
+The shape is `(iter.Seq[T], func() error)` deliberately ([ADR-0020](../adr/0020-watch-and-reload.md)).
 A watch error is a production incident, and this is the shape where discarding it takes a visible `_` at the call site rather than a dropped second range variable.
 The convention: the stream ends on the first failed reload or on context cancellation, and the error function answers why, once, after the range exits.
 
+## Recovering from a failed reload
+
+The error ends the stream, and continuing past one is a policy ferry does not pick for you.
+Recovery is calling `Values` again on the same `Signal`, which loses nothing: a change that lands while no stream is ranging is pending when the next one opens.
+
 ```go
-seq, errf := Watch(ctx, binding, signal)
-for cfg := range seq {
-	publish(cfg) // replace the pointer, never mutate the old value
-}
-if err := errf(); err != nil {
-	alert(err)
+plane.Delete(ferry.At("host")) // the plane loses a required address
+
+for {
+	seq, errf := watch.Values(ctx, s, b)
+	for cfg := range seq {
+		fmt.Println("reloaded:", cfg.Host)
+
+		break // a server would keep ranging until it was told to stop
+	}
+
+	err := errf()
+	if err == nil || errors.Is(err, context.Canceled) {
+		return // the range ended cleanly, or the process is shutting down
+	}
+
+	fmt.Println("reload failed, address missing:", errors.Is(err, ferry.ErrMissing))
+
+	plane.Set(ferry.At("host"), ferry.String("db2")) // somebody fixes it
 }
 ```
+
+That is `Example_failedReload` in `watch/example_test.go`, trimmed of its setup.
+The load's error passes through untouched, so `errors.Is` against ferry's sentinels answers what went wrong before you decide whether to range again.
 
 What one turn of the loop actually does, and where the change enters:
 
@@ -133,17 +144,35 @@ The signal carries nothing because it needs to carry nothing: the open re-reads 
 A loaded value is yours alone; goroutines holding the previous value keep it unchanged.
 Swap an atomic pointer, send on a channel, or replace under a short lock - never write into a struct another goroutine can see.
 
+**There are two contexts, and they should be the same one.**
+The driver watches under the context you gave its Option, and `watch.Values` ranges under the context you give it.
+Pass one that outlives the driver's and the range waits forever on a signal nothing will fire again; cancel the range's first and the driver keeps watching into a `Signal` nobody reads.
+Give both the same context and there is one lifecycle, which is what cancelling it ends.
+
+**`Changed` never blocks, so the driver never waits for you.**
+A hand-written callback that loads inline holds the driver's watching goroutine for the length of the reload, and delays its next look at the plane.
+`Signal.Changed` records the change and returns, and the reload runs on the goroutine doing the ranging.
+The price is one pending slot: a burst is one change, and so is a change that lands while a reload is already running ([ADR-0020](../adr/0020-watch-and-reload.md)).
+
+**A lost watch goes quiet.**
+`driver/env` watches with fsnotify, and a watch it loses - the watched directory removed, say - fires the callback one last time and then stops firing.
+The stream keeps ranging and quietly stops reloading, because there is nothing left to announce.
+Nothing in ferry can see that; the driver's own documentation says which endings it can announce, and a process that must not miss a change reloads on a timer as well.
+
 **A dump feeds your own watcher.**
 If the same process dumps to the plane it watches, its own writes fire its own signal.
-Coalesce, compare, or mark your own writes; the loop above deliberately does not hide this.
+Coalesce, compare, or mark your own writes; the helper deliberately does not hide this.
 
 **Signals may coalesce and may lie.**
 Treat a signal as "the plane may have changed", nothing more.
-The reload reads the truth; a spurious wake costs one load.
+The reload reads the truth; a spurious wake costs one load and yields a value equal to the last.
+
+**One range per `Signal` at a time.**
+Two ranges over one `Signal` share the pending changes out between them rather than each receiving them, and nothing polices it.
 
 ## The three drivers that announce changes
 
-Everything above is plane-independent: the loop is yours and the signal is the driver's.
+Everything above is plane-independent: the policy is yours and the signal is the driver's.
 Three first-party drivers have a signal to give, and all three give it as a callback rather than a channel, because there is no `Notifier` interface in core to shape one ([ADR-0020](../adr/0020-watch-and-reload.md) specifies that interface and deliberately does not ship it).
 
 The yaml driver is the one described below.
@@ -161,16 +190,9 @@ The three agree on everything but the mechanism, which is deliberate: callback n
 Wiring a second watchable source under one binding is not answered here or in the ADR - [#361](https://github.com/onhotpath/ferry/issues/361) is where that question lives.
 
 ```go
-onChange := func(ctx context.Context) {
-	cfg, err := b.Load(ctx) // a reload is a load
-	if err != nil {
-		alert(err)
-		return
-	}
-	current.Store(&cfg) // publish by replacement
-}
+s := watch.New()
 
-src := yaml.NewSource(path, yaml.Watch(ctx, time.Second, onChange))
+src := yaml.NewSource(path, yaml.Watch(ctx, time.Second, s.Changed))
 b, err := ferry.Bind[Config](src)
 ```
 
@@ -181,8 +203,8 @@ A source built without the option touches the file only when a load asks it to.
 One built with it polls from a goroutine of its own, and cancelling the context you gave is what stops it - there is no `Stop`, because core has no watch lifecycle to hang one from.
 
 **Watching starts before `Bind` returns.**
-The option starts looking when the source is built, so a callback that loads through the binding is referring to a variable the surrounding code has not assigned yet.
-Publish the binding through something that orders the two - an atomic pointer, or a channel the callback reads first - which is what `ExampleWatch` in `driver/yaml` does.
+The option starts looking when the source is built, so a change can land before there is a binding to load through, let alone a stream to range.
+The `Signal` is what makes that survivable: it records the change rather than losing it, and the first `Values` opens with that reload.
 
 **Looking is a stat, not fsnotify.**
 This driver takes no dependency to watch a file, so the interval is yours to name and a rewrite that lands in the same modification-time tick without changing the file's length is not seen.

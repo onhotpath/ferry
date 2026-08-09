@@ -9,6 +9,7 @@ import (
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/driver/yaml"
+	"github.com/onhotpath/ferry/watch"
 )
 
 // Example loads a hand-maintained config file, changes two fields and writes it
@@ -138,16 +139,11 @@ func ExampleExtension() {
 // whole of reloading: a reload is a load, and publishing one means replacing a
 // value rather than writing into a value somebody else is reading.
 //
-// A server would keep the fresh value in an atomic pointer and swap it here. The
-// channel is what an example can print.
+// A server would keep the fresh value in an atomic pointer and swap it on every
+// turn of the range.
 func ExampleWatch() {
 	type config struct {
 		Port int `ferry:"port"`
-	}
-
-	type reload struct {
-		cfg config
-		err error
 	}
 
 	path := writeExamplePlane("# the port the server listens on\nport: 8080\n")
@@ -158,35 +154,17 @@ func ExampleWatch() {
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 
-	reloaded := make(chan reload, 1)
-
 	// Watching starts when the source is built, which is before Bind has handed
-	// back the binding the callback loads through. Closing ready is what orders
-	// the two, and a server that keeps its binding in an atomic pointer gets the
-	// same ordering from the pointer.
-	var b *ferry.Binding[config]
+	// back the binding to load through. The signal is what keeps a change that
+	// lands in that window: it records one, and the stream opens with it.
+	s := watch.New()
 
-	ready := make(chan struct{})
-
-	onChange := func(ctx context.Context) {
-		<-ready
-
-		cfg, err := b.Load(ctx)
-
-		select {
-		case reloaded <- reload{cfg: cfg, err: err}:
-		default: // this example wants one; a server would take every one
-		}
-	}
-
-	b, err := ferry.Bind[config](yaml.NewSource(path, yaml.Watch(ctx, 10*time.Millisecond, onChange)))
+	b, err := ferry.Bind[config](yaml.NewSource(path, yaml.Watch(ctx, 10*time.Millisecond, s.Changed)))
 	if err != nil {
 		fmt.Println(err)
 
 		return
 	}
-
-	close(ready)
 
 	held, err := b.Load(ctx)
 	if err != nil {
@@ -202,15 +180,17 @@ func ExampleWatch() {
 		return
 	}
 
-	got := <-reloaded
-	if got.err != nil {
-		fmt.Println(got.err)
+	seq, errf := watch.Values(ctx, s, b)
+	for cfg := range seq {
+		fmt.Printf("held:     %d\n", held.Port)
+		fmt.Printf("reloaded: %d\n", cfg.Port)
 
-		return
+		break // one turn is enough for an example; a server keeps ranging
 	}
 
-	fmt.Printf("held:     %d\n", held.Port)
-	fmt.Printf("reloaded: %d\n", got.cfg.Port)
+	if err := errf(); err != nil {
+		fmt.Println(err)
+	}
 
 	// Output:
 	// held:     8080

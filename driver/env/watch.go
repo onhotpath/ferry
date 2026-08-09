@@ -81,9 +81,12 @@ type watcher struct {
 //
 // Sharp edges, and they are the reason this is a callback and not a stream.
 //
-// onChange runs on the watching goroutine and one call at a time. A slow callback
-// delays the next look rather than running beside itself, and changes that land
-// while it runs are one call afterwards rather than several.
+// onChange runs on the watching goroutine and one call at a time. A callback that
+// reloads inline is a slow one, and a slow callback delays the next look rather
+// than running beside itself, so changes that land while it runs are one call
+// afterwards rather than several. The Changed method of a Signal from
+// github.com/onhotpath/ferry/watch returns immediately instead, which leaves the
+// reload on the goroutine ranging the stream and this one free to keep looking.
 //
 // A panic in onChange takes the process down, exactly as it would on a goroutine
 // the caller started. Nothing here recovers it: there is no result to hand a
@@ -91,9 +94,11 @@ type watcher struct {
 // process that has silently stopped reloading.
 //
 // Watching starts when the source is built, so it starts before [ferry.Bind] has
-// handed back the binding the callback wants to load through. Publish the binding
-// to the callback in a way that orders the two - an atomic pointer, or a channel
-// the callback reads before it uses one - as the example in this package does.
+// handed back the binding the callback wants to load through, and a change can
+// land while there is nothing yet to load through. A Signal from
+// github.com/onhotpath/ferry/watch is what to pass here in that case: its Changed
+// method records such a change rather than losing it, and the stream that opens
+// afterwards begins with that reload, as the example in this package does.
 //
 // A call says a file may have changed and nothing more. Load to find out what it
 // holds now, which is correct whether the change was real, coalesced with

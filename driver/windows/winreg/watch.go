@@ -83,9 +83,11 @@ type watcher struct {
 // that has silently stopped reloading.
 //
 // Watching starts when the source is built, so it starts before [ferry.Bind] has
-// handed back the binding the callback wants to load through. Publish the binding
-// to the callback in a way that orders the two - an atomic pointer, or a channel
-// the callback reads before it uses one.
+// handed back the binding the callback wants to load through, and a change can
+// land while there is nothing yet to load through. A Signal from
+// github.com/onhotpath/ferry/watch is what to pass here in that case: its Changed
+// method records such a change rather than losing it, and the stream that opens
+// afterwards begins with that reload.
 //
 // A call says the key may have changed and nothing more. Load to find out what it
 // holds now, which is correct whether the change was real or a rewrite of the same

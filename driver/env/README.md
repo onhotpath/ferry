@@ -262,15 +262,28 @@ It also unsets what a save swept, which is what makes a shortened slice actually
 ## Reloading when a file changes
 
 ```go
-b, err := ferry.Bind[Config](env.New(env.DotEnv(path), env.WatchFiles(ctx, reload)))
+s := watch.New()
+
+src := env.New(env.Environ(func() []string { return nil }), env.DotEnv(path),
+	env.WatchFiles(ctx, s.Changed))
+
+b, err := ferry.Bind[Config](src)
+
+seq, errf := watch.Values(ctx, s, b)
+for cfg := range seq {
+	publish(cfg) // replace the pointer, never mutate the old value
+}
 ```
+
+That is `ExampleWatchFiles` in [`example_test.go`](example_test.go), trimmed of its setup and its plumbing.
 
 `env.WatchFiles` calls back when any file `env.DotEnv` named changes, until the context is done.
 The directory is what is watched rather than the file, because an editor and this package's own sink both replace a file by renaming another over it.
 A burst of events from one save is one call.
 A watch that cannot be opened - no files named, or a directory that is not there - is refused at Bind, because a watch that never fires is the failure this exists to avoid.
 
-Watching starts when the source is built, so the callback runs before `ferry.Bind` has handed the binding back; order the two with an atomic pointer, as `ExampleWatchFiles` does.
+Watching starts when the source is built, so a change can land before `ferry.Bind` has handed the binding back.
+`watch.Signal` is what keeps that change: `s.Changed` records it instead of losing it, and `watch.Values` opens the stream with that reload.
 
 ## The sharp edges
 

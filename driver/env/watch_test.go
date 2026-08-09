@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/onhotpath/ferry"
+	"github.com/onhotpath/ferry/watch"
 )
 
 // A watch is opt-in, it runs on a goroutine of its own, and everything about it
@@ -83,6 +84,47 @@ func TestAWriteFiresTheWatch(t *testing.T) {
 
 	if !fired.fired(t) {
 		t.Error("the callback did not run for a write to the watched file")
+	}
+}
+
+// TestASignalCarriesTheChangeIntoAReload is the whole wiring a caller writes:
+// the option takes a signal's Changed, and the stream over that signal answers
+// with what the file holds now.
+//
+// It is here rather than in the watch package because only a real file and a real
+// inotify watch prove the two halves meet.
+func TestASignalCarriesTheChangeIntoAReload(t *testing.T) {
+	t.Parallel()
+
+	path := staged(t, "HOST=old\n")
+
+	// The deadline is the failure mode: a change that never arrives ends the
+	// stream with an error instead of hanging the case.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	s := watch.New()
+
+	src := New(Environ(noEnviron), DotEnv(path), WatchFiles(ctx, s.Changed))
+
+	b, err := ferry.Bind[host](src)
+	if err != nil {
+		t.Fatalf("bind: %+v", err)
+	}
+
+	write(t, path, "HOST=new\n")
+
+	seq, errf := watch.Values(ctx, s, b)
+	for cfg := range seq {
+		if cfg.Host != "new" {
+			t.Errorf("the reload read %q, want the file's new contents", cfg.Host)
+		}
+
+		break
+	}
+
+	if err := errf(); err != nil {
+		t.Errorf("the stream ended in failure, so no reload reached the caller: %+v", err)
 	}
 }
 
