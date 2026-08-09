@@ -13,7 +13,7 @@ import (
 // plane's own answer, untouched.
 //
 //	reg := ferry.MustRegistry(ferry.WithTagKeys(protect.Extension()))
-//	src := protect.Over(kv.NewSource(client), protect.LocalSystem, protect.FromTags())
+//	src := protect.Over(kv.NewSource(client), protect.CurrentUser, protect.FromTags())
 //	cfg, err := ferry.Load[Config](ctx, src, ferry.WithRegistry(reg))
 //
 // The result is a [ferry.Source] and nothing more, so it goes wherever the

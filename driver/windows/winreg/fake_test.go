@@ -81,6 +81,18 @@ type fake struct {
 	// registry was not reached at all" is read off.
 	answered int
 
+	// trail is every subkey this store was asked to remove, to create or to
+	// write into, in the order it was asked.
+	//
+	// It exists for one assertion: a save must never write into a key it has
+	// already removed. On Windows a removed key that some other process still
+	// holds a handle on stays in place marked for deletion, and every operation
+	// on it fails with ERROR_KEY_DELETED until that handle closes - so a driver
+	// whose sweep removed a subkey its own staged writes then recreated would
+	// fail against a live machine and pass against every store that models the
+	// registry as a map. [fake.removedThenWritten] is where that is held to.
+	trail []visit
+
 	// cancel is called at the end of every call, so the driver's next context
 	// check is the one that fires. It is how a load or a save cancelled in
 	// flight is staged against a plane that is genuinely in the middle of one.
@@ -91,6 +103,14 @@ type fake struct {
 type entry struct {
 	name string
 	d    winreg.Datum
+}
+
+// visit is one thing this store was asked to do to one subkey: remove it, or put
+// something in it. The subkey is folded, because the registry's own comparison
+// is.
+type visit struct {
+	subkey  string
+	removed bool
 }
 
 // errFake is what a staged failure reports, and the sentinel a test looks for
@@ -298,6 +318,7 @@ func (f *fake) Set(ctx context.Context, subkey, name string, d winreg.Datum) err
 		return err
 	}
 
+	f.note(subkey, false)
 	f.makeKeys(subkey)
 
 	held, ok := f.vals[fold(subkey)]
@@ -325,6 +346,7 @@ func (f *fake) Create(ctx context.Context, subkey string) error {
 		return err
 	}
 
+	f.note(subkey, false)
 	f.makeKeys(subkey)
 	f.fire()
 
@@ -374,6 +396,8 @@ func (f *fake) DeleteKey(ctx context.Context, subkey string) error {
 	if err := f.refuse(ctx, subkey); err != nil {
 		return err
 	}
+
+	f.note(subkey, true)
 
 	at, inside := fold(subkey), fold(join(subkey, ""))
 
@@ -463,6 +487,47 @@ func (f *fake) refuse(ctx context.Context, subkey string) error {
 	}
 
 	return nil
+}
+
+// note records one thing this store was asked to do to one subkey. The lock is
+// already held by every caller.
+func (f *fake) note(subkey string, removed bool) {
+	f.trail = append(f.trail, visit{subkey: fold(subkey), removed: removed})
+}
+
+// removedThenWritten is the first subkey this store was asked to write into or
+// create after it had been asked to remove that subkey or one above it, and
+// false where no such pair happened.
+//
+// It reads the whole of this store's life rather than one save, so a test asks
+// it of a store whose saves only ever add and replace: a key removed by one save
+// and written by a later one is ordinary, and it would read as this pair.
+func (f *fake) removedThenWritten() (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var gone []string
+
+	for _, v := range f.trail {
+		if v.removed {
+			gone = append(gone, v.subkey)
+		} else if under(v.subkey, gone) {
+			return v.subkey, true
+		}
+	}
+
+	return "", false
+}
+
+// under reports whether one subkey is any of these or lies below one of them.
+func under(subkey string, keys []string) bool {
+	for _, at := range keys {
+		if subkey == at || strings.HasPrefix(subkey, join(at, "")) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // calls is how many questions this store has been asked, refused ones included.

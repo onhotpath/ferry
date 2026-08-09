@@ -14,7 +14,7 @@
 //
 //	reg := ferry.MustRegistry(ferry.WithTagKeys(protect.Extension()))
 //
-//	src := protect.Over(store, protect.LocalSystem, protect.FromTags())
+//	src := protect.Over(store, protect.CurrentUser, protect.FromTags())
 //	cfg, err := ferry.Load[Config](ctx, src, ferry.WithRegistry(reg))
 //
 // Which addresses are secret comes from the struct, in the protect tag key,
@@ -30,14 +30,23 @@
 // in the clear. [FromTags] refuses at Bind instead, before anything is read or
 // written.
 //
-// # What it protects against, and what it does not
+// # Which descriptor, and what it protects against
 //
-// DPAPI-NG with [LocalSystem] means that decrypting a value requires running as
-// the local system on the machine that encrypted it. That stops another user on
-// the machine reading the store, and it stops a copy of the store being read on
-// any other machine. It is not a vault: an attacker who takes the SYSTEM
-// registry hive and the boot key recovers the value offline, at their leisure.
-// Read the package's README for the whole of that statement.
+// [CurrentUser] is the one to start from. It protects to the account the process
+// runs as, so decrypting the value requires being that account on the machine
+// that encrypted it: another user on the machine cannot read the store, and a
+// copy of the store cannot be read anywhere else. A service running as the local
+// system account gets exactly that, and it needs no domain.
+//
+// [LocalSystem] names the local system account by its security identifier, and a
+// descriptor that names a principal is resolved by Active Directory, so it works
+// on a domain-joined machine and fails at the first save on a standalone one.
+// [LocalMachine] needs no domain but grants every account on the machine, which
+// is what classic DPAPI at machine scope already grants.
+//
+// None of them is a vault: an attacker who takes the machine's own key material
+// recovers the value offline, at their leisure. Read the package's README for
+// the whole of that statement.
 //
 // # Migration
 //

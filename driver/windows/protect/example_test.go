@@ -30,8 +30,8 @@ func Example() {
 	store, keeper := newStore(), newKeeper()
 	registry := ferry.MustRegistry(ferry.WithTagKeys(protect.Extension()))
 
-	src := protect.Over(storeSource{s: store}, protect.LocalSystem, protect.FromTags(), protect.Using(keeper))
-	dst := protect.OverSink(storeSink{s: store}, protect.LocalSystem, protect.FromTags(), protect.Using(keeper))
+	src := protect.Over(storeSource{s: store}, protect.CurrentUser, protect.FromTags(), protect.Using(keeper))
+	dst := protect.OverSink(storeSink{s: store}, protect.CurrentUser, protect.FromTags(), protect.Using(keeper))
 
 	want := Settings{Auth: Credentials{RefreshToken: "s3cr3t"}, Host: "example.internal"}
 
@@ -67,7 +67,7 @@ func ExampleFromTags() {
 
 	// No ferry.WithTagKeys(protect.Extension()) anywhere, so every protect tag
 	// in the struct is another library's business and parses to nothing.
-	dst := protect.OverSink(storeSink{s: store}, protect.LocalSystem, protect.FromTags(), protect.Using(keeper))
+	dst := protect.OverSink(storeSink{s: store}, protect.CurrentUser, protect.FromTags(), protect.Using(keeper))
 
 	err := ferry.Dump(context.Background(), Settings{Auth: Credentials{RefreshToken: "s3cr3t"}}, dst)
 

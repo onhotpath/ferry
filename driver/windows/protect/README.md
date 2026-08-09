@@ -14,16 +14,44 @@ It wraps somebody else's `ferry.Source` and `ferry.Sink` - the registry, a key-v
 
 **This is a large improvement over plaintext. It is not a vault.**
 
-With `protect.LocalSystem`, decrypting a value requires running as the local system account on the machine that encrypted it.
-That stops another user on the machine reading the store, and it stops a copy of the store being read anywhere else.
+Decrypting a value requires being the principal the descriptor names, on the machine that encrypted it.
+That stops another account on the machine reading the store, and it stops a copy of the store being read anywhere else.
 
-**An attacker who takes the SYSTEM registry hive and the boot key recovers the value offline, at their leisure.**
-Anyone with administrator rights on a live machine can also simply run as the local system and ask for the plaintext, which is what the descriptor says they may do.
+**An attacker who takes the machine's own key material recovers the value offline, at their leisure** - for `LOCAL=` descriptors that is the DPAPI master key material under the SYSTEM registry hive and the boot key.
+Anyone with administrator rights on a live machine can also simply run as the principal the descriptor names and ask for the plaintext, which is what the descriptor says they may do.
 If your threat model includes either of those, you want a key you hold somewhere else and this package is not it.
 
-What it does retire is the common Go-on-Windows mistake: classic DPAPI at `CRYPTPROTECT_LOCAL_MACHINE` with no entropy, written to a file whose access control list grants read to everyone.
+What it retires is the common Go-on-Windows mistake: classic DPAPI at `CRYPTPROTECT_LOCAL_MACHINE` with no entropy, written to a file whose access control list grants read to everyone.
 Machine-scope DPAPI grants decryption to *every* principal on the machine, so the ACL is the only thing keeping the value in - and that list is usually inherited from a parent directory rather than chosen.
-`SID=S-1-5-18` says what classic machine scope cannot: this value is for the local system account and for nothing else.
+`protect.CurrentUser` says what classic machine scope cannot: this value is for the account that wrote it and for nothing else.
+
+## Which descriptor works where
+
+**A descriptor that names a security principal needs a domain.**
+`SID=` and `SDDL=` rules are resolved by the Microsoft Key Protection Provider through Active Directory's key distribution service, so they work on a domain-joined machine and, on a machine that is not joined to a domain, `NCryptProtectSecret` fails at the first save with `NTE_ENCRYPTION_FAILURE` (`0x80090034`).
+`LOCAL=` rules are resolved by the machine itself and need no domain at all.
+
+This package ships three constants, and the third is not the default:
+
+| constant | rule string | who can decrypt | needs a domain |
+| --- | --- | --- | --- |
+| `protect.CurrentUser` | `LOCAL=user` | the account the process runs as, on this machine | no |
+| `protect.LocalMachine` | `LOCAL=machine` | every account on this machine | no |
+| `protect.LocalSystem` | `SID=S-1-5-18` | the local system account, on this machine | **yes** |
+
+**Start from `protect.CurrentUser`.**
+A service running as the local system account and protecting under `LOCAL=user` gets exactly what `SID=S-1-5-18` promises - the value is for SYSTEM on this machine and for nothing else - and it gets it on a standalone machine too.
+The sharp edge is that the principal is *whoever runs the process*: run the same program by hand as an ordinary user and the value is protected to that user, and the service will not be able to read it back.
+
+**`protect.LocalMachine` is not an improvement on classic machine scope in access-control terms.**
+Windows documents `LOCAL=machine` as protecting content to the local computer so that all users on it can decrypt, which is the same grant `CRYPTPROTECT_LOCAL_MACHINE` gives.
+Reach for it only where more than one account genuinely has to read the value, and know that the store's ACL is then the only thing narrowing it down.
+
+**`protect.LocalSystem` survives as a constant because it is the right answer on a domain-joined machine**, where the blob is bound to a key the domain issued and the principal is named rather than implied.
+It is not the default, because most unattended services this package is aimed at do not run on a domain-joined machine, and there it fails every `Dump` - loudly, naming the status and the reason, but every one.
+
+There is also `LOCAL=logon`, which this package does not ship a constant for: it protects to the current logon session and Windows documents the value as undecryptable after logoff or reboot, which is not what a configuration store is for.
+Any DPAPI-NG rule string can be passed as a `protect.Descriptor`, including certificate and web-credential rules.
 
 ## Which addresses are protected, and why the tag
 
@@ -38,7 +66,7 @@ type Config struct {
 
 var Registry = ferry.MustRegistry(ferry.WithTagKeys(protect.Extension()))
 
-src := protect.Over(store, protect.LocalSystem, protect.FromTags())
+src := protect.Over(store, protect.CurrentUser, protect.FromTags())
 cfg, err := ferry.Load[Config](ctx, src, ferry.WithRegistry(Registry))
 ```
 
@@ -65,7 +93,7 @@ func ExampleFromTags() {
 
 	// No ferry.WithTagKeys(protect.Extension()) anywhere, so every protect tag
 	// in the struct is another library's business and parses to nothing.
-	dst := protect.OverSink(storeSink{s: store}, protect.LocalSystem, protect.FromTags(), protect.Using(keeper))
+	dst := protect.OverSink(storeSink{s: store}, protect.CurrentUser, protect.FromTags(), protect.Using(keeper))
 
 	err := ferry.Dump(context.Background(), Settings{Auth: Credentials{RefreshToken: "s3cr3t"}}, dst)
 
@@ -88,8 +116,8 @@ func Example() {
 	store, keeper := newStore(), newKeeper()
 	registry := ferry.MustRegistry(ferry.WithTagKeys(protect.Extension()))
 
-	src := protect.Over(storeSource{s: store}, protect.LocalSystem, protect.FromTags(), protect.Using(keeper))
-	dst := protect.OverSink(storeSink{s: store}, protect.LocalSystem, protect.FromTags(), protect.Using(keeper))
+	src := protect.Over(storeSource{s: store}, protect.CurrentUser, protect.FromTags(), protect.Using(keeper))
+	dst := protect.OverSink(storeSink{s: store}, protect.CurrentUser, protect.FromTags(), protect.Using(keeper))
 
 	want := Settings{Auth: Credentials{RefreshToken: "s3cr3t"}, Host: "example.internal"}
 
@@ -200,7 +228,7 @@ type Protector interface {
 `protect.Using` is where one is handed over.
 With no `Using`, a source or a sink reaches DPAPI-NG, which exists on Windows and nowhere else: everywhere else it refuses at `Bind` with `protect.ErrNoProtection`.
 
-The real implementation sits behind `//go:build windows` and declares the five `ncrypt.dll` entry points itself, because `golang.org/x/sys/windows` wraps the classic `CryptProtectData` family and nothing from DPAPI-NG.
+The real implementation sits behind `//go:build windows` and declares the four `ncrypt.dll` entry points itself, because `golang.org/x/sys/windows` wraps the classic `CryptProtectData` family and nothing from DPAPI-NG.
 It takes no dependency beyond the one this module already has.
 
 ## Options

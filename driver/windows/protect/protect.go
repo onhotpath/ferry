@@ -50,16 +50,61 @@ type Protector interface {
 //
 // It is data rather than a function, so a source and a sink are configured with
 // a value that can be written down, compared and put in a test.
+//
+// There are two families of rule string, and which one you are holding decides
+// whether a machine can use it at all.
+//
+// A rule that names a security principal - one beginning SID= or SDDL= - is
+// resolved by Active Directory's key distribution service, so it works on a
+// machine joined to a domain and fails on one that is not, with
+// NTE_ENCRYPTION_FAILURE at the first save. [LocalSystem] is one of these.
+//
+// A rule beginning LOCAL= is resolved by the machine itself and needs no domain.
+// [CurrentUser] and [LocalMachine] are these two, and they are what a standalone
+// machine has.
+//
+// Every other rule string DPAPI-NG accepts - a certificate, a set of web
+// credentials - is written out here in full and is not a constant this package
+// ships.
 type Descriptor string
 
-// LocalSystem is the descriptor for the local system account, and it is the one
-// to reach for when a service on this machine is the only thing that should read
-// the value.
+// CurrentUser protects to the account the process is running as, and it is the
+// descriptor to reach for unless the machine is joined to a domain.
 //
-// It is what classic DPAPI at machine scope cannot say. Machine scope there
-// grants decryption to every principal on the machine, so a file's access
-// control list is the only thing keeping the value in - and that list is usually
-// inherited rather than chosen. This names the principal instead.
+// Only that account, on this machine, can decrypt the value. A copy of the store
+// taken anywhere else is unreadable, and so is the store read here by any other
+// account. A service running as the local system account gets from this exactly
+// what [LocalSystem] promises, on a machine that needs no domain to give it.
+//
+// The principal is whoever runs the process, which is the sharp edge: run the
+// same program by hand as an ordinary user and the value is protected to that
+// user, and the service that was going to read it back cannot.
+const CurrentUser Descriptor = "LOCAL=user"
+
+// LocalMachine protects to the machine, so every account on it can decrypt the
+// value. It needs no domain.
+//
+// It is the descriptor for a value more than one account has to read: a service
+// that writes it and an operator's tool that reads it.
+//
+// It grants what classic DPAPI at machine scope grants, which is every principal
+// on the machine, so the store's own access control list is the only thing
+// narrowing that down. Reach for [CurrentUser] wherever one account is enough.
+const LocalMachine Descriptor = "LOCAL=machine"
+
+// LocalSystem protects to the local system account, by naming its well-known
+// security identifier.
+//
+// It says what classic DPAPI at machine scope cannot: this value is for the
+// local system account and for nothing else, where machine scope grants
+// decryption to every principal on the machine and leaves the store's access
+// control list as the only thing keeping the value in.
+//
+// It works on a machine joined to an Active Directory domain and nowhere else. A
+// SID rule names a principal the domain's key distribution service resolves, so
+// on a standalone machine the first save fails with NTE_ENCRYPTION_FAILURE and
+// nothing is written. [CurrentUser] is how a service running as the local system
+// account gets the same narrowing with no domain behind it.
 const LocalSystem Descriptor = "SID=S-1-5-18"
 
 // ErrNoProtection reports a machine with no DPAPI-NG on it.
@@ -102,7 +147,7 @@ var ErrOption = errors.New("protect: unusable decorator option")
 //
 // It wraps [ferry.ErrPlane], the report names the address, and whatever the
 // [Protector] itself reported stays reachable underneath.
-var ErrCiphertext = errors.New("protect: this value is marked as protected and could not be read back")
+var ErrCiphertext = errors.New("protect: this value is marked as a secret and the protection failed on it")
 
 // Option is a setting handed to [Over] or to [OverSink].
 //
@@ -122,7 +167,7 @@ func (f optionFunc) apply(c *config) { f(c) }
 
 // Using names the protection this decorator encrypts and decrypts through.
 //
-//	src := protect.Over(store, protect.LocalSystem, protect.FromTags(), protect.Using(fake))
+//	src := protect.Over(store, protect.CurrentUser, protect.FromTags(), protect.Using(fake))
 //
 // A nil argument is DPAPI-NG, which is the default and which exists on Windows
 // and nowhere else: elsewhere, a source or a sink built without this refuses at
@@ -191,8 +236,8 @@ func (c *config) settle() {
 	}
 
 	if c.desc == "" {
-		c.refuse(optionError("the protection descriptor is empty: protect.LocalSystem is the local system " +
-			"account, and any DPAPI-NG rule string is a descriptor"))
+		c.refuse(optionError("the protection descriptor is empty: protect.CurrentUser is the account this " +
+			"process runs as, and any DPAPI-NG rule string is a descriptor"))
 
 		return
 	}

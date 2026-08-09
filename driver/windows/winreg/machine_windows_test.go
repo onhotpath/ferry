@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,12 +34,31 @@ import (
 // cannot be written there skips rather than fails, because a sandbox with no
 // writable hive is not this driver being broken.
 
+// scratchKeys numbers the scratch keys this process hands out, and it is what
+// makes each of them one key nobody else is using.
+//
+// A timestamp does not. time.Now on Windows reads _SYSTEM_TIME straight out of
+// KUSER_SHARED_DATA, which the kernel refreshes once per clock tick - 15.6ms
+// unless some process on the machine has raised the timer resolution - so every
+// UnixNano taken inside one tick is the same number. Every test in this file
+// calls t.Parallel and then scratchKey, so all of them resume together and take
+// that number microseconds apart: a timestamped path hands the whole file one
+// shared key, and each test's own cleanup then removes the key the others are
+// still working in. That is what the first Windows run of this file measured -
+// a load that came back empty because another test had swept the key, and an
+// ERROR_KEY_DELETED from a key TestMachineWatchFires still held a notification
+// handle on, which is what keeps a removed key alive and refusing.
+var scratchKeys atomic.Uint64
+
 // scratchKey makes one key nobody else is using and removes it, and everything
 // under it, when the test ends.
+//
+// The process id keeps two `go test` runs on one machine apart, and the counter
+// keeps this run's own parallel tests apart.
 func scratchKey(t *testing.T) string {
 	t.Helper()
 
-	path := fmt.Sprintf(`Software\ferry-winreg-test\%d-%d`, os.Getpid(), time.Now().UnixNano())
+	path := fmt.Sprintf(`Software\ferry-winreg-test\%d-%d`, os.Getpid(), scratchKeys.Add(1))
 
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, path, registry.ALL_ACCESS)
 	if err != nil {

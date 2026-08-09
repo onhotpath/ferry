@@ -301,6 +301,54 @@ func TestASweepKeepsASubkeyThisSaveSpelled(t *testing.T) {
 	}
 }
 
+// TestACommitNeverWritesIntoAKeyItRemoved is the commit's own ordering, held to
+// rather than assumed.
+//
+// A save removes what it replaces before it writes what it staged, and a
+// replaced composite whose members are written again is the ordinary case that
+// puts the two next to each other. The sweep is supposed to leave every subkey
+// this save puts something in alone, and this is where the two orders are
+// checked against each other.
+//
+// It is asserted here rather than only on Windows because Windows reports the
+// mistake by accident. A removed key some other process still holds a handle on
+// stays in place marked for deletion, so the write that followed the removal
+// fails with ERROR_KEY_DELETED - and only while that other reader is there. A
+// store that models the registry as a map answers the same write happily, which
+// is why the order rather than the outcome is what this reads.
+func TestACommitNeverWritesIntoAKeyItRemoved(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a member written again beside one removed", func(t *testing.T) {
+		t.Parallel()
+
+		store := newFake()
+		mustDump(t, store, mapOfMaps{M: map[string]map[string]string{"a": {"x": "1"}, "b": {"y": "2"}}})
+		mustDump(t, store, mapOfMaps{M: map[string]map[string]string{"a": {"x": "2"}}})
+		noWriteAfterRemoval(t, store)
+	})
+
+	t.Run("a member spelled again beside one removed", func(t *testing.T) {
+		t.Parallel()
+
+		store := newFake()
+		mustDump(t, store, sections{M: map[string]*omittable{"a": {}, "b": {}}})
+		mustDump(t, store, sections{M: map[string]*omittable{"a": {}}})
+		noWriteAfterRemoval(t, store)
+	})
+}
+
+// noWriteAfterRemoval is [TestACommitNeverWritesIntoAKeyItRemoved]'s one
+// assertion, over whatever saves the case in front of it made.
+func noWriteAfterRemoval(t *testing.T, store *fake) {
+	t.Helper()
+
+	if at, ok := store.removedThenWritten(); ok {
+		t.Errorf("this save wrote into %q after removing it: a registry another process holds a handle on "+
+			"keeps that key alive marked for deletion, and answers the write with ERROR_KEY_DELETED", at)
+	}
+}
+
 // TestAMemberNameThatIsNotAPositionStaysAName is the recovery of a segment kind
 // out of text the registry carries none of.
 //

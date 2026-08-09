@@ -169,6 +169,11 @@ The list is deferred to [#5](https://github.com/onhotpath/ferry/issues/5), becau
 >   Today the only producer of that error in the tree is `driver/kv`'s optional `ACL` hook, which simulates it.
 > - **A decorator over another `Source` and `Sink`.** `protect` implements neither plane nor format: it wraps a driver and rewrites the values crossing the boundary.
 >   Nothing in this repository exercises that composition, and it is the axis that says whether the contract is composable at all rather than only implementable.
+>   The axis is the composition and not the protection, which matters because the first run of the real DPAPI-NG on a Windows runner moved what the package's own defaults are without touching this admission.
+>   `SID=` and `SDDL=` protection descriptors are resolved through Active Directory's key distribution service, so they need a domain controller the machine can reach ([MS-GKDI](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-gkdi/60b439bf-d845-4bee-8487-b231d6fdfb92): the server "runs on a DC with a DC functional level of DS_BEHAVIOR_WIN2012 or higher in an Active Directory domain").
+>   `windows-latest` is standalone, so `SID=S-1-5-18` - the package's original headline descriptor - failed every save with `NTE_ENCRYPTION_FAILURE` (`0x80090034`), which is the first thing this driver measured that no test double could have.
+>   The package now defaults to the `LOCAL=` rules, which the machine resolves for itself, and says in its README which descriptor works in which deployment.
+>   None of that changes the axis, and it is recorded here because this is where the driver was admitted.
 >
 > **Case folding is not one of the axes, and the issue's headline claim that it is does not survive.**
 > `driver/env` folds every segment to upper case, which [ADR-0003](0003-how-a-leaf-addresses-a-plane.md) carries as the fourth column of its key-function table, and `driver/http`'s header plane folds through `textproto.CanonicalMIMEHeaderKey`.

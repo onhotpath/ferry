@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -82,7 +83,7 @@ func (dpapi) Protect(ctx context.Context, descriptor string, plaintext []byte) (
 	runtime.KeepAlive(plaintext)
 
 	if st != 0 {
-		return nil, status("NCryptProtectSecret", st)
+		return nil, protectFailed(descriptor, st)
 	}
 
 	return taken(out, n)
@@ -197,9 +198,46 @@ func refusedEmpty(call string) error {
 	return fmt.Errorf("protect: %s was handed nothing at all, and it takes at least one byte", call)
 }
 
+// nteEncryptionFailure is NTE_ENCRYPTION_FAILURE from winerror.h, and it is the
+// one SECURITY_STATUS this package can say something useful about: DPAPI-NG
+// reports it when it could not get the key the descriptor names, which on a
+// machine that is not domain-joined is every SID and SDDL rule there is.
+const nteEncryptionFailure = 0x80090034
+
 // status is what a non-zero SECURITY_STATUS reads as. The code is printed as it
 // is documented, in hexadecimal, because that is what an operator searching for
-// it will be typing.
+// it will be typing, and the one code with a name here carries it.
 func status(call string, st uintptr) error {
+	if uint32(st) == nteEncryptionFailure {
+		return fmt.Errorf("protect: %s failed with NTE_ENCRYPTION_FAILURE (0x%08x)", call, uint32(st))
+	}
+
 	return fmt.Errorf("protect: %s failed with status 0x%08x", call, uint32(st))
+}
+
+// protectFailed is [status] for the encrypting call, with the one cause an
+// operator cannot guess named where it applies.
+//
+// NTE_ENCRYPTION_FAILURE under a rule naming a principal is almost always a
+// machine with no domain controller to ask, and the status alone points at the
+// encryption rather than at the directory.
+func protectFailed(descriptor string, st uintptr) error {
+	err := status("NCryptProtectSecret", st)
+
+	if uint32(st) != nteEncryptionFailure || !namesAPrincipal(descriptor) {
+		return err
+	}
+
+	return fmt.Errorf("%w: this descriptor names a security principal, which Active Directory's key "+
+		"distribution service resolves, so it needs a domain controller this machine can reach: where the "+
+		"machine is not joined to a domain, LOCAL=user and LOCAL=machine are the descriptors that work", err)
+}
+
+// namesAPrincipal reports whether a rule string leans on the directory. SID and
+// SDDL rules do, LOCAL rules do not, and a rule may hold several joined by AND
+// or OR, so this looks through the whole of it.
+func namesAPrincipal(rule string) bool {
+	upper := strings.ToUpper(rule)
+
+	return strings.Contains(upper, "SID=") || strings.Contains(upper, "SDDL=")
 }

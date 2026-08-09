@@ -89,7 +89,7 @@ type Selector interface {
 // FromTags selects the addresses whose field carried protect:"secret".
 //
 //	reg := ferry.MustRegistry(ferry.WithTagKeys(protect.Extension()))
-//	src := protect.Over(store, protect.LocalSystem, protect.FromTags())
+//	src := protect.Over(store, protect.CurrentUser, protect.FromTags())
 //	cfg, err := ferry.Load[Config](ctx, src, ferry.WithRegistry(reg))
 //
 // The declaration is the struct author's, which is where it belongs: a field

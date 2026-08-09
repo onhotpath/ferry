@@ -11,7 +11,7 @@ import (
 // exactly as it would have been.
 //
 //	reg := ferry.MustRegistry(ferry.WithTagKeys(protect.Extension()))
-//	dst := protect.OverSink(kv.NewSink(client), protect.LocalSystem, protect.FromTags())
+//	dst := protect.OverSink(kv.NewSink(client), protect.CurrentUser, protect.FromTags())
 //	err := ferry.Dump(ctx, cfg, dst, ferry.WithRegistry(reg))
 //
 // It is a second constructor rather than a second argument to [Over], because a
