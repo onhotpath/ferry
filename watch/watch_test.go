@@ -247,14 +247,19 @@ func TestCancellationEndsTheStream(t *testing.T) {
 	t.Run("change pending", func(t *testing.T) {
 		plane, s, b := bind(t)
 
-		ctx, cancel := context.WithCancel(t.Context())
-		seq, errf := watch.Values(ctx, s, b)
+		// A cancelled context and a pending change make both select arms ready,
+		// and the runtime picks one arbitrarily. Every pick must end the stream
+		// with the cancellation; repeating is what reaches both arms.
+		for range 100 {
+			ctx, cancel := context.WithCancel(t.Context())
+			seq, errf := watch.Values(ctx, s, b)
 
-		plane.Set(ferry.At("host"), ferry.String("db2"))
-		cancel()
+			plane.Set(ferry.At("host"), ferry.String("db2"))
+			cancel()
 
-		expectNoValues(t, seq)
-		expectCancelled(t, errf)
+			expectNoValues(t, seq)
+			expectCancelled(t, errf)
+		}
 	})
 }
 
