@@ -158,6 +158,28 @@ func Example_headers() {
 	// Output: {ID:acme Region:eu-west-1}
 }
 
+// ExampleRootParam loads a whole schema out of one parameter.
+//
+// The type resolves to a single value rather than to a struct, so the schema has
+// one address, the root, and that address carries no part for this driver to
+// name it by. The option is what names it, and without one the load is refused
+// before the request is looked at.
+func ExampleRootParam() {
+	src := ferryhttp.NewQuerySource(ferryhttp.RootParam("q"))
+
+	ctx := ferryhttp.WithQuery(context.Background(), url.Values{"q": {"ferry"}})
+
+	q, err := ferry.Load[string](ctx, src)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Println(q)
+	// Output: ferry
+}
+
 // Example_repeatedName shows what a parameter occurring more than once means.
 //
 // It is a sequence and never a value that happened to arrive twice, so reading

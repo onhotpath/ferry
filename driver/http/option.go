@@ -18,23 +18,71 @@ import (
 // returned.
 var ErrOption = errors.New("http: unusable driver option")
 
-// Option configures a [Source]. The set is closed at two: [Separator] and
-// [BytesAs].
-type Option interface {
-	apply(*config)
+// QueryOption is what [NewQuerySource] takes.
+//
+// Every [Option] is one, so an option that means the same thing on both planes
+// goes to either constructor. [RootParam] is a QueryOption and not an [Option],
+// because it names one half of a request. Nothing outside this package can
+// implement this interface.
+type QueryOption interface {
+	applyQuery(*config)
 }
 
-// optionFunc is the one implementation, which is what makes every option a
-// one-line constructor.
+// HeaderOption is what [NewHeaderSource] takes.
+//
+// Every [Option] is one, and [RootField] is a HeaderOption and not an [Option],
+// for the reason [RootParam] is a [QueryOption]. Nothing outside this package
+// can implement this interface.
+type HeaderOption interface {
+	applyHeader(*config)
+}
+
+// Option configures a [Source] on either plane, so one may be given to
+// [NewQuerySource] and to [NewHeaderSource] alike. The set is closed at two:
+// [Separator] and [BytesAs].
+//
+// The two options that name the root address are not here, because there is one
+// per plane and they are not interchangeable: [RootParam] is a [QueryOption],
+// [RootField] a [HeaderOption], and a source handed the other plane's does not
+// compile.
+type Option interface {
+	QueryOption
+	HeaderOption
+}
+
+// optionFunc is the implementation behind an option that means the same thing on
+// both planes. It carries both plane methods, which is what makes one value
+// assignable to either constructor's parameter (#338).
 type optionFunc func(*config)
 
-func (f optionFunc) apply(c *config) { f(c) }
+func (f optionFunc) applyQuery(c *config)  { f(c) }
+func (f optionFunc) applyHeader(c *config) { f(c) }
+
+// queryOptionFunc carries the query method and only that one, so the compiler
+// refuses it where a [HeaderOption] is wanted. The two methods have to be named
+// differently for that to hold: one name on both interfaces makes each satisfy
+// the other and there is nothing left to refuse (#338).
+type queryOptionFunc func(*config)
+
+func (f queryOptionFunc) applyQuery(c *config) { f(c) }
+
+// headerOptionFunc is its counterpart, refused on a query source for the same
+// reason (#338).
+type headerOptionFunc func(*config)
+
+func (f headerOptionFunc) applyHeader(c *config) { f(c) }
 
 // config is a [Source]'s settled configuration, copied into every binding so
 // that a Source reconfigured after it was bound cannot change a binding already
 // handed out.
 type config struct {
 	sep string
+
+	// root is the name this plane's own root option gave the root address, empty
+	// until it does. Which of the two options that is is a fact about the
+	// constructor that was called rather than about the configuration, so it
+	// lives on the plane instead (#338).
+	root string
 
 	// bytes is the spelling [BytesAs] declared, and it is nil until one is
 	// declared: this plane holds text and nothing else, so a value is a String
@@ -114,6 +162,42 @@ func BytesAs(s ferry.Spelling[[]byte, string]) Option {
 
 		c.bytes = s
 	})
+}
+
+// RootParam names the query parameter a schema whose root is a single value is
+// read from.
+//
+//	src := ferryhttp.NewQuerySource(ferryhttp.RootParam("q"))
+//	q, err := ferry.Load[string](ferryhttp.WithQuery(r.Context(), r.URL.Query()), src)
+//
+// Such a schema has one address, the root, and that address carries no part for
+// this driver to name it by, so without this option it is refused before any
+// request is looked at. It says nothing about any other schema: every address
+// with a part of its own is named by that part as before.
+//
+// The name is one query parameter and it may not be empty. It is a
+// [QueryOption] rather than an [Option], so [NewHeaderSource] does not take it:
+// [RootField] is the header plane's, and giving one plane's to the other is a
+// compile error rather than a root read out of the wrong half of the request.
+func RootParam(name string) QueryOption {
+	return queryOptionFunc(func(c *config) { c.root = name })
+}
+
+// RootField names the header field a schema whose root is a single value is
+// read from.
+//
+//	src := ferryhttp.NewHeaderSource(ferryhttp.RootField("X-Request-Id"))
+//	id, err := ferry.Load[string](ferryhttp.WithHeaders(r.Context(), r.Header), src)
+//
+// It is [RootParam] on the header plane, and it is a [HeaderOption] the same way
+// that one is a [QueryOption]: [NewQuerySource] does not take it.
+//
+// The name is held to what a header field name is - a non-empty run of letters,
+// digits and !#$%&'*+-.^_`|~ - and it is canonicalised the way net/http
+// canonicalises every field name, so RootField("x-request-id") reads the field a
+// request carries as X-Request-Id.
+func RootField(name string) HeaderOption {
+	return headerOptionFunc(func(c *config) { c.root = name })
 }
 
 // notEmpty is the query plane's whole rule for a separator. Every byte survives
