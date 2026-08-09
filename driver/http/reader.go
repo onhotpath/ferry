@@ -29,8 +29,8 @@ type reader struct {
 	vals   values
 }
 
-func newReader(p plane, cfg config, names *ferry.Keys, static map[string]ferry.Path, vals values) *reader {
-	return &reader{p: p, sep: cfg.sep, bytes: cfg.bytes, names: names,
+func newReader(p *plane, cfg config, names *ferry.Keys, static map[string]ferry.Path, vals values) *reader {
+	return &reader{p: *p, sep: cfg.sep, bytes: cfg.bytes, names: names,
 		keys: names.Open(), static: static, vals: vals}
 }
 

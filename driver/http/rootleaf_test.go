@@ -3,6 +3,7 @@ package ferryhttp
 import (
 	"net/http"
 	"net/url"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -115,28 +116,51 @@ func TestARootFieldNameNoHeaderFieldNameMayHoldIsRefused(t *testing.T) {
 	assertWraps(t, err, ErrIllegalName, ferry.ErrPlane)
 }
 
-// TestOnePlanesRootOptionIsRefusedOnTheOther is why there are two names rather
-// than one: a header source given the query plane's option reads the root out of
-// a name meant for the other half of the request, so it is refused instead.
+// TestOnePlanesRootOptionDoesNotCompileOnTheOther is why there are two names
+// rather than one: a header source given the query plane's option would read the
+// root out of a name meant for the other half of the request, and the parameter
+// type is what stops it, before anything runs (#338).
 //
-// It is an option refusal and not a naming one, so it lands whatever the schema
-// is, and the schema here holds no root leaf at all.
-func TestOnePlanesRootOptionIsRefusedOnTheOther(t *testing.T) {
+// The wording of a compiler diagnostic is Go's rather than ferry's, so what is
+// asserted is that the build fails and that the message names the option and the
+// plane option type it is not.
+func TestOnePlanesRootOptionDoesNotCompileOnTheOther(t *testing.T) {
 	t.Parallel()
 
-	for name, src := range map[string]*Source{
-		"ferryhttp.RootField on a query source":  NewQuerySource(RootField("Value")),
-		"ferryhttp.RootParam on a header source": NewHeaderSource(RootParam("value")),
+	for name, tc := range map[string]struct {
+		pkg  string
+		want []string
+	}{
+		"ferryhttp.RootField on a query source": {
+			pkg:  "./internal/testdata/crossedroot/fieldonquery",
+			want: []string{"ferryhttp.HeaderOption", "ferryhttp.QueryOption"},
+		},
+		"ferryhttp.RootParam on a header source": {
+			pkg:  "./internal/testdata/crossedroot/paramonheader",
+			want: []string{"ferryhttp.QueryOption", "ferryhttp.HeaderOption"},
+		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+		t.Run(name, mustNotCompile(tc.pkg, tc.want))
+	}
+}
 
-			_, err := ferry.Bind[filter](src)
-			if err == nil {
-				t.Fatal("a source built with the other plane's root option bound anyway")
+// mustNotCompile builds one fixture package and holds its refusal to naming the
+// two plane option types. It is lifted out of the table above so that the table
+// stays a table: a subtest body counts against the enclosing function's
+// complexity.
+func mustNotCompile(pkg string, want []string) func(*testing.T) {
+	return func(t *testing.T) {
+		t.Parallel()
+
+		out, err := exec.CommandContext(t.Context(), "go", "build", pkg).CombinedOutput()
+		if err == nil {
+			t.Fatalf("%s compiled, and it is a fixture that must not", pkg)
+		}
+
+		for _, w := range want {
+			if !strings.Contains(string(out), w) {
+				t.Errorf("the compiler said\n\t%s\nand it does not contain\n\t%s", out, w)
 			}
-
-			assertWraps(t, err, ErrOption, ferry.ErrPlane)
-		})
+		}
 	}
 }

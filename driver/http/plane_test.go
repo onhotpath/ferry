@@ -118,8 +118,24 @@ const (
 
 // withRoot puts the plane's own root option in front of the caller's, so that a
 // run naming a root of its own still wins.
-func withRoot(root Option, opts []Option) []Option {
-	return append([]Option{root}, opts...)
+//
+// It is generic because []Option is not []QueryOption and Go converts neither
+// slice to the other: a shared option is assignable to either plane's option
+// type one element at a time, and this is that loop (#338).
+func withRoot[O any](root O, opts []Option) []O {
+	out := make([]O, 0, len(opts)+1)
+	out = append(out, root)
+
+	for _, o := range opts {
+		v, ok := any(o).(O)
+		if !ok {
+			panic("an Option satisfies both plane option types, and this one did not")
+		}
+
+		out = append(out, v)
+	}
+
+	return out
 }
 
 // flatKinds is the declaration both planes make, and it is five of the six kinds
@@ -180,7 +196,7 @@ type standInSink struct {
 // Bind checks the same things the source's does, through the same helper, so a
 // schema the plane refuses is refused in both directions.
 func (s standInSink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
-	keys, _, err := bindPlane(s.src.p, s.src.cfg, addrs)
+	keys, _, err := bindPlane(&s.src.p, s.src.cfg, addrs)
 	if err != nil {
 		return nil, err
 	}

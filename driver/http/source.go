@@ -75,16 +75,21 @@ type values = map[string][]string
 
 // plane is the half of a [Source] that differs between query parameters and
 // header fields: what to call it, how to render an address as a name, how to
-// spell a name back as a map key, what it calls the root address, and how to
-// find the request in a context.
+// spell a name back as a map key, which option names the root address, and how
+// to find the request in a context.
 type plane struct {
 	name     string
 	sep      string
 	key      func(sep string, root rootName) ferry.KeyFunc
 	mint     func(text string) string
 	checkSep func(sep string) error
-	root     func(c config) (rootName, error)
-	from     func(ctx context.Context) (values, error)
+
+	// rootOption is the option this plane's caller reaches for to name the root
+	// address, and it is a constant of the plane because the constructor's own
+	// parameter type is what admits it (#338).
+	rootOption string
+
+	from func(ctx context.Context) (values, error)
 }
 
 // queryPlane describes the query-parameter plane.
@@ -94,24 +99,14 @@ type plane struct {
 // through it unchanged.
 func queryPlane() plane {
 	return plane{
-		name:     "query",
-		sep:      QuerySeparator,
-		key:      flatKey,
-		mint:     func(text string) string { return text },
-		checkSep: notEmpty,
-		root:     queryRoot,
-		from:     queryFrom,
+		name:       "query",
+		sep:        QuerySeparator,
+		key:        flatKey,
+		mint:       func(text string) string { return text },
+		checkSep:   notEmpty,
+		rootOption: "ferryhttp.RootParam",
+		from:       queryFrom,
 	}
-}
-
-// queryRoot is what this plane calls the root address, which [RootParam] is the
-// only thing that gives it (#338).
-func queryRoot(c config) (rootName, error) {
-	if c.rootBy == rootByField {
-		return rootName{}, crossedRoot("ferryhttp.RootField", "query", "ferryhttp.RootParam")
-	}
-
-	return rootName{name: c.root, option: "ferryhttp.RootParam"}, nil
 }
 
 // headerPlane describes the header-field plane.
@@ -122,24 +117,14 @@ func queryRoot(c config) (rootName, error) {
 // that is not comes back lower whatever this driver does.
 func headerPlane() plane {
 	return plane{
-		name:     "header",
-		sep:      HeaderSeparator,
-		key:      headerKey,
-		mint:     strings.ToLower,
-		checkSep: tokenSeparator,
-		root:     headerRoot,
-		from:     headerFrom,
+		name:       "header",
+		sep:        HeaderSeparator,
+		key:        headerKey,
+		mint:       strings.ToLower,
+		checkSep:   tokenSeparator,
+		rootOption: "ferryhttp.RootField",
+		from:       headerFrom,
 	}
-}
-
-// headerRoot is [queryRoot] on the header plane, and [RootField] is what fills
-// it (#338).
-func headerRoot(c config) (rootName, error) {
-	if c.rootBy == rootByParam {
-		return rootName{}, crossedRoot("ferryhttp.RootParam", "header", "ferryhttp.RootField")
-	}
-
-	return rootName{name: c.root, option: "ferryhttp.RootField"}, nil
 }
 
 // queryFrom is the query plane taken out of the context, and a nil one is the
@@ -214,8 +199,15 @@ var _ ferry.Source = (*Source)(nil)
 // With no options it joins nested fields with [QuerySeparator]. Change that with
 // [Separator], and name the parameter a schema whose root is a single value
 // reads from with [RootParam].
-func NewQuerySource(opts ...Option) *Source {
-	return newSource(queryPlane(), opts)
+func NewQuerySource(opts ...QueryOption) *Source {
+	p := queryPlane()
+	c := config{sep: p.sep}
+
+	for _, o := range opts {
+		o.applyQuery(&c)
+	}
+
+	return &Source{p: p, cfg: c}
 }
 
 // NewHeaderSource builds a [Source] over a request's header fields.
@@ -226,14 +218,12 @@ func NewQuerySource(opts ...Option) *Source {
 // With no options it joins nested fields with [HeaderSeparator]. Change that
 // with [Separator], and name the field a schema whose root is a single value
 // reads from with [RootField].
-func NewHeaderSource(opts ...Option) *Source {
-	return newSource(headerPlane(), opts)
-}
-
-func newSource(p plane, opts []Option) *Source {
+func NewHeaderSource(opts ...HeaderOption) *Source {
+	p := headerPlane()
 	c := config{sep: p.sep}
+
 	for _, o := range opts {
-		o.apply(&c)
+		o.applyHeader(&c)
 	}
 
 	return &Source{p: p, cfg: c}
@@ -251,7 +241,7 @@ func newSource(p plane, opts []Option) *Source {
 // a request has been supplied. A load with no request in its context is refused
 // when that load starts, which is the first moment the absence is visible.
 func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
-	keys, static, err := bindPlane(s.p, s.cfg, addrs)
+	keys, static, err := bindPlane(&s.p, s.cfg, addrs)
 	if err != nil {
 		return nil, err
 	}
@@ -264,13 +254,13 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 			return nil, err
 		}
 
-		return newReader(p, cfg, keys, static, vals), nil
+		return newReader(&p, cfg, keys, static, vals), nil
 	}, nil
 }
 
 // bindPlane is the whole of binding, for either direction: check the options,
 // build the checked name table, and read it back the other way.
-func bindPlane(p plane, cfg config, addrs *ferry.AddressSet) (*ferry.Keys, map[string]ferry.Path, error) {
+func bindPlane(p *plane, cfg config, addrs *ferry.AddressSet) (*ferry.Keys, map[string]ferry.Path, error) {
 	sep := cfg.sep
 
 	if err := p.checkSep(sep); err != nil {
@@ -281,10 +271,7 @@ func bindPlane(p plane, cfg config, addrs *ferry.AddressSet) (*ferry.Keys, map[s
 		return nil, nil, cfg.bytesErr
 	}
 
-	root, err := p.root(cfg)
-	if err != nil {
-		return nil, nil, err
-	}
+	root := rootName{name: cfg.root, option: p.rootOption}
 
 	keys, err := ferry.NewKeys(addrs, p.name, p.key(sep, root))
 	if err != nil {

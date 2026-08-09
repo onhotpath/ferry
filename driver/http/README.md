@@ -236,7 +236,9 @@ func ExampleRootParam() {
 
 `ferryhttp.RootField` is the header plane's, held to the grammar a field name has and canonicalised like every other field name: `RootField("x-request-id")` reads `X-Request-Id`.
 Without the option the load is refused before the request is looked at, and the refusal names the option that lifts it.
-So is one plane's option given to the other plane's source, which is why there are two names rather than one.
+
+One plane's option given to the other plane's source does not compile, which is why there are two names rather than one:
+`RootParam` is a `ferryhttp.QueryOption` and `RootField` a `ferryhttp.HeaderOption`, and `Separator` and `BytesAs` return a `ferryhttp.Option`, which is both.
 
 ## Two fields cannot share a name
 

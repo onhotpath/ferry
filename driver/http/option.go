@@ -8,9 +8,8 @@ import (
 )
 
 // ErrOption reports a driver option this source cannot be built with: a
-// separator that is empty, one holding a byte a header field name may not, a
-// [BytesAs] with no spelling in it, or one plane's root option given to the
-// other plane's source.
+// separator that is empty, one holding a byte a header field name may not, or a
+// [BytesAs] with no spelling in it.
 //
 // [NewQuerySource] and [NewHeaderSource] take options and return no error, so
 // this lands at the first moment the driver is asked for anything, which is
@@ -19,17 +18,50 @@ import (
 // returned.
 var ErrOption = errors.New("http: unusable driver option")
 
-// Option configures a [Source]. The set is closed at four: [Separator],
-// [BytesAs], [RootParam] and [RootField].
-type Option interface {
-	apply(*config)
+// QueryOption configures a [NewQuerySource]. It is satisfied by every [Option]
+// and by [RootParam], and by nothing outside this package.
+type QueryOption interface {
+	applyQuery(*config)
 }
 
-// optionFunc is the one implementation, which is what makes every option a
-// one-line constructor.
+// HeaderOption configures a [NewHeaderSource]. It is satisfied by every [Option]
+// and by [RootField], and by nothing outside this package.
+type HeaderOption interface {
+	applyHeader(*config)
+}
+
+// Option configures a [Source] on either plane, so it may be passed to
+// [NewQuerySource] and to [NewHeaderSource] alike. The set is closed at two:
+// [Separator] and [BytesAs].
+//
+// The options naming the root address are not here, because there is one per
+// plane and they are not interchangeable: [RootParam] is a [QueryOption] and
+// [RootField] a [HeaderOption], so a source handed the other plane's does not
+// compile.
+type Option interface {
+	QueryOption
+	HeaderOption
+}
+
+// optionFunc is the shared implementation. It carries both plane methods, which
+// is exactly what makes a shared option assignable to either constructor's
+// parameter.
 type optionFunc func(*config)
 
-func (f optionFunc) apply(c *config) { f(c) }
+func (f optionFunc) applyQuery(c *config)  { f(c) }
+func (f optionFunc) applyHeader(c *config) { f(c) }
+
+// queryOptionFunc carries the query method and only that one, so the compiler
+// refuses it where a [HeaderOption] is wanted (#338).
+type queryOptionFunc func(*config)
+
+func (f queryOptionFunc) applyQuery(c *config) { f(c) }
+
+// headerOptionFunc is its counterpart, refused on a query source for the same
+// reason.
+type headerOptionFunc func(*config)
+
+func (f headerOptionFunc) applyHeader(c *config) { f(c) }
 
 // config is a [Source]'s settled configuration, copied into every binding so
 // that a Source reconfigured after it was bound cannot change a binding already
@@ -37,10 +69,10 @@ func (f optionFunc) apply(c *config) { f(c) }
 type config struct {
 	sep string
 
-	// root is the name [RootParam] or [RootField] gave the root address, empty
-	// until one of them does, and rootBy is which of the two gave it (#338).
-	root   string
-	rootBy rootBy
+	// root is the name this plane's own root option gave the root address, empty
+	// until it does. Which option that is is a fact about the constructor that
+	// was called, so it lives on the plane rather than here (#338).
+	root string
 
 	// bytes is the spelling [BytesAs] declared, and it is nil until one is
 	// declared: this plane holds text and nothing else, so a value is a String
@@ -133,11 +165,12 @@ func BytesAs(s ferry.Spelling[[]byte, string]) Option {
 // request is looked at. It says nothing about any other schema: every address
 // with a part of its own is named by that part as before.
 //
-// The name is one query parameter and it may not be empty. Give it to a query
-// source only; [RootField] is the header plane's, and a source handed the other
-// plane's option is refused rather than read as if it were this one's.
-func RootParam(name string) Option {
-	return optionFunc(func(c *config) { c.root, c.rootBy = name, rootByParam })
+// The name is one query parameter and it may not be empty. It is a
+// [QueryOption] and not an [Option], so [NewHeaderSource] does not take it:
+// [RootField] is the header plane's, and mixing the two is a compile error
+// rather than a field named for the wrong half of the request.
+func RootParam(name string) QueryOption {
+	return queryOptionFunc(func(c *config) { c.root = name })
 }
 
 // RootField names the header field a schema whose root is a single value is
@@ -146,38 +179,15 @@ func RootParam(name string) Option {
 //	src := ferryhttp.NewHeaderSource(ferryhttp.RootField("X-Request-Id"))
 //	id, err := ferry.Load[string](ferryhttp.WithHeaders(r.Context(), r.Header), src)
 //
-// It is [RootParam] on the header plane, and it is refused on a query source the
-// same way that one is refused here.
+// It is [RootParam] on the header plane, and it is a [HeaderOption] the same way
+// that one is a [QueryOption]: [NewQuerySource] does not take it.
 //
 // The name is held to what a header field name is - a non-empty run of letters,
 // digits and !#$%&'*+-.^_`|~ - and it is canonicalised the way net/http
 // canonicalises every field name, so RootField("x-request-id") reads the field a
 // request carries as X-Request-Id.
-func RootField(name string) Option {
-	return optionFunc(func(c *config) { c.root, c.rootBy = name, rootByField })
-}
-
-// rootBy is which of the two root options named the root address. They name two
-// different planes, and a source handed the other plane's option is refused
-// rather than reading the root out of the wrong half of the request (#338).
-type rootBy uint8
-
-const (
-	// rootUnnamed is the zero value, which is a source neither option was given
-	// and a plane with no name for the root.
-	rootUnnamed rootBy = iota
-	rootByParam
-	rootByField
-)
-
-// crossedRoot is the refusal one plane's root option earns on the other plane.
-//
-// Reading it as this plane's own would name the root out of the wrong half of
-// the request, which is the silent outcome two option names exist to prevent
-// (#338).
-func crossedRoot(given, plane, want string) error {
-	return optionError(given + " names the root on the other plane, and this is a " + plane +
-		" source: name this one's root with " + want)
+func RootField(name string) HeaderOption {
+	return headerOptionFunc(func(c *config) { c.root = name })
 }
 
 // notEmpty is the query plane's whole rule for a separator. Every byte survives
