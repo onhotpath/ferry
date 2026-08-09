@@ -41,6 +41,10 @@ type config struct {
 	// for: this plane holds text and nothing else, so a variable is a String
 	// unless a word of this plane's own says it is a bool (ADR-0018).
 	bools ferry.Spelling[bool, string]
+	// ungated selects the shipped, plane-wide reading of the words over the
+	// prototyped kind-gated one, so that both paths are exhibitable from one
+	// branch. It is not shipped surface (proto: #309).
+	ungated bool
 	// wordsErr is what building it refused with, held until Bind for the reason
 	// [ErrOption] gives: an Option is applied inside [New], which returns no
 	// error, so the refusal waits for the first moment the driver is asked for

@@ -79,10 +79,12 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 	}
 
 	cfg := s.cfg
+	gate := boolGate(addrs)
 
 	return func(context.Context) (ferry.Reader, error) {
 		return &reader{
 			cfg:      cfg,
+			gate:     gate,
 			names:    keys,
 			keys:     keys.Open(),
 			declared: declared,
@@ -261,6 +263,10 @@ func environMap(environ []string) map[string]string {
 type reader struct {
 	cfg config
 
+	// gate is where this plane's boolean words apply, read off the schema's own
+	// kind at Bind (proto: #309).
+	gate kindGate
+
 	// names is the binding's checked name table, and it is here for the reports
 	// rather than for the reads: it answers what this plane calls an address
 	// without touching what this open has minted (ADR-0011, #159).
@@ -317,7 +323,7 @@ func (r *reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error
 	}
 
 	if text, ok := r.env[key]; ok {
-		return r.cfg.observe(text), nil
+		return r.observe(addr, text), nil
 	}
 
 	if !declared && r.holdsBelow(key) {

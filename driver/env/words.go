@@ -158,12 +158,83 @@ func boolTable(words []string) (map[string]bool, error) {
 	return table, nil
 }
 
+// kindGate is where this plane's boolean words apply, which under the kind seam
+// is exactly where the schema wants a bool (proto: #309).
+//
+// It is built once, at Bind, off the address set, and never written to
+// afterwards, so one binding is still readable from many goroutines with no
+// synchronisation.
+type kindGate struct {
+	// at is every declared leaf the schema wants a bool at.
+	at map[ferry.LeafAddr]bool
+	// under is the address of every composite whose minted members the schema
+	// wants a bool at. A minted address is in no address set, so it cannot be a
+	// key in the table above and the composite that will mint it answers for it.
+	under []ferry.Path
+}
+
+// boolGate reads the schema's kind at every address this binding covers.
+func boolGate(addrs *ferry.AddressSet) kindGate {
+	g := kindGate{at: make(map[ferry.LeafAddr]bool, addrs.Len())}
+
+	for m := range addrs.Seq() {
+		g.admit(addrs, m)
+	}
+
+	return g
+}
+
+// admit records one address if the schema wants a bool there.
+func (g *kindGate) admit(addrs *ferry.AddressSet, m ferry.Member) {
+	switch a := m.(type) {
+	case ferry.LeafAddr:
+		if k, ok := addrs.KindAt(a); ok && k == ferry.KindBool {
+			g.at[a] = true
+		}
+	case ferry.CompositeAddr:
+		if k, ok := addrs.ElemKind(a); ok && k == ferry.KindBool {
+			g.under = append(g.under, a.Path())
+		}
+	default:
+		// A section holds no value, so this plane's words say nothing there.
+	}
+}
+
+// holds reports whether the schema wants a bool at this address.
+func (g kindGate) holds(addr ferry.LeafAddr) bool {
+	if g.at[addr] {
+		return true
+	}
+
+	for _, composite := range g.under {
+		if under(composite, addr.Path()) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // observe is what one variable's text is at the boundary.
 //
 // It is a String unless a declared word says it is a bool, which is how a plane
 // with no type information of its own carries a kind at all: the words are the
 // type information, and they are the operator's own rather than a guess this
 // driver makes (ADR-0018).
+//
+// The gate is the prototyped half: the words are applied where the schema wants
+// a bool and nowhere else, so a variable holding a declared word is still text
+// at a string field (proto: #309, K2). With [config.ungated] set the driver is
+// K1, which is what ships: the words decide plane-wide and the address is not
+// consulted.
+func (r *reader) observe(addr ferry.LeafAddr, text string) ferry.Value {
+	if !r.cfg.ungated && !r.gate.holds(addr) {
+		return ferry.String(text)
+	}
+
+	return r.cfg.observe(text)
+}
+
 func (c config) observe(text string) ferry.Value {
 	if c.bools == nil {
 		return ferry.String(text)
