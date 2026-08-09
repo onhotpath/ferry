@@ -104,14 +104,15 @@ func queryPlane() plane {
 	}
 }
 
-// queryRoot is what this plane calls the root address, which [RootParam] is the
+// queryRoot is what this plane calls the root address, which [RootName] is the
 // only thing that gives it (#338).
+//
+// The query plane's reading of the raw name is the identity, the same transform
+// flatKey applies to every other name on this plane: a query parameter name is
+// any byte sequence, so there is nothing to canonicalise and nothing to refuse
+// but an empty name.
 func queryRoot(c config) (rootName, error) {
-	if c.rootBy == rootByField {
-		return rootName{}, crossedRoot("ferryhttp.RootField", "query", "ferryhttp.RootParam")
-	}
-
-	return rootName{name: c.root, option: "ferryhttp.RootParam"}, nil
+	return rootName{name: c.root, option: "ferryhttp.RootName"}, nil
 }
 
 // headerPlane describes the header-field plane.
@@ -132,14 +133,16 @@ func headerPlane() plane {
 	}
 }
 
-// headerRoot is [queryRoot] on the header plane, and [RootField] is what fills
-// it (#338).
+// headerRoot is [queryRoot] on the header plane, and [RootName] fills it there
+// too (#338).
+//
+// The header plane's reading of the raw name is not the identity, and it does
+// not happen here: headerKey wraps flatKey, so the name this returns goes
+// through the same canonicalisation and the same token-grammar check as a name
+// a tag spelled. That is the whole of what one option can be plane-aware about,
+// because the name is all the caller stated.
 func headerRoot(c config) (rootName, error) {
-	if c.rootBy == rootByParam {
-		return rootName{}, crossedRoot("ferryhttp.RootParam", "header", "ferryhttp.RootField")
-	}
-
-	return rootName{name: c.root, option: "ferryhttp.RootField"}, nil
+	return rootName{name: c.root, option: "ferryhttp.RootName"}, nil
 }
 
 // queryFrom is the query plane taken out of the context, and a nil one is the
@@ -213,7 +216,7 @@ var _ ferry.Source = (*Source)(nil)
 //
 // With no options it joins nested fields with [QuerySeparator]. Change that with
 // [Separator], and name the parameter a schema whose root is a single value
-// reads from with [RootParam].
+// reads from with [RootName].
 func NewQuerySource(opts ...Option) *Source {
 	return newSource(queryPlane(), opts)
 }
@@ -225,7 +228,7 @@ func NewQuerySource(opts ...Option) *Source {
 //
 // With no options it joins nested fields with [HeaderSeparator]. Change that
 // with [Separator], and name the field a schema whose root is a single value
-// reads from with [RootField].
+// reads from with [RootName].
 func NewHeaderSource(opts ...Option) *Source {
 	return newSource(headerPlane(), opts)
 }

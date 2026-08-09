@@ -217,8 +217,8 @@ The same request reads the same way every run, which is what lets a test assert 
 Such a schema has one address, the root, and the root carries no part for this driver to name it by, so an option names it:
 
 ```go
-func ExampleRootParam() {
-	src := ferryhttp.NewQuerySource(ferryhttp.RootParam("q"))
+func ExampleRootName() {
+	src := ferryhttp.NewQuerySource(ferryhttp.RootName("q"))
 
 	ctx := ferryhttp.WithQuery(context.Background(), url.Values{"q": {"ferry"}})
 
@@ -234,9 +234,9 @@ func ExampleRootParam() {
 }
 ```
 
-`ferryhttp.RootField` is the header plane's, held to the grammar a field name has and canonicalised like every other field name: `RootField("x-request-id")` reads `X-Request-Id`.
+The same option serves the header plane, and that plane reads the name its own way: it is held to the grammar a field name has and canonicalised like every other field name, so `RootName("x-request-id")` on a header source reads `X-Request-Id`.
 Without the option the load is refused before the request is looked at, and the refusal names the option that lifts it.
-So is one plane's option given to the other plane's source, which is why there are two names rather than one.
+A name meant for the other plane is not refused, because the option carries only the name: `RootName("X-Request-Id")` on a query source reads a query parameter spelled exactly that.
 
 ## Two fields cannot share a name
 

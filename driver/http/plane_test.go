@@ -65,7 +65,7 @@ func queryPlaneFor(opts ...Option) ferrytest.Plane {
 		Kinds: flatKinds(),
 		Open: func() ferrytest.Instance {
 			v := url.Values{}
-			src := NewQuerySource(withRoot(RootParam(rootParam), opts)...)
+			src := NewQuerySource(withRoot(RootName(rootParam), opts)...)
 
 			return ferrytest.Instance{
 				Source: src,
@@ -96,7 +96,7 @@ func headerPlaneFor(opts ...Option) ferrytest.Plane {
 		Except: notAFieldValue,
 		Open: func() ferrytest.Instance {
 			h := http.Header{}
-			src := NewHeaderSource(withRoot(RootField(rootField), opts)...)
+			src := NewHeaderSource(withRoot(RootName(rootField), opts)...)
 
 			return ferrytest.Instance{
 				Source: src,
@@ -110,7 +110,8 @@ func headerPlaneFor(opts ...Option) ferrytest.Plane {
 }
 
 // rootParam and rootField are what the two planes call the root address in
-// every run of the suite, and they are two names because they are two options.
+// every run of the suite. One option names both, and they stay two spellings
+// because the two planes read a name differently: the header one canonicalises.
 const (
 	rootParam = "value"
 	rootField = "Value"

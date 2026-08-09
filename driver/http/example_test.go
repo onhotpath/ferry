@@ -158,14 +158,14 @@ func Example_headers() {
 	// Output: {ID:acme Region:eu-west-1}
 }
 
-// ExampleRootParam loads a whole schema out of one parameter.
+// ExampleRootName loads a whole schema out of one parameter.
 //
 // The type resolves to a single value rather than to a struct, so the schema has
 // one address, the root, and that address carries no part for this driver to
 // name it by. The option is what names it, and without one the load is refused
 // before the request is looked at.
-func ExampleRootParam() {
-	src := ferryhttp.NewQuerySource(ferryhttp.RootParam("q"))
+func ExampleRootName() {
+	src := ferryhttp.NewQuerySource(ferryhttp.RootName("q"))
 
 	ctx := ferryhttp.WithQuery(context.Background(), url.Values{"q": {"ferry"}})
 

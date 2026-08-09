@@ -15,7 +15,7 @@ import (
 // A query parameter name is any byte sequence, so only two addresses reach it
 // there: one with an empty part, and the root address of a schema whose root is
 // a single value, which carries no part to be named by and is refused until
-// [RootParam] or [RootField] names it. A header field name is a token, so a name
+// [RootName] names it. A header field name is a token, so a name
 // holding a byte no field name may hold reaches it as well, and a root name held
 // to that grammar is one of them. A tagged field is refused before anything is
 // read, and a map key that mints such a name is refused as it is minted.
@@ -60,15 +60,15 @@ var ErrTwoSpellings = errors.New("http: this name carries a sequence in two spel
 // holds, so this transform keeps every part exactly as the tag spelled it, and
 // the only names it refuses are the ones no join can rescue.
 //
-// root is what the plane's own root option called the root address, which is
-// the one address there is nothing to join for (ADR-0003, #338).
+// root is what [RootName] called the root address, which is the one address
+// there is nothing to join for (ADR-0003, #338).
 func flatKey(sep string, root rootName) ferry.KeyFunc {
 	return func(addr ferry.Path) (string, error) { return join(addr, sep, root) }
 }
 
-// rootName is what a plane calls the root address: the name that plane's own
-// root option gave it, empty until one does, and the option's own name so that
-// a refusal names the thing the caller can reach for (#338).
+// rootName is what a plane calls the root address: the raw name [RootName] gave
+// it, empty until it does, and the option's own name so that a refusal names the
+// thing the caller can reach for (#338).
 type rootName struct {
 	name   string
 	option string
@@ -134,8 +134,9 @@ func join(addr ferry.Path, sep string, root rootName) (string, error) {
 // The check afterwards is not redundant with it. textproto hands back a name it
 // cannot canonicalise unchanged, so a name holding a space or a byte no field
 // name may hold arrives here intact, and net/http would refuse to send it. A
-// root field name goes through both, which is why [RootField] promises no more
-// about the name it is given than a tag promises about a field's (#338).
+// root field name goes through both, which is why [RootName] promises no more
+// about the name it is given than a tag promises about a field's, and this is
+// the only place the header plane's own reading of that name happens (#338).
 func headerKey(sep string, root rootName) ferry.KeyFunc {
 	inner := flatKey(sep, root)
 

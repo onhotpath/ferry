@@ -8,9 +8,8 @@ import (
 )
 
 // ErrOption reports a driver option this source cannot be built with: a
-// separator that is empty, one holding a byte a header field name may not, a
-// [BytesAs] with no spelling in it, or one plane's root option given to the
-// other plane's source.
+// separator that is empty, one holding a byte a header field name may not, or a
+// [BytesAs] with no spelling in it.
 //
 // [NewQuerySource] and [NewHeaderSource] take options and return no error, so
 // this lands at the first moment the driver is asked for anything, which is
@@ -19,8 +18,8 @@ import (
 // returned.
 var ErrOption = errors.New("http: unusable driver option")
 
-// Option configures a [Source]. The set is closed at four: [Separator],
-// [BytesAs], [RootParam] and [RootField].
+// Option configures a [Source]. The set is closed at three: [Separator],
+// [BytesAs] and [RootName].
 type Option interface {
 	apply(*config)
 }
@@ -37,10 +36,11 @@ func (f optionFunc) apply(c *config) { f(c) }
 type config struct {
 	sep string
 
-	// root is the name [RootParam] or [RootField] gave the root address, empty
-	// until one of them does, and rootBy is which of the two gave it (#338).
-	root   string
-	rootBy rootBy
+	// root is the name [RootName] gave the root address, raw and unread, empty
+	// until it is given. Each plane derives its own reading of it: the query
+	// plane takes it as it stands, the header plane canonicalises it and holds
+	// it to the token grammar, both by the plane's own key function (#338).
+	root string
 
 	// bytes is the spelling [BytesAs] declared, and it is nil until one is
 	// declared: this plane holds text and nothing else, so a value is a String
@@ -122,62 +122,33 @@ func BytesAs(s ferry.Spelling[[]byte, string]) Option {
 	})
 }
 
-// RootParam names the query parameter a schema whose root is a single value is
-// read from.
+// RootName names the query parameter or header field a schema whose root is a
+// single value is read from.
 //
-//	src := ferryhttp.NewQuerySource(ferryhttp.RootParam("q"))
+//	src := ferryhttp.NewQuerySource(ferryhttp.RootName("q"))
 //	q, err := ferry.Load[string](ferryhttp.WithQuery(r.Context(), r.URL.Query()), src)
+//
+//	src := ferryhttp.NewHeaderSource(ferryhttp.RootName("x-request-id"))
+//	id, err := ferry.Load[string](ferryhttp.WithHeaders(r.Context(), r.Header), src)
 //
 // Such a schema has one address, the root, and that address carries no part for
 // this driver to name it by, so without this option it is refused before any
 // request is looked at. It says nothing about any other schema: every address
 // with a part of its own is named by that part as before.
 //
-// The name is one query parameter and it may not be empty. Give it to a query
-// source only; [RootField] is the header plane's, and a source handed the other
-// plane's option is refused rather than read as if it were this one's.
-func RootParam(name string) Option {
-	return optionFunc(func(c *config) { c.root, c.rootBy = name, rootByParam })
-}
-
-// RootField names the header field a schema whose root is a single value is
-// read from.
+// The name is read by the plane the source was built for, the same way that
+// plane reads a name a tag spelled. A query source takes it as it stands and
+// only refuses an empty one. A header source canonicalises it the way net/http
+// canonicalises every field name, so RootName("x-request-id") reads the field a
+// request carries as X-Request-Id, and holds it to what a field name may be - a
+// non-empty run of letters, digits and !#$%&'*+-.^_`|~.
 //
-//	src := ferryhttp.NewHeaderSource(ferryhttp.RootField("X-Request-Id"))
-//	id, err := ferry.Load[string](ferryhttp.WithHeaders(r.Context(), r.Header), src)
-//
-// It is [RootParam] on the header plane, and it is refused on a query source the
-// same way that one is refused here.
-//
-// The name is held to what a header field name is - a non-empty run of letters,
-// digits and !#$%&'*+-.^_`|~ - and it is canonicalised the way net/http
-// canonicalises every field name, so RootField("x-request-id") reads the field a
-// request carries as X-Request-Id.
-func RootField(name string) Option {
-	return optionFunc(func(c *config) { c.root, c.rootBy = name, rootByField })
-}
-
-// rootBy is which of the two root options named the root address. They name two
-// different planes, and a source handed the other plane's option is refused
-// rather than reading the root out of the wrong half of the request (#338).
-type rootBy uint8
-
-const (
-	// rootUnnamed is the zero value, which is a source neither option was given
-	// and a plane with no name for the root.
-	rootUnnamed rootBy = iota
-	rootByParam
-	rootByField
-)
-
-// crossedRoot is the refusal one plane's root option earns on the other plane.
-//
-// Reading it as this plane's own would name the root out of the wrong half of
-// the request, which is the silent outcome two option names exist to prevent
-// (#338).
-func crossedRoot(given, plane, want string) error {
-	return optionError(given + " names the root on the other plane, and this is a " + plane +
-		" source: name this one's root with " + want)
+// The sharp edge is that a source cannot tell a name meant for the other plane
+// from one meant for it. RootName("X-Request-Id") on a query source reads a
+// query parameter spelled exactly that, and finds none in an ordinary request,
+// so the root reads as absent rather than as a mistake.
+func RootName(name string) Option {
+	return optionFunc(func(c *config) { c.root = name })
 }
 
 // notEmpty is the query plane's whole rule for a separator. Every byte survives
