@@ -273,8 +273,9 @@ type Artefact struct {
 //	},
 //
 // v is an ordinary annotated struct, exactly as it is at a [ferry.Dump] call
-// site. A bare leaf is refused there for naming no address, so it is refused
-// here too.
+// site. A bare leaf sits at the root address instead, which most planes have no
+// name for and refuse at Bind, so a row pinning one is a row about that plane's
+// own root rule.
 //
 // want is what [Instance.Contents] must yield afterwards. A plane holding more
 // than one storage unit - a key-value store is a set of pairs and not a

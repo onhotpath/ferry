@@ -590,11 +590,6 @@ func TestCompileRoot(t *testing.T) {
 	t.Parallel()
 
 	run(t, []compileCase{{
-		name:     "a root leaf mints the empty path, which is not an address",
-		run:      Compile[int],
-		want:     []string{"int compiles to a leaf", "the empty path", "wrap it in a struct"},
-		elements: 1,
-	}, {
 		name:     "a root map",
 		run:      Compile[map[string]string],
 		want:     []string{"map[string]string is not a struct ferry walks"},
@@ -609,12 +604,29 @@ func TestCompileRoot(t *testing.T) {
 		run:      Compile[any],
 		want:     []string{"interface {} is not a struct ferry walks"},
 		elements: 1,
-	}, {
-		name:     "a pointer to a root leaf",
-		run:      Compile[*int],
-		want:     []string{"*int compiles to a leaf"},
-		elements: 1,
 	}})
+}
+
+// TestCompileRootLeaf is the other half of the same split: a root that resolves
+// to a leaf compiles, and it names the root address and nothing else.
+func TestCompileRootLeaf(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		name string
+		run  func(...Option) error
+	}{
+		{"a root leaf", Compile[int]},
+		{"a pointer to a root leaf", Compile[*int]},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := c.run(); err != nil {
+				t.Fatalf("compile: %+v", err)
+			}
+		})
+	}
 }
 
 // tiers is ADR-0008's measured fixture, byte for byte: one field of each fault,

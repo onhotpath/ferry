@@ -281,6 +281,12 @@ Everything beyond that is opt-in.
 
 This is the one seam that survived every round of simplification, because it is the only thing carrying ADR-0003's before-any-I/O rule.
 
+> **Amended under [#335](https://github.com/onhotpath/ferry/issues/335): a driver may refuse an address it has no name for, and `Bind` is where that refusal belongs.**
+>
+> As published this section says what `Bind` is for and what it may not do, and says nothing about a driver refusing the address set it was handed rather than the plane behind it.
+> [ADR-0003](0003-how-a-leaf-addresses-a-plane.md)'s root address is the case that made the omission matter: it carries no segment, so a plane whose keys are segments joined together has nothing to join and no key to write at.
+> A driver in that position refuses at `Bind`, where the caller still holds the whole schema and nothing has been asked of the plane, rather than at a write that has already begun.
+
 Three pieces of state, three lifetimes:
 
 | | holds | changes when |

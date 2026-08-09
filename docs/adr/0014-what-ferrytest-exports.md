@@ -716,6 +716,24 @@ Written as assertions rather than prose, which is [#41](https://github.com/onhot
 > **The surface table does not move**: the case is internal, no exported name of this package changes, and `TestExportedSurface` locks the same twenty-six.
 > What does move is the count in this package's own prose, from twenty-one to twenty-two, and the line a run says about itself, which now names this capability on whichever half declares it.
 
+> **Amended under [#335](https://github.com/onhotpath/ferry/issues/335): the list is twenty-three cases, and the twenty-third is the address that had no case because no schema could name it.**
+>
+> [ADR-0003](0003-how-a-leaf-addresses-a-plane.md)'s amendment under the same issue makes the empty path the root address, and puts one obligation on a driver that nothing above asks of it: name the root by a rule of your own or refuse it, and refuse it at `Bind`.
+> Until this issue no schema could mint that address, so there was nothing for a case to hand a plane.
+>
+> 23. **A type whose whole value is one leaf round trips at the root, or is refused.** A `String` is dumped at the root address and loaded back, and a plane that has no name for the root says so rather than taking the write ([ADR-0003](0003-how-a-leaf-addresses-a-plane.md), [ADR-0004](0004-source-and-sink.md), [ADR-0010](0010-the-entry-point-and-the-schema-cache.md)).
+>
+> **The load is the half with the teeth.** A plane with no key for the root can write nowhere and return a nil error, which is a total loss that the write side alone cannot see; reading the value back is what separates that from a write that landed.
+> **A refusal is an answer and not a failure**, so the case skips on one and says which of the two moments it came from.
+> A refusal at `Bind` is the expected shape, because that is where the caller still holds the whole schema and nothing has been asked of the plane; a refusal at the write is loud too and loses nothing, so it is a skip that says the answer came late rather than a case that went red.
+> **It is skipped, out loud, for a plane that mints only one half**, because it round trips, and for one that does not carry `ferry.KindString`, because the value it writes has to be one the plane declared it holds.
+>
+> `driver/env` and `driver/http` refuse at `Bind`, `driver/yaml` refuses at the write, and `driver/kv` runs it to a conclusion once `kv.RootKey` names the key, which its conformance plane now sets.
+> `MemPlane` runs it to a conclusion unconditionally: it keys by the address itself, and the root address is an address.
+>
+> **The surface table does not move**: the case is internal, no exported name of this package changes, and `TestExportedSurface` locks the same twenty-six.
+> What moves is the count in this package's own prose, from twenty-two to twenty-three.
+
 Case 11 is the one that is new, and ADR-0013 gives the reason a round-trip case cannot stand in for it: a round trip tests a function against its own inverse, a spelling is a *choice* of function, and changing both halves together is invisible to any test that only composes them.
 The expected contents live on the `Plane` rather than being a parameter of the suite, because the spelling is the **driver's** statement about itself and ADR-0005 puts it on the driver's side of the line.
 
@@ -899,6 +917,11 @@ That is weaker than a compile-time signal and it is the only shape available, be
 >
 > [ADR-0004](0004-source-and-sink.md) gained `PlaneNamer`, so **the optional interfaces are nine, not eight**, and the `Driver` amendment under the same issue gives it a case, so **the list is twenty-two cases, not twenty-one**.
 > Nothing else in the correction above moves, and the arithmetic is stated here rather than edited into it for the reason that correction gives: a figure belongs to the section that owns the decision, and this one is the summary.
+
+> **Amended under [#335](https://github.com/onhotpath/ferry/issues/335): the case count has moved once more, and nothing else has.**
+>
+> The `Driver` amendment under that issue adds the root-leaf case, so **the list is twenty-three cases, not twenty-two**.
+> The optional interfaces are still nine, no exported name moves, and the arithmetic is stated here for the same reason the two notes above state theirs.
 
 ## Items from the xload survey
 

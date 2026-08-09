@@ -14,6 +14,12 @@ import (
 // test that names it.
 const prefix = "app"
 
+// rootKey is what this plane calls the root address, so that the conformance
+// run exercises the root-leaf case rather than skipping it. Without one this
+// driver has no key for the root and refuses it, which is the other legitimate
+// answer and is what every plane in the rest of this package gives (#334).
+const rootKey = "value"
+
 // TestDriver is the conformance suite, in one call.
 func TestDriver(t *testing.T) {
 	t.Parallel()
@@ -51,8 +57,8 @@ func kvPlane(t *testing.T) ferrytest.Plane {
 			store := newFake()
 
 			return ferrytest.Instance{
-				Source:   mustSource(t, store),
-				Sink:     mustSink(t, store),
+				Source:   mustSource(t, store, kv.RootKey(rootKey)),
+				Sink:     mustSink(t, store, kv.RootKey(rootKey)),
 				Contents: func() ([]byte, error) { return store.contents(), nil },
 			}
 		},
@@ -114,10 +120,10 @@ func mustSource(t *testing.T, store kv.Client, opts ...kv.Option) *kv.Source {
 	return src
 }
 
-func mustSink(t *testing.T, store kv.Client) *kv.Sink {
+func mustSink(t *testing.T, store kv.Client, opts ...kv.Option) *kv.Sink {
 	t.Helper()
 
-	sink, err := kv.NewSink(store, kv.WithPrefix(prefix))
+	sink, err := kv.NewSink(store, append([]kv.Option{kv.WithPrefix(prefix)}, opts...)...)
 	if err != nil {
 		t.Fatalf("kv.NewSink: %v", err)
 	}

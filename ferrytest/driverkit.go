@@ -35,6 +35,7 @@ const (
 	caseOrderingNo      = 20
 	caseOmissionNo      = 21
 	caseNamedNo         = 22
+	caseRootLeafNo      = 23
 )
 
 // The suite's own fixtures, and their addresses.

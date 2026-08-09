@@ -171,7 +171,7 @@ func (b *bound) load(ctx context.Context, dst reflect.Value) (err error) {
 
 	w := newWalker(loadFrom{r: r, addrs: b.sch.addrs}, schedulerFor(b.budget, r))
 
-	_, err = w.walk(ctx, spot{n: b.sch.root, v: loadRoot(dst)})
+	_, err = w.walk(ctx, spot{n: b.sch.root, v: loadRoot(b.sch.root, dst)})
 
 	return err
 }
@@ -264,7 +264,7 @@ func (b *boundSink) replaceable(w Writer) error {
 // sink is closed with no Commit and ADR-0004's abort signal survives the path
 // nothing was going to report on (#254).
 func (b *boundSink) dump(ctx context.Context, v reflect.Value) (err error) {
-	root, err := dumpRoot(v)
+	root, err := dumpRoot(b.sch.root, v)
 	if err != nil {
 		return err
 	}
@@ -316,21 +316,27 @@ func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) err
 	return b.dump(ctx, v)
 }
 
-// loadRoot is the struct the walk writes into, given the value the caller's
+// loadRoot is the value the walk writes into, given the value the caller's
 // type named.
 //
-// A root pointer is materialised into a fresh allocation seeded from what the
-// caller supplied, rather than written through. The copy is what keeps "the
-// partial is unreachable from the caller" a property: a pointer is the one root
-// shape whose contents a plain copy of the seed would still share with the
-// caller, so writing through it would publish the partial by the back door.
+// A root leaf is handed over untouched, whatever its kind. *int resolves
+// through registry.pointerLeaf to a leaf carrying a null rather than to a
+// pointer the walk descends through, so its codec is built for *int and is the
+// one thing that may be handed the pointer (ADR-0005, ADR-0010).
+//
+// A root pointer to a struct is materialised into a fresh allocation seeded
+// from what the caller supplied, rather than written through. The copy is what
+// keeps "the partial is unreachable from the caller" a property: a pointer is
+// the one root shape whose contents a plain copy of the seed would still share
+// with the caller, so writing through it would publish the partial by the back
+// door.
 //
 // Materialising unconditionally is a placement rather than a rule. What a
 // pointer means when the plane is silent is the presence bit's question, and
 // the root is the one position with no address for its own absence to be
 // observed at.
-func loadRoot(dst reflect.Value) reflect.Value {
-	if dst.Kind() != reflect.Pointer {
+func loadRoot(n *node, dst reflect.Value) reflect.Value {
+	if n.kind == nodeLeaf || dst.Kind() != reflect.Pointer {
 		return dst
 	}
 
@@ -344,23 +350,27 @@ func loadRoot(dst reflect.Value) reflect.Value {
 	return fresh.Elem()
 }
 
-// dumpRoot is the struct the walk reads from, and it refuses a nil one.
+// dumpRoot is the value the walk reads from, and it refuses a nil pointer to a
+// struct.
 //
-// ADR-0010 refuses a root that compiles to a leaf because the empty path is not
-// an address, and measured the consequence of letting it through: a YAML sink
-// wrote "{}" and returned a nil error, so the value was silently and totally
-// lost. A nil root pointer is the same hole at the same address - there is
-// nowhere for the Null a nil composite writes to sit - so it is refused rather
-// than dumped as an empty plane with a nil error.
-func dumpRoot(v reflect.Value) (reflect.Value, error) {
-	if v.Kind() != reflect.Pointer {
+// A root leaf is handed over untouched, whatever its kind: *int is a leaf
+// carrying a null, its codec is built for *int, and a nil one has the root
+// address to write that null at (ADR-0005, ADR-0010). Dereferencing it here
+// would hand an int to a codec built for *int, which panics inside the shared
+// walk rather than in the compiler.
+//
+// A nil pointer to a struct is the case with nowhere to go. The struct is not
+// an address of its own, so the Null a nil composite writes has no place to sit,
+// and dumping it would write nothing and report success.
+func dumpRoot(n *node, v reflect.Value) (reflect.Value, error) {
+	if n.kind == nodeLeaf || v.Kind() != reflect.Pointer {
 		return v, nil
 	}
 
 	if v.IsNil() {
 		return reflect.Value{}, newError(momentWalk, ErrValue, Path{},
-			"the root is a nil pointer, and the root has no address of its own for a null to sit at: "+
-				"dumping it would write nothing and report success")
+			"the root is a nil pointer to a struct, and a struct has no address of its own for a null to sit "+
+				"at: dumping it would write nothing and report success")
 	}
 
 	return v.Elem(), nil

@@ -93,7 +93,10 @@ func (s Segment) Text() string { return s.text }
 // order a human diffing a dumped file expects, and the order ferry enumerates
 // addresses in.
 //
-// The zero Path has no segments. An address has at least one.
+// The zero Path has no segments, and it is the root address: where the type a
+// call names resolves to a single value rather than to a struct, that value
+// sits there. A plane names the root by its own rule or refuses it at Bind, so
+// a driver's key function asks [Path.IsRoot] before it walks the segments.
 type Path struct {
 	// rendered is the canonical rendering and the whole of the value. A
 	// []string field would cost comparability, which is the property the type
@@ -129,7 +132,8 @@ const (
 // object member or a map key contributes.
 //
 // It is the ordinary way to write a literal address: At("db", "host") is
-// /db/host. With no arguments it is the empty path, which is not an address.
+// /db/host. With no arguments it is the root address, which is where a type
+// resolving to a single value sits.
 func At(names ...string) Path { return Path{}.At(names...) }
 
 // At extends the address with Name segments, leaving the receiver untouched.
@@ -193,6 +197,14 @@ func (p Path) below(prefix Path) Path { return Path{rendered: p.rendered[len(pre
 // It is not a plane key, no driver may write it into a plane as one, and
 // sorting it is not this type's ordering: see [Path.Compare].
 func (p Path) String() string { return p.rendered }
+
+// IsRoot reports whether this is the root address, the one with no segments.
+//
+// A driver's key function asks it first. The root has no segment to build a key
+// out of, so a plane either names it by a rule of its own - an option holding
+// the key to use, a file's whole document - or refuses it, and refusing it at
+// Bind is where a caller can still do something about it.
+func (p Path) IsRoot() bool { return p.rendered == "" }
 
 // Segments enumerates the address left to right. It is what a driver's key
 // function walks to build a plane key.

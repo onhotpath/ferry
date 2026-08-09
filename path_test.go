@@ -653,6 +653,52 @@ func segKey(segs []Segment) string {
 	return b.String()
 }
 
+// TestPathIsRootIsTrueOnlyForTheEmptyPath is a direct unit test because Path is
+// the seam: it is a pure value with no engine behind it, and a driver's key
+// function asks this method before it walks anything.
+func TestPathIsRootIsTrueOnlyForTheEmptyPath(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		at   Path
+		want bool
+	}{
+		{Path{}, true},
+		{At(), true},
+		{At(""), false},
+		{At("db"), false},
+		{At("db", "host"), false},
+		{Path{}.Elem(0), false},
+	} {
+		if got := c.at.IsRoot(); got != c.want {
+			t.Errorf("%q.IsRoot() is %v, want %v", c.at.String(), got, c.want)
+		}
+	}
+}
+
+// TestARootLeafIsOneAddressAndItIsTheRoot is what a driver is handed for a type
+// that resolves to a leaf: one member, and it says so for itself rather than by
+// comparing against a path the test built.
+func TestARootLeafIsOneAddressAndItIsTheRoot(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+
+	if _, err := Bind[int](planeSource{p: p}); err != nil {
+		t.Fatalf("bind: %+v", err)
+	}
+
+	if p.bound.Len() != 1 {
+		t.Fatalf("the driver was handed %d addresses, want exactly the root", p.bound.Len())
+	}
+
+	for m := range p.bound.Seq() {
+		if !m.Path().IsRoot() {
+			t.Errorf("the one address is %s, want the root", m.Path())
+		}
+	}
+}
+
 func renderings(paths []Path) []string {
 	out := make([]string, 0, len(paths))
 	for _, p := range paths {
