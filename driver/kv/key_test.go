@@ -16,29 +16,43 @@ import (
 // refusals are the driver's half of ADR-0003's legality obligation: core refuses
 // an empty minted name at the mapping before this driver is asked (#258), so the
 // empty-part row has no other way in and would otherwise be a guard nothing
-// proves.
+// proves. The root rows are here for the same reason twice over: no schema can
+// mint a root-leaf address yet, so this is the only place the empty path reaches
+// this driver at all (#334).
+//
+// RootKey("") and no RootKey at all are one configuration and one refusal, since
+// the name a caller did not give and the empty name they did give are the same
+// empty string. Both rows are kept, because the second is the one that would
+// otherwise slip through as the prefix itself.
 func TestKeyFunc(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]struct {
-		prefix []string
-		addr   ferry.Path
-		want   string
-		refuse string
+		prefix  []string
+		rootKey string
+		addr    ferry.Path
+		want    string
+		refuse  string
 	}{
-		"a leaf":          {addr: ferry.At("host"), want: "host"},
-		"a nested leaf":   {addr: ferry.At("db", "host"), want: "db/host"},
-		"a position":      {addr: ferry.At("tags").Elem(0), want: "tags/0"},
-		"under a prefix":  {prefix: []string{"app"}, addr: ferry.At("db", "host"), want: "app/db/host"},
-		"an empty part":   {addr: ferry.At("labels", ""), refuse: "empty part"},
-		"a part with a /": {addr: ferry.At("labels", "a/b"), refuse: "part containing"},
+		"a leaf":            {addr: ferry.At("host"), want: "host"},
+		"a nested leaf":     {addr: ferry.At("db", "host"), want: "db/host"},
+		"a position":        {addr: ferry.At("tags").Elem(0), want: "tags/0"},
+		"under a prefix":    {prefix: []string{"app"}, addr: ferry.At("db", "host"), want: "app/db/host"},
+		"an empty part":     {addr: ferry.At("labels", ""), refuse: "empty part"},
+		"a part with a /":   {addr: ferry.At("labels", "a/b"), refuse: "part containing"},
+		"the root, unnamed": {addr: ferry.Path{}, refuse: "no key for one"},
+		"the root, named": {
+			prefix: []string{"app"}, rootKey: "value", addr: ferry.Path{}, want: "app/value",
+		},
+		"a root key with a /": {rootKey: "a/b", addr: ferry.Path{}, refuse: "root key"},
+		"an empty root key":   {rootKey: "", addr: ferry.Path{}, refuse: "no key for one"},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := keyFunc(tc.prefix)(tc.addr)
+			got, err := keyFunc(tc.prefix, tc.rootKey)(tc.addr)
 			if tc.refuse == "" {
 				checkKey(t, got, tc.want, err)
 

@@ -48,6 +48,15 @@ const separator = "/"
 // out, and there is no escape to map it onto: any byte the escape used would be
 // a byte a segment is entitled to contain.
 //
+// # The root is a key under the prefix or it is nothing
+//
+// A schema whose root is a single value has the empty path as its only address,
+// and there is no key it can take on its own: this driver's key for the empty
+// path would be the prefix, which is the folder every other address is written
+// under, so a store would end up holding a value on an interior node. [RootKey]
+// names an ordinary key under the prefix for it instead, and without one the
+// address is refused on both the source and the sink side (#334).
+//
 // # What it deliberately does not refuse
 //
 // An Index segment is written as its own base-10 text, so /tags#0 is "tags/0",
@@ -56,10 +65,18 @@ const separator = "/"
 // map key "0" under /tags are one key. That is not silent: they are two members
 // of one address set, and the injectivity check refuses a schema holding both,
 // before any backend call. [reader.Children] documents the one residue.
-func keyFunc(prefix []string) ferry.KeyFunc {
+func keyFunc(prefix []string, root string) ferry.KeyFunc {
 	return func(addr ferry.Path) (string, error) {
 		parts := make([]string, 0, len(prefix)+segmentsHint)
 		parts = append(parts, prefix...)
+
+		// The empty path is the schema's own root, which has no segment of its
+		// own to be named by, so the loop below would skip every check and hand
+		// back the prefix itself - the folder every other address is written
+		// under. A comparison is what asks, because Path is comparable.
+		if addr == (ferry.Path{}) {
+			return rootName(parts, root)
+		}
 
 		for seg := range addr.Segments() {
 			text := seg.Text()
@@ -99,10 +116,50 @@ func nameable(text string) error {
 	}
 }
 
-// rootKey is the key every address this driver reaches lies at or under, which
+// rootName is the key the schema's own root value is written at: the prefix's
+// segments and the name [RootKey] gave it, so that it is an ordinary key under
+// the prefix and never the prefix itself (#334).
+//
+// parts already holds the prefix, and it is the caller's own slice with room to
+// spare, so the name is appended to it rather than joined a second time.
+func rootName(parts []string, root string) (string, error) {
+	if err := nameableRoot(root); err != nil {
+		return "", err
+	}
+
+	return strings.Join(append(parts, root), separator), nil
+}
+
+// nameableRoot reports whether the store can name the schema's root at this
+// name, which is the two rules [nameable] holds every other segment to: a name
+// this driver was not given is empty, and a name holding a separator is a path
+// rather than a key.
+//
+// The empty case is the refusal of a root nobody named, because [RootKey] is
+// the only thing that fills it and a store has no key for an unnamed root
+// (#334).
+func nameableRoot(name string) error {
+	switch {
+	case name == "":
+		return fmt.Errorf("%w: this schema's root is a single value, and a key-value store has no key for one: "+
+			"the store's own key at this prefix is the folder every other address is written under, so writing "+
+			"the value there would put a value on an interior node - name the key with kv.RootKey", ferry.ErrPlane)
+	case strings.Contains(name, separator):
+		return fmt.Errorf("%w: the root key %q contains %q, and the store reads that as another step in its "+
+			"hierarchy: kv.RootKey names one key under the prefix rather than a path down from it",
+			ferry.ErrPlane, name, separator)
+	default:
+		return nil
+	}
+}
+
+// prefixKey is the key every address this driver reaches lies at or under, which
 // is the prefix and nothing else. It is the empty string for a driver with no
 // prefix, which is the whole store.
-func rootKey(prefix []string) string { return strings.Join(prefix, separator) }
+//
+// It is a folder and never a key holding a value, which is why the schema's own
+// root is named beside it by [rootName] rather than written here (#334).
+func prefixKey(prefix []string) string { return strings.Join(prefix, separator) }
 
 // folder is the key prefix everything strictly under key begins with.
 //

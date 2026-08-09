@@ -26,6 +26,10 @@ type Source struct {
 	client Client
 	prefix []string
 
+	// rootName is the key a root value is written at, under the prefix, or
+	// empty where [RootKey] named none (#334).
+	rootName string
+
 	// batch is the whole of ADR-0004's "the difference is one boolean inside
 	// the driver", and it is read once, in the open.
 	batch bool
@@ -54,7 +58,7 @@ func NewSource(client Client, opts ...Option) (*Source, error) {
 		return nil, errNoClient
 	}
 
-	return &Source{client: client, prefix: cfg.prefix, batch: cfg.batch, raw: cfg.raw}, nil
+	return &Source{client: client, prefix: cfg.prefix, rootName: cfg.rootKey, batch: cfg.batch, raw: cfg.raw}, nil
 }
 
 // errNoClient is both constructors' refusal of a plane that was never supplied.
@@ -70,7 +74,7 @@ var errNoClient = errors.New("kv: the client is nil, so there is no store to rea
 // It cannot fail for anything about the store itself. A store that is
 // unreachable, or a token that has expired, is reported when the load starts.
 func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
-	keys, err := ferry.NewKeys(addrs, driverName, keyFunc(s.prefix))
+	keys, err := ferry.NewKeys(addrs, driverName, keyFunc(s.prefix, s.rootName))
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +194,7 @@ func under(prefix, p ferry.Path) bool {
 // backends is where [ferry.ConcurrencyBudget] earns its keep, and it is read at
 // the open rather than here for that reason.
 func (s *Source) opener(keys *ferry.Keys, sections map[ferry.SectionAddr]sectionScope) ferry.OpenFunc {
-	root := rootKey(s.prefix)
+	root := prefixKey(s.prefix)
 
 	return func(ctx context.Context) (ferry.Reader, error) {
 		if err := ctx.Err(); err != nil {

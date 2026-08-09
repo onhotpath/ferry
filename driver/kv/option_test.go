@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/driver/kv"
 )
 
@@ -110,5 +111,44 @@ func TestSinkRefusesWithBatch(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "source's Option") {
 		t.Errorf("NewSink refused with %q, which does not say whose Option it is", err)
+	}
+}
+
+// TestRootKeyNamesOnlyTheRoot is [kv.RootKey] doing exactly one thing: it is an
+// Option both constructors take, and it moves no key of any other address.
+//
+// The key it does name is asserted where the mapping is, in TestKeyFunc, because
+// no schema can mint a root address yet and there is no load or save that
+// reaches one.
+func TestRootKeyNamesOnlyTheRoot(t *testing.T) {
+	t.Parallel()
+
+	store, plain := newFake(), newFake()
+
+	sink, err := kv.NewSink(store, kv.WithPrefix(prefix), kv.RootKey("value"))
+	if err != nil {
+		t.Fatalf("NewSink refused kv.RootKey: %v", err)
+	}
+
+	if _, err := kv.NewSource(newFake(), kv.WithPrefix(prefix), kv.RootKey("value")); err != nil {
+		t.Fatalf("NewSource refused kv.RootKey: %v", err)
+	}
+
+	cfg := three{Host: "h", Port: "8080", Zone: "eu"}
+	dumpInto(t, cfg, sink)
+	dumpInto(t, cfg, mustSink(t, plain))
+
+	if got, want := string(store.contents()), string(plain.contents()); got != want {
+		t.Errorf("the store holds\n%s\nwant what a sink without kv.RootKey wrote\n%s", got, want)
+	}
+}
+
+// dumpInto saves one value through one sink, failing the test where the save
+// itself is what went wrong.
+func dumpInto(t *testing.T, cfg three, sink *kv.Sink) {
+	t.Helper()
+
+	if err := ferry.Dump(t.Context(), cfg, sink); err != nil {
+		t.Fatalf("Dump: %v", err)
 	}
 }
