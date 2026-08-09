@@ -285,6 +285,11 @@ It is recorded as the runner-up rather than dismissed: the difficulty of naming 
 > **The rule is exactly the one this section states and is why the fourth fits without argument**: everything a compile depends on is in the key, and anything that is not compile-affecting stays out.
 > The shape is unchanged too - the cache still hangs off the registry, and the inner key is still one comparable struct - so the measurements below still describe the mechanism that ships, with one more comparable field in the struct they measure.
 
+> **Corrected under [#336](https://github.com/onhotpath/ferry/issues/336): the closed Option set is four rather than three, and the new member is compile-affecting and in the key.**
+>
+> `ferry.RootRequired` declares the root address required, which no tag can do ([ADR-0006](0006-defaults-and-zero-values.md), [ADR-0008](0008-the-struct-tag-grammar.md)), and one `reflect.Type` yields a required root under it and an optional one without it.
+> So it joins the inner key by exactly the rule below, as a comparable two-`bool` struct, and the key is five components in all.
+
 Nothing in that sentence is this ticket's to decide.
 ADR-0008 put the tag key in, ADR-0009 put the registry in, and both measured what happens without it.
 Both were re-run against a real compile rather than inherited:

@@ -139,6 +139,12 @@ The field rule, which is the other half of the grammar and is where most of the 
 > The row as published is unconditional, and the first row's reason - reflect cannot set an unexported field - reaches it wherever the tag makes the embedded field itself the position ferry writes at.
 > A struct is what the row still holds for, promoted or nested, and the measurement is in [the section below](#--skips-and-embedding-needs-no-word).
 
+> **Amended under [#336](https://github.com/onhotpath/ferry/issues/336): the table above is every field, and the grammar has exactly one address it cannot reach.**
+>
+> As published, the field rule was the whole reach of the grammar, because every address was named by a field's tag.
+> [ADR-0003](0003-how-a-leaf-addresses-a-plane.md) has since named the empty path the root address, and no field names it, so no tag can be written on it.
+> The declaration that would have gone on its tag lives in the Option list instead, as `ferry.RootRequired`, and it is the one declaration not spelled in this grammar ([ADR-0006](0006-defaults-and-zero-values.md)).
+
 ### What a struct tag can carry, and what it cannot
 
 This section is first because the grammar has to live inside it, and because what it measures is stronger than the one instance ADR-0006 recorded.
