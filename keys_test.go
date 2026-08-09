@@ -848,7 +848,7 @@ func checkSecondDumpRefused(t *testing.T, err error) {
 }
 
 // treeStore is a plane with no key space: a tree of nested mappings, which is
-// what a YAML or a Registry driver walks the segments into.
+// what a YAML driver walks the segments into.
 type treeStore struct{ root map[string]any }
 
 func newTreeStore() *treeStore { return &treeStore{root: map[string]any{}} }

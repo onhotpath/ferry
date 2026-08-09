@@ -321,8 +321,9 @@ func (a *AddressSet) firstComposite() (CompositeAddr, bool) {
 // each.
 //
 //	func (s Sink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
+//	    view, declared := addrs.Extension("yamlext")
 //	    nodeTags := map[ferry.Path]string{}
-//	    for addr, words := range addrs.Extension("yamlext") {
+//	    for addr, words := range view {
 //	        nodeTags[addr] = words["node"]
 //	    }
 //	    ...
@@ -333,16 +334,23 @@ func (a *AddressSet) firstComposite() (CompositeAddr, bool) {
 // still constructed the way it always was. Reading it once at Bind is the whole
 // idiom, since the answer is a property of the schema and not of a call.
 //
-// A driver sees extension data only for addresses it was bound to. A key
-// nothing declared, and a key no field carried, both yield an empty view rather
-// than an error, and the result is freshly allocated and the caller's to keep.
+// The second result reports the key having been declared on the registry this
+// schema was compiled against. A declared key no field carried yields an empty
+// view and true; a key nobody declared yields an empty view and false. Neither
+// is an error, so a driver whose words are an optional annotation may discard
+// it, and a driver whose absent word means something it would act on should
+// refuse at Bind instead of reading a missing declaration as a struct with no
+// annotations.
+//
+// A driver sees extension data only for addresses it was bound to, and the view
+// is freshly allocated and the caller's to keep.
 //
 // What is in it is inert to ferry: core validated the words against their
 // declaration and acts on none of them. Acting is yours, and so is the proof
 // that what you write can be read back.
-func (a *AddressSet) Extension(key string) map[Path]map[string]string {
+func (a *AddressSet) Extension(key string) (map[Path]map[string]string, bool) {
 	if a == nil {
-		return map[Path]map[string]string{}
+		return map[Path]map[string]string{}, false
 	}
 
 	return a.ext.Extension(key)
