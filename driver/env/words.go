@@ -158,24 +158,47 @@ func boolTable(words []string) (map[string]bool, error) {
 	return table, nil
 }
 
-// kindGate is where this plane's boolean words apply, which under the kind seam
-// is exactly where the schema wants a bool (proto: #309).
+// gate is where this plane's boolean words apply, which under the kind seam is
+// exactly where the schema wants a bool (proto: #309).
 //
-// It is built once, at Bind, off the address set, and never written to
-// afterwards, so one binding is still readable from many goroutines with no
+// It is one interface here only because the #309 surface exploration compares
+// four spellings of the same question against one exhibit. A shipping driver
+// carries whichever one wins and no interface at all.
+//
+// Every implementation is built once, at Bind, and never written to afterwards,
+// so one binding is still readable from many goroutines with no
 // synchronisation.
-type kindGate struct {
-	// at is every declared leaf the schema wants a bool at.
-	at map[ferry.LeafAddr]bool
-	// under is the address of every composite whose minted members the schema
-	// wants a bool at. A minted address is in no address set, so it cannot be a
-	// key in the table above and the composite that will mint it answers for it.
+type gate interface {
+	holds(addr ferry.LeafAddr) bool
+}
+
+// planeWide is K1, which is what ships: the words decide for the whole plane and
+// no address is consulted.
+type planeWide struct{}
+
+func (planeWide) holds(ferry.LeafAddr) bool { return true }
+
+// setGate is what candidates A and B both build: a table of the declared leaves
+// the schema wants a bool at, and the composites whose minted members it wants
+// a bool at.
+//
+// The second half is there because a minted address is in no address set, so it
+// cannot be a key in the table and the composite that will mint it has to answer
+// for it. That is the prefix scan at the bottom of this file, and it is the cost
+// of keeping the answer on the set rather than on the address.
+type setGate struct {
+	at    map[ferry.LeafAddr]bool
 	under []ferry.Path
 }
 
-// boolGate reads the schema's kind at every address this binding covers.
-func boolGate(addrs *ferry.AddressSet) kindGate {
-	g := kindGate{at: make(map[ferry.LeafAddr]bool, addrs.Len())}
+// candidateA is the two-method spelling: KindAt at a leaf, ElemKind at a
+// composite, each asked in its own arm.
+// It does not fit in one function under this repository's complexity limit,
+// which is a measurement rather than a style note: two questions asked in two
+// arms is one branch more than the limit allows, so candidate A costs a driver
+// a helper that candidate B does not.
+func candidateA(addrs *ferry.AddressSet) gate {
+	g := &setGate{at: make(map[ferry.LeafAddr]bool, addrs.Len())}
 
 	for m := range addrs.Seq() {
 		g.admit(addrs, m)
@@ -185,7 +208,7 @@ func boolGate(addrs *ferry.AddressSet) kindGate {
 }
 
 // admit records one address if the schema wants a bool there.
-func (g *kindGate) admit(addrs *ferry.AddressSet, m ferry.Member) {
+func (g *setGate) admit(addrs *ferry.AddressSet, m ferry.Member) {
 	switch a := m.(type) {
 	case ferry.LeafAddr:
 		if k, ok := addrs.KindAt(a); ok && k == ferry.KindBool {
@@ -200,8 +223,31 @@ func (g *kindGate) admit(addrs *ferry.AddressSet, m ferry.Member) {
 	}
 }
 
+// candidateB is the one-method spelling: one question over the sealed sum, and
+// the type switch stays because what the driver stores still differs by kind.
+func candidateB(addrs *ferry.AddressSet) gate {
+	g := &setGate{at: make(map[ferry.LeafAddr]bool, addrs.Len())}
+
+	for m := range addrs.Seq() {
+		if k, ok := addrs.Kind(m); !ok || k != ferry.KindBool {
+			continue
+		}
+
+		switch a := m.(type) {
+		case ferry.LeafAddr:
+			g.at[a] = true
+		case ferry.CompositeAddr:
+			g.under = append(g.under, a.Path())
+		default:
+			// Unreachable: a section answers false above.
+		}
+	}
+
+	return g
+}
+
 // holds reports whether the schema wants a bool at this address.
-func (g kindGate) holds(addr ferry.LeafAddr) bool {
+func (g *setGate) holds(addr ferry.LeafAddr) bool {
 	if g.at[addr] {
 		return true
 	}
@@ -215,6 +261,16 @@ func (g kindGate) holds(addr ferry.LeafAddr) bool {
 	return false
 }
 
+// addrGate is candidate C, and it is the whole driver-side implementation: the
+// address a driver was handed already carries the schema's answer, so there is
+// no table, no Bind pass, and no prefix scan for the addresses a value minted.
+type addrGate struct{}
+
+func (addrGate) holds(addr ferry.LeafAddr) bool { return addr.Kind() == ferry.KindBool }
+
+// candidateC needs the address set for nothing at all, which is the measurement.
+func candidateC(*ferry.AddressSet) gate { return addrGate{} }
+
 // observe is what one variable's text is at the boundary.
 //
 // It is a String unless a declared word says it is a bool, which is how a plane
@@ -224,11 +280,9 @@ func (g kindGate) holds(addr ferry.LeafAddr) bool {
 //
 // The gate is the prototyped half: the words are applied where the schema wants
 // a bool and nowhere else, so a variable holding a declared word is still text
-// at a string field (proto: #309, K2). With [config.ungated] set the driver is
-// K1, which is what ships: the words decide plane-wide and the address is not
-// consulted.
+// at a string field (proto: #309, K2).
 func (r *reader) observe(addr ferry.LeafAddr, text string) ferry.Value {
-	if !r.cfg.ungated && !r.gate.holds(addr) {
+	if !r.gate.holds(addr) {
 		return ferry.String(text)
 	}
 

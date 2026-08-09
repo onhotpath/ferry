@@ -1295,7 +1295,7 @@ func (c *compiler) addressSet() *AddressSet {
 	members := make([]Member, 0, len(c.leaves)+len(c.sections)+len(c.composites))
 
 	for _, l := range c.leaves {
-		members = append(members, leafOf(l.addr))
+		members = append(members, leafWanting(l.addr, l.kind))
 	}
 
 	for _, k := range c.sections {
@@ -1303,7 +1303,7 @@ func (c *compiler) addressSet() *AddressSet {
 	}
 
 	for _, k := range c.composites {
-		members = append(members, compositeOf(k.addr))
+		members = append(members, compositeWanting(k.addr, c.elemKinds[k.addr]))
 	}
 
 	a := newAddressSet(members...)
@@ -1319,7 +1319,7 @@ func (c *compiler) addressSet() *AddressSet {
 func (c *compiler) leafKinds() map[LeafAddr]VKind {
 	out := make(map[LeafAddr]VKind, len(c.leaves))
 	for _, l := range c.leaves {
-		out[leafOf(l.addr)] = l.kind
+		out[leafWanting(l.addr, l.kind)] = l.kind
 	}
 
 	return out
@@ -1330,7 +1330,7 @@ func (c *compiler) leafKinds() map[LeafAddr]VKind {
 func (c *compiler) compositeElemKinds() map[CompositeAddr]VKind {
 	out := make(map[CompositeAddr]VKind, len(c.elemKinds))
 	for addr, kind := range c.elemKinds {
-		out[compositeOf(addr)] = kind
+		out[compositeWanting(addr, kind)] = kind
 	}
 
 	return out

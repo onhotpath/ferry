@@ -79,7 +79,7 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 	}
 
 	cfg := s.cfg
-	gate := boolGate(addrs)
+	gate := s.cfg.gate(addrs)
 
 	return func(context.Context) (ferry.Reader, error) {
 		return &reader{
@@ -265,7 +265,7 @@ type reader struct {
 
 	// gate is where this plane's boolean words apply, read off the schema's own
 	// kind at Bind (proto: #309).
-	gate kindGate
+	gate gate
 
 	// names is the binding's checked name table, and it is here for the reports
 	// rather than for the reads: it answers what this plane calls an address

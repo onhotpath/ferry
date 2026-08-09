@@ -205,7 +205,7 @@ type spot struct {
 // rather than carried on the node, because a node under a dynamic composite
 // holds an address shape and the address is the one the walk realised
 // (ADR-0016).
-func (s spot) leaf() LeafAddr { return leafOf(s.at) }
+func (s spot) leaf() LeafAddr { return leafWanting(s.at, s.n.codec.kind) }
 
 // container is the typed address of the container this position occupies, at
 // the kind the compiler decided for it. Its callers are the three arms that
@@ -216,12 +216,22 @@ func (s spot) container() Container {
 		return sectionOf(s.at)
 	}
 
-	return compositeOf(s.at)
+	return compositeWanting(s.at, s.elemWant())
 }
 
 // composite is the typed address of a dynamic container, which is what a driver
 // is asked to enumerate.
-func (s spot) composite() CompositeAddr { return compositeOf(s.at) }
+func (s spot) composite() CompositeAddr { return compositeWanting(s.at, s.elemWant()) }
+
+// elemWant is the kind the schema wants at the leaves this composite's value
+// mints, and KindAbsent where its members are not leaves (proto: #309, C).
+func (s spot) elemWant() VKind {
+	if len(s.n.fields) == 0 {
+		return KindAbsent
+	}
+
+	return s.n.fields[elemShape].codec.kind
+}
 
 // child is the address of one member a driver enumerated: the driver minted the
 // segment and the schema types what is at it (ADR-0016).
@@ -1459,7 +1469,11 @@ func (r *realising) member(v reflect.Value, at Path, into descend) {
 // once, at [collided].
 func (r *realising) mint(at Path) error {
 	_, taken := r.b.out.minted[at]
-	if taken || r.addrs.Has(memberAt(r.kind, at)) {
+	// The kind is not part of what Has compares, so the address minted for the
+	// question carries none. That asymmetry is candidate C's own wart: an
+	// address built to ask about a place is == to nothing, and only the set's
+	// own ordering saves it (proto: #309).
+	if taken || r.addrs.Has(memberAt(r.kind, at, KindAbsent)) {
 		return collided(at, r.s)
 	}
 

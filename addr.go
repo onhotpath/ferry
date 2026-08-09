@@ -24,7 +24,17 @@ import (
 // computed before any I/O.
 //
 // Read it with [LeafAddr.Path], which is what a key function walks.
-type LeafAddr struct{ p Path }
+type LeafAddr struct {
+	p Path
+
+	// want is the kind the schema wants at this address, carried on the address
+	// itself rather than looked up in the set it came from. It is candidate C
+	// of the #309 surface exploration and it is what makes a minted address
+	// answer for itself: the walk mints one from the node it is standing at, so
+	// a map's element carries its element kind with no lookup and no prefix
+	// scan (proto: #309).
+	want VKind
+}
 
 // SectionAddr is the address of a place whose children are known from the type:
 // a struct, an array, or either of those behind a pointer.
@@ -42,7 +52,13 @@ type SectionAddr struct{ p Path }
 // them. Which Go type produced it is not part of the address: a []string and a
 // map[string]string are both a CompositeAddr, and a driver mints the [Name] or
 // [Index] segments while the schema types the child they name.
-type CompositeAddr struct{ p Path }
+type CompositeAddr struct {
+	p Path
+
+	// want is the kind the schema wants at the leaves this composite's value
+	// mints, and KindAbsent where its members are not leaves (proto: #309, C).
+	want VKind
+}
 
 // Member is one address a compiled schema determines: a [LeafAddr], a
 // [SectionAddr] or a [CompositeAddr], and nothing else.
@@ -126,9 +142,38 @@ var (
 // compiler reaches these, and it reaches them from the node kind it decided
 // (ADR-0016).
 
-func leafOf(p Path) LeafAddr           { return LeafAddr{p: p} }
-func sectionOf(p Path) SectionAddr     { return SectionAddr{p: p} }
+// leafOf mints an address to ask a question with, carrying no kind. Candidate C
+// needs it, and it is the hole candidate C opens: an address built without the
+// schema's answer is == to no address the compiler minted, so a table keyed by
+// one silently misses (proto: #309).
+func leafOf(p Path) LeafAddr { return LeafAddr{p: p} }
+
+func sectionOf(p Path) SectionAddr { return SectionAddr{p: p} }
+
 func compositeOf(p Path) CompositeAddr { return CompositeAddr{p: p} }
+
+// leafWanting and compositeWanting are the mints that carry the schema's answer:
+// the compiler's, and the walk's own from the node it is standing at.
+func leafWanting(p Path, want VKind) LeafAddr { return LeafAddr{p: p, want: want} }
+
+func compositeWanting(p Path, want VKind) CompositeAddr { return CompositeAddr{p: p, want: want} }
+
+// Kind is the kind of value the schema wants at this address.
+//
+// It is read off the address a driver already holds, so an address a value
+// minted answers for itself and there is nothing to look up.
+//
+// It is plane vocabulary and never a Go type, and it is what the schema wants
+// rather than the whole of what it will take: a leaf accepts a [KindString]
+// beside its own kind whatever this answers.
+func (a LeafAddr) Kind() VKind { return a.want }
+
+// ElemKind is the kind the schema wants at the leaves this composite's value
+// mints, and [KindAbsent] where its members are not leaves at all.
+//
+// A driver reading it needs it only before it has minted anything: an address
+// the walk hands back from [Enumerator.Children] carries its own kind.
+func (a CompositeAddr) ElemKind() VKind { return a.want }
 
 // addrKind is how the compiler's own answer for a position travels to the
 // places that need a typed address for it: the walk realises an address per
@@ -144,14 +189,14 @@ const (
 // memberAt mints the address of one kind at one path. It is the one place a
 // typed address is built from an untyped one, so the rule that the schema types
 // every address is a rule with a single site (ADR-0016).
-func memberAt(k addrKind, p Path) Member {
+func memberAt(k addrKind, p Path, want VKind) Member {
 	switch k {
 	case kindLeaf:
-		return leafOf(p)
+		return leafWanting(p, want)
 	case kindSection:
 		return sectionOf(p)
 	default:
-		return compositeOf(p)
+		return compositeWanting(p, want)
 	}
 }
 
@@ -367,6 +412,28 @@ func (a *AddressSet) ElemKind(addr CompositeAddr) (VKind, bool) {
 	k, ok := a.elems[addr]
 
 	return k, ok
+}
+
+// Kind is what the schema wants at one member of this set: the value at a
+// [LeafAddr], and the value at each address a [CompositeAddr] will mint.
+//
+// At a leaf it is the kind the schema wants at that address. At a composite it
+// is the kind it wants at every address that composite's value mints. A
+// [SectionAddr] holds no value and answers false, and so does any address this
+// set does not hold.
+//
+// The blur it costs is that the answer is about the address at a leaf and about
+// addresses that do not exist yet at a composite, so a caller that does not
+// switch on the member cannot tell which sentence it was told.
+func (a *AddressSet) Kind(m Member) (VKind, bool) {
+	switch addr := m.(type) {
+	case LeafAddr:
+		return a.KindAt(addr)
+	case CompositeAddr:
+		return a.ElemKind(addr)
+	default:
+		return KindAbsent, false
+	}
 }
 
 // Has reports whether the set holds this address, at this kind.

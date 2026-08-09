@@ -17,13 +17,37 @@ import (
 // K1 is what ships. The words decide plane-wide, so FEATURE=on arrives as a
 // Bool wherever it is read and a string field over it is refused.
 //
-// K2 is what is prototyped here. The address set carries the schema's kind at
-// every address, the driver reads it at Bind, and the words apply only where
-// the schema wants a bool.
+// K2 is what is prototyped here. The schema's kind reaches the driver, and the
+// words apply only where the schema wants a bool.
+//
+// K2 is ratified, so what this file compares now is how the kind reaches the
+// driver: candidate A is two methods on the address set, candidate B is one,
+// candidate C puts the answer on the address itself. Every gated candidate runs
+// the same exhibit, so the comparison is between working things.
 
-// ungated builds a K1 source out of the K2 driver, so both paths are runnable
-// from one branch. It is not shipped surface.
-func ungated() Option { return optionFunc(func(c *config) { c.ungated = true }) }
+// using selects which spelling of the seam a Source builds its gate with.
+func using(build func(*ferry.AddressSet) gate) Option {
+	return optionFunc(func(c *config) { c.gate = build })
+}
+
+// ungated is K1, which is what ships.
+func ungated() Option {
+	return using(func(*ferry.AddressSet) gate { return planeWide{} })
+}
+
+// candidate is one spelling of the seam, run against the whole exhibit.
+type candidate struct {
+	name  string
+	build func(*ferry.AddressSet) gate
+}
+
+// gated is every candidate that consults the schema's kind. K1 is not one of
+// them and is asserted on its own, because its whole behaviour is different.
+var gated = []candidate{
+	{"A_two_methods_on_the_set", candidateA},
+	{"B_one_method_on_the_set", candidateB},
+	{"C_kind_rides_the_address", candidateC},
+}
 
 // oneEnvironment is the one environment both readers are pointed at.
 func oneEnvironment() Option {
@@ -69,7 +93,20 @@ func TestTwoReadersOfOneEnvironmentUnderK1(t *testing.T) {
 func TestTwoReadersOfOneEnvironmentUnderK2(t *testing.T) {
 	t.Parallel()
 
-	words := []Option{BoolWords("on", "off"), oneEnvironment()}
+	for _, c := range gated {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			twoReaders(t, c)
+		})
+	}
+}
+
+// twoReaders is the exhibit: one environment, a bool schema and a string
+// schema, and both of them loading.
+func twoReaders(t *testing.T, c candidate) {
+	t.Helper()
+
+	words := []Option{BoolWords("on", "off"), oneEnvironment(), using(c.build)}
 
 	a, err := ferry.Load[readerA](context.Background(), New(words...))
 	if err != nil {
@@ -112,8 +149,20 @@ func TestTheCollisionInsideOneSchema(t *testing.T) {
 
 	t.Logf("K1 mixed: %v", err)
 
+	for _, c := range gated {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			collisionLoads(t, c)
+		})
+	}
+}
+
+// collisionLoads is the mixed schema loading under one candidate.
+func collisionLoads(t *testing.T, c candidate) {
+	t.Helper()
+
 	k2, err := ferry.Load[mixed](context.Background(),
-		New(BoolWords("on", "off"), mixedEnvironment()))
+		New(BoolWords("on", "off"), mixedEnvironment(), using(c.build)))
 	if err != nil {
 		t.Fatalf("K2 mixed: %v", err)
 	}
@@ -134,7 +183,20 @@ func TestAMintedAddressIsGatedByItsComposite(t *testing.T) {
 
 	environ := Environ(func() []string { return []string{"FLAGS_BETA=on"} })
 
-	got, err := ferry.Load[minted](context.Background(), New(BoolWords("on", "off"), environ))
+	for _, c := range gated {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			mintedBoolLoads(t, c, environ)
+		})
+	}
+}
+
+// mintedBoolLoads is one candidate answering for an address the value minted.
+func mintedBoolLoads(t *testing.T, c candidate, environ Option) {
+	t.Helper()
+
+	got, err := ferry.Load[minted](context.Background(),
+		New(BoolWords("on", "off"), environ, using(c.build)))
 	if err != nil {
 		t.Fatalf("K2 minted: %v", err)
 	}
@@ -254,7 +316,20 @@ func TestTheRoundTripClosesOnlyUnderK2(t *testing.T) {
 		t.Fatal("K1: the round trip closed, and the shipped sharp edge says it does not")
 	}
 
-	back, err := ferry.Load[readerB](context.Background(), New(BoolWords("on", "off"), environ))
+	for _, c := range gated {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			roundTripCloses(t, c, environ)
+		})
+	}
+}
+
+// roundTripCloses is the string reader reading back what the sink wrote.
+func roundTripCloses(t *testing.T, c candidate, environ Option) {
+	t.Helper()
+
+	back, err := ferry.Load[readerB](context.Background(),
+		New(BoolWords("on", "off"), environ, using(c.build)))
 	if err != nil {
 		t.Fatalf("K2 round trip: %v", err)
 	}
@@ -274,7 +349,20 @@ func TestAMintedAddressAtAStringElementIsNotGated(t *testing.T) {
 
 	environ := Environ(func() []string { return []string{"FLAGS_BETA=on"} })
 
-	got, err := ferry.Load[textFlags](context.Background(), New(BoolWords("on", "off"), environ))
+	for _, c := range gated {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			mintedTextLoads(t, c, environ)
+		})
+	}
+}
+
+// mintedTextLoads is the same address one kind over: the words must not reach it.
+func mintedTextLoads(t *testing.T, c candidate, environ Option) {
+	t.Helper()
+
+	got, err := ferry.Load[textFlags](context.Background(),
+		New(BoolWords("on", "off"), environ, using(c.build)))
 	if err != nil {
 		t.Fatalf("K2 minted text: %v", err)
 	}
@@ -329,7 +417,8 @@ func BenchmarkLoad(b *testing.B) {
 		opts []Option
 	}{
 		{"k1_plane_wide", []Option{BoolWords("on", "off"), oneEnvironment(), ungated()}},
-		{"k2_kind_gated", []Option{BoolWords("on", "off"), oneEnvironment()}},
+		{"k2_A_two_methods", []Option{BoolWords("on", "off"), oneEnvironment(), using(candidateA)}},
+		{"k2_C_on_the_address", []Option{BoolWords("on", "off"), oneEnvironment(), using(candidateC)}},
 	} {
 		b.Run(tc.name, func(b *testing.B) { benchLoad(b, tc.opts) })
 	}

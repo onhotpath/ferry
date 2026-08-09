@@ -41,10 +41,10 @@ type config struct {
 	// for: this plane holds text and nothing else, so a variable is a String
 	// unless a word of this plane's own says it is a bool (ADR-0018).
 	bools ferry.Spelling[bool, string]
-	// ungated selects the shipped, plane-wide reading of the words over the
-	// prototyped kind-gated one, so that both paths are exhibitable from one
-	// branch. It is not shipped surface (proto: #309).
-	ungated bool
+	// gate is which spelling of the kind seam this Source builds its gate with,
+	// so that K1 and every candidate surface run from one branch against one
+	// exhibit. It is not shipped surface (proto: #309).
+	gate func(*ferry.AddressSet) gate
 	// wordsErr is what building it refused with, held until Bind for the reason
 	// [ErrOption] gives: an Option is applied inside [New], which returns no
 	// error, so the refusal waits for the first moment the driver is asked for
@@ -64,7 +64,7 @@ const DefaultSeparator = "_"
 
 // defaults is the configuration a [Source] starts from.
 func defaults() config {
-	return config{sep: DefaultSeparator, canon: Lower, environ: os.Environ}
+	return config{sep: DefaultSeparator, canon: Lower, environ: os.Environ, gate: candidateA}
 }
 
 // Separator sets the string nested fields are joined with.
