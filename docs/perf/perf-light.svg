@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="1094" viewBox="0 0 1180 1094" role="img" aria-label="time and allocations per load, cold and warm, over 8 rows in each of 5 scenarios">
-<rect x="0" y="0" width="1180" height="1094" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="1268" viewBox="0 0 1180 1268" role="img" aria-label="time and allocations per load, cold and warm, over 8 rows in each of 6 scenarios">
+<rect x="0" y="0" width="1180" height="1268" fill="#ffffff"/>
 <text x="16.0" y="26.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="15.0" font-weight="600" fill="#1f2328" text-anchor="start">ferry against the libraries people choose between</text>
 <text x="16.0" y="45.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#59636e" text-anchor="start">One populated struct, one source, asserted identical across every library before anything was timed.</text>
 <text x="16.0" y="60.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#59636e" text-anchor="start">ubuntu-latest, Go go1.27rc2, -count 10, -benchtime 1s. Whiskers are benchstat's 95% confidence interval.</text>
@@ -13,274 +13,205 @@
 <line x1="736.0" y1="78.0" x2="736.0" y2="90.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
 <text x="746.0" y="88.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#9a6700" text-anchor="start">baseline: the same work, no mapping library; nothing beats it</text>
 <text x="184.0" y="102.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#1f2328" text-anchor="start">time per operation (log scale)</text>
-<line x1="184.0" y1="112.0" x2="184.0" y2="1012.0" stroke="#d1d9e0" stroke-width="1.0"/>
-<text x="184.0" y="1026.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">100ns</text>
-<line x1="301.0" y1="112.0" x2="301.0" y2="1012.0" stroke="#d1d9e0" stroke-width="1.0"/>
-<text x="301.0" y="1026.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">1.00µs</text>
-<line x1="418.0" y1="112.0" x2="418.0" y2="1012.0" stroke="#d1d9e0" stroke-width="1.0"/>
-<text x="418.0" y="1026.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">10.0µs</text>
-<line x1="535.0" y1="112.0" x2="535.0" y2="1012.0" stroke="#d1d9e0" stroke-width="1.0"/>
-<text x="535.0" y="1026.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">100µs</text>
-<line x1="652.0" y1="112.0" x2="652.0" y2="1012.0" stroke="#d1d9e0" stroke-width="1.0"/>
-<text x="652.0" y="1026.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">1.00ms</text>
+<line x1="184.0" y1="112.0" x2="184.0" y2="1186.0" stroke="#d1d9e0" stroke-width="1.0"/>
+<text x="184.0" y="1200.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">100ns</text>
+<line x1="301.0" y1="112.0" x2="301.0" y2="1186.0" stroke="#d1d9e0" stroke-width="1.0"/>
+<text x="301.0" y="1200.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">1.00µs</text>
+<line x1="418.0" y1="112.0" x2="418.0" y2="1186.0" stroke="#d1d9e0" stroke-width="1.0"/>
+<text x="418.0" y="1200.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">10.0µs</text>
+<line x1="535.0" y1="112.0" x2="535.0" y2="1186.0" stroke="#d1d9e0" stroke-width="1.0"/>
+<text x="535.0" y="1200.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">100µs</text>
+<line x1="652.0" y1="112.0" x2="652.0" y2="1186.0" stroke="#d1d9e0" stroke-width="1.0"/>
+<text x="652.0" y="1200.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">1.00ms</text>
 <text x="696.0" y="102.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#1f2328" text-anchor="start">allocations per operation (linear, from zero)</text>
-<line x1="696.0" y1="112.0" x2="696.0" y2="1012.0" stroke="#d1d9e0" stroke-width="1.0"/>
-<text x="696.0" y="1026.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">0</text>
-<line x1="813.0" y1="112.0" x2="813.0" y2="1012.0" stroke="#d1d9e0" stroke-width="1.0"/>
-<text x="813.0" y="1026.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">625</text>
-<line x1="930.0" y1="112.0" x2="930.0" y2="1012.0" stroke="#d1d9e0" stroke-width="1.0"/>
-<text x="930.0" y="1026.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">1250</text>
-<line x1="1047.0" y1="112.0" x2="1047.0" y2="1012.0" stroke="#d1d9e0" stroke-width="1.0"/>
-<text x="1047.0" y="1026.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">1875</text>
-<line x1="1164.0" y1="112.0" x2="1164.0" y2="1012.0" stroke="#d1d9e0" stroke-width="1.0"/>
-<text x="1164.0" y="1026.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">2500</text>
+<line x1="696.0" y1="112.0" x2="696.0" y2="1186.0" stroke="#d1d9e0" stroke-width="1.0"/>
+<text x="696.0" y="1200.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">0</text>
+<line x1="813.0" y1="112.0" x2="813.0" y2="1186.0" stroke="#d1d9e0" stroke-width="1.0"/>
+<text x="813.0" y="1200.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">625</text>
+<line x1="930.0" y1="112.0" x2="930.0" y2="1186.0" stroke="#d1d9e0" stroke-width="1.0"/>
+<text x="930.0" y="1200.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">1250</text>
+<line x1="1047.0" y1="112.0" x2="1047.0" y2="1186.0" stroke="#d1d9e0" stroke-width="1.0"/>
+<text x="1047.0" y="1200.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">1875</text>
+<line x1="1164.0" y1="112.0" x2="1164.0" y2="1186.0" stroke="#d1d9e0" stroke-width="1.0"/>
+<text x="1164.0" y="1200.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.0" font-weight="400" fill="#8c959f" text-anchor="middle">2500</text>
 <text x="16.0" y="138.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12.0" font-weight="600" fill="#1f2328" text-anchor="start">env_small</text>
-<line x1="213.1" y1="154.0" x2="213.1" y2="290.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
+<line x1="212.8" y1="154.0" x2="212.8" y2="290.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
 <line x1="696.0" y1="154.0" x2="696.0" y2="290.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
 <text x="29.0" y="166.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#9a6700" text-anchor="start">stdlib (baseline)</text>
-<line x1="213.1" y1="162.5" x2="213.3" y2="162.5" stroke="#8c959f" stroke-width="1.0"/>
-<circle cx="213.3" cy="162.5" r="3.6" fill="#ffffff" stroke="#9a6700" stroke-width="1.6"/>
-<circle cx="213.1" cy="162.5" r="3.6" fill="#9a6700"/>
+<line x1="212.8" y1="162.5" x2="213.0" y2="162.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="213.0" cy="162.5" r="3.6" fill="#ffffff" stroke="#9a6700" stroke-width="1.6"/>
+<circle cx="212.8" cy="162.5" r="3.6" fill="#9a6700"/>
 <rect x="696.0" y="157.0" width="0.6" height="5.0" fill="#e0b872"/>
 <rect x="696.0" y="163.0" width="0.6" height="5.0" fill="#e0b872"/>
 <text x="29.0" y="183.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">go-envconfig</text>
-<line x1="285.4" y1="179.5" x2="287.5" y2="179.5" stroke="#8c959f" stroke-width="1.0"/>
-<circle cx="287.5" cy="179.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="285.4" cy="179.5" r="3.6" fill="#0969da"/>
+<line x1="282.9" y1="179.5" x2="285.3" y2="179.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="285.3" cy="179.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="282.9" cy="179.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="174.0" width="0.6" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="180.0" width="0.6" height="5.0" fill="#54aeff"/>
 <circle cx="20.0" cy="196.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
 <text x="29.0" y="200.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry-bound</text>
-<line x1="316.2" y1="196.5" x2="410.5" y2="196.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="410.0" y1="196.5" x2="411.0" y2="196.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="410.0" y1="193.5" x2="410.0" y2="199.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="411.0" y1="193.5" x2="411.0" y2="199.5" stroke="#8250df" stroke-width="1.2"/>
-<circle cx="410.5" cy="196.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="316.2" cy="196.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="191.0" width="17.2" height="5.0" fill="#c9a7f5"/>
-<rect x="696.0" y="197.0" width="3.4" height="5.0" fill="#54aeff"/>
+<line x1="328.2" y1="196.5" x2="420.9" y2="196.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="327.6" y1="196.5" x2="328.7" y2="196.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="327.6" y1="193.5" x2="327.6" y2="199.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="328.7" y1="193.5" x2="328.7" y2="199.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="420.9" cy="196.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="328.2" cy="196.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="191.0" width="22.1" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="197.0" width="2.2" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="217.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">xload</text>
-<line x1="334.9" y1="213.5" x2="335.7" y2="213.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="334.4" y1="213.5" x2="335.5" y2="213.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="334.4" y1="210.5" x2="334.4" y2="216.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="335.5" y1="210.5" x2="335.5" y2="216.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="335.7" cy="213.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="334.9" cy="213.5" r="3.6" fill="#0969da"/>
+<line x1="333.3" y1="213.5" x2="334.0" y2="213.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="334.0" cy="213.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="333.3" cy="213.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="208.0" width="3.4" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="214.0" width="3.2" height="5.0" fill="#54aeff"/>
-<circle cx="20.0" cy="230.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
-<text x="29.0" y="234.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry</text>
-<line x1="358.1" y1="230.5" x2="411.0" y2="230.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="409.4" y1="230.5" x2="412.5" y2="230.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="409.4" y1="227.5" x2="409.4" y2="233.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="412.5" y1="227.5" x2="412.5" y2="233.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="357.6" y1="230.5" x2="358.6" y2="230.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="357.6" y1="227.5" x2="357.6" y2="233.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="358.6" y1="227.5" x2="358.6" y2="233.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="411.0" cy="230.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="358.1" cy="230.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="225.0" width="17.2" height="5.0" fill="#c9a7f5"/>
-<rect x="696.0" y="231.0" width="7.1" height="5.0" fill="#54aeff"/>
-<text x="29.0" y="251.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">kelseyhightower</text>
-<line x1="362.1" y1="247.5" x2="362.1" y2="247.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="361.6" y1="247.5" x2="362.6" y2="247.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="361.6" y1="244.5" x2="361.6" y2="250.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="362.6" y1="244.5" x2="362.6" y2="250.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="361.6" y1="247.5" x2="362.6" y2="247.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="361.6" y1="244.5" x2="361.6" y2="250.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="362.6" y1="244.5" x2="362.6" y2="250.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="362.1" cy="247.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="362.1" cy="247.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="242.0" width="10.7" height="5.0" fill="#c9a7f5"/>
-<rect x="696.0" y="248.0" width="10.5" height="5.0" fill="#54aeff"/>
+<text x="29.0" y="234.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">kelseyhightower</text>
+<line x1="361.7" y1="230.5" x2="362.0" y2="230.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="361.5" y1="230.5" x2="362.5" y2="230.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="361.5" y1="227.5" x2="361.5" y2="233.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="362.5" y1="227.5" x2="362.5" y2="233.5" stroke="#8250df" stroke-width="1.2"/>
+<circle cx="362.0" cy="230.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="361.7" cy="230.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="225.0" width="10.7" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="231.0" width="10.5" height="5.0" fill="#54aeff"/>
+<circle cx="20.0" cy="247.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
+<text x="29.0" y="251.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry</text>
+<line x1="378.7" y1="247.5" x2="421.0" y2="247.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="420.0" y1="247.5" x2="422.0" y2="247.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="420.0" y1="244.5" x2="420.0" y2="250.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="422.0" y1="244.5" x2="422.0" y2="250.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="378.2" y1="247.5" x2="379.2" y2="247.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="378.2" y1="244.5" x2="378.2" y2="250.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="379.2" y1="244.5" x2="379.2" y2="250.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="421.0" cy="247.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="378.7" cy="247.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="242.0" width="22.1" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="248.0" width="10.7" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="268.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">viper</text>
-<line x1="406.9" y1="264.5" x2="416.0" y2="264.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="406.4" y1="264.5" x2="407.4" y2="264.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="406.4" y1="261.5" x2="406.4" y2="267.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="407.4" y1="261.5" x2="407.4" y2="267.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="416.0" cy="264.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="406.9" cy="264.5" r="3.6" fill="#0969da"/>
+<line x1="403.4" y1="264.5" x2="412.5" y2="264.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="402.9" y1="264.5" x2="403.9" y2="264.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="402.9" y1="261.5" x2="402.9" y2="267.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="403.9" y1="261.5" x2="403.9" y2="267.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="412.5" cy="264.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="403.4" cy="264.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="259.0" width="16.7" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="265.0" width="12.5" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="285.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">koanf</text>
-<line x1="439.4" y1="281.5" x2="439.5" y2="281.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="439.0" y1="281.5" x2="440.0" y2="281.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="439.0" y1="278.5" x2="439.0" y2="284.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="440.0" y1="278.5" x2="440.0" y2="284.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="438.9" y1="281.5" x2="439.9" y2="281.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="438.9" y1="278.5" x2="438.9" y2="284.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="439.9" y1="278.5" x2="439.9" y2="284.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="439.5" cy="281.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="439.4" cy="281.5" r="3.6" fill="#0969da"/>
+<line x1="435.5" y1="281.5" x2="435.7" y2="281.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="435.0" y1="281.5" x2="436.0" y2="281.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="435.0" y1="278.5" x2="435.0" y2="284.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="436.0" y1="278.5" x2="436.0" y2="284.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="435.7" cy="281.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="435.5" cy="281.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="276.0" width="32.2" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="282.0" width="32.0" height="5.0" fill="#54aeff"/>
 <text x="16.0" y="312.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12.0" font-weight="600" fill="#1f2328" text-anchor="start">env_large</text>
-<line x1="347.5" y1="328.0" x2="347.5" y2="464.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
+<line x1="346.3" y1="328.0" x2="346.3" y2="464.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
 <line x1="696.9" y1="328.0" x2="696.9" y2="464.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
 <text x="29.0" y="340.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#9a6700" text-anchor="start">stdlib (baseline)</text>
-<line x1="347.5" y1="336.5" x2="347.5" y2="336.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="347.0" y1="336.5" x2="348.0" y2="336.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="347.0" y1="333.5" x2="347.0" y2="339.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="348.0" y1="333.5" x2="348.0" y2="339.5" stroke="#9a6700" stroke-width="1.2"/>
-<circle cx="347.5" cy="336.5" r="3.6" fill="#ffffff" stroke="#9a6700" stroke-width="1.6"/>
-<circle cx="347.5" cy="336.5" r="3.6" fill="#9a6700"/>
+<line x1="346.3" y1="336.5" x2="346.4" y2="336.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="346.4" cy="336.5" r="3.6" fill="#ffffff" stroke="#9a6700" stroke-width="1.6"/>
+<circle cx="346.3" cy="336.5" r="3.6" fill="#9a6700"/>
 <rect x="696.0" y="331.0" width="0.9" height="5.0" fill="#e0b872"/>
 <rect x="696.0" y="337.0" width="0.9" height="5.0" fill="#e0b872"/>
 <text x="29.0" y="357.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">go-envconfig</text>
-<line x1="430.2" y1="353.5" x2="430.5" y2="353.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="429.7" y1="353.5" x2="430.7" y2="353.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="429.7" y1="350.5" x2="429.7" y2="356.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="430.7" y1="350.5" x2="430.7" y2="356.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="430.5" cy="353.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="430.2" cy="353.5" r="3.6" fill="#0969da"/>
+<line x1="428.0" y1="353.5" x2="428.4" y2="353.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="428.4" cy="353.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="428.0" cy="353.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="348.0" width="5.2" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="354.0" width="5.1" height="5.0" fill="#54aeff"/>
 <circle cx="20.0" cy="370.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
 <text x="29.0" y="374.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry-bound</text>
-<line x1="454.8" y1="370.5" x2="547.7" y2="370.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="547.2" y1="370.5" x2="548.2" y2="370.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="547.2" y1="367.5" x2="547.2" y2="373.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="548.2" y1="367.5" x2="548.2" y2="373.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="454.3" y1="370.5" x2="455.3" y2="370.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="454.3" y1="367.5" x2="454.3" y2="373.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="455.3" y1="367.5" x2="455.3" y2="373.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="547.7" cy="370.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="454.8" cy="370.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="365.0" width="123.9" height="5.0" fill="#c9a7f5"/>
-<rect x="696.0" y="371.0" width="27.7" height="5.0" fill="#54aeff"/>
+<line x1="460.1" y1="370.5" x2="574.1" y2="370.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="574.1" cy="370.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="460.1" cy="370.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="365.0" width="150.3" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="371.0" width="14.6" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="391.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">xload</text>
-<line x1="474.6" y1="387.5" x2="474.7" y2="387.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="474.2" y1="387.5" x2="475.2" y2="387.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="474.2" y1="384.5" x2="474.2" y2="390.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="475.2" y1="384.5" x2="475.2" y2="390.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="474.1" y1="387.5" x2="475.1" y2="387.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="474.1" y1="384.5" x2="474.1" y2="390.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="475.1" y1="384.5" x2="475.1" y2="390.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="474.7" cy="387.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="474.6" cy="387.5" r="3.6" fill="#0969da"/>
+<line x1="472.5" y1="387.5" x2="472.6" y2="387.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="472.5" cy="387.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="472.6" cy="387.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="382.0" width="47.2" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="388.0" width="47.0" height="5.0" fill="#54aeff"/>
-<circle cx="20.0" cy="404.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
-<text x="29.0" y="408.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry</text>
-<line x1="484.2" y1="404.5" x2="548.6" y2="404.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="548.1" y1="404.5" x2="549.1" y2="404.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="548.1" y1="401.5" x2="548.1" y2="407.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="549.1" y1="401.5" x2="549.1" y2="407.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="483.7" y1="404.5" x2="484.7" y2="404.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="483.7" y1="401.5" x2="483.7" y2="407.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="484.7" y1="401.5" x2="484.7" y2="407.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="548.6" cy="404.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="484.2" cy="404.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="399.0" width="123.9" height="5.0" fill="#c9a7f5"/>
-<rect x="696.0" y="405.0" width="41.2" height="5.0" fill="#54aeff"/>
-<text x="29.0" y="425.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">kelseyhightower</text>
-<line x1="509.0" y1="421.5" x2="509.4" y2="421.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="508.9" y1="421.5" x2="509.9" y2="421.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="508.9" y1="418.5" x2="508.9" y2="424.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="509.9" y1="418.5" x2="509.9" y2="424.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="508.5" y1="421.5" x2="509.5" y2="421.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="508.5" y1="418.5" x2="508.5" y2="424.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="509.5" y1="418.5" x2="509.5" y2="424.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="509.4" cy="421.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="509.0" cy="421.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="416.0" width="170.4" height="5.0" fill="#c9a7f5"/>
-<rect x="696.0" y="422.0" width="170.2" height="5.0" fill="#54aeff"/>
+<text x="29.0" y="408.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">kelseyhightower</text>
+<line x1="508.5" y1="404.5" x2="508.5" y2="404.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="508.0" y1="404.5" x2="509.0" y2="404.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="508.0" y1="401.5" x2="508.0" y2="407.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="509.0" y1="401.5" x2="509.0" y2="407.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="508.5" cy="404.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="508.5" cy="404.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="399.0" width="170.4" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="405.0" width="170.2" height="5.0" fill="#54aeff"/>
+<circle cx="20.0" cy="421.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
+<text x="29.0" y="425.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry</text>
+<line x1="513.4" y1="421.5" x2="574.1" y2="421.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="573.6" y1="421.5" x2="574.6" y2="421.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="573.6" y1="418.5" x2="573.6" y2="424.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="574.6" y1="418.5" x2="574.6" y2="424.5" stroke="#8250df" stroke-width="1.2"/>
+<circle cx="574.1" cy="421.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="513.4" cy="421.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="416.0" width="150.3" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="422.0" width="53.9" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="442.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">viper</text>
-<line x1="536.2" y1="438.5" x2="542.3" y2="438.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="541.8" y1="438.5" x2="542.8" y2="438.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="541.8" y1="435.5" x2="541.8" y2="441.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="542.8" y1="435.5" x2="542.8" y2="441.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="535.7" y1="438.5" x2="536.7" y2="438.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="535.7" y1="435.5" x2="535.7" y2="441.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="536.7" y1="435.5" x2="536.7" y2="441.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="542.3" cy="438.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="536.2" cy="438.5" r="3.6" fill="#0969da"/>
+<line x1="534.6" y1="438.5" x2="540.6" y2="438.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="540.6" cy="438.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="534.6" cy="438.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="433.0" width="190.4" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="439.0" width="172.2" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="459.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">koanf</text>
-<line x1="566.7" y1="455.5" x2="567.0" y2="455.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="566.5" y1="455.5" x2="567.5" y2="455.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="566.5" y1="452.5" x2="566.5" y2="458.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="567.5" y1="452.5" x2="567.5" y2="458.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="566.2" y1="455.5" x2="567.2" y2="455.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="566.2" y1="452.5" x2="566.2" y2="458.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="567.2" y1="452.5" x2="567.2" y2="458.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="567.0" cy="455.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="566.7" cy="455.5" r="3.6" fill="#0969da"/>
+<line x1="563.4" y1="455.5" x2="563.7" y2="455.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="562.9" y1="455.5" x2="563.9" y2="455.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="562.9" y1="452.5" x2="562.9" y2="458.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="563.9" y1="452.5" x2="563.9" y2="458.5" stroke="#8250df" stroke-width="1.2"/>
+<circle cx="563.4" cy="455.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="563.7" cy="455.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="450.0" width="350.8" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="456.0" width="350.6" height="5.0" fill="#54aeff"/>
 <text x="16.0" y="486.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12.0" font-weight="600" fill="#1f2328" text-anchor="start">yaml_small</text>
-<line x1="460.4" y1="502.0" x2="460.4" y2="638.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
+<line x1="458.3" y1="502.0" x2="458.3" y2="638.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
 <line x1="714.3" y1="502.0" x2="714.3" y2="638.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
 <text x="29.0" y="514.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">xload †</text>
-<line x1="341.4" y1="510.5" x2="469.0" y2="510.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="468.5" y1="510.5" x2="469.5" y2="510.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="468.5" y1="507.5" x2="468.5" y2="513.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="469.5" y1="507.5" x2="469.5" y2="513.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="340.9" y1="510.5" x2="341.9" y2="510.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="340.9" y1="507.5" x2="340.9" y2="513.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="341.9" y1="507.5" x2="341.9" y2="513.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="469.0" cy="510.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="341.4" cy="510.5" r="3.6" fill="#0969da"/>
+<line x1="339.0" y1="510.5" x2="466.8" y2="510.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="466.8" cy="510.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="339.0" cy="510.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="505.0" width="25.8" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="511.0" width="4.3" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="531.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#9a6700" text-anchor="start">stdlib (baseline)</text>
-<line x1="460.4" y1="527.5" x2="461.8" y2="527.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="461.3" y1="527.5" x2="462.3" y2="527.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="461.3" y1="524.5" x2="461.3" y2="530.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="462.3" y1="524.5" x2="462.3" y2="530.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="459.4" y1="527.5" x2="461.4" y2="527.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="459.4" y1="524.5" x2="459.4" y2="530.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="461.4" y1="524.5" x2="461.4" y2="530.5" stroke="#9a6700" stroke-width="1.2"/>
-<circle cx="461.8" cy="527.5" r="3.6" fill="#ffffff" stroke="#9a6700" stroke-width="1.6"/>
-<circle cx="460.4" cy="527.5" r="3.6" fill="#9a6700"/>
+<line x1="458.3" y1="527.5" x2="458.6" y2="527.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="458.6" cy="527.5" r="3.6" fill="#ffffff" stroke="#9a6700" stroke-width="1.6"/>
+<circle cx="458.3" cy="527.5" r="3.6" fill="#9a6700"/>
 <rect x="696.0" y="522.0" width="18.5" height="5.0" fill="#e0b872"/>
 <rect x="696.0" y="528.0" width="18.3" height="5.0" fill="#e0b872"/>
 <circle cx="20.0" cy="544.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
 <text x="29.0" y="548.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry-bound</text>
-<line x1="461.9" y1="544.5" x2="477.4" y2="544.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="475.9" y1="544.5" x2="478.9" y2="544.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="475.9" y1="541.5" x2="475.9" y2="547.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="478.9" y1="541.5" x2="478.9" y2="547.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="461.4" y1="544.5" x2="462.4" y2="544.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="461.4" y1="541.5" x2="461.4" y2="547.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="462.4" y1="541.5" x2="462.4" y2="547.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="477.4" cy="544.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="461.9" cy="544.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="539.0" width="29.8" height="5.0" fill="#c9a7f5"/>
+<line x1="461.4" y1="544.5" x2="478.5" y2="544.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="478.0" y1="544.5" x2="479.0" y2="544.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="478.0" y1="541.5" x2="478.0" y2="547.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="479.0" y1="541.5" x2="479.0" y2="547.5" stroke="#8250df" stroke-width="1.2"/>
+<circle cx="478.5" cy="544.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="461.4" cy="544.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="539.0" width="32.0" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="545.0" width="18.7" height="5.0" fill="#54aeff"/>
 <circle cx="20.0" cy="561.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
 <text x="29.0" y="565.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry</text>
-<line x1="463.2" y1="561.5" x2="477.4" y2="561.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="476.9" y1="561.5" x2="477.9" y2="561.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="476.9" y1="558.5" x2="476.9" y2="564.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="477.9" y1="558.5" x2="477.9" y2="564.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="462.7" y1="561.5" x2="463.7" y2="561.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="462.7" y1="558.5" x2="462.7" y2="564.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="463.7" y1="558.5" x2="463.7" y2="564.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="477.4" cy="561.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="463.2" cy="561.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="556.0" width="29.8" height="5.0" fill="#c9a7f5"/>
-<rect x="696.0" y="562.0" width="19.7" height="5.0" fill="#54aeff"/>
+<line x1="463.4" y1="561.5" x2="478.7" y2="561.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="478.7" cy="561.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="463.4" cy="561.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="556.0" width="32.0" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="562.0" width="20.4" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="582.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">viper</text>
-<line x1="484.4" y1="578.5" x2="485.1" y2="578.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="484.6" y1="578.5" x2="485.6" y2="578.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="484.6" y1="575.5" x2="484.6" y2="581.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="485.6" y1="575.5" x2="485.6" y2="581.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="483.9" y1="578.5" x2="484.9" y2="578.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="483.9" y1="575.5" x2="483.9" y2="581.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="484.9" y1="575.5" x2="484.9" y2="581.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="485.1" cy="578.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="484.4" cy="578.5" r="3.6" fill="#0969da"/>
+<line x1="481.1" y1="578.5" x2="482.7" y2="578.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="482.1" y1="578.5" x2="483.2" y2="578.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="482.1" y1="575.5" x2="482.1" y2="581.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="483.2" y1="575.5" x2="483.2" y2="581.5" stroke="#8250df" stroke-width="1.2"/>
+<circle cx="482.7" cy="578.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="481.1" cy="578.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="573.0" width="34.3" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="579.0" width="32.0" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="599.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">koanf</text>
-<line x1="491.0" y1="595.5" x2="491.3" y2="595.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="490.8" y1="595.5" x2="491.8" y2="595.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="490.8" y1="592.5" x2="490.8" y2="598.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="491.8" y1="592.5" x2="491.8" y2="598.5" stroke="#8250df" stroke-width="1.2"/>
-<circle cx="491.3" cy="595.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="491.0" cy="595.5" r="3.6" fill="#0969da"/>
+<line x1="487.8" y1="595.5" x2="487.9" y2="595.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="487.9" cy="595.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="487.8" cy="595.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="590.0" width="46.8" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="596.0" width="46.6" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="616.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">go-envconfig</text>
@@ -290,68 +221,44 @@
 <text x="184.0" y="633.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
 <text x="696.0" y="633.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
 <text x="16.0" y="660.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12.0" font-weight="600" fill="#1f2328" text-anchor="start">yaml_large</text>
-<line x1="547.4" y1="676.0" x2="547.4" y2="812.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
+<line x1="545.8" y1="676.0" x2="545.8" y2="812.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
 <line x1="836.4" y1="676.0" x2="836.4" y2="812.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
 <text x="29.0" y="688.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#9a6700" text-anchor="start">stdlib (baseline)</text>
-<line x1="547.3" y1="684.5" x2="547.4" y2="684.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="546.7" y1="684.5" x2="547.8" y2="684.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="546.7" y1="681.5" x2="546.7" y2="687.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="547.8" y1="681.5" x2="547.8" y2="687.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="546.9" y1="684.5" x2="547.9" y2="684.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="546.9" y1="681.5" x2="546.9" y2="687.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="547.9" y1="681.5" x2="547.9" y2="687.5" stroke="#9a6700" stroke-width="1.2"/>
-<circle cx="547.3" cy="684.5" r="3.6" fill="#ffffff" stroke="#9a6700" stroke-width="1.6"/>
-<circle cx="547.4" cy="684.5" r="3.6" fill="#9a6700"/>
+<line x1="545.8" y1="684.5" x2="545.9" y2="684.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="545.9" cy="684.5" r="3.6" fill="#ffffff" stroke="#9a6700" stroke-width="1.6"/>
+<circle cx="545.8" cy="684.5" r="3.6" fill="#9a6700"/>
 <rect x="696.0" y="679.0" width="140.6" height="5.0" fill="#e0b872"/>
 <rect x="696.0" y="685.0" width="140.4" height="5.0" fill="#e0b872"/>
 <circle cx="20.0" cy="701.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
 <text x="29.0" y="705.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry-bound</text>
-<line x1="548.1" y1="701.5" x2="577.1" y2="701.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="576.6" y1="701.5" x2="577.6" y2="701.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="576.6" y1="698.5" x2="576.6" y2="704.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="577.6" y1="698.5" x2="577.6" y2="704.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="547.6" y1="701.5" x2="548.6" y2="701.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="547.6" y1="698.5" x2="547.6" y2="704.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="548.6" y1="698.5" x2="548.6" y2="704.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="577.1" cy="701.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="548.1" cy="701.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="696.0" width="222.4" height="5.0" fill="#c9a7f5"/>
-<rect x="696.0" y="702.0" width="138.7" height="5.0" fill="#54aeff"/>
+<line x1="549.9" y1="701.5" x2="591.6" y2="701.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="591.1" y1="701.5" x2="592.1" y2="701.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="591.1" y1="698.5" x2="591.1" y2="704.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="592.1" y1="698.5" x2="592.1" y2="704.5" stroke="#8250df" stroke-width="1.2"/>
+<circle cx="591.6" cy="701.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="549.9" cy="701.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="696.0" width="234.4" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="702.0" width="129.9" height="5.0" fill="#54aeff"/>
 <circle cx="20.0" cy="718.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
 <text x="29.0" y="722.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry</text>
-<line x1="548.6" y1="718.5" x2="577.6" y2="718.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="577.1" y1="718.5" x2="578.1" y2="718.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="577.1" y1="715.5" x2="577.1" y2="721.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="578.1" y1="715.5" x2="578.1" y2="721.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="548.1" y1="718.5" x2="549.1" y2="718.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="548.1" y1="715.5" x2="548.1" y2="721.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="549.1" y1="715.5" x2="549.1" y2="721.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="577.6" cy="718.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="548.6" cy="718.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="713.0" width="222.4" height="5.0" fill="#c9a7f5"/>
-<rect x="696.0" y="719.0" width="139.7" height="5.0" fill="#54aeff"/>
+<line x1="552.7" y1="718.5" x2="591.3" y2="718.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="591.3" cy="718.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="552.7" cy="718.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="713.0" width="234.4" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="719.0" width="137.8" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="739.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">viper</text>
-<line x1="583.3" y1="735.5" x2="583.3" y2="735.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="582.8" y1="735.5" x2="583.8" y2="735.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="582.8" y1="732.5" x2="582.8" y2="738.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="583.8" y1="732.5" x2="583.8" y2="738.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="582.8" y1="735.5" x2="583.8" y2="735.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="582.8" y1="732.5" x2="582.8" y2="738.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="583.8" y1="732.5" x2="583.8" y2="738.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="583.3" cy="735.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="583.3" cy="735.5" r="3.6" fill="#0969da"/>
+<line x1="581.4" y1="735.5" x2="581.5" y2="735.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="580.9" y1="735.5" x2="581.9" y2="735.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="580.9" y1="732.5" x2="580.9" y2="738.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="581.9" y1="732.5" x2="581.9" y2="738.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="581.5" cy="735.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="581.4" cy="735.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="730.0" width="319.0" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="736.0" width="316.7" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="756.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">koanf</text>
-<line x1="592.5" y1="752.5" x2="592.7" y2="752.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="592.2" y1="752.5" x2="593.2" y2="752.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="592.2" y1="749.5" x2="592.2" y2="755.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="593.2" y1="749.5" x2="593.2" y2="755.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="592.0" y1="752.5" x2="593.0" y2="752.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="592.0" y1="749.5" x2="592.0" y2="755.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="593.0" y1="749.5" x2="593.0" y2="755.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="592.7" cy="752.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="592.5" cy="752.5" r="3.6" fill="#0969da"/>
+<line x1="590.1" y1="752.5" x2="590.3" y2="752.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="590.3" cy="752.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="590.1" cy="752.5" r="3.6" fill="#0969da"/>
 <rect x="696.0" y="747.0" width="453.8" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="753.0" width="453.6" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="773.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">go-envconfig</text>
@@ -364,70 +271,67 @@
 <text x="184.0" y="807.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
 <text x="696.0" y="807.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
 <text x="16.0" y="834.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12.0" font-weight="600" fill="#1f2328" text-anchor="start">dump_large</text>
-<line x1="594.8" y1="850.0" x2="594.8" y2="986.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
+<line x1="592.3" y1="850.0" x2="592.3" y2="986.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
 <line x1="900.6" y1="850.0" x2="900.6" y2="986.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
 <text x="29.0" y="862.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#9a6700" text-anchor="start">stdlib (baseline)</text>
-<line x1="594.8" y1="858.5" x2="606.4" y2="858.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="605.4" y1="858.5" x2="607.5" y2="858.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="605.4" y1="855.5" x2="605.4" y2="861.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="607.5" y1="855.5" x2="607.5" y2="861.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="593.8" y1="858.5" x2="595.8" y2="858.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="593.8" y1="855.5" x2="593.8" y2="861.5" stroke="#9a6700" stroke-width="1.2"/>
-<line x1="595.8" y1="855.5" x2="595.8" y2="861.5" stroke="#9a6700" stroke-width="1.2"/>
-<circle cx="606.4" cy="858.5" r="3.6" fill="#ffffff" stroke="#9a6700" stroke-width="1.6"/>
-<circle cx="594.8" cy="858.5" r="3.6" fill="#9a6700"/>
-<rect x="696.0" y="853.0" width="206.7" height="5.0" fill="#e0b872"/>
+<line x1="592.3" y1="858.5" x2="603.9" y2="858.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="603.4" y1="858.5" x2="604.4" y2="858.5" stroke="#9a6700" stroke-width="1.2"/>
+<line x1="603.4" y1="855.5" x2="603.4" y2="861.5" stroke="#9a6700" stroke-width="1.2"/>
+<line x1="604.4" y1="855.5" x2="604.4" y2="861.5" stroke="#9a6700" stroke-width="1.2"/>
+<line x1="591.8" y1="858.5" x2="592.8" y2="858.5" stroke="#9a6700" stroke-width="1.2"/>
+<line x1="591.8" y1="855.5" x2="591.8" y2="861.5" stroke="#9a6700" stroke-width="1.2"/>
+<line x1="592.8" y1="855.5" x2="592.8" y2="861.5" stroke="#9a6700" stroke-width="1.2"/>
+<circle cx="603.9" cy="858.5" r="3.6" fill="#ffffff" stroke="#9a6700" stroke-width="1.6"/>
+<circle cx="592.3" cy="858.5" r="3.6" fill="#9a6700"/>
+<rect x="696.0" y="853.0" width="206.5" height="5.0" fill="#e0b872"/>
 <rect x="696.0" y="859.0" width="204.6" height="5.0" fill="#e0b872"/>
 <text x="29.0" y="879.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">koanf</text>
-<line x1="615.3" y1="875.5" x2="623.8" y2="875.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="622.3" y1="875.5" x2="625.3" y2="875.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="622.3" y1="872.5" x2="622.3" y2="878.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="625.3" y1="872.5" x2="625.3" y2="878.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="614.8" y1="875.5" x2="615.8" y2="875.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="614.8" y1="872.5" x2="614.8" y2="878.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="615.8" y1="872.5" x2="615.8" y2="878.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="623.8" cy="875.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="615.3" cy="875.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="870.0" width="443.5" height="5.0" fill="#c9a7f5"/>
+<line x1="613.0" y1="875.5" x2="620.5" y2="875.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="620.0" y1="875.5" x2="621.0" y2="875.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="620.0" y1="872.5" x2="620.0" y2="878.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="621.0" y1="872.5" x2="621.0" y2="878.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="612.5" y1="875.5" x2="613.5" y2="875.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="612.5" y1="872.5" x2="612.5" y2="878.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="613.5" y1="872.5" x2="613.5" y2="878.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="620.5" cy="875.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="613.0" cy="875.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="870.0" width="443.3" height="5.0" fill="#c9a7f5"/>
 <rect x="696.0" y="876.0" width="441.4" height="5.0" fill="#54aeff"/>
 <circle cx="20.0" cy="892.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
-<text x="29.0" y="896.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry</text>
-<line x1="621.8" y1="892.5" x2="639.7" y2="892.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="637.1" y1="892.5" x2="642.2" y2="892.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="637.1" y1="889.5" x2="637.1" y2="895.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="642.2" y1="889.5" x2="642.2" y2="895.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="620.2" y1="892.5" x2="623.3" y2="892.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="620.2" y1="889.5" x2="620.2" y2="895.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="623.3" y1="889.5" x2="623.3" y2="895.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="639.7" cy="892.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="621.8" cy="892.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="887.0" width="441.4" height="5.0" fill="#c9a7f5"/>
-<rect x="696.0" y="893.0" width="357.9" height="5.0" fill="#54aeff"/>
+<text x="29.0" y="896.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry-bound</text>
+<line x1="621.9" y1="892.5" x2="642.6" y2="892.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="642.0" y1="892.5" x2="643.1" y2="892.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="642.0" y1="889.5" x2="642.0" y2="895.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="643.1" y1="889.5" x2="643.1" y2="895.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="621.4" y1="892.5" x2="622.5" y2="892.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="621.4" y1="889.5" x2="621.4" y2="895.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="622.5" y1="889.5" x2="622.5" y2="895.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="642.6" cy="892.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="621.9" cy="892.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="887.0" width="467.8" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="893.0" width="368.6" height="5.0" fill="#54aeff"/>
 <circle cx="20.0" cy="909.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
-<text x="29.0" y="913.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry-bound</text>
-<line x1="622.0" y1="909.5" x2="638.6" y2="909.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="637.6" y1="909.5" x2="639.6" y2="909.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="637.6" y1="906.5" x2="637.6" y2="912.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="639.6" y1="906.5" x2="639.6" y2="912.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="620.4" y1="909.5" x2="623.5" y2="909.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="620.4" y1="906.5" x2="620.4" y2="912.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="623.5" y1="906.5" x2="623.5" y2="912.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="638.6" cy="909.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="622.0" cy="909.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="904.0" width="441.4" height="5.0" fill="#c9a7f5"/>
-<rect x="696.0" y="910.0" width="356.8" height="5.0" fill="#54aeff"/>
+<text x="29.0" y="913.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry</text>
+<line x1="622.2" y1="909.5" x2="642.5" y2="909.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="621.7" y1="909.5" x2="622.7" y2="909.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="621.7" y1="906.5" x2="621.7" y2="912.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="622.7" y1="906.5" x2="622.7" y2="912.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="642.5" cy="909.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="622.2" cy="909.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="904.0" width="467.8" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="910.0" width="370.8" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="930.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">viper</text>
-<line x1="641.5" y1="926.5" x2="648.9" y2="926.5" stroke="#8c959f" stroke-width="1.0"/>
-<line x1="647.8" y1="926.5" x2="649.9" y2="926.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="647.8" y1="923.5" x2="647.8" y2="929.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="649.9" y1="923.5" x2="649.9" y2="929.5" stroke="#8250df" stroke-width="1.2"/>
-<line x1="640.5" y1="926.5" x2="642.5" y2="926.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="640.5" y1="923.5" x2="640.5" y2="929.5" stroke="#0969da" stroke-width="1.2"/>
-<line x1="642.5" y1="923.5" x2="642.5" y2="929.5" stroke="#0969da" stroke-width="1.2"/>
-<circle cx="648.9" cy="926.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
-<circle cx="641.5" cy="926.5" r="3.6" fill="#0969da"/>
-<rect x="696.0" y="921.0" width="319.7" height="5.0" fill="#c9a7f5"/>
-<rect x="696.0" y="927.0" width="317.7" height="5.0" fill="#54aeff"/>
+<line x1="637.8" y1="926.5" x2="645.1" y2="926.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="644.6" y1="926.5" x2="645.7" y2="926.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="644.6" y1="923.5" x2="644.6" y2="929.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="645.7" y1="923.5" x2="645.7" y2="929.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="636.8" y1="926.5" x2="638.8" y2="926.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="636.8" y1="923.5" x2="636.8" y2="929.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="638.8" y1="923.5" x2="638.8" y2="929.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="645.1" cy="926.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="637.8" cy="926.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="921.0" width="320.1" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="927.0" width="318.2" height="5.0" fill="#54aeff"/>
 <text x="29.0" y="947.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">go-envconfig</text>
 <text x="184.0" y="947.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
 <text x="696.0" y="947.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
@@ -437,8 +341,67 @@
 <text x="29.0" y="981.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">xload</text>
 <text x="184.0" y="981.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
 <text x="696.0" y="981.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
-<text x="16.0" y="1068.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#59636e" text-anchor="start">The time panel is a log scale, so a mark twice as far right is ten times the number, not twice it. Marks carry no bar because a bar on a log axis reads as a proportion it does not have.</text>
-<text x="16.0" y="1082.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#59636e" text-anchor="start">The allocation panel is linear and starts at zero. † marks a warm mark that is not comparable with the others in its scenario, because that library reads and parses the file once at construction; its cold mark is the comparable one.</text>
-<text x="16.0" y="1096.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#59636e" text-anchor="start">The dashed rule in each scenario stands at the baseline's warm value, so the distance from it to a mark is what that library's abstraction costs over the floor, ferry's read the same way.</text>
-<text x="16.0" y="1110.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#59636e" text-anchor="start">Generated by bench/cmd/perfreport from benchstat output; no figure on this chart was typed.</text>
+<text x="16.0" y="1008.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12.0" font-weight="600" fill="#1f2328" text-anchor="start">dump_fresh</text>
+<line x1="586.3" y1="1024.0" x2="586.3" y2="1160.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
+<line x1="900.8" y1="1024.0" x2="900.8" y2="1160.0" stroke="#9a6700" stroke-width="1.2" stroke-dasharray="3 3"/>
+<text x="29.0" y="1036.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#9a6700" text-anchor="start">stdlib (baseline)</text>
+<line x1="586.3" y1="1032.5" x2="586.6" y2="1032.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="586.6" cy="1032.5" r="3.6" fill="#ffffff" stroke="#9a6700" stroke-width="1.6"/>
+<circle cx="586.3" cy="1032.5" r="3.6" fill="#9a6700"/>
+<rect x="696.0" y="1027.0" width="206.3" height="5.0" fill="#e0b872"/>
+<rect x="696.0" y="1033.0" width="204.8" height="5.0" fill="#e0b872"/>
+<circle cx="20.0" cy="1049.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
+<text x="29.0" y="1053.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry-bound</text>
+<line x1="604.3" y1="1049.5" x2="623.9" y2="1049.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="623.4" y1="1049.5" x2="624.4" y2="1049.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="623.4" y1="1046.5" x2="623.4" y2="1052.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="624.4" y1="1046.5" x2="624.4" y2="1052.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="603.7" y1="1049.5" x2="604.8" y2="1049.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="603.7" y1="1046.5" x2="603.7" y2="1052.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="604.8" y1="1046.5" x2="604.8" y2="1052.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="623.9" cy="1049.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="604.3" cy="1049.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="1044.0" width="377.6" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="1050.0" width="277.6" height="5.0" fill="#54aeff"/>
+<circle cx="20.0" cy="1066.5" r="2.4" fill="none" stroke="#8c959f" stroke-width="1.2"/>
+<text x="29.0" y="1070.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">ferry</text>
+<line x1="604.5" y1="1066.5" x2="623.7" y2="1066.5" stroke="#8c959f" stroke-width="1.0"/>
+<circle cx="623.7" cy="1066.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="604.5" cy="1066.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="1061.0" width="377.6" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="1067.0" width="279.9" height="5.0" fill="#54aeff"/>
+<text x="29.0" y="1087.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">koanf</text>
+<line x1="609.8" y1="1083.5" x2="610.0" y2="1083.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="609.3" y1="1083.5" x2="610.3" y2="1083.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="609.3" y1="1080.5" x2="609.3" y2="1086.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="610.3" y1="1080.5" x2="610.3" y2="1086.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="610.0" cy="1083.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="609.8" cy="1083.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="1078.0" width="443.1" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="1084.0" width="441.6" height="5.0" fill="#54aeff"/>
+<text x="29.0" y="1104.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">viper</text>
+<line x1="639.6" y1="1100.5" x2="639.8" y2="1100.5" stroke="#8c959f" stroke-width="1.0"/>
+<line x1="638.3" y1="1100.5" x2="641.3" y2="1100.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="638.3" y1="1097.5" x2="638.3" y2="1103.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="641.3" y1="1097.5" x2="641.3" y2="1103.5" stroke="#8250df" stroke-width="1.2"/>
+<line x1="639.1" y1="1100.5" x2="640.1" y2="1100.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="639.1" y1="1097.5" x2="639.1" y2="1103.5" stroke="#0969da" stroke-width="1.2"/>
+<line x1="640.1" y1="1097.5" x2="640.1" y2="1103.5" stroke="#0969da" stroke-width="1.2"/>
+<circle cx="639.8" cy="1100.5" r="3.6" fill="#ffffff" stroke="#8250df" stroke-width="1.6"/>
+<circle cx="639.6" cy="1100.5" r="3.6" fill="#0969da"/>
+<rect x="696.0" y="1095.0" width="319.9" height="5.0" fill="#c9a7f5"/>
+<rect x="696.0" y="1101.0" width="318.4" height="5.0" fill="#54aeff"/>
+<text x="29.0" y="1121.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">go-envconfig</text>
+<text x="184.0" y="1121.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
+<text x="696.0" y="1121.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
+<text x="29.0" y="1138.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">kelseyhightower</text>
+<text x="184.0" y="1138.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
+<text x="696.0" y="1138.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
+<text x="29.0" y="1155.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11.0" font-weight="400" fill="#1f2328" text-anchor="start">xload</text>
+<text x="184.0" y="1155.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
+<text x="696.0" y="1155.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#8c959f" text-anchor="start">not measured</text>
+<text x="16.0" y="1242.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#59636e" text-anchor="start">The time panel is a log scale, so a mark twice as far right is ten times the number, not twice it. Marks carry no bar because a bar on a log axis reads as a proportion it does not have.</text>
+<text x="16.0" y="1256.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#59636e" text-anchor="start">The allocation panel is linear and starts at zero. † marks a warm mark that is not comparable with the others in its scenario, because that library reads and parses the file once at construction; its cold mark is the comparable one.</text>
+<text x="16.0" y="1270.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#59636e" text-anchor="start">The dashed rule in each scenario stands at the baseline's warm value, so the distance from it to a mark is what that library's abstraction costs over the floor, ferry's read the same way.</text>
+<text x="16.0" y="1284.0" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#59636e" text-anchor="start">Generated by bench/cmd/perfreport from benchstat output; no figure on this chart was typed.</text>
 </svg>
