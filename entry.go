@@ -171,7 +171,7 @@ func (b *bound) load(ctx context.Context, dst reflect.Value) (err error) {
 
 	w := newWalker(loadFrom{r: r, addrs: b.sch.addrs}, schedulerFor(b.budget, r))
 
-	_, err = w.walk(ctx, spot{n: b.sch.root, v: loadRoot(dst)})
+	_, err = w.walk(ctx, spot{n: b.sch.root, v: rootValue(b.sch, dst, loadRoot), at: b.sch.root.addr})
 
 	return err
 }
@@ -264,7 +264,7 @@ func (b *boundSink) replaceable(w Writer) error {
 // sink is closed with no Commit and ADR-0004's abort signal survives the path
 // nothing was going to report on (#254).
 func (b *boundSink) dump(ctx context.Context, v reflect.Value) (err error) {
-	root, err := dumpRoot(v)
+	root, err := dumpRootOf(b.sch, v)
 	if err != nil {
 		return err
 	}
@@ -329,6 +329,17 @@ func runDump(ctx context.Context, v reflect.Value, sink Sink, opts []Option) err
 // pointer means when the plane is silent is the presence bit's question, and
 // the root is the one position with no address for its own absence to be
 // observed at.
+// rootValue applies the root adjustment only where the root is a container
+// (PROTOTYPE, #309). A root that compiles to a leaf keeps the pointer, because
+// *int is the leaf and int is not what its codec was built for.
+func rootValue(sch *schema, v reflect.Value, adjust func(reflect.Value) reflect.Value) reflect.Value {
+	if sch.root != nil && sch.root.kind == nodeLeaf {
+		return v
+	}
+
+	return adjust(v)
+}
+
 func loadRoot(dst reflect.Value) reflect.Value {
 	if dst.Kind() != reflect.Pointer {
 		return dst
@@ -352,6 +363,15 @@ func loadRoot(dst reflect.Value) reflect.Value {
 // lost. A nil root pointer is the same hole at the same address - there is
 // nowhere for the Null a nil composite writes to sit - so it is refused rather
 // than dumped as an empty plane with a nil error.
+// dumpRootOf is [dumpRoot] with the root-leaf exemption (PROTOTYPE, #309).
+func dumpRootOf(sch *schema, v reflect.Value) (reflect.Value, error) {
+	if sch.root != nil && sch.root.kind == nodeLeaf {
+		return v, nil
+	}
+
+	return dumpRoot(v)
+}
+
 func dumpRoot(v reflect.Value) (reflect.Value, error) {
 	if v.Kind() != reflect.Pointer {
 		return v, nil

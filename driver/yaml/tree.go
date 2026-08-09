@@ -148,8 +148,14 @@ func place(doc *yamlv3.Node, addr ferry.Path, last yamlv3.Kind) (*yamlv3.Node, e
 	// side needs to look one segment ahead: what a container has to be is
 	// decided by the kind of the segment under it.
 	segs := slices.Collect(addr.Segments())
+	// PROTOTYPE (#309): the empty path is the document root, and a root leaf
+	// there is a scalar document.
 	if len(segs) == 0 {
-		return nil, fmt.Errorf("%w: the empty path is not an address", ferry.ErrPlane)
+		if len(doc.Content) == 0 {
+			doc.Content = []*yamlv3.Node{{}}
+		}
+
+		return doc.Content[0], nil
 	}
 
 	n := rootFor(doc, segs[0].Kind())

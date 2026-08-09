@@ -290,9 +290,7 @@ func compileSchema(t reflect.Type, cfg config) (*schema, error) {
 // question, and this refusal neither answers it nor anticipates it.
 func (c *compiler) compileRoot(t reflect.Type) *node {
 	if c.rootIsLeaf(t) {
-		c.errAt(Path{}, rootLeafMsg(t))
-
-		return nil
+		return c.compileRootLeaf(t)
 	}
 
 	if t.Kind() == reflect.Pointer {
@@ -310,6 +308,31 @@ func (c *compiler) compileRoot(t reflect.Type) *node {
 	n, _ := c.compileStruct(t, site{}, nil)
 
 	return n
+}
+
+// compileRootLeaf compiles a root that resolves to a leaf, at the address
+// [rootLeafSite] gives it (PROTOTYPE, #309).
+func (c *compiler) compileRootLeaf(t reflect.Type) *node {
+	s := rootLeafSite()
+
+	cd, ok := c.rootLeafCodec(t)
+	if !ok {
+		return nil
+	}
+
+	n := &node{kind: nodeLeaf, addr: s.addr, codec: cd}
+	c.recordLeaf(s)
+
+	return n
+}
+
+// rootLeafCodec is the codec [compiler.rootIsLeaf] already found.
+func (c *compiler) rootLeafCodec(t reflect.Type) (leafCodec, bool) {
+	if t.Kind() == reflect.Pointer {
+		return c.cfg.registry.pointerLeaf(t)
+	}
+
+	return c.cfg.registry.leafFor(t)
 }
 
 // rootIsLeaf reports whether the root type resolves to a leaf, asking exactly

@@ -36,6 +36,9 @@ func (f optionFunc) apply(c *config) { f(c) }
 type config struct {
 	sep     string
 	canon   Form
+	// rootVar is the variable a root leaf reads (PROTOTYPE, #309). Empty means
+	// there is none, and the empty address is refused as it is today.
+	rootVar string
 	environ func() []string
 	// bools is the spelling [BoolWords] built, and it is nil until it is asked
 	// for: this plane holds text and nothing else, so a variable is a String
@@ -186,4 +189,15 @@ func legalSeparator(sep string) bool {
 // [ErrOption] reachable underneath it.
 func optionError(msg string) error {
 	return fmt.Errorf("%w: %w: %s", ferry.ErrPlane, ErrOption, msg)
+}
+
+// RootVar names the environment variable a root leaf is read from
+// (PROTOTYPE, #309).
+//
+//	port, err := ferry.Load[int](ctx, env.New(env.RootVar("APP_PORT")))
+//
+// Without it a schema whose root is a leaf has no name on this plane and is
+// refused at Bind, which is what happens today.
+func RootVar(name string) Option {
+	return optionFunc(func(c *config) { c.rootVar = name })
 }

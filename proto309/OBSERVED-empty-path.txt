@@ -1,0 +1,76 @@
+################ MODE: sentinel="" ################
+
+--- root type: int ---
+  compile                      ok   schema compiled
+  env  Load                    ERR  ferry: the driver refused the address set: plane error: env: address has no environment variable name: the empty address names nothing
+  http Load(query)             ERR  ferry: the driver refused the address set: plane error: http: address has no name on this plane: the empty address names nothing
+  yaml Dump                    ok   file="8080\n"
+  yaml Load                    ok   8080
+  yaml Load                    ERR  ferry: the driver failed: invalid value: the plane holds a mapping here and the destination takes a single value: model the field as a map or a struct, or change the document
+  yaml roundtrip               ok   file="8080\n" -> 8080
+  kv   Dump                    ok   keys={""="8080"}
+  kv   Load                    ok   8080
+  kv   roundtrip               ok   store={""="8080"} -> 8080
+
+--- root type: string ---
+  compile                      ok   schema compiled
+  env  Load                    ERR  ferry: the driver refused the address set: plane error: env: address has no environment variable name: the empty address names nothing
+  http Load(query)             ERR  ferry: the driver refused the address set: plane error: http: address has no name on this plane: the empty address names nothing
+  yaml Dump                    ok   file="hello\n"
+  yaml Load                    ok   "hello"
+  yaml roundtrip               ok   file="hello\n" -> "hello"
+  kv   Dump                    ok   keys={""="hello"}
+  kv   roundtrip               ok   store={""="hello"} -> "hello"
+
+--- root type: []byte ---
+  compile                      ok   schema compiled
+  env  Load                    ERR  ferry: the driver refused the address set: plane error: env: address has no environment variable name: the empty address names nothing
+  yaml Dump                    ok   file="!!binary aGVsbG8=\n"
+  yaml Load                    ok   []byte{0x61, 0x47, 0x56, 0x73, 0x62, 0x47, 0x38, 0x3d}
+  yaml roundtrip               ok   file="!!binary aGVsbG8=\n" -> []byte{0x68, 0x65, 0x6c, 0x6c, 0x6f}
+  kv   Dump                    ok   keys={""="hello"}
+  kv   roundtrip               ok   store={""="hello"} -> []byte{0x68, 0x65, 0x6c, 0x6c, 0x6f}
+
+--- root type: json.RawMessage ---
+  compile                      ok   schema compiled
+  env  Load                    ERR  ferry: the driver refused the address set: plane error: env: address has no environment variable name: the empty address names nothing
+  env  Load                    ERR  ferry: the driver refused the address set: plane error: env: address has no environment variable name: the empty address names nothing
+  yaml Dump                    ok   file="!!binary eyJhIjoxfQ==\n"
+  yaml Load                    ERR  ferry: the driver failed: invalid value: the plane holds a mapping here and the destination takes a single value: model the field as a map or a struct, or change the document
+  yaml roundtrip               ok   file="!!binary eyJhIjoxfQ==\n" -> jsontext.Value{0x7b, 0x22, 0x61, 0x22, 0x3a, 0x31, 0x7d}
+  kv   Dump                    ok   keys={""="{\"a\":1}"}
+  kv   roundtrip               ok   store={""="{\"a\":1}"} -> jsontext.Value{0x7b, 0x22, 0x61, 0x22, 0x3a, 0x31, 0x7d}
+
+--- root type: netip.Addr ---
+  compile                      ok   schema compiled
+  env  Load                    ERR  ferry: the driver refused the address set: plane error: env: address has no environment variable name: the empty address names nothing
+  http Load(query)             ERR  ferry: the driver refused the address set: plane error: http: address has no name on this plane: the empty address names nothing
+  yaml Dump                    ok   file="10.0.0.1\n"
+  yaml Load                    ok   netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x26ff92d70120)}}
+  yaml roundtrip               ok   file="10.0.0.1\n" -> netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x26ff92d70120)}}
+  kv   Dump                    ok   keys={""="10.0.0.1"}
+  kv   roundtrip               ok   store={""="10.0.0.1"} -> netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x26ff92d70120)}}
+
+--- root type: *int ---
+  compile                      ok   schema compiled
+  env  Load                    ERR  ferry: the driver refused the address set: plane error: env: address has no environment variable name: the empty address names nothing
+  yaml Dump                    ok   file="8080\n"
+  yaml Load                    ok   (*int)(0x26ff92d737b0)
+  yaml roundtrip               ok   file="8080\n" -> (*int)(0x26ff92d73858)
+  kv   Dump                    ok   keys={""="8080"}
+  kv   roundtrip               ok   store={""="8080"} -> (*int)(0x26ff92d73978)
+
+--- root type: prefix and overwrite hazards (int root) ---
+  kv   Dump(prefix=app)        ok   keys={"app"="8080", "app/other"="kept"}
+  yaml Dump(over doc)          ok   file="8080\n"
+
+--- root type: env sentinel collision with the real process environment ---
+  env  Load(real environ)      ERR  ferry: the driver refused the address set: plane error: env: address has no environment variable name: the empty address names nothing
+
+--- root type: driver option alternative: env.RootVar ---
+  env  Load(RootVar="APP_PORT") ok   8080
+  env  Load(RootVar="")        ERR  ferry: the driver refused the address set: plane error: env: address has no environment variable name: the empty address names nothing
+
+--- root type: control: struct{P int `ferry:"p"`} ---
+  compile                      ok   schema compiled
+  kv   Dump                    ok   keys={"p"="8080"}

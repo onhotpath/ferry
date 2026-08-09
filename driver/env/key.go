@@ -46,6 +46,11 @@ func (c config) key(addr ferry.Path) (string, error) {
 		return "", err
 	}
 
+	// PROTOTYPE (#309): the root leaf's variable, where the caller named one.
+	if name == "" && c.rootVar != "" {
+		name = c.rootVar
+	}
+
 	// Every segment contributes at least one byte, so an empty name is an
 	// address with no segments: the empty path, which is not an address at all.
 	if name == "" {

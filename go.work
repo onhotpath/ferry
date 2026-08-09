@@ -17,4 +17,5 @@ use (
 	./driver/kv
 	./driver/yaml
 	./examples
+	./proto309
 )
