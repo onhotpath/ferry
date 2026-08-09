@@ -16,6 +16,12 @@ type ScenarioDoc struct {
 	// What it measures, in one line.
 	What string
 
+	// Remark is what separates this scenario from the others, as a phrase,
+	// rendered beside the scenario's name in the README's summary table so that
+	// two rows of that table can be read against each other. Empty renders as an
+	// empty cell rather than as filler.
+	Remark string
+
 	// Impls are the libraries compared, in the order they are listed.
 	Impls []ImplDoc
 }

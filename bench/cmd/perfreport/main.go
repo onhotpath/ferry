@@ -352,7 +352,7 @@ func scenarioDocs() []report.ScenarioDoc {
 			})
 		}
 
-		out = append(out, report.ScenarioDoc{Name: sc.Name, What: sc.What, Impls: impls})
+		out = append(out, report.ScenarioDoc{Name: sc.Name, What: sc.What, Remark: sc.Remark, Impls: impls})
 	}
 
 	return out

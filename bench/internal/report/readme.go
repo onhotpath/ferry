@@ -56,6 +56,14 @@ func ReplaceSection(readme, section string) (string, error) {
 // its raw figure. One ratio per row, against the peer; the baseline is the
 // reference the row is read against rather than a second contest inside it.
 //
+// Each row carries its scenario's remark beside the scenario's name, because a
+// row here names a scenario and one competitor rather than listing the field,
+// so the per-library remarks column the results file carries has nowhere to go
+// in this table. What a reader compares here is two rows, and the two dump rows
+// are the pair that needs it: the same library reads as slower over a file that
+// is already there and faster over a path with no file at it, and the remark is
+// what stops that flip reading as noise.
+//
 // The multiple over the baseline is not computed here. It is computed for every
 // library, ferry included, in the results file, which is where the whole field
 // is. Both operands of ferry's are in this row, so nothing about it is out of
@@ -67,8 +75,8 @@ func Summary(in *Input) string {
 	fmt.Fprint(&b, "The table is machine-generated from a benchmark run; the harness refuses to run at\n")
 	fmt.Fprint(&b, "all unless every library produces the identical struct from the identical source.\n\n")
 	fmt.Fprint(&b, summaryBaselineNote)
-	fmt.Fprint(&b, "| scenario | ferry (warm) | fastest other library | | baseline: no mapping layer |\n")
-	fmt.Fprint(&b, "| --- | --- | --- | --- | --- |\n")
+	fmt.Fprint(&b, "| scenario | remarks | ferry (warm) | fastest other library | | baseline: no mapping layer |\n")
+	fmt.Fprint(&b, "| --- | --- | --- | --- | --- | --- |\n")
 
 	excluded := make(map[string][]string, len(in.Scenarios))
 
@@ -114,8 +122,9 @@ func writeSummaryRow(b *strings.Builder, in *Input, sc ScenarioDoc) (excluded []
 	best, bestName, excluded := fastestOther(in, sc)
 	base, baseName, _ := baselineOf(in, sc)
 
-	fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s |\n",
+	fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s | %s |\n",
 		sc.Name,
+		sc.Remark,
 		duration(ferry, ferryOK),
 		otherCell(best, bestName),
 		verdict(ferry, ferryOK, best, bestName),

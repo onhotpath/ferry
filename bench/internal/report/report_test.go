@@ -95,9 +95,10 @@ func input(t *testing.T) *report.Input {
 
 func fixtureScenarios() []report.ScenarioDoc {
 	return []report.ScenarioDoc{{
-		Name:  "env_small",
-		What:  "five flat fields out of the process environment.",
-		Impls: fixtureImpls(),
+		Name:   "env_small",
+		What:   "five flat fields out of the process environment.",
+		Remark: "five flat fields",
+		Impls:  fixtureImpls(),
 	}, {
 		// A scenario carrying a warm figure that is not comparable with the
 		// rest of its column. This is the real yaml_small shape: xload's YAML
@@ -108,13 +109,18 @@ func fixtureScenarios() []report.ScenarioDoc {
 		// summary came to rank ferry against a figure the results file's own
 		// footnote called incomparable. A golden that covers only the easy
 		// shape pins only the easy shape.
-		Name:  "yaml_small",
-		What:  "five flat fields out of a small YAML document.",
-		Impls: fixtureYAMLImpls(),
+		Name:   "yaml_small",
+		What:   "five flat fields out of a small YAML document.",
+		Remark: "five fields, parsed per load",
+		Impls:  fixtureYAMLImpls(),
 	}, {
 		// A scenario the CSV carries no rows for at all, which is the case
 		// that must render as "not measured" in every cell rather than as a
 		// zero or a blank.
+		//
+		// It also carries no Remark, deliberately: a scenario that has not been
+		// given one has to reach the summary table as an empty cell, and a
+		// fixture where every row carries a remark pins only the filled case.
 		Name:  "no_such_scenario",
 		What:  "a scenario nothing was measured for.",
 		Impls: []report.ImplDoc{{Name: "ferry", Module: ferryModule, Notes: "n/a"}},
@@ -619,9 +625,10 @@ func summaryRow(t *testing.T, summary, scenario string) []string {
 	return nil
 }
 
-// fastestOtherCell is the column the summary names a library in. Index 3 is the
-// third cell of a row that opens with an empty field before the first pipe.
-const fastestOtherCell = 3
+// fastestOtherCell is the column the summary names a library in. A row opens
+// with an empty field before the first pipe, so index 4 is the fourth cell:
+// scenario, the scenario's remark, ferry's warm figure, then this one.
+const fastestOtherCell = 4
 
 // TestSummaryNeverRanksTheBaselineAsALibrary is the rule that stops the
 // baseline being reported as the thing ferry lost to.
