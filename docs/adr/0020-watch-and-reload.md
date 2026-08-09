@@ -69,6 +69,37 @@ Every one of those shipped for its own reasons.
 
 **What is required is documentation rather than code**: `docs/guide/watch-reload.md` and a runnable `examples/watcher`, which are this decision's deliverables, because a capability whose whole argument is "you can build it" is worth nothing if nobody is shown the thirty lines.
 
+> **Amended under [#364](https://github.com/onhotpath/ferry/issues/364): a typed helper ships in the core module as package `ferry/watch`, and the root package still grows nothing.**
+>
+> As published this section ships no code at all.
+> Core ships no `Watch`, no `Notifier` and no watcher, and the decision's deliverables are two documents.
+>
+> **What moves is the deliverables.**
+> `Signal` and `Values` ship, in the core module, in a package of their own:
+>
+> ```go
+> func New() *Signal
+> func (s *Signal) Changed(context.Context)
+> func Values[T any](ctx context.Context, s *Signal, b *ferry.Binding[T]) (iter.Seq[T], func() error)
+> ```
+>
+> The root package `ferry` still grows no surface, the driver seam is unchanged, and `Notifier` still does not ship.
+> `Signal.Changed`'s method value has type `func(context.Context)`, which is exactly what all three drivers' watch Options already take, so nothing on the driver side moves either.
+>
+> **Why: the thirty lines above and the drivers that shipped do not compose.**
+> The blessed loop takes `signal <-chan struct{}`, and no shipped driver publishes a channel - three of them ship a callback, for the reason the amendments below give.
+> All three start watching inside their constructor, which is before `ferry.Bind` has returned, so a change can land when there is nothing yet to load through.
+> **That ordering hole is one no driver can close**, because the binding is core's and does not exist when the driver's watch opens.
+> The shipped `ExampleWatchFiles` is what the hole cost: it nil-checked an atomic pointer on every callback, silently dropped a change that landed before `Bind` returned, and had nowhere to send a failed reload's error.
+>
+> **[ADR-0002](0002-core-and-sub-modules.md) admits it by route (b), not route (a).**
+> `watch/` is a directory of the core module like `ferrytest/`, not a module of its own: it imports the root package and the standard library and nothing else, so core's empty `require` block is untouched.
+> What admits it is that the helper is this ADR's own rule - a signal says the plane may have changed, and the reload is `Load` - in executable form, and that the one hole it closes is closable only over core's own `Binding[T]`.
+> A third party's version of that loop settles the ordering for nobody, which is route (b)'s argument read where it applies.
+>
+> **The thirty lines survive in this ADR and nowhere else.**
+> `examples/watcher`'s hand-rolled loop is deleted, because a demonstration of code a caller now imports is a second implementation to keep true.
+
 ### A reload is `Load`, and there is no second verb
 
 > `Load` produces a new value.
@@ -137,6 +168,12 @@ That is a smaller claim than the first one and it is the true one.
 Four questions that must be answered per API against one shape that answers them by construction.
 
 **This answers a question [ADR-0011](0011-the-error-model.md) left open** rather than opening one, and it is recorded there.
+
+> **Amended under [#364](https://github.com/onhotpath/ferry/issues/364): the convention has its first shipped user.**
+>
+> As published nothing in ferry returned this pair, and the convention was decided on a prototype.
+> `watch.Values` now ships it.
+> The shape is unchanged, and so is everything decided above about it.
 
 ### The YAML sink refuses a commit over a file that changed underneath
 
@@ -278,6 +315,21 @@ And core would own the semantics of a channel it never reads.
 That is the rule of three applied one door down, and it is the same trigger [ADR-0018](0018-the-spelling-seam.md) sets for consolidating spellings.
 `ferry.Watch` in core sits behind that, not beside it.
 
+> **Amended under [#364](https://github.com/onhotpath/ferry/issues/364): the shipped helper is not `Notifier` and does not move its trigger.**
+>
+> As published this section is the only place a change signal is named at all, so a package called `watch` shipping in the core module reads as `Notifier` arriving under a different name.
+> It is not.
+> **The helper adds no capability to the assertion set**, no driver publishes a channel, and core still reads no channel it did not create: a `Signal` is a channel the caller made and handed to the driver as a callback, which is the opposite direction to the interface written out above.
+> Nothing here is option-dependent either, because there is no interface for a source to assert.
+>
+> **The restated trigger is what the helper serves, on the caller's side of the seam.**
+> The [#352](https://github.com/onhotpath/ferry/issues/352) amendment restated it as a caller writing the same watch wiring against two drivers and wanting one binding for both, and that is exactly the caller `watch.Values` is for.
+> It is also why the driver-side interface still buys nothing: the wiring was the cost, and it is now paid once in a package rather than once per driver in an interface neither driver's internals share anything behind.
+>
+> **The helper deliberately removes back pressure, which a hand-written callback has.**
+> `Changed` records a pending change and returns immediately, so a slow consumer no longer delays the driver's next look, where a callback that loads inline holds the watching goroutine for the length of the reload.
+> What is paid for it is coalescing: one slot, so a burst is one change and so is a change that lands while a reload is already running.
+
 ### What this ADR does not decide
 
 - **Whether any first-party driver ever announces changes.** The YAML Option above is the only one on the table and it is opt-in. *(Amended under [#352](https://github.com/onhotpath/ferry/issues/352): `driver/env` ships `WatchFiles`, which is a second one and is also opt-in.)*
@@ -286,6 +338,19 @@ That is the rule of three applied one door down, and it is the same trigger [ADR
 - **What a watcher does with a partial failure mid-stream.** The error ends the stream, and a caller who wants to continue rebuilds the iterator, which is a caller's policy rather than ferry's.
 - **Concurrency inside one reload**: [ADR-0019](0019-the-concurrency-model.md)'s.
 
+> **Amended under [#364](https://github.com/onhotpath/ferry/issues/364): a helper package ships, and these rows stand.**
+>
+> As published this list is read against a decision that shipped no code, so which rows `ferry/watch` touches is worth saying out loud.
+>
+> **`ferry.Watch` in the root package still does not ship**, and the row above is unchanged.
+> `watch.Values` is a function in a package of the core module, reached as `watch.Values`, and the root package's surface is the same as it was.
+>
+> **The partial-failure row is unchanged, and `watch.Values` implements exactly the policy it states.**
+> The error ends the stream, and a caller who wants to continue rebuilds the iterator by calling `Values` again on the same `Signal`.
+> Nothing is lost in between: a change that lands while no stream is ranging is pending when the next one opens.
+> A `Follow`-style convenience wrapping that rebuild loop was considered and deliberately not shipped, because what it would wrap is a retry policy and this row says the policy is the caller's.
+> It is a candidate later addition if real callers turn out to write the same loop.
+
 ## Consequences
 
 - **Watch moves from Milestoned to Enabled and core grows no surface**, so [ADR-0001](0001-what-ferry-supports.md)'s capability table gains its first row to change bucket.
@@ -293,6 +358,12 @@ That is the rule of three applied one door down, and it is the same trigger [ADR
 - **The commitment ADR-0001 made was honoured**: the mechanism landed, in core, piece by piece, and the feature ships outside, which is what milestoning promised and what Enabled means.
 - **The deliverables are two documents rather than an API**: `docs/guide/watch-reload.md` and a runnable `examples/watcher`.
   A capability argued as buildable is worthless undemonstrated.
+
+  > **Amended under [#364](https://github.com/onhotpath/ferry/issues/364): the deliverables now include an API.**
+  >
+  > As published this consequence is that nothing ships but prose.
+  > Package `ferry/watch` ships, in the core module, and the guide is written against it rather than against a listing a reader copies.
+  > **Why is in the amendment to the first decision above**, and the part that belongs here is what it costs: a package in core to keep true, in exchange for the ordering hole no driver could close and a demonstration nobody has to copy.
 - **A reload is `Load` and no alias ships**, so there is one spelling of one operation.
   `LoadOver`'s two traps - a lost address keeping its stale value, and a composite replaced wholesale - are published in its godoc and in the guide, because the shape a reader reaches for first is the wrong one.
 - **ferry now has a convention for a fallible iterator**, `(iter.Seq[T], func() error)`, decided on deliberate-versus-accidental discard rather than on compiler enforcement, which the first draft claimed and which does not hold.

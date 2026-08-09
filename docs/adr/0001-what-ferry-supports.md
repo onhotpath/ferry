@@ -90,6 +90,12 @@ Watch is Milestoned: the machinery does not exist yet, and building it is core's
 >
 > Plane inspection and delta dump stay Milestoned on their own terms and are untouched.
 
+> **Amended under [#364](https://github.com/onhotpath/ferry/issues/364): a typed watch helper now ships, as package `ferry/watch`.**
+>
+> The amendment above said "ferry ships no watcher", and that read true as written.
+> What moves is that a helper over `Binding[T]` and the drivers' change callback ships as a directory of the core module, because the ordering hole between a driver's constructor starting the watch and `Bind` returning the binding is closable only over core's own type.
+> The row is unchanged: the bucket is still Enabled, the root package still grows nothing, and [ADR-0020](0020-watch-and-reload.md) carries the argument.
+
 > **Amended under [#306](https://github.com/onhotpath/ferry/issues/306): the transfer row's example exists, and it is the struct-mediated shape.**
 >
 > As published the row reads "Falls out of the pluggable design. Ships as an example", and no such example shipped.

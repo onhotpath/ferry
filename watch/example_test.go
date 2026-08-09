@@ -1,4 +1,4 @@
-package watcher_test
+package watch_test
 
 import (
 	"context"
@@ -6,11 +6,10 @@ import (
 	"fmt"
 
 	"github.com/onhotpath/ferry"
-	"github.com/onhotpath/ferry/examples/watcher"
 	"github.com/onhotpath/ferry/watch"
 )
 
-// Config is the struct both examples watch.
+// Config is the struct the examples and the tests watch.
 type Config struct {
 	Host string `ferry:"host,required"`
 	Port int    `ferry:"port,default=8080"`
@@ -20,15 +19,13 @@ type Config struct {
 // receive a fresh one. The held value is untouched by the reload, which is what
 // makes publication a replacement rather than a mutation.
 func Example() {
-	plane := watcher.NewMemPlane()
+	plane := newMemPlane()
 	plane.Set(ferry.At("host"), ferry.String("db1"))
 
 	ctx := context.Background()
 
-	// The signal is registered before Bind, exactly as a real driver's watch
-	// option is: a change landing in that window is recorded, not lost.
 	s := watch.New()
-	plane.OnChange(s.Changed)
+	plane.OnChange(s.Changed) // what a driver's watch option takes
 
 	b, err := ferry.Bind[Config](plane)
 	if err != nil {
@@ -47,15 +44,14 @@ func Example() {
 	seq, errf := watch.Values(ctx, s, b)
 
 	// Two writes land before the range reads the signal, so the two changes
-	// coalesce into one reload that sees both. A change carries no payload; the
-	// reload is what reads the truth.
+	// coalesce into one reload that sees both.
 	plane.Set(ferry.At("host"), ferry.String("db2"))
 	plane.Set(ferry.At("port"), ferry.Number("5432"))
 
 	for cfg := range seq {
 		fmt.Printf("reloaded: %s:%d\n", cfg.Host, cfg.Port)
 
-		break // one turn is enough for an example; a server would keep ranging
+		break // one turn is enough for an example; a server keeps ranging
 	}
 
 	fmt.Printf("held:     %s:%d\n", held.Host, held.Port)
@@ -67,11 +63,14 @@ func Example() {
 	// stream error: <nil>
 }
 
-// A reload that fails ends the stream with no value yielded, and errf carries the
-// failure out of the range. Recovery is ranging again on the same signal.
-func ExampleMemPlane_failedReload() {
-	plane := watcher.NewMemPlane()
+// A failed reload ends the stream, so a process that wants to survive one ranges
+// again on the same signal. Nothing is lost in between: the change that fixed
+// the plane is pending when the second stream opens.
+func Example_failedReload() {
+	plane := newMemPlane()
 	plane.Set(ferry.At("host"), ferry.String("db1"))
+
+	ctx := context.Background()
 
 	s := watch.New()
 	plane.OnChange(s.Changed)
@@ -83,16 +82,27 @@ func ExampleMemPlane_failedReload() {
 		return
 	}
 
-	seq, errf := watch.Values(context.Background(), s, b)
-
 	plane.Delete(ferry.At("host")) // the plane loses a required address
 
-	for range seq {
-		fmt.Println("unreachable: a failed reload yields no value")
+	for {
+		seq, errf := watch.Values(ctx, s, b)
+		for cfg := range seq {
+			fmt.Println("reloaded:", cfg.Host)
+
+			break // a server would keep ranging until it was told to stop
+		}
+
+		err := errf()
+		if err == nil || errors.Is(err, context.Canceled) {
+			return // the range ended cleanly, or the process is shutting down
+		}
+
+		fmt.Println("reload failed, address missing:", errors.Is(err, ferry.ErrMissing))
+
+		plane.Set(ferry.At("host"), ferry.String("db2")) // somebody fixes it
 	}
 
-	fmt.Println("required address missing:", errors.Is(errf(), ferry.ErrMissing))
-
 	// Output:
-	// required address missing: true
+	// reload failed, address missing: true
+	// reloaded: db2
 }

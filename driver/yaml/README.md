@@ -274,14 +274,15 @@ The one edit the check cannot see is a rewrite that lands in the same modificati
 Pass `yaml.Watch` to be called when the file changes underneath a source, which is how a process holding a loaded value learns to load a fresh one:
 
 ```go
-src := yaml.NewSource(path, yaml.Watch(ctx, 10*time.Millisecond, onChange))
+s := watch.New()
 
-b, err := ferry.Bind[config](src)
+b, err := ferry.Bind[config](yaml.NewSource(path, yaml.Watch(ctx, 10*time.Millisecond, s.Changed)))
 
 // ... an operator edits the file ...
 
-func onChange(ctx context.Context) {
-	cfg, err := b.Load(ctx) // a reload is a load; publish it by replacement
+seq, errf := watch.Values(ctx, s, b)
+for cfg := range seq {
+	publish(cfg) // a reload is a load; publish it by replacement
 }
 ```
 
@@ -292,10 +293,11 @@ Cancelling the context you gave it is what stops it.
 Looking is a stat every interval rather than an fsnotify subscription, so that watching a file costs this module no dependency, and the interval is yours to name.
 
 Two sharp edges are worth reading before you wire it up, and the rest are in the [package documentation](https://pkg.go.dev/github.com/onhotpath/ferry/driver/yaml#Watch).
-Watching starts when the source is built, which is before `ferry.Bind` has handed back the binding your callback wants to load through, so publish that binding to the callback through something that orders the two.
+Watching starts when the source is built, which is before `ferry.Bind` has handed back the binding to load through, so a change can land while there is nothing to load through yet.
+`watch.Signal` is what keeps it: `s.Changed` records such a change instead of losing it, and `watch.Values` opens the stream with that reload.
 And a panic in the callback takes the process down, exactly as it would on a goroutine you started yourself.
 
-The loop this feeds, and the reasons ferry ships no watcher of its own, are in [the watch and reload guide](../../docs/guide/watch-reload.md).
+The loop this feeds is [`ferry/watch`](https://pkg.go.dev/github.com/onhotpath/ferry/watch), and the whole of it is in [the watch and reload guide](../../docs/guide/watch-reload.md).
 
 ## One thing it cannot do
 
