@@ -111,6 +111,12 @@ github.com/onhotpath/ferry                 go.mod    core
 > It is a module for this ADR's own reason: an example that imports a driver would put that driver in core's dependency graph, and core's `require` block stays empty.
 > **Nothing in the layout rule moves**: one core module, one module per driver, and anything that needs a dependency core may not have gets a module of its own.
 
+> **Amended under [#364](https://github.com/onhotpath/ferry/issues/364): `watch/` is a sixth entry in this layout, and it is a directory of the core module.**
+>
+> As published the diagram has one row under core, `ferrytest/`, because that was the only package core shipped beside the root one.
+> `watch/` sits beside it: the typed watch helper, importing the root package and the standard library and nothing else, so core's empty `require` block is untouched.
+> It is a directory rather than a module for the same reason `ferrytest/` is, and the argument that admits it under route (b) is in [ADR-0020](0020-watch-and-reload.md)'s amendment rather than repeated here.
+
 Separate repositories are rejected because first-party drivers exist to be built against core's HEAD on every commit, which is the whole reason they exist at all.
 
 `driver/` rather than `plane/` because ADR-0001 fixed those words: a plane is the external system, a driver is the code someone writes against the contract.
