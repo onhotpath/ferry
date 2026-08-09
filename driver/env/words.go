@@ -24,11 +24,13 @@ import (
 // this driver folds none of it, and a plane whose operators write both spells
 // both by naming both.
 //
-// The sharp edge is that this is a fact about the whole environment and not
-// about one field, which is what makes it declarable at all. A variable holding
-// one of these words arrives as a boolean wherever it is read, so a string
-// field over FEATURE=on is then a value the field cannot take rather than the
-// text "on": choose words your text values do not use.
+// The words are consulted where the schema wants a bool and nowhere else, so a
+// string field over FEATURE=on loads the text "on".
+//
+// The sharp edge is what that means for two programs reading one environment: a
+// variable holding a declared word is a boolean where the schema wants one and
+// text where it does not, so one variable can be read two ways, and which way
+// is the schema's business rather than the environment's.
 //
 // Bind refuses a list that is not whole pairs, a word that is empty, and a word
 // given twice, because each of those is a spelling that cannot be read back the
@@ -164,8 +166,12 @@ func boolTable(words []string) (map[string]bool, error) {
 // with no type information of its own carries a kind at all: the words are the
 // type information, and they are the operator's own rather than a guess this
 // driver makes (ADR-0018).
-func (c *config) observe(text string) ferry.Value {
-	if c.bools == nil {
+//
+// The words are consulted where the schema wants a bool and nowhere else. The
+// address carries that answer, so a plane-wide spelling lands per field with no
+// table and no second pass over the address set (ADR-0016).
+func (c *config) observe(addr ferry.LeafAddr, text string) ferry.Value {
+	if c.bools == nil || addr.Wants() != ferry.KindBool {
 		return ferry.String(text)
 	}
 

@@ -115,8 +115,8 @@ An environment variable is text, so a `bool` field reads the text a bool's own p
 `env.BoolWords("on", "off", "true", "false")` says which words this environment spells a boolean with.
 All four are then accepted, and `on` is the one a `true` is written as.
 
-It is a fact about the whole environment rather than about one field.
-A variable holding one of these words arrives as a boolean wherever it is read, so pick words your text values do not use.
+The words are consulted where the schema wants a bool and nowhere else, so a `string` field over `FEATURE=on` loads the text `on`.
+The sharp edge is what that means for two programs reading one environment: a variable holding a declared word is a boolean where the schema wants one and text where it does not, so one variable can be read two ways, and which way is the schema's business rather than the environment's.
 
 ## A schema that is one value needs a name for it
 

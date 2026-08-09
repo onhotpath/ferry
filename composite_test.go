@@ -627,7 +627,7 @@ func TestAContainerAddressIsNeverAskedForAValue(t *testing.T) {
 		t.Errorf("the walk probed %v, want the section's own address among them", p.probed)
 	}
 
-	if !p.bound.Has(sectionOf(At("opt"))) || p.bound.Has(leafOf(At("opt"))) {
+	if !p.bound.Has(sectionOf(At("opt"))) || p.bound.Has(leafOf(At("opt"), KindAbsent)) {
 		t.Errorf("the driver was bound to %v, want /opt as a section and not as a leaf", kinded(p.bound))
 	}
 }

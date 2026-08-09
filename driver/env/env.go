@@ -317,7 +317,7 @@ func (r *reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error
 	}
 
 	if text, ok := r.env[key]; ok {
-		return r.cfg.observe(text), nil
+		return r.cfg.observe(addr, text), nil
 	}
 
 	if !declared && r.holdsBelow(key) {

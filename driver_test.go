@@ -156,7 +156,7 @@ func (p *probe) Close() error {
 // will: bind before any I/O, open, use, then discover the optional interfaces
 // by assertion rather than by demanding them.
 func TestContractIsImplementable(t *testing.T) {
-	addr := leafOf(At("db", "host"))
+	addr := leafOf(At("db", "host"), KindString)
 	p := &probe{values: map[Path]Value{}, presence: map[Path]Presence{}}
 
 	src, sink := Source(p), Sink(&sinkOnly{probe: p})
@@ -238,12 +238,12 @@ func readBack(t *testing.T, src Source, addr LeafAddr) {
 		t.Errorf("Get(%s) = %#v, want %#v", addr, got, String("localhost"))
 	}
 
-	missing, err := r.Get(t.Context(), leafOf(At("nope")))
+	missing, err := r.Get(t.Context(), leafOf(At("nope"), KindString))
 	if err != nil || missing.Kind() != KindAbsent {
 		t.Errorf("Get at a missing address = %#v, %v, want absent and no error", missing, err)
 	}
 
-	enumerate(t, r, compositeOf(At("tags")))
+	enumerate(t, r, compositeOf(At("tags"), KindString))
 	probeSection(t, r, sectionOf(At("db")))
 }
 
@@ -284,7 +284,7 @@ func probeSection(t *testing.T, r Reader, addr SectionAddr) {
 func TestReadOnlyRefusalLandsInTheOpen(t *testing.T) {
 	var s Sink = readOnly{}
 
-	open, err := s.Bind(newAddressSet(leafOf(At("x"))))
+	open, err := s.Bind(newAddressSet(leafOf(At("x"), KindString)))
 	if err != nil {
 		t.Fatalf("Bind refused before any I/O: %v", err)
 	}

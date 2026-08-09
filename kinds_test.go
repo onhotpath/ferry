@@ -102,11 +102,11 @@ func TestASetAnswersPerKind(t *testing.T) {
 		Tags []string `ferry:"tags"`
 	}](t)
 
-	if !set.Has(compositeOf(At("tags"))) {
+	if !set.Has(compositeOf(At("tags"), KindString)) {
 		t.Error("the set does not hold /tags as a composite, which is what a []string determines")
 	}
 
-	if set.Has(leafOf(At("tags"))) {
+	if set.Has(leafOf(At("tags"), KindAbsent)) {
 		t.Error("the set holds /tags as a leaf, and a []string names no value at its own address")
 	}
 
@@ -129,7 +129,7 @@ func TestASectionTakesAnAddressOfItsOwn(t *testing.T) {
 		t.Error("the set does not hold /home as a section, so a driver is never told the address is a place")
 	}
 
-	if set.Has(leafOf(At("home"))) {
+	if set.Has(leafOf(At("home"), KindAbsent)) {
 		t.Error("the set holds /home as a leaf, and no value is at a section's own address")
 	}
 }
@@ -149,7 +149,7 @@ func TestAnArrayIsASection(t *testing.T) {
 	}
 
 	for _, want := range []Path{At("pair").Elem(0), At("pair").Elem(1)} {
-		if !set.Has(leafOf(want)) {
+		if !set.Has(leafOf(want, KindString)) {
 			t.Errorf("the set does not hold %s, and an array's element addresses come from its type", want)
 		}
 	}

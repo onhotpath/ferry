@@ -207,6 +207,11 @@ type compiler struct {
 type leaf struct {
 	addr  Path
 	field Path
+
+	// kind is what the schema wants at the address: the codec's declared kind
+	// for a leaf entry and the element's for a composite entry, which is why it
+	// sits on the one record type both use (ADR-0016).
+	kind VKind
 }
 
 // site is where a field sits: the address its container occupies, the Go field
@@ -352,7 +357,7 @@ func (c *compiler) rootLeafCodec(t reflect.Type) (leafCodec, bool) {
 // tag, because requiredness is a fact about the schema and not about the
 // caller's starting value.
 func (c *compiler) compileRootLeaf(cd leafCodec) *node {
-	c.recordLeaf(site{owned: true})
+	c.recordLeaf(site{owned: true}, cd.kind)
 
 	return &node{kind: nodeLeaf, addr: Path{}, codec: cd, required: c.cfg.root.required}
 }
@@ -764,7 +769,7 @@ func (c *compiler) compileSlice(t reflect.Type, parent *node, s site, tg tag) in
 	}
 
 	parent.fields = append(parent.fields, n)
-	c.recordComposite(s)
+	c.recordComposite(s, elemWantOf(n))
 
 	return count
 }
@@ -793,7 +798,7 @@ func (c *compiler) compileMap(t reflect.Type, parent *node, s site, tg tag) int 
 	}
 
 	parent.fields = append(parent.fields, n)
-	c.recordComposite(s)
+	c.recordComposite(s, elemWantOf(n))
 
 	return count
 }
@@ -833,12 +838,12 @@ func (c *compiler) checkDynamicOptions(t reflect.Type, addr Path, tg tag) {
 // recordLeaf adds a leaf address to the static set, and adds nothing under a
 // dynamic composite: what is compiled there is a shape, a driver is never handed
 // one, and there is nothing at it to fetch or write (ADR-0003).
-func (c *compiler) recordLeaf(s site) {
+func (c *compiler) recordLeaf(s site, want VKind) {
 	if s.dynamic {
 		return
 	}
 
-	c.leaves = append(c.leaves, leaf{addr: s.addr, field: s.field})
+	c.leaves = append(c.leaves, leaf{addr: s.addr, field: s.field, kind: want})
 }
 
 // recordSection adds a place whose children are known from the type: a struct,
@@ -859,12 +864,15 @@ func (c *compiler) recordSection(s site) {
 // recordComposite adds a place whose children come from the value, which is
 // where the Null an empty one writes sits and the address a driver is asked to
 // enumerate (ADR-0016).
-func (c *compiler) recordComposite(s site) {
+//
+// elem is what the schema wants at the leaves this composite's value mints, and
+// KindAbsent where its members are not leaves.
+func (c *compiler) recordComposite(s site, elem VKind) {
 	if s.dynamic || s.nullable {
 		return
 	}
 
-	c.composites = append(c.composites, leaf{addr: s.addr, field: s.field})
+	c.composites = append(c.composites, leaf{addr: s.addr, field: s.field, kind: elem})
 }
 
 // recordUnder adds the container address a pointer occupies, at the kind of
@@ -880,7 +888,7 @@ func (c *compiler) recordUnder(n *node, s site) {
 	case k == kindSection:
 		c.recordSection(s)
 	default:
-		c.recordComposite(s)
+		c.recordComposite(s, elemWantOf(n))
 	}
 }
 
@@ -999,7 +1007,7 @@ func (c *compiler) compileLeaf(cd leafCodec, t reflect.Type, parent *node, s sit
 	n.required, n.omitzero = heldAt(s, tg)
 
 	parent.fields = append(parent.fields, n)
-	c.recordLeaf(s)
+	c.recordLeaf(s, cd.kind)
 
 	return 1
 }
@@ -1339,7 +1347,7 @@ func (c *compiler) addressSet() *AddressSet {
 	members := make([]Member, 0, len(c.leaves)+len(c.sections)+len(c.composites))
 
 	for _, l := range c.leaves {
-		members = append(members, leafOf(l.addr))
+		members = append(members, leafOf(l.addr, l.kind))
 	}
 
 	for _, k := range c.sections {
@@ -1347,7 +1355,7 @@ func (c *compiler) addressSet() *AddressSet {
 	}
 
 	for _, k := range c.composites {
-		members = append(members, compositeOf(k.addr))
+		members = append(members, compositeOf(k.addr, k.kind))
 	}
 
 	a := newAddressSet(members...)

@@ -23,8 +23,12 @@ import (
 // classified the address set at [Source.Bind] can serve a read from a table it
 // computed before any I/O.
 //
-// Read it with [LeafAddr.Path], which is what a key function walks.
-type LeafAddr struct{ p Path }
+// Read it with [LeafAddr.Path], which is what a key function walks, and with
+// [LeafAddr.Wants], which is the kind of value the schema wants here.
+type LeafAddr struct {
+	p    Path
+	want VKind
+}
 
 // SectionAddr is the address of a place whose children are known from the type:
 // a struct, an array, or either of those behind a pointer.
@@ -42,7 +46,18 @@ type SectionAddr struct{ p Path }
 // them. Which Go type produced it is not part of the address: a []string and a
 // map[string]string are both a CompositeAddr, and a driver mints the [Name] or
 // [Index] segments while the schema types the child they name.
-type CompositeAddr struct{ p Path }
+type CompositeAddr struct {
+	p Path
+
+	// want is the kind the schema wants at the leaves this composite's value
+	// mints, and KindAbsent where its members are not leaves.
+	//
+	// It is carried and not published: a composite address the walk mints must
+	// be == to the one the set holds, or a driver keying a table by address
+	// finds out at run time, and publishing ElemKind later is then one method
+	// body and no plumbing (ADR-0016).
+	want VKind
+}
 
 // Member is one address a compiled schema determines: a [LeafAddr], a
 // [SectionAddr] or a [CompositeAddr], and nothing else.
@@ -96,6 +111,20 @@ func (a SectionAddr) Path() Path { return a.p }
 // Path is the composite's address with its kind dropped.
 func (a CompositeAddr) Path() Path { return a.p }
 
+// Wants is the kind of value the schema wants at this address.
+//
+// It is what a plane carrying no type information of its own reads to decide a
+// spelling exactly where the schema asks for one: a source that renders text
+// answers [String] everywhere and a typed value only where this says so.
+//
+// It is what the schema wants and not the whole of what it takes. A leaf
+// accepts a [KindString] beside its own kind whatever this returns, so text is
+// never the wrong answer. In the other direction it decides nothing: a
+// [Writer.Set] answers with what its plane holds, which is the [Value] in hand,
+// and the two can legitimately differ - a nil pointer leaf writes a [Null] at
+// an address whose schema kind is the pointee's.
+func (a LeafAddr) Wants() VKind { return a.want }
+
 // String is the canonical rendering: /db/host, /tags#0. It identifies the
 // address and it is not a plane key, for the reason [Path.String] gives.
 func (a LeafAddr) String() string { return a.p.String() }
@@ -125,10 +154,16 @@ var (
 // The minting side is unexported, which is the whole of the sealing: only the
 // compiler reaches these, and it reaches them from the node kind it decided
 // (ADR-0016).
+//
+// A leaf and a composite take the kind the schema wants at them, and there is
+// no arity that compiles without one: a mint that forgot the answer is a build
+// failure rather than an address silently equal to nothing. A section holds no
+// value and has none to want.
 
-func leafOf(p Path) LeafAddr           { return LeafAddr{p: p} }
-func sectionOf(p Path) SectionAddr     { return SectionAddr{p: p} }
-func compositeOf(p Path) CompositeAddr { return CompositeAddr{p: p} }
+func leafOf(p Path, want VKind) LeafAddr { return LeafAddr{p: p, want: want} }
+func sectionOf(p Path) SectionAddr       { return SectionAddr{p: p} }
+
+func compositeOf(p Path, want VKind) CompositeAddr { return CompositeAddr{p: p, want: want} }
 
 // addrKind is how the compiler's own answer for a position travels to the
 // places that need a typed address for it: the walk realises an address per
@@ -144,14 +179,14 @@ const (
 // memberAt mints the address of one kind at one path. It is the one place a
 // typed address is built from an untyped one, so the rule that the schema types
 // every address is a rule with a single site (ADR-0016).
-func memberAt(k addrKind, p Path) Member {
+func memberAt(k addrKind, p Path, want VKind) Member {
 	switch k {
 	case kindLeaf:
-		return leafOf(p)
+		return leafOf(p, want)
 	case kindSection:
 		return sectionOf(p)
 	default:
-		return compositeOf(p)
+		return compositeOf(p, want)
 	}
 }
 

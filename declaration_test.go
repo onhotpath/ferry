@@ -164,7 +164,7 @@ func mustHoldNoDeclarationKey(t *testing.T, p *plane) {
 	t.Helper()
 
 	for _, realised := range []Path{At("servers", "a", "port"), At("pool").Elem(0).At("port")} {
-		if p.bound.Has(leafOf(realised)) {
+		if p.bound.Has(leafOf(realised, KindNumber)) {
 			t.Errorf("%s is in the compiled schema, and an address minted from a value never is", realised)
 		}
 	}
