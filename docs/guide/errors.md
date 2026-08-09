@@ -156,6 +156,21 @@ Three things worth knowing before you write one:
 ferry's schema-compile diagnostics are a suppression order, and the defect they are most likely to develop is firing once too often.
 A field tagged `required,default=v` on a slice must report two errors, not three, and a contains-assertion passes straight through the difference (ADR-0011).
 
+## A message names the thing its reader has
+
+Three audiences reach a ferry message through the same `Load` call, and they do not share nouns.
+
+- **Somebody configuring a service** has an environment variable, a YAML key, a store key.
+  A message they can reach names *that*, and never `address`, `plane` or `segment`.
+  The location prefix already carries the noun - a driver implementing `ferry.PlaneNamer` names the address in its own spelling - so the body says `required, and nothing is set here`, with neither `address` nor `plane` in it.
+- **Somebody writing a driver** is implementing against ferry, so a message they reach keeps ferry's own vocabulary: `address`, `plane`, `segment`, `kind` are the words their interface is written in, and translating them would make the message harder to act on rather than easier.
+  `the sink returned no error and no open from Bind` is correct as it stands.
+- **Somebody writing Go against ferry** - a struct tag, a codec registration, an extension declaration - has a tag and a type, and those messages already name them.
+
+Two rules hold across all three.
+**State the rule, do not echo the input** (`a duration needs a unit, as in 30s or 1h30m`).
+And **name both sides and the consequence**: what is there, what was wanted, what would be lost.
+
 ## ferry never prints a value the plane supplied
 
 ferry's own message text never contains a value the plane supplied.

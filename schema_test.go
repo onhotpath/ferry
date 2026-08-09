@@ -392,6 +392,136 @@ func TestCompileEmbedding(t *testing.T) {
 	}})
 }
 
+// TestCompileRefusesATaggedUnexportedEmbeddedFieldItCannotSet is the other half
+// of the unexported-embedded rule, and it is the half ADR-0008 did not measure.
+//
+// Promotion works through such a field because reflect drops the read-only flag
+// at the exported field one step below. A tag makes the field itself the mapped
+// position, where there is no step below, so every shape reflect writes at the
+// position is refused: each of these compiled clean and panicked inside reflect
+// on load.
+func TestCompileRefusesATaggedUnexportedEmbeddedFieldItCannotSet(t *testing.T) {
+	t.Parallel()
+
+	run(t, []compileCase{{
+		name: "a leaf",
+		run: Compile[struct {
+			namedString `ferry:"n"`
+			Port        string `ferry:"port"`
+		}],
+		want: []string{
+			"/namedString: embedded field namedString is unexported and its ferry tag maps the field itself",
+			"which reflect cannot set",
+			`give the field an exported name, or mark it ferry:"-"`,
+		},
+		elements: 1,
+	}, {
+		name: "a pointer to a struct",
+		run: Compile[struct {
+			*common `ferry:"c"`
+			Port    string `ferry:"port"`
+		}],
+		want:     []string{"/common: embedded field common is unexported"},
+		elements: 1,
+	}, {
+		name: "a slice",
+		run: Compile[struct {
+			namedSlice `ferry:"s"`
+			Port       string `ferry:"port"`
+		}],
+		want:     []string{"/namedSlice: embedded field namedSlice is unexported"},
+		elements: 1,
+	}, {
+		name: "an array, whose elements inherit the flag",
+		run: Compile[struct {
+			namedArray `ferry:"a"`
+			Port       string `ferry:"port"`
+		}],
+		want:     []string{"/namedArray: embedded field namedArray is unexported"},
+		elements: 1,
+	}, {
+		name: "a map",
+		run: Compile[struct {
+			namedMapping `ferry:"m"`
+			Port         string `ferry:"port"`
+		}],
+		want:     []string{"/namedMapping: embedded field namedMapping is unexported"},
+		elements: 1,
+	}})
+}
+
+// TestCompileTakesTheTaggedEmbeddedFieldsItCanSet holds the refusal above to
+// its own scope, because a rule stated as "an unexported embedded field with a
+// tag" rather than as "a position reflect writes at" would take these three
+// with it.
+func TestCompileTakesTheTaggedEmbeddedFieldsItCanSet(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		name string
+		run  func(...Option) error
+	}{
+		{"an unexported struct, whose exported fields are what a load sets", Compile[nestedUnexported]},
+		{"an exported type, which is settable at the field itself", Compile[struct {
+			NamedString `ferry:"n"`
+			Port        string `ferry:"port"`
+		}]},
+		{`an unexported field marked ferry:"-", which is redundant and accepted`, Compile[struct {
+			namedString `ferry:"-"`
+			Port        string `ferry:"port"`
+		}]},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := c.run(); err != nil {
+				t.Errorf("refused a field reflect can set: %+v", err)
+			}
+		})
+	}
+}
+
+// TestALoadWritesThroughATaggedUnexportedEmbeddedStruct is the accepted case
+// end to end, because compiling clean is what the refused shapes did too.
+func TestALoadWritesThroughATaggedUnexportedEmbeddedStruct(t *testing.T) {
+	t.Parallel()
+
+	src := planeSource{newPlane(map[Path]Value{
+		At("c", "name"): String("n"),
+		At("c", "env"):  String("prod"),
+		At("port"):      String("8080"),
+	})}
+
+	out, err := Load[nestedUnexported](t.Context(), src)
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if want := (nestedUnexported{common: common{Name: "n", Env: "prod"}, Port: "8080"}); out != want {
+		t.Errorf("loaded %+v, want %+v", out, want)
+	}
+}
+
+// nestedUnexported is the shape the refusal must not reach: the embedded field
+// is unexported and its tag nests it, and what a load sets is the exported
+// fields one step below, which reflect allows.
+type nestedUnexported struct {
+	common `ferry:"c"`
+	Port   string `ferry:"port"`
+}
+
+// NamedString is the exported twin of namedString, so the rule above is held to
+// being about what reflect can set rather than about the kind of the type.
+type NamedString string
+
+// namedSlice, namedArray and namedMapping are the three composite shapes an
+// embedded field can carry, each written at the field itself.
+type (
+	namedSlice   []string
+	namedArray   [2]string
+	namedMapping map[string]string
+)
+
 type namedString string
 
 type brokenCommon struct {

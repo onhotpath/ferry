@@ -161,7 +161,7 @@ A single line holding a comma-separated list is one value, because `net/http` do
 A `Source` holds no request.
 It is built once and shared, which is what `net/http` running every handler in a goroutine of its own requires, and the request travels in the context instead.
 
-A load whose context never went through `WithQuery` or `WithHeaders` is refused before anything is read:
+A load whose context never went through `WithQuery` or `WithHeaders`, or went through one of them carrying a nil `url.Values` or `http.Header`, is refused before anything is read:
 
 ```
 ferry: opening the plane: plane error: http: no query parameters in the context: put it there with ferryhttp.WithQuery or ferryhttp.WithHeaders
@@ -202,6 +202,9 @@ The realistic way to hit it is a form with a hidden `tags.0` beside a checkbox g
 
 Only an overlap is refused.
 `?tags=a&tags=b&tags.2=c` extends the sequence and loads as three elements, because position 2 is not claimed twice.
+
+A request claiming more than one position twice is one refusal rather than several, and it names the lowest of them.
+The same request reads the same way every run, which is what lets a test assert on the line.
 
 ## Set but empty is not the same as absent
 

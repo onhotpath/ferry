@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1304,6 +1305,175 @@ func TestModeSurvives(t *testing.T) {
 
 	if got := fi.Mode().Perm(); got != 0o640 {
 		t.Errorf("the plane's mode is %v after a dump, want 0640", got)
+	}
+}
+
+// TestASymlinkedPlaneIsWrittenThrough is #256: a save renamed its staged file
+// over the link itself, so the link became a regular file, the file it named
+// kept the value the save was replacing, and every process reading the target
+// went on reading the old document.
+//
+// A symlinked config path is how a dotfile farm, /etc/alternatives and a
+// ConfigMap subPath all present a file, and none of them survive being replaced
+// by a regular file.
+func TestASymlinkedPlaneIsWrittenThrough(t *testing.T) {
+	type config struct {
+		Port int `ferry:"port"`
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.yaml")
+
+	if err := os.WriteFile(target, []byte("port: 1\n"), 0o600); err != nil {
+		t.Fatalf("writing the file the link names: %v", err)
+	}
+
+	link := filepath.Join(dir, planeName)
+	if err := os.Symlink("real.yaml", link); err != nil {
+		t.Skipf("this environment does not take a symlink: %v", err)
+	}
+
+	if err := ferry.Dump(t.Context(), config{Port: 8080}, yaml.NewSink(link)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	stillALink(t, link)
+
+	if got, want := read(t, target), "port: 8080\n"; got != want {
+		t.Errorf("the file the link names holds %q, want %q: a save through a link writes the file it names", got, want)
+	}
+}
+
+// TestASymlinkedPlaneStagesBesideTheFileItNames asserts the replacement is
+// staged in the directory the save actually renames into.
+//
+// A temporary staged beside the link is on whatever filesystem the link lives
+// on, and a rename across filesystems fails - so the save that looks atomic is
+// the one that cannot commit at all.
+func TestASymlinkedPlaneStagesBesideTheFileItNames(t *testing.T) {
+	type config struct {
+		Port int `ferry:"port"`
+	}
+
+	dir := t.TempDir()
+
+	held := filepath.Join(dir, "held")
+	if err := os.Mkdir(held, 0o700); err != nil {
+		t.Fatalf("making the directory the link points into: %v", err)
+	}
+
+	target := filepath.Join(held, "real.yaml")
+	if err := os.WriteFile(target, []byte("port: 1\n"), 0o600); err != nil {
+		t.Fatalf("writing the file the link names: %v", err)
+	}
+
+	link := filepath.Join(dir, planeName)
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("this environment does not take a symlink: %v", err)
+	}
+
+	if err := ferry.Dump(t.Context(), config{Port: 8080}, yaml.NewSink(link)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	stillALink(t, link)
+	holdsOnly(t, dir, planeName, "held")
+	holdsOnly(t, held, "real.yaml")
+}
+
+// TestASaveThroughADanglingLinkWritesTheFileItNames is the same walk where the
+// file does not exist yet, which is how a link into a directory a deploy has not
+// filled in behaves: the save writes the file the link names and leaves the link
+// alone, exactly as an ordinary write through the link would.
+func TestASaveThroughADanglingLinkWritesTheFileItNames(t *testing.T) {
+	type config struct {
+		Port int `ferry:"port"`
+	}
+
+	dir := t.TempDir()
+
+	link := filepath.Join(dir, planeName)
+	if err := os.Symlink("real.yaml", link); err != nil {
+		t.Skipf("this environment does not take a symlink: %v", err)
+	}
+
+	if err := ferry.Dump(t.Context(), config{Port: 8080}, yaml.NewSink(link)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	stillALink(t, link)
+
+	if got, want := read(t, filepath.Join(dir, "real.yaml")), "port: 8080\n"; got != want {
+		t.Errorf("the file the link names holds %q, want %q", got, want)
+	}
+}
+
+// TestASaveThroughALinkThatNamesItselfIsRefused is the bound on following one:
+// a cycle of links has no file at the end of it, and the save says so rather
+// than spinning.
+func TestASaveThroughALinkThatNamesItselfIsRefused(t *testing.T) {
+	type config struct {
+		Port int `ferry:"port"`
+	}
+
+	dir := t.TempDir()
+	first, second := filepath.Join(dir, planeName), filepath.Join(dir, "other.yaml")
+
+	if err := os.Symlink("other.yaml", first); err != nil {
+		t.Skipf("this environment does not take a symlink: %v", err)
+	}
+
+	if err := os.Symlink(planeName, second); err != nil {
+		t.Fatalf("closing the cycle: %v", err)
+	}
+
+	err := ferry.Dump(t.Context(), config{Port: 8080}, yaml.NewSink(first))
+	if err == nil {
+		t.Fatal("a dump through a cycle of links succeeded, and there is no file at the end of one")
+	}
+
+	if !errors.Is(err, ferry.ErrPlane) {
+		t.Errorf("the dump reported %v, want an error carrying ferry.ErrPlane", err)
+	}
+}
+
+// stillALink asserts the path is the symlink it was, which is what a save that
+// renamed over it destroys.
+func stillALink(t *testing.T, path string) {
+	t.Helper()
+
+	fi, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("stat of the link itself: %v", err)
+	}
+
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the plane is %v after a dump, want a symlink: a save renamed over the link rather than through it",
+			fi.Mode())
+	}
+}
+
+// holdsOnly asserts a directory holds exactly these names, which is how a
+// temporary staged in the wrong directory is caught.
+func holdsOnly(t *testing.T, dir string, want ...string) {
+	t.Helper()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", dir, err)
+	}
+
+	got := make([]string, 0, len(entries))
+	for _, e := range entries {
+		got = append(got, e.Name())
+	}
+
+	slices.Sort(got)
+	slices.Sort(want)
+
+	if !slices.Equal(got, want) {
+		t.Errorf("%s holds %v, want %v: a staged file that outlives the dump is a temporary left behind",
+			dir, got, want)
 	}
 }
 

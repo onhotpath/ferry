@@ -608,3 +608,85 @@ jobs:
           files: ${{ matrix.module }}/cross.out
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
+
+  # The one check `main`'s ruleset needs to require (#108).
+  #
+  # `build`, `lint` and `coverage` are matrix jobs fanned out over whatever the
+  # `modules` job globbed, so their check contexts carry a module path in the
+  # name and the set of them changes when the module set does. Naming those
+  # contexts in a ruleset is a hand-maintained copy of the glob, and it degrades
+  # in both directions: a driver added later is unguarded because its three
+  # contexts are not in the list, and a driver removed or renamed leaves a
+  # required context that never reports again, which blocks every pull request
+  # against `main` permanently.
+  #
+  # `needs` on a matrix job waits for every leg of the matrix, so this job
+  # follows the module set with no list to keep in step. A driver added under
+  # driver/ is covered the moment the glob finds it.
+  #
+  # `if: always()` is what makes it a gate rather than a casualty. Without it,
+  # this job is skipped whenever anything it needs fails, and a skipped check is
+  # not a passing one, so the ruleset would block - the right outcome reached by
+  # a reason nobody can debug from the log.
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [modules, invariants, build, nojsonv2, format, lint, race, coverage]
+    steps:
+      - uses: actions/checkout@v7
+
+      # The list above is the one thing here that is still written by hand, and
+      # it is the same shape of defect as the ruleset it replaces - just one
+      # level up, per job rather than per matrix leg, so a new driver never
+      # touches it and a new job does. That edit is asserted rather than
+      # remembered.
+      - name: The gate needs every job in this workflow
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          # A job key is the only thing indented by exactly two spaces after the
+          # top-level `jobs:` line; a job's own body starts at four. Reading the
+          # file this way rather than through a YAML library keeps the assertion
+          # on the tools every other step here already uses.
+          declared=$(awk '
+            /^jobs:$/ { injobs = 1; next }
+            /^[^[:space:]]/ { injobs = 0 }
+            injobs && /^  [A-Za-z0-9_-]+:$/ { gsub(/[ :]/, "", $0); print }
+          ' .github/workflows/ci.yml | grep -vx 'ci' | sort)
+          needed=$(echo "$RESULTS" | jq -r 'keys[]' | sort)
+          echo "jobs in ci.yml: $(echo "$declared" | tr '\n' ' ')"
+          echo "gate needs:     $(echo "$needed" | tr '\n' ' ')"
+          if [ "$declared" != "$needed" ]; then
+            echo "FAIL: ci.yml and this gate's needs list disagree, so a job is"
+            echo "      running outside the one required status check and can"
+            echo "      fail without blocking a merge."
+            diff <(echo "$needed") <(echo "$declared") || true
+            echo "      Add it to the 'needs:' of the 'ci' job."
+            exit 1
+          fi
+          echo "OK: the gate covers every job."
+
+      # Success is the only result that passes, `skipped` included.
+      #
+      # No job here carries a job-level `if:`, so the only way one reports
+      # `skipped` is that something it needs failed or was cancelled - which is
+      # a red run being laundered into a green gate if it is let through. The
+      # deliberate skips this workflow does have, the GOWORK=off gates in
+      # `build` and the empty-profile gates in `coverage`, are `exit 0` inside a
+      # step: the step passes and so does its job, and none of them can reach
+      # this expression.
+      - name: Every needed job must have succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"' | sort
+          bad=$(echo "$RESULTS" | jq -r 'to_entries[] | select(.value.result != "success") | "  \(.key): \(.value.result)"')
+          if [ -n "$bad" ]; then
+            echo "FAIL: these jobs did not succeed:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "OK: every job succeeded."

@@ -299,6 +299,13 @@ The class is `errors.Is`, and nobody branches on the moment.
 > ferry's own message text never contains a value the plane supplied.
 > The cause stays in the chain and is not printed.
 
+> **Amended under [#159](https://github.com/onhotpath/ferry/issues/159): a message names the noun its reader has, and this section only ever decided the value.**
+>
+> As published this section decided what a message may print - structure, never the value - and never said which structure's words to use.
+> ferry's own text reaches three different readers through one `Load` call, and they do not share nouns: somebody configuring a service has an environment variable or a YAML key, not a "plane" or an "address"; somebody writing a driver is implementing against ferry's own interfaces, so `address`, `plane`, `segment` and `kind` are exactly the words their code already uses; somebody writing Go against ferry has a struct tag and a type.
+> A message reaching the first audience now names what that reader holds, and a message reaching the second or third keeps ferry's own vocabulary, because translating it would make the message harder to act on rather than easier.
+> This is orthogonal to the rule above and decides only which noun names a thing, never whether the plane's own value may appear.
+
 > **Amended under [#259](https://github.com/onhotpath/ferry/issues/259): a spelling's parse refusal is the one exception, and it is bounded.**
 >
 > [ADR-0018](0018-the-spelling-seam.md) puts a plane's own spellings on the driver side, and its law 4 requires a parse refusal to name the text it refused.
