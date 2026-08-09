@@ -465,6 +465,28 @@ Element 1 has nothing on the plane and still takes its default.
 A slice element in the same position does not exist at all.
 That is ADR-0005's array-against-slice asymmetry appearing a second time, in a place ADR-0005 did not look, and it belongs in the documentation of the set for the same reason.
 
+> **Amended under [#336](https://github.com/onhotpath/ferry/issues/336): the root is an address now, and it is the one address with no tag on it, so it is the one address that can carry `required` and cannot carry a declared default.**
+>
+> As published, every rule in this ADR was written about a field, because a declaration was written on a field's tag and the root was not an address at all.
+> [ADR-0003](0003-how-a-leaf-addresses-a-plane.md) has since named the empty path the root address, and a root that resolves to a leaf compiles there.
+> Everything this ADR decides about absence holds there unchanged: absence does not write, and a seed survives it.
+>
+> What does not exist there is a **declared** default.
+> A declared default is written on a tag, this ADR's whole treatment of it assumes a tag, and the root has none.
+> The decision is not to invent a second way to declare one.
+>
+> > A seed is the caller's default.
+> > A declared default exists only where a tag can spell one, and the root has no tag.
+>
+> So `ferry.LoadOver(ctx, 8080, src)` is the root's default, and it is better typed than a declaration would have been: the seed is a `T` rather than a text this ADR's own chain would have to decode on every load.
+> The cost is stated rather than hidden: `Compile` validates a tagged field's default text from the type alone and has nothing to validate at the root, because there is no text there to be wrong.
+>
+> `required` at the root **is** declared, by `ferry.RootRequired`, because requiredness is a fact about the schema and not about the caller's starting value.
+> It composes with a seed and is not weakened by one: `required` is a presence test about the plane, satisfied by any observation other than `Absent`, and a seed is not an observation.
+> `LoadOver(ctx, 8080, src, ferry.RootRequired)` therefore carries 8080 forward on a reload and still fails with `ErrMissing` where the plane went silent, which is the shape a reload wants and no declared default could give it.
+>
+> At a struct root it is the same word with the same meaning it has at every other section address, which the subsection below states: the plane supplied at least one of the address's static children.
+
 ### A defaulted field is dumped like any other, and omission is per-field and zero-based
 
 > A field holding its default is dumped.

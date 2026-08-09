@@ -97,7 +97,8 @@ func schemaWith(t reflect.Type, cfg config, keep retention) (*schema, error) {
 		return compileSchema(t, cfg)
 	}
 
-	return cfg.registry.schemaFor(schemaKey{typ: t, tagKey: cfg.tagKey, decl: cfg.registry.exts.decl}, cfg)
+	return cfg.registry.schemaFor(
+		schemaKey{typ: t, tagKey: cfg.tagKey, decl: cfg.registry.exts.decl, root: cfg.root}, cfg)
 }
 
 // schema is a compiled type: the node tree a walk iterates, and the address set
@@ -307,6 +308,20 @@ func (c *compiler) compileRoot(t reflect.Type) *node {
 
 	n, _ := c.compileStruct(t, site{}, nil)
 
+	return c.declareOnStructRoot(n)
+}
+
+// declareOnStructRoot carries the root declaration onto a struct root, where
+// required means exactly what it means at every other static container: the
+// plane supplied at least one of the address's children, which is the presence
+// bit [loadFrom.atStatic] already answers (ADR-0006).
+//
+// It is a step of its own rather than a field set inline, because the root is
+// the one position whose declaration comes from the Option list instead of from
+// a tag, and that is the whole of what separates it from every other container.
+func (c *compiler) declareOnStructRoot(n *node) *node {
+	n.required = c.cfg.root.required
+
 	return n
 }
 
@@ -331,13 +346,15 @@ func (c *compiler) rootLeafCodec(t reflect.Type) (leafCodec, bool) {
 // compileRootLeaf compiles a root that resolves to a leaf, at the root address
 // (ADR-0003, ADR-0010).
 //
-// It carries no default and no required flag, because the root has no tag to
-// write either on: a leaf below the root reads them off the field that names
-// it, and the root is named by nothing.
+// It carries no default, because a default is text written on a tag and the root
+// has none: the seed [LoadOver] takes is the root's default instead (ADR-0006).
+// required is declared all the same, out of the Option list rather than off a
+// tag, because requiredness is a fact about the schema and not about the
+// caller's starting value.
 func (c *compiler) compileRootLeaf(cd leafCodec) *node {
 	c.recordLeaf(site{owned: true})
 
-	return &node{kind: nodeLeaf, addr: Path{}, codec: cd}
+	return &node{kind: nodeLeaf, addr: Path{}, codec: cd, required: c.cfg.root.required}
 }
 
 // compileStruct compiles every field of a struct at the address the struct

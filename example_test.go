@@ -74,6 +74,25 @@ func ExampleLoadOver() {
 	// Output: {Host:db.internal Port:8080 Timeout:30s Tags:[default] DB:{User:}}
 }
 
+// ExampleLoadOver_root loads a bare value, which sits at the root address.
+//
+// The root is the one address no struct tag names, so it declares no default
+// and the seed is the only one it has. The plane here holds nothing, so 8080 is
+// what comes back.
+func ExampleLoadOver_root() {
+	src := ferrytest.Static(map[ferry.Path]ferry.Value{})
+
+	port, err := ferry.LoadOver(context.Background(), 8080, src)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Println(port)
+	// Output: 8080
+}
+
 // ExampleDump writes a value to a plane and loads it back.
 //
 // [ferrytest.MemPlane] is a plane with nothing of its own, so what comes back
@@ -254,6 +273,23 @@ func ExampleTagKey() {
 
 	fmt.Printf("%+v\n", cfg)
 	// Output: {Name:checkout Timeout:30}
+}
+
+// ExampleRootRequired declares the root address required, which no tag can do.
+//
+// A seed does not answer it, because required is a presence test about the
+// plane and a seed is not an observation: the reload below carries 8080 forward
+// and still refuses where the plane went silent.
+func ExampleRootRequired() {
+	src := ferrytest.Static(map[ferry.Path]ferry.Value{})
+
+	port, err := ferry.LoadOver(context.Background(), 8080, src, ferry.RootRequired)
+
+	fmt.Println(port, errors.Is(err, ferry.ErrMissing))
+	fmt.Println(err)
+	// Output:
+	// 8080 true
+	// ferry: required, and nothing is set here
 }
 
 // ExampleAt builds an address and walks its segments.

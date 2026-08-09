@@ -27,8 +27,8 @@ import (
 // setting would not be. The mechanism is below.
 
 // schemaKey is the inner key of one registry's cache: the type, the struct tag
-// key the compiler read it under, and the foreign tag keys it was told to read
-// beside that one.
+// key the compiler read it under, the foreign tag keys it was told to read
+// beside that one, and what the Option list declared about the root address.
 //
 // It is a named struct rather than an anonymous one so that adding a field to
 // it is a deliberate act rather than a side effect of adding an Option. Every
@@ -40,10 +40,16 @@ import (
 // carried in its canonical order-independent form, so two registries declaring
 // the same extensions in opposite orders key one schema rather than two
 // (ADR-0021).
+//
+// The root declaration is a member on the same rule, and for the plainest
+// reason there is: one reflect.Type compiles to a required root under it and to
+// an optional one without it, and a cache that could not tell the two apart
+// would hand the second caller the first caller's schema (ADR-0006, ADR-0010).
 type schemaKey struct {
 	typ    reflect.Type
 	tagKey string
 	decl   extDecl
+	root   rootDecl
 }
 
 // This is the whole mechanism behind the rule above, and it is the only one Go
