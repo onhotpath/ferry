@@ -21,8 +21,13 @@ const (
 	koanfNotesYAML = "Parses the file into a map, then mapstructure-decodes the map into the " +
 		"struct: two passes over the data and one intermediate map per load, none of it cached."
 	koanfNotesDump = "Reflects the struct into a map with fatih/structs, marshals the map to YAML " +
-		"and writes the file whole. Comments, key order and quoting in the existing " +
-		"document are lost, and the write is not atomic."
+		"and writes the file whole. It never reads what is at the path, so this row is the " +
+		"same code doing the same work in both dump scenarios and its two figures differ " +
+		"only by the removal a dump_fresh iteration begins with. Over a document that is " +
+		"already there that means comments, key order, quoting and every key no field maps " +
+		"are lost; over a path with no file at it there is nothing to lose, which is why " +
+		"dump_fresh is the scenario where this column and ferry's are doing the same job. " +
+		"The write is not atomic."
 )
 
 // koanfConf is koanf's unmarshal configuration. Tag is what lets koanf read
@@ -54,6 +59,7 @@ func koanfEnvProvider() *kenv.Env {
 func koanfEnv[T any](notes string) Impl {
 	return Impl{
 		Name: "koanf", Module: "github.com/knadh/koanf/v2", Notes: notes,
+		Remark: "reads the whole environ per load",
 		New: func(*Fixture) (Loader, error) {
 			return func(dst any) error {
 				if _, err := dstOf[T](dst); err != nil {
@@ -80,6 +86,7 @@ func koanfEnvLarge() Impl { return koanfEnv[Large](koanfNotesEnv) }
 func koanfYAML[T any](path func(*Fixture) string) Impl {
 	return Impl{
 		Name: "koanf", Module: "github.com/knadh/koanf/v2", Notes: koanfNotesYAML,
+		Remark: "file to map to struct; nothing cached",
 		New: func(f *Fixture) (Loader, error) {
 			p := path(f)
 
@@ -105,11 +112,12 @@ func koanfYAML[T any](path func(*Fixture) string) Impl {
 func koanfYAMLSmall() Impl { return koanfYAML[Small](func(f *Fixture) string { return f.YAMLSmall }) }
 func koanfYAMLLarge() Impl { return koanfYAML[Large](func(f *Fixture) string { return f.YAMLLarge }) }
 
-func koanfDumpLarge() Impl {
+func koanfDump(t DumpTarget) Impl {
 	return Impl{
 		Name: "koanf", Module: "github.com/knadh/koanf/v2", Notes: koanfNotesDump,
+		Remark: "replaces the file whole",
 		New: func(f *Fixture) (Loader, error) {
-			path, err := f.Seed("koanf", YAMLLarge)
+			path, start, err := f.Prepare(t, "koanf")
 			if err != nil {
 				return nil, err
 			}
@@ -117,6 +125,10 @@ func koanfDumpLarge() Impl {
 			want := WantLarge()
 
 			return func(dst any) error {
+				if err := start(); err != nil {
+					return err
+				}
+
 				k := koanf.New(".")
 				if err := k.Load(kstructs.Provider(want, ferryTag), nil); err != nil {
 					return fmt.Errorf("bench: koanf structs load: %w", err)

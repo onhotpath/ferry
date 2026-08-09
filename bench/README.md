@@ -60,6 +60,55 @@ The root `Makefile`'s `MODULES` list does not include `bench`, so `make vet`, `m
 `make check`'s `gofmt` and `gci` steps walk files rather than modules, so this directory is
 held to the same formatting as the rest of the repository, which is intentional.
 
+## The two dump scenarios
+
+The dump direction is measured twice, and the difference between the two runs is one thing:
+whether there is already a file at the path.
+
+| scenario | the file at the path | what it measures |
+| --- | --- | --- |
+| `dump_large` | the document is there, and stays there | writing over a config file somebody maintains |
+| `dump_fresh` | removed before every save | writing the file out from nothing |
+
+That split exists because the columns do not agree on what a save is.
+ferry's YAML sink merges: it reads and parses the document that is there, writes only the
+keys the struct maps, and leaves comments, key order, quoting and every unmapped key exactly
+as they were.
+koanf, viper and the baseline serialise the struct and replace the file whole, and never read
+what was there at all.
+
+So `dump_large` is a table in which one row is doing a job the rows beside it are not doing,
+and paying a read and a parse for it.
+That is not a flaw in the scenario - it is the job ferry's sink exists for, and a comparison
+that left it out would be measuring a ferry nobody ships.
+But it does mean the figure answers "what does editing this file cost", not "which library
+writes YAML fastest", and those had been reading as the same number.
+
+`dump_fresh` is the second question asked on its own.
+With no document at the path there is nothing to merge and nothing to keep, so every column
+is doing the same work, and what is left is the mapping layer and the write.
+
+Neither scenario is the fair one and neither replaces the other.
+An operator with a hand-maintained config file and a program generating one from scratch are
+asking different questions, and both are answered.
+
+Two properties make the pair worth reading together:
+
+- **The two figures for one library are directly comparable.**
+  The fixture, the struct, the read-back and every column around them are identical; the file
+  at the path is the only thing that changed. So the distance between a library's two rows is
+  what reading the existing document costs it, and nothing else. For the three columns that
+  never read it, that distance is roughly the cost of one `os.Remove`.
+- **The removal is inside the timed region, and every column pays it.**
+  `Fixture.Prepare` hands each adapter the step its scenario begins with - a no-op for
+  `dump_large`, the removal for `dump_fresh` - and every adapter calls it unconditionally, so
+  it is a constant added to all five rather than a thumb on any scale. Lifting it out would
+  leave every iteration after the first with a document at the path, which is the other
+  scenario.
+
+Every dump row writes a file of its own, named for its scenario and its library, so one
+column's output can never become another's input and the two scenarios never share a file.
+
 ## Running it
 
 ```

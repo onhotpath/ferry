@@ -1,7 +1,9 @@
 package bench
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -61,6 +63,21 @@ type Impl struct {
 	// a comparison that hides what each library actually did is worth less
 	// than no comparison.
 	Notes string
+
+	// Remark is [Impl.Notes] compressed to a few words, and it is rendered
+	// inside the table rather than under it.
+	//
+	// The two exist together because they answer at different distances. A
+	// reader scanning a column of figures is deciding whether the row beside
+	// the one they are reading did the same job, and a paragraph below the
+	// table is too far away to answer that: by the time it is read the numbers
+	// have already been compared. So the difference that changes how a figure
+	// should be read - this row merged, that one replaced the file - is in the
+	// row, and the reasoning stays in the note.
+	//
+	// It is a phrase and not a sentence. Anything that needs a sentence needs
+	// the note.
+	Remark string
 
 	// Baseline marks the column that is not a library.
 	//
@@ -169,20 +186,67 @@ func NewFixture(dir string) (*Fixture, error) {
 	return f, nil
 }
 
-// Seed writes doc to a file named for one dump implementation and returns the
-// path.
+// DumpTarget is what a dump scenario leaves at the file its rows write, and
+// therefore what every save in that scenario finds there.
 //
-// Every dump implementation gets its own file so that one library's output can
-// never become another's input. The seed matters: ferry's YAML sink edits an
-// existing document in place, so dumping into an empty directory would measure
-// a different job from the one it is for.
-func (f *Fixture) Seed(name, doc string) (string, error) {
-	path := filepath.Join(f.Dir, "dump-"+name+".yaml")
-	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
-		return "", fmt.Errorf("bench: seeding %s: %w", path, err)
+// It is the whole difference between the two dump scenarios, and it is a value
+// rather than a flag inside each adapter so that the five adapters are written
+// once and the scenario decides which job they do.
+//
+// [DumpInto] seeds the file with the document and never removes it, so every
+// save merges into a document that is already there. [DumpFresh] removes it
+// before every save, so every save writes a file that is not there. Which of
+// the two a library is faster at is not the same question, and the answer is
+// not the same either: a save that merges has to read and parse what is there
+// before it can write, and a save that replaces the file whole never does.
+type DumpTarget struct {
+	// Scenario is the scenario's name, and the first half of every file name in
+	// it, so a library measured in both scenarios writes two different files.
+	Scenario string
+
+	// Seeded says whether the document is at the path when a save starts.
+	Seeded bool
+}
+
+// DumpInto and DumpFresh are the two dump scenarios' targets.
+var (
+	DumpInto  = DumpTarget{Scenario: "dump_large", Seeded: true}
+	DumpFresh = DumpTarget{Scenario: "dump_fresh", Seeded: false}
+)
+
+// Prepare gives one row its own file and hands back the path together with the
+// step every save in this scenario begins with.
+//
+// Every implementation gets a file of its own, in both scenarios, so that one
+// library's output can never become another's input.
+//
+// The step is a no-op for a seeded target and the removal for a fresh one, and
+// it is a function both ways so that every adapter calls it unconditionally.
+// It runs inside the timed region, which is deliberate and is the same rule
+// [readBackLarge] is inside it under: every column pays it, so it is a constant
+// added to all five, and lifting it out would leave every iteration after the
+// first with a document at the path - which is the other scenario.
+func (f *Fixture) Prepare(t DumpTarget, name string) (string, func() error, error) {
+	path := filepath.Join(f.Dir, t.Scenario+"-"+name+".yaml")
+
+	if !t.Seeded {
+		return path, func() error { return clear(path) }, nil
 	}
 
-	return path, nil
+	if err := os.WriteFile(path, []byte(YAMLLarge), 0o600); err != nil {
+		return "", nil, fmt.Errorf("bench: seeding %s: %w", path, err)
+	}
+
+	return path, func() error { return nil }, nil
+}
+
+// clear removes the document a fresh save must not find.
+func clear(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("bench: clearing %s: %w", path, err)
+	}
+
+	return nil
 }
 
 // Scenarios is the whole comparison: every scenario, in the order the results
@@ -194,6 +258,7 @@ func Scenarios() []Scenario {
 		yamlSmallScenario(),
 		yamlLargeScenario(),
 		dumpLargeScenario(),
+		dumpFreshScenario(),
 	}
 }
 
@@ -253,17 +318,54 @@ func yamlLargeScenario() Scenario {
 	}
 }
 
+// dumpLargeScenario and dumpFreshScenario are the dump direction, split on the
+// one thing that decides how much work a save is: whether there is already a
+// document at the path.
+//
+// They are two scenarios and not one because the five columns do not agree on
+// what a save is. ferry merges into the document that is there and keeps
+// everything it did not write; the other four serialise the struct and replace
+// the file whole, and never read what was there at all. Measured over a seeded
+// file those are two different jobs in one table, and the row that reads the
+// file pays for a parse the rows beside it never do. Measured over a path with
+// no file at it they are the same job, because there is nothing to merge and
+// nothing to keep.
+//
+// So dump_large is what a config file being edited costs, which is the job
+// ferry's sink exists for, and dump_fresh is what writing the file out costs,
+// which is the job the other four do in both. Neither replaces the other and
+// neither is the fair one: they are two questions, and a reader with an
+// existing file to preserve and a reader generating one from scratch are
+// asking different ones.
 func dumpLargeScenario() Scenario {
 	return Scenario{
 		Name: "dump_large",
-		What: "the other direction: the same fifty-one leaves written back out to a YAML file, " +
-			"then read back to prove the round trip.",
+		What: "the other direction: the same fifty-one leaves written back out over a YAML file that is " +
+			"already there, then read back to prove the round trip.",
 		Setup:  func(*Fixture) { ApplyEnv(nil) },
 		NewDst: func() any { return new(Large) },
 		Want:   WantLarge(),
-		Impls: []Impl{
-			ferryDumpLarge(), ferryBoundDumpLarge(), koanfDumpLarge(), viperDumpLarge(), stdlibDumpLarge(),
-		},
+		Impls:  dumpImpls(DumpInto),
+	}
+}
+
+func dumpFreshScenario() Scenario {
+	return Scenario{
+		Name: "dump_fresh",
+		What: "the same fifty-one leaves written out to a path with no file at it, so no column has a " +
+			"document to merge into and every one of them is writing the file whole.",
+		Setup:  func(*Fixture) { ApplyEnv(nil) },
+		NewDst: func() any { return new(Large) },
+		Want:   WantLarge(),
+		Impls:  dumpImpls(DumpFresh),
+	}
+}
+
+// dumpImpls is the field both dump scenarios run, which is the same five
+// adapters pointed at the target the scenario chose.
+func dumpImpls(t DumpTarget) []Impl {
+	return []Impl{
+		ferryDump(t), ferryBoundDump(t), koanfDump(t), viperDump(t), stdlibDump(t),
 	}
 }
 
@@ -302,18 +404,18 @@ func Absences() []NotMeasured {
 		},
 		{
 			Library:  "github.com/gojekfarm/xtools/xload",
-			Scenario: "dump_large",
+			Scenario: "dump_large, dump_fresh",
 			Why: "xload is the Load direction only. Its whole contract is a Loader that returns " +
 				"a string for a key, and there is no inverse of it in the package.",
 		},
 		{
 			Library:  "github.com/sethvargo/go-envconfig",
-			Scenario: "yaml_small, yaml_large, dump_large",
+			Scenario: "yaml_small, yaml_large, dump_large, dump_fresh",
 			Why:      "environment variables only, by design. No file format and no dump direction.",
 		},
 		{
 			Library:  "github.com/kelseyhightower/envconfig",
-			Scenario: "yaml_small, yaml_large, dump_large",
+			Scenario: "yaml_small, yaml_large, dump_large, dump_fresh",
 			Why:      "environment variables only, by design. No file format and no dump direction.",
 		},
 		{

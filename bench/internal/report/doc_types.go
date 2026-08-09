@@ -31,6 +31,11 @@ type ImplDoc struct {
 	// Notes is the semantic difference stated out loud.
 	Notes string
 
+	// Remark is Notes compressed to a phrase, rendered inside the table so that
+	// a figure and the reason it is not comparable with the one beside it are
+	// read together. Empty renders as an empty cell rather than as filler.
+	Remark string
+
 	// Baseline marks the column that is not a library: the same job written by
 	// hand with no mapping layer over it.
 	//

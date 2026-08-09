@@ -152,17 +152,21 @@ const ferryModule = "github.com/onhotpath/ferry"
 // over a CSV written for it.
 func fixtureImpls() []report.ImplDoc {
 	return []report.ImplDoc{
-		{Name: "ferry", Module: ferryModule, Notes: "Compiles once, caches the schema."},
+		{Name: "ferry", Module: ferryModule, Notes: "Compiles once, caches the schema.",
+			Remark: "compiled schema"},
 		{
 			Name: "ferry-bound", Module: ferryModule, Variant: true,
-			Notes: "The same job through a caller-held binding.",
+			Notes:  "The same job through a caller-held binding.",
+			Remark: "held binding",
 		},
-		{Name: "koanf", Module: "github.com/knadh/koanf/v2", Notes: "Reads the whole environ per load."},
+		{Name: "koanf", Module: "github.com/knadh/koanf/v2", Notes: "Reads the whole environ per load.",
+			Remark: "reads the whole environ per load"},
 		{Name: "viper", Module: "github.com/spf13/viper", Notes: "Needs every key registered."},
 		{Name: "xload", Module: "github.com/gojekfarm/xtools/xload", Notes: "Reflects per call."},
 		{Name: "go-envconfig", Module: "github.com/sethvargo/go-envconfig", Notes: "Reflects per call."},
 		{Name: "kelseyhightower", Module: "github.com/kelseyhightower/envconfig", Notes: "Reflects per call."},
-		{Name: "stdlib", Module: "", Notes: "Hand-rolled os.Getenv.", Baseline: true},
+		{Name: "stdlib", Module: "", Notes: "Hand-rolled os.Getenv.", Baseline: true,
+			Remark: "os.Getenv plus strconv, by hand"},
 	}
 }
 

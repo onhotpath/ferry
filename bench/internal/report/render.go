@@ -176,10 +176,30 @@ read: it is the one number in this file that compares a library to something no 
 gets to move.
 
 **Where the libraries differ semantically, the difference is in the notes** under each
-table rather than smoothed over.
-Some of those differences are large: ferry's YAML dump edits an existing document where the
-columns beside it serialise a fresh one, and one of those four columns flushes what it wrote
-to the disk while the other three leave it to the operating system.
+table rather than smoothed over, and the shortest form of it is the remarks column inside
+the table, so a figure and the reason it is not comparable with the one beside it are read
+together.
+Some of those differences are large: one of the dump columns flushes what it wrote to the
+disk while the other three leave it to the operating system, and only one of the four reads
+the file it is about to replace.
+
+**The dump direction is two scenarios, and the difference between them is that read.**
+` + "`dump_large`" + ` writes over a file that is already there and ` + "`dump_fresh`" + ` writes to a path
+with no file at it, which is not a detail of the fixture but the whole of what separates
+these libraries in this direction.
+ferry's sink merges: it reads and parses the document, writes only the keys the struct
+maps, and leaves comments, key order, quoting and every unmapped key exactly as they were.
+The other three serialise the struct and replace the file whole, and never read what was
+there at all.
+So over an existing document the table holds one row doing a job the rows beside it are not
+doing and paying a parse for it, and over a path with no file at it there is nothing to
+merge and every column is doing the same work.
+Neither scenario is the fair one and neither replaces the other: an operator with a
+hand-maintained config file to preserve and a program generating one from scratch are asking
+different questions, and both are answered here.
+The two figures for the same library are directly comparable, because the fixture, the
+struct, the read-back and every column around them are identical - the file at the path is
+the only thing that changed.
 
 **The destination is allocated once, outside the timed loop, and reused across iterations.**
 Funnelling a fifty-one field struct back through an ` + "`any`" + ` on every iteration would box it,
@@ -202,8 +222,8 @@ target for this job.
 
 func writeScenario(b *strings.Builder, in *Input, sc ScenarioDoc) {
 	fmt.Fprintf(b, "## `%s`\n\n%s\n\n", sc.Name, sc.What)
-	fmt.Fprint(b, "| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |\n")
-	fmt.Fprint(b, "| --- | --- | --- | --- | --- | --- |\n")
+	fmt.Fprint(b, "| library | cold | warm | warm x baseline | remarks | warm B/op | warm allocs/op |\n")
+	fmt.Fprint(b, "| --- | --- | --- | --- | --- | --- | --- |\n")
 
 	for _, impl := range sc.Impls {
 		writeScenarioRow(b, in, sc, impl)
@@ -224,11 +244,12 @@ func writeScenarioRow(b *strings.Builder, in *Input, sc ScenarioDoc, impl ImplDo
 	cold, coldOK := in.Stats.Lookup(Key{Scenario: sc.Name, Mode: "cold", Impl: impl.Name})
 	warm, warmOK := in.Stats.Lookup(Key{Scenario: sc.Name, Mode: "warm", Impl: impl.Name})
 
-	fmt.Fprintf(b, "| %s | %s | %s%s | %s%s | %s | %s |\n",
+	fmt.Fprintf(b, "| %s | %s | %s%s | %s%s | %s | %s | %s |\n",
 		implLabel(impl),
 		measured(cold, coldOK, unitSec),
 		measured(warm, warmOK, unitSec), caveatMark(impl),
 		baselineCell(in, sc, impl), caveatMark(impl),
+		impl.Remark,
 		measured(warm, warmOK, unitBytes),
 		measured(warm, warmOK, unitAllocs),
 	)
