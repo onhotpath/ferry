@@ -73,6 +73,26 @@ func Example_tagKey() {
 	// Output: {Name:checkout Timeout:30}
 }
 
+// ExampleRootVar loads a schema that is one value, from the variable named for
+// it.
+//
+// The root of such a schema carries no segment, so there is nothing for this
+// driver to fold a name out of and no field or map key could ever produce one.
+// Without the option the load is refused at Bind, before anything is read.
+func ExampleRootVar() {
+	environ := func() []string { return []string{"APP_PORT=8080"} }
+
+	port, err := ferry.Load[int](context.Background(), env.New(env.Environ(environ), env.RootVar("APP_PORT")))
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Println(port)
+	// Output: 8080
+}
+
 // Feature is a schema with a boolean an operator writes in words.
 type Feature struct {
 	Enabled bool `ferry:"enabled"`

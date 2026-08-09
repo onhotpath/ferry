@@ -118,6 +118,34 @@ All four are then accepted, and `on` is the one a `true` is written as.
 It is a fact about the whole environment rather than about one field.
 A variable holding one of these words arrives as a boolean wherever it is read, so pick words your text values do not use.
 
+## A schema that is one value needs a name for it
+
+`ferry.Load[int]` names one address, the root, and the root carries no segment to fold a name out of.
+Name the variable and it loads:
+
+```go
+func ExampleRootVar() {
+	environ := func() []string { return []string{"APP_PORT=8080"} }
+
+	port, err := ferry.Load[int](context.Background(), env.New(env.Environ(environ), env.RootVar("APP_PORT")))
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Println(port)
+	// Output: 8080
+}
+```
+
+That is `ExampleRootVar` in `example_test.go`, which supplies its own environment so that it runs the same everywhere.
+
+Without `env.RootVar` that load is refused at Bind, before anything is read.
+It is the only route to a root value, because the fold turns every byte outside `A-Z`, `0-9` and `_` into `_`, so no field or map key could ever produce the name.
+
+The variable being unset is ordinary absence: the root has no tag to carry `required` or `default=`, so `ferry.Load` gives back the zero value and `ferry.LoadOver` gives back the seed.
+
 ## There is no way to write back
 
 This package loads only.
