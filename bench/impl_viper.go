@@ -22,7 +22,8 @@ const (
 		"bridge to dump one. That is fatih/structs here, which is the same bridge koanf's " +
 		"own structs provider uses internally, so the two dump columns are the same shape: " +
 		"struct to map, map to YAML, whole file replaced. Neither preserves a comment, a key " +
-		"order or a quoting decision. The writes differ where it costs: viper opens the " +
+		"order or a quoting decision, and neither reads the file it replaces, so neither " +
+		"moves much between the two dump scenarios. The writes differ where it costs: viper opens the " +
 		"target with O_TRUNC and ends writeConfig with f.Sync(), so its write is fsynced " +
 		"but not atomic, and a crash mid-write leaves the operator a truncated file that " +
 		"has been durably committed. koanf's os.WriteFile is neither."
@@ -67,6 +68,7 @@ func newViperEnv(keys []string) *viper.Viper {
 func viperEnv[T any](keys func() []string) Impl {
 	return Impl{
 		Name: "viper", Module: "github.com/spf13/viper", Notes: viperNotesEnv,
+		Remark: "every leaf key registered up front",
 		New: func(*Fixture) (Loader, error) {
 			v := newViperEnv(keys())
 
@@ -90,6 +92,7 @@ func viperEnvLarge() Impl { return viperEnv[Large](LargeKeys) }
 func viperYAML[T any](path func(*Fixture) string) Impl {
 	return Impl{
 		Name: "viper", Module: "github.com/spf13/viper", Notes: viperNotesYAML,
+		Remark: "file to settings map to struct",
 		New: func(f *Fixture) (Loader, error) {
 			v := viper.New()
 			v.SetConfigFile(path(f))
@@ -120,11 +123,12 @@ func viperYAMLLarge() Impl { return viperYAML[Large](func(f *Fixture) string { r
 // It exists because excluding viper for needing a struct-to-map bridge while
 // measuring koanf through exactly such a bridge was not a defensible line:
 // koanf's own structs provider is fatih/structs, and this is the same call.
-func viperDumpLarge() Impl {
+func viperDump(t DumpTarget) Impl {
 	return Impl{
 		Name: "viper", Module: "github.com/spf13/viper", Notes: viperNotesDump,
+		Remark: "replaces whole; fsyncs, not atomic",
 		New: func(f *Fixture) (Loader, error) {
-			path, err := f.Seed("viper", YAMLLarge)
+			path, start, err := f.Prepare(t, "viper")
 			if err != nil {
 				return nil, err
 			}
@@ -132,6 +136,10 @@ func viperDumpLarge() Impl {
 			want := WantLarge()
 
 			return func(dst any) error {
+				if err := start(); err != nil {
+					return err
+				}
+
 				// A fresh instance per iteration, for the same reason koanf
 				// gets one: an instance that already holds the settings would
 				// be measuring a second write rather than a dump.

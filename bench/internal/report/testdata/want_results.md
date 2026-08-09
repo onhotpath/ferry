@@ -74,10 +74,30 @@ read: it is the one number in this file that compares a library to something no 
 gets to move.
 
 **Where the libraries differ semantically, the difference is in the notes** under each
-table rather than smoothed over.
-Some of those differences are large: ferry's YAML dump edits an existing document where the
-columns beside it serialise a fresh one, and one of those four columns flushes what it wrote
-to the disk while the other three leave it to the operating system.
+table rather than smoothed over, and the shortest form of it is the remarks column inside
+the table, so a figure and the reason it is not comparable with the one beside it are read
+together.
+Some of those differences are large: one of the dump columns flushes what it wrote to the
+disk while the other three leave it to the operating system, and only one of the four reads
+the file it is about to replace.
+
+**The dump direction is two scenarios, and the difference between them is that read.**
+`dump_large` writes over a file that is already there and `dump_fresh` writes to a path
+with no file at it, which is not a detail of the fixture but the whole of what separates
+these libraries in this direction.
+ferry's sink merges: it reads and parses the document, writes only the keys the struct
+maps, and leaves comments, key order, quoting and every unmapped key exactly as they were.
+The other three serialise the struct and replace the file whole, and never read what was
+there at all.
+So over an existing document the table holds one row doing a job the rows beside it are not
+doing and paying a parse for it, and over a path with no file at it there is nothing to
+merge and every column is doing the same work.
+Neither scenario is the fair one and neither replaces the other: an operator with a
+hand-maintained config file to preserve and a program generating one from scratch are asking
+different questions, and both are answered here.
+The two figures for the same library are directly comparable, because the fixture, the
+struct, the read-back and every column around them are identical - the file at the path is
+the only thing that changed.
 
 **The destination is allocated once, outside the timed loop, and reused across iterations.**
 Funnelling a fifty-one field struct back through an `any` on every iteration would box it,
@@ -100,16 +120,16 @@ target for this job.
 
 five flat fields out of the process environment.
 
-| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- | --- |
-| ferry | 7.68µs ±4% | 2.75µs ±4% | 16.60x | 2.89 KiB | 41 |
-| ferry-bound | not measured | not measured | not measured | not measured | not measured |
-| koanf | 12.4µs ±7% | 12.5µs ±3% | 75.24x | 8.41 KiB | 171 |
-| viper | 8.12µs ±3% | 6.76µs ±2% | 40.80x | 3.61 KiB | 67 |
-| xload | 1.55µs ±2% | 1.55µs ±5% | 9.34x | 936 B | 17 |
-| go-envconfig | 597ns ±4% | 570ns ±4% | 3.44x | 0 B | 0 |
-| kelseyhightower | 2.72µs ±3% | 2.73µs ±7% | 16.46x | 1.21 KiB | 56 |
-| stdlib (baseline) | 166ns ±1% | 166ns ±15% | 1.00x, by definition | 0 B | 0 |
+| library | cold | warm | warm x baseline | remarks | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferry | 7.68µs ±4% | 2.75µs ±4% | 16.60x | compiled schema | 2.89 KiB | 41 |
+| ferry-bound | not measured | not measured | not measured | held binding | not measured | not measured |
+| koanf | 12.4µs ±7% | 12.5µs ±3% | 75.24x | reads the whole environ per load | 8.41 KiB | 171 |
+| viper | 8.12µs ±3% | 6.76µs ±2% | 40.80x |  | 3.61 KiB | 67 |
+| xload | 1.55µs ±2% | 1.55µs ±5% | 9.34x |  | 936 B | 17 |
+| go-envconfig | 597ns ±4% | 570ns ±4% | 3.44x |  | 0 B | 0 |
+| kelseyhightower | 2.72µs ±3% | 2.73µs ±7% | 16.46x |  | 1.21 KiB | 56 |
+| stdlib (baseline) | 166ns ±1% | 166ns ±15% | 1.00x, by definition | os.Getenv plus strconv, by hand | 0 B | 0 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Compiles once, caches the schema.
 - **ferry-bound** (`github.com/onhotpath/ferry`) The same job through a caller-held binding.
@@ -124,13 +144,13 @@ five flat fields out of the process environment.
 
 five flat fields out of a small YAML document.
 
-| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- | --- |
-| ferry | 22.1µs ±5% | 17.4µs ±3% | 1.05x | 11.0 KiB | 107 |
-| koanf | 30.0µs ±4% | 30.1µs ±3% | 1.82x | 17.4 KiB | 249 |
-| viper | 26.4µs ±3% | 26.6µs ±14% | 1.61x | 15.5 KiB | 171 |
-| xload | 19.5µs ±3% | 1.74µs ±2% † | 0.10x † | 1000 B | 23 |
-| stdlib (baseline) | 16.6µs ±4% | 16.6µs ±11% | 1.00x, by definition | 9.82 KiB | 98 |
+| library | cold | warm | warm x baseline | remarks | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferry | 22.1µs ±5% | 17.4µs ±3% | 1.05x |  | 11.0 KiB | 107 |
+| koanf | 30.0µs ±4% | 30.1µs ±3% | 1.82x |  | 17.4 KiB | 249 |
+| viper | 26.4µs ±3% | 26.6µs ±14% | 1.61x |  | 15.5 KiB | 171 |
+| xload | 19.5µs ±3% | 1.74µs ±2% † | 0.10x † |  | 1000 B | 23 |
+| stdlib (baseline) | 16.6µs ±4% | 16.6µs ±11% | 1.00x, by definition |  | 9.82 KiB | 98 |
 
 † **xload's warm figure is not comparable with the rest of this table.** xload's YAML provider reads and parses the file once, when the loader is constructed, so this warm figure excludes the read and the parse every other row pays.
 
@@ -144,9 +164,9 @@ five flat fields out of a small YAML document.
 
 a scenario nothing was measured for.
 
-| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- | --- |
-| ferry | not measured | not measured | not measured | not measured | not measured |
+| library | cold | warm | warm x baseline | remarks | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferry | not measured | not measured | not measured |  | not measured | not measured |
 
 - **ferry** (`github.com/onhotpath/ferry`) n/a
 

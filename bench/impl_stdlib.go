@@ -26,14 +26,17 @@ const (
 		"intermediate map. yaml.v3 keeps a per-type field cache of its own that no " +
 		"caller can defeat, so its cold column is not a true cold measurement and is " +
 		"the same number as its warm one for that reason rather than for the others'."
-	stdlibNotesDump = "yaml.Marshal plus os.WriteFile: the document is replaced whole. Comments, " +
-		"key order, quoting and any key no field maps are lost, and the write is not " +
-		"atomic - a crash mid-write truncates the operator's file."
+	stdlibNotesDump = "yaml.Marshal plus os.WriteFile: the document is replaced whole. It reads " +
+		"nothing at the path first, so it does the same work in both dump scenarios. Over a " +
+		"document that is already there, comments, key order, quoting and any key no field " +
+		"maps are lost; over a path with no file at it there is nothing to lose. The write " +
+		"is not atomic - a crash mid-write truncates the operator's file."
 )
 
 func stdlibEnvSmall() Impl {
 	return Impl{
 		Name: "stdlib", Notes: stdlibNotesEnv, Baseline: true,
+		Remark: "os.Getenv plus strconv, by hand",
 		New: func(*Fixture) (Loader, error) {
 			return func(dst any) error {
 				p, err := dstOf[Small](dst)
@@ -56,6 +59,7 @@ func stdlibEnvSmall() Impl {
 func stdlibEnvLarge() Impl {
 	return Impl{
 		Name: "stdlib", Notes: stdlibNotesEnv, Baseline: true,
+		Remark: "os.Getenv plus strconv, by hand",
 		New: func(*Fixture) (Loader, error) {
 			return func(dst any) error {
 				p, err := dstOf[Large](dst)
@@ -350,6 +354,7 @@ func envMap(key string) (map[string]string, error) {
 func stdlibYAML[T any](path func(*Fixture) string) Impl {
 	return Impl{
 		Name: "stdlib", Module: "go.yaml.in/yaml/v3", Notes: stdlibNotesYAML, Baseline: true,
+		Remark: "yaml.Unmarshal straight into the struct",
 		New: func(f *Fixture) (Loader, error) {
 			p := path(f)
 
@@ -375,11 +380,12 @@ func stdlibYAML[T any](path func(*Fixture) string) Impl {
 func stdlibYAMLSmall() Impl { return stdlibYAML[Small](func(f *Fixture) string { return f.YAMLSmall }) }
 func stdlibYAMLLarge() Impl { return stdlibYAML[Large](func(f *Fixture) string { return f.YAMLLarge }) }
 
-func stdlibDumpLarge() Impl {
+func stdlibDump(t DumpTarget) Impl {
 	return Impl{
 		Name: "stdlib", Module: "go.yaml.in/yaml/v3", Notes: stdlibNotesDump, Baseline: true,
+		Remark: "replaces the file whole",
 		New: func(f *Fixture) (Loader, error) {
-			path, err := f.Seed("stdlib", YAMLLarge)
+			path, start, err := f.Prepare(t, "stdlib")
 			if err != nil {
 				return nil, err
 			}
@@ -387,6 +393,10 @@ func stdlibDumpLarge() Impl {
 			want := WantLarge()
 
 			return func(dst any) error {
+				if err := start(); err != nil {
+					return err
+				}
+
 				b, err := yamlv3.Marshal(want)
 				if err != nil {
 					return fmt.Errorf("bench: stdlib marshal: %w", err)

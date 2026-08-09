@@ -80,10 +80,30 @@ read: it is the one number in this file that compares a library to something no 
 gets to move.
 
 **Where the libraries differ semantically, the difference is in the notes** under each
-table rather than smoothed over.
-Some of those differences are large: ferry's YAML dump edits an existing document where the
-columns beside it serialise a fresh one, and one of those four columns flushes what it wrote
-to the disk while the other three leave it to the operating system.
+table rather than smoothed over, and the shortest form of it is the remarks column inside
+the table, so a figure and the reason it is not comparable with the one beside it are read
+together.
+Some of those differences are large: one of the dump columns flushes what it wrote to the
+disk while the other three leave it to the operating system, and only one of the four reads
+the file it is about to replace.
+
+**The dump direction is two scenarios, and the difference between them is that read.**
+`dump_large` writes over a file that is already there and `dump_fresh` writes to a path
+with no file at it, which is not a detail of the fixture but the whole of what separates
+these libraries in this direction.
+ferry's sink merges: it reads and parses the document, writes only the keys the struct
+maps, and leaves comments, key order, quoting and every unmapped key exactly as they were.
+The other three serialise the struct and replace the file whole, and never read what was
+there at all.
+So over an existing document the table holds one row doing a job the rows beside it are not
+doing and paying a parse for it, and over a path with no file at it there is nothing to
+merge and every column is doing the same work.
+Neither scenario is the fair one and neither replaces the other: an operator with a
+hand-maintained config file to preserve and a program generating one from scratch are asking
+different questions, and both are answered here.
+The two figures for the same library are directly comparable, because the fixture, the
+struct, the read-back and every column around them are identical - the file at the path is
+the only thing that changed.
 
 **The destination is allocated once, outside the timed loop, and reused across iterations.**
 Funnelling a fifty-one field struct back through an `any` on every iteration would box it,
@@ -106,16 +126,16 @@ target for this job.
 
 five flat fields out of the process environment, where a mapping layer has the least room to hide.
 
-| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- | --- |
-| ferry | 6.37µs ±2% | 2.29µs ±2% | 14.68x | 2.59 KiB | 36 |
-| ferry-bound | not measured | not measured | not measured | not measured | not measured |
-| koanf | 11.1µs ±0% | 11.1µs ±0% | 70.99x | 8.41 KiB | 171 |
-| viper | 7.26µs ±0% | 6.09µs ±1% | 39.05x | 3.61 KiB | 67 |
-| xload | 1.43µs ±0% | 1.41µs ±0% | 9.05x | 936 B | 17 |
-| go-envconfig | 529ns ±0% | 508ns ±1% | 3.26x | 0 B | 0 |
-| kelseyhightower | 2.59µs ±0% | 2.57µs ±0% | 16.48x | 1.21 KiB | 56 |
-| stdlib (baseline) | 156ns ±1% | 156ns ±1% | 1.00x, by definition | 0 B | 0 |
+| library | cold | warm | warm x baseline | remarks | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferry | 6.37µs ±2% | 2.29µs ±2% | 14.68x | compiled schema; reads only what it names | 2.59 KiB | 36 |
+| ferry-bound | not measured | not measured | not measured | held binding | not measured | not measured |
+| koanf | 11.1µs ±0% | 11.1µs ±0% | 70.99x | reads the whole environ per load | 8.41 KiB | 171 |
+| viper | 7.26µs ±0% | 6.09µs ±1% | 39.05x | every leaf key registered up front | 3.61 KiB | 67 |
+| xload | 1.43µs ±0% | 1.41µs ±0% | 9.05x | reflects per call; one delimited variable | 936 B | 17 |
+| go-envconfig | 529ns ±0% | 508ns ±1% | 3.26x | reflects per call; one delimited variable | 0 B | 0 |
+| kelseyhightower | 2.59µs ±0% | 2.57µs ±0% | 16.48x | reflects per call; names from the fields | 1.21 KiB | 56 |
+| stdlib (baseline) | 156ns ±1% | 156ns ±1% | 1.00x, by definition | os.Getenv plus strconv, by hand | 0 B | 0 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Compiles a schema per type and caches it on the Registry, which is what the cold/warm gap is. Reads only the addresses the schema names, so the size of the environ costs it nothing. Reads TAGS_0.. and LIMITS_* rather than one delimited variable.
 - **ferry-bound** (`github.com/onhotpath/ferry`) The same job through a caller-held binding. ferry.Bind hands the source the addresses the type names once, when the binding is built, and every load through the binding skips that; ferry.Load does it again on every call. Nothing else differs - the same tag key, the same Registry, the same walk, the same value out - so the distance between this row and ferry's is what holding the binding is worth and nothing else. Building the binding is constructor work, so it lands in the cold column, and this row's cold figure is therefore the same job ferry's cold figure measures.
@@ -130,16 +150,16 @@ five flat fields out of the process environment, where a mapping layer has the l
 
 fifty-one leaves over three levels, including a slice and a map, out of the process environment.
 
-| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- | --- |
-| ferry | 93.1µs ±0% | 26.8µs ±0% | 14.43x | 23.7 KiB | 218 |
-| ferry-bound | not measured | not measured | not measured | not measured | not measured |
-| koanf | 135µs ±1% | 135µs ±0% | 72.67x | 94.5 KiB | 1873 |
-| viper | 85.3µs ±0% | 75.5µs ±1% | 40.64x | 47.8 KiB | 920 |
-| xload | 21.4µs ±1% | 21.4µs ±0% | 11.54x | 12.9 KiB | 251 |
-| go-envconfig | 9.19µs ±0% | 9.14µs ±0% | 4.92x | 1.36 KiB | 27 |
-| kelseyhightower | 43.5µs ±0% | 43.4µs ±0% | 23.34x | 31.2 KiB | 909 |
-| stdlib (baseline) | 1.86µs ±0% | 1.86µs ±1% | 1.00x, by definition | 1008 B | 5 |
+| library | cold | warm | warm x baseline | remarks | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferry | 93.1µs ±0% | 26.8µs ±0% | 14.43x | compiled schema; reads only what it names | 23.7 KiB | 218 |
+| ferry-bound | not measured | not measured | not measured | held binding | not measured | not measured |
+| koanf | 135µs ±1% | 135µs ±0% | 72.67x | reads the whole environ per load | 94.5 KiB | 1873 |
+| viper | 85.3µs ±0% | 75.5µs ±1% | 40.64x | every leaf key registered up front | 47.8 KiB | 920 |
+| xload | 21.4µs ±1% | 21.4µs ±0% | 11.54x | reflects per call; one delimited variable | 12.9 KiB | 251 |
+| go-envconfig | 9.19µs ±0% | 9.14µs ±0% | 4.92x | reflects per call; one delimited variable | 1.36 KiB | 27 |
+| kelseyhightower | 43.5µs ±0% | 43.4µs ±0% | 23.34x | reflects per call; names from the fields | 31.2 KiB | 909 |
+| stdlib (baseline) | 1.86µs ±0% | 1.86µs ±1% | 1.00x, by definition | os.Getenv plus strconv, by hand | 1008 B | 5 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Compiles a schema per type and caches it on the Registry, which is what the cold/warm gap is. Reads only the addresses the schema names, so the size of the environ costs it nothing. Reads TAGS_0.. and LIMITS_* rather than one delimited variable.
 - **ferry-bound** (`github.com/onhotpath/ferry`) The same job through a caller-held binding. ferry.Bind hands the source the addresses the type names once, when the binding is built, and every load through the binding skips that; ferry.Load does it again on every call. Nothing else differs - the same tag key, the same Registry, the same walk, the same value out - so the distance between this row and ferry's is what holding the binding is worth and nothing else. Building the binding is constructor work, so it lands in the cold column, and this row's cold figure is therefore the same job ferry's cold figure measures.
@@ -154,14 +174,14 @@ fifty-one leaves over three levels, including a slice and a map, out of the proc
 
 the same five fields, read from a YAML file on disk on every iteration.
 
-| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- | --- |
-| ferry | 17.3µs ±0% | 13.1µs ±0% | 1.01x | 10.8 KiB | 103 |
-| ferry-bound | not measured | not measured | not measured | not measured | not measured |
-| koanf | 24.2µs ±0% | 24.2µs ±1% | 1.88x | 17.4 KiB | 249 |
-| viper | 21.3µs ±1% | 20.8µs ±0% | 1.62x | 15.5 KiB | 171 |
-| xload | 15.6µs ±0% | 1.60µs ±0% † | 0.12x † | 1000 B | 23 |
-| stdlib (baseline) | 13.0µs ±1% | 12.9µs ±0% | 1.00x, by definition | 9.82 KiB | 98 |
+| library | cold | warm | warm x baseline | remarks | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferry | 17.3µs ±0% | 13.1µs ±0% | 1.01x | compiled schema; reads a node tree | 10.8 KiB | 103 |
+| ferry-bound | not measured | not measured | not measured | held binding | not measured | not measured |
+| koanf | 24.2µs ±0% | 24.2µs ±1% | 1.88x | file to map to struct; nothing cached | 17.4 KiB | 249 |
+| viper | 21.3µs ±1% | 20.8µs ±0% | 1.62x | file to settings map to struct | 15.5 KiB | 171 |
+| xload | 15.6µs ±0% | 1.60µs ±0% † | 0.12x † |  | 1000 B | 23 |
+| stdlib (baseline) | 13.0µs ±1% | 12.9µs ±0% | 1.00x, by definition | yaml.Unmarshal straight into the struct | 9.82 KiB | 98 |
 
 † **xload's warm figure is not comparable with the rest of this table.** xload's YAML provider reads and parses the file once, when the loader is constructed, and every later load is a map lookup against that snapshot. So this warm figure excludes the file read and the YAML parse that ferry, koanf, viper and the stdlib baseline all pay on every single load. The cold column is where these rows are comparable; the warm one measures a different job.
 
@@ -176,13 +196,13 @@ the same five fields, read from a YAML file on disk on every iteration.
 
 the same fifty-one leaves, read from a YAML file on disk on every iteration.
 
-| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- | --- |
-| ferry | 157µs ±1% | 86.7µs ±1% | 1.01x | 46.0 KiB | 744 |
-| ferry-bound | not measured | not measured | not measured | not measured | not measured |
-| koanf | 215µs ±1% | 215µs ±0% | 2.51x | 122 KiB | 2423 |
-| viper | 181µs ±1% | 180µs ±1% | 2.10x | 95.8 KiB | 1692 |
-| stdlib (baseline) | 85.9µs ±1% | 85.7µs ±0% | 1.00x, by definition | 39.7 KiB | 750 |
+| library | cold | warm | warm x baseline | remarks | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferry | 157µs ±1% | 86.7µs ±1% | 1.01x | compiled schema; reads a node tree | 46.0 KiB | 744 |
+| ferry-bound | not measured | not measured | not measured | held binding | not measured | not measured |
+| koanf | 215µs ±1% | 215µs ±0% | 2.51x | file to map to struct; nothing cached | 122 KiB | 2423 |
+| viper | 181µs ±1% | 180µs ±1% | 2.10x | file to settings map to struct | 95.8 KiB | 1692 |
+| stdlib (baseline) | 85.9µs ±1% | 85.7µs ±0% | 1.00x, by definition | yaml.Unmarshal straight into the struct | 39.7 KiB | 750 |
 
 - **ferry** (`github.com/onhotpath/ferry`) Same compile and cache. The YAML source parses the document into a node tree and reads addresses out of it, rather than unmarshalling into the struct.
 - **ferry-bound** (`github.com/onhotpath/ferry`) The same job through a caller-held binding. ferry.Bind hands the source the addresses the type names once, when the binding is built, and every load through the binding skips that; ferry.Load does it again on every call. Nothing else differs - the same tag key, the same Registry, the same walk, the same value out - so the distance between this row and ferry's is what holding the binding is worth and nothing else. Building the binding is constructor work, so it lands in the cold column, and this row's cold figure is therefore the same job ferry's cold figure measures.
@@ -192,21 +212,39 @@ the same fifty-one leaves, read from a YAML file on disk on every iteration.
 
 ## `dump_large`
 
-the other direction: the same fifty-one leaves written back out to a YAML file, then read back to prove the round trip.
+the other direction: the same fifty-one leaves written back out over a YAML file that is already there, then read back to prove the round trip.
 
-| library | cold | warm | warm x baseline | warm B/op | warm allocs/op |
-| --- | --- | --- | --- | --- | --- |
-| ferry | 941µs ±62% | 398µs ±108% | 1.39x | 178 KiB | 1910 |
-| ferry-bound | not measured | not measured | not measured | not measured | not measured |
-| koanf | 574µs ±66% | 444µs ±71% | 1.55x | 193 KiB | 2358 |
-| viper | 2.48ms ±37% | 1.64ms ±51% | 5.74x | 165 KiB | 1697 |
-| stdlib (baseline) | 540µs ±77% | 286µs ±31% | 1.00x, by definition | 123 KiB | 1093 |
+| library | cold | warm | warm x baseline | remarks | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferry | 941µs ±62% | 398µs ±108% | 1.39x | merges, keeps comments; atomic | 178 KiB | 1910 |
+| ferry-bound | not measured | not measured | not measured | held sink binding | not measured | not measured |
+| koanf | 574µs ±66% | 444µs ±71% | 1.55x | replaces the file whole | 193 KiB | 2358 |
+| viper | 2.48ms ±37% | 1.64ms ±51% | 5.74x | replaces whole; fsyncs, not atomic | 165 KiB | 1697 |
+| stdlib (baseline) | 540µs ±77% | 286µs ±31% | 1.00x, by definition | replaces the file whole | 123 KiB | 1093 |
 
-- **ferry** (`github.com/onhotpath/ferry`) Edits the existing document in place: it reads and parses the file, writes only the keys the struct maps, and leaves comments, key order, quoting and unmapped keys intact. The replacement is atomic: a temporary file beside the plane is renamed over it, so nothing ever reads a half-written config and a save that fails leaves the file byte for byte as it was. It is not flushed to the disk unless the caller asks for that, and this row measures the default, so what is timed here offers the same durability koanf and the baseline do. viper is the one column that fsyncs: its WriteConfigAs ends in f.Sync(), which is why it sits an order of magnitude above the other three. ferry's durable mode is yaml.Durable(), and it is opt-in because the journal commit it costs dwarfs everything else in the save. It is not what this row measures.
-- **ferry-bound** (`github.com/onhotpath/ferry`) The dump direction's half of the same thing: ferry.BindSink hands the sink the addresses the type names once and every dump through the binding skips that. It writes its own seeded file, as every dump row does, and it is read back by the same third-party reader as the rest of the table.
-- **koanf** (`github.com/knadh/koanf/v2`) Reflects the struct into a map with fatih/structs, marshals the map to YAML and writes the file whole. Comments, key order and quoting in the existing document are lost, and the write is not atomic.
-- **viper** (`github.com/spf13/viper`) viper holds a settings map rather than a struct, so it needs a struct-to-map bridge to dump one. That is fatih/structs here, which is the same bridge koanf's own structs provider uses internally, so the two dump columns are the same shape: struct to map, map to YAML, whole file replaced. Neither preserves a comment, a key order or a quoting decision. The writes differ where it costs: viper opens the target with O_TRUNC and ends writeConfig with f.Sync(), so its write is fsynced but not atomic, and a crash mid-write leaves the operator a truncated file that has been durably committed. koanf's os.WriteFile is neither.
-- **stdlib (baseline)** (`go.yaml.in/yaml/v3`) yaml.Marshal plus os.WriteFile: the document is replaced whole. Comments, key order, quoting and any key no field maps are lost, and the write is not atomic - a crash mid-write truncates the operator's file.
+- **ferry** (`github.com/onhotpath/ferry`) Edits the existing document in place: it reads and parses the file, writes only the keys the struct maps, and leaves comments, key order, quoting and unmapped keys intact. That read and parse is work no other column in this table does, because no other column keeps anything - and it is most of what separates this row from koanf's. dump_fresh is the same save with nothing at the path, which is that parse taken away and nothing else. The replacement is atomic either way: a temporary file beside the plane is renamed over it, so nothing ever reads a half-written config and a save that fails leaves the file byte for byte as it was. It is not flushed to the disk unless the caller asks for that, and these rows measure the default, so what is timed here offers the same durability koanf and the baseline do. viper is the one column that fsyncs: its WriteConfigAs ends in f.Sync(), which is why it sits an order of magnitude above the other three. ferry's durable mode is yaml.Durable(), and it is opt-in because the journal commit it costs dwarfs everything else in the save. It is not what these rows measure.
+- **ferry-bound** (`github.com/onhotpath/ferry`) The dump direction's half of the same thing: ferry.BindSink hands the sink the addresses the type names once and every dump through the binding skips that. It writes a file of its own, prepared the way its scenario prepares every row's, and it is read back by the same third-party reader as the rest of the table.
+- **koanf** (`github.com/knadh/koanf/v2`) Reflects the struct into a map with fatih/structs, marshals the map to YAML and writes the file whole. It never reads what is at the path, so this row is the same code doing the same work in both dump scenarios and its two figures differ only by the removal a dump_fresh iteration begins with. Over a document that is already there that means comments, key order, quoting and every key no field maps are lost; over a path with no file at it there is nothing to lose, which is why dump_fresh is the scenario where this column and ferry's are doing the same job. The write is not atomic.
+- **viper** (`github.com/spf13/viper`) viper holds a settings map rather than a struct, so it needs a struct-to-map bridge to dump one. That is fatih/structs here, which is the same bridge koanf's own structs provider uses internally, so the two dump columns are the same shape: struct to map, map to YAML, whole file replaced. Neither preserves a comment, a key order or a quoting decision, and neither reads the file it replaces, so neither moves much between the two dump scenarios. The writes differ where it costs: viper opens the target with O_TRUNC and ends writeConfig with f.Sync(), so its write is fsynced but not atomic, and a crash mid-write leaves the operator a truncated file that has been durably committed. koanf's os.WriteFile is neither.
+- **stdlib (baseline)** (`go.yaml.in/yaml/v3`) yaml.Marshal plus os.WriteFile: the document is replaced whole. It reads nothing at the path first, so it does the same work in both dump scenarios. Over a document that is already there, comments, key order, quoting and any key no field maps are lost; over a path with no file at it there is nothing to lose. The write is not atomic - a crash mid-write truncates the operator's file.
+
+## `dump_fresh`
+
+the same fifty-one leaves written out to a path with no file at it, so no column has a document to merge into and every one of them is writing the file whole.
+
+| library | cold | warm | warm x baseline | remarks | warm B/op | warm allocs/op |
+| --- | --- | --- | --- | --- | --- | --- |
+| ferry | not measured | not measured | not measured | writes whole; atomic | not measured | not measured |
+| ferry-bound | not measured | not measured | not measured | held sink binding | not measured | not measured |
+| koanf | not measured | not measured | not measured | replaces the file whole | not measured | not measured |
+| viper | not measured | not measured | not measured | replaces whole; fsyncs, not atomic | not measured | not measured |
+| stdlib (baseline) | not measured | not measured | not measured | replaces the file whole | not measured | not measured |
+
+- **ferry** (`github.com/onhotpath/ferry`) The same sink with no document at the path, so there is nothing to merge into and nothing to keep: the save writes the file whole, which is what the other columns do in both scenarios. The distance from this row to ferry's dump_large row is what editing a config file in place costs, measured rather than argued. The replacement is atomic either way: a temporary file beside the plane is renamed over it, so nothing ever reads a half-written config and a save that fails leaves the file byte for byte as it was. It is not flushed to the disk unless the caller asks for that, and these rows measure the default, so what is timed here offers the same durability koanf and the baseline do. viper is the one column that fsyncs: its WriteConfigAs ends in f.Sync(), which is why it sits an order of magnitude above the other three. ferry's durable mode is yaml.Durable(), and it is opt-in because the journal commit it costs dwarfs everything else in the save. It is not what these rows measure.
+- **ferry-bound** (`github.com/onhotpath/ferry`) The dump direction's half of the same thing: ferry.BindSink hands the sink the addresses the type names once and every dump through the binding skips that. It writes a file of its own, prepared the way its scenario prepares every row's, and it is read back by the same third-party reader as the rest of the table.
+- **koanf** (`github.com/knadh/koanf/v2`) Reflects the struct into a map with fatih/structs, marshals the map to YAML and writes the file whole. It never reads what is at the path, so this row is the same code doing the same work in both dump scenarios and its two figures differ only by the removal a dump_fresh iteration begins with. Over a document that is already there that means comments, key order, quoting and every key no field maps are lost; over a path with no file at it there is nothing to lose, which is why dump_fresh is the scenario where this column and ferry's are doing the same job. The write is not atomic.
+- **viper** (`github.com/spf13/viper`) viper holds a settings map rather than a struct, so it needs a struct-to-map bridge to dump one. That is fatih/structs here, which is the same bridge koanf's own structs provider uses internally, so the two dump columns are the same shape: struct to map, map to YAML, whole file replaced. Neither preserves a comment, a key order or a quoting decision, and neither reads the file it replaces, so neither moves much between the two dump scenarios. The writes differ where it costs: viper opens the target with O_TRUNC and ends writeConfig with f.Sync(), so its write is fsynced but not atomic, and a crash mid-write leaves the operator a truncated file that has been durably committed. koanf's os.WriteFile is neither.
+- **stdlib (baseline)** (`go.yaml.in/yaml/v3`) yaml.Marshal plus os.WriteFile: the document is replaced whole. It reads nothing at the path first, so it does the same work in both dump scenarios. Over a document that is already there, comments, key order, quoting and any key no field maps are lost; over a path with no file at it there is nothing to lose. The write is not atomic - a crash mid-write truncates the operator's file.
 
 ## The same numbers, drawn
 
@@ -231,6 +269,7 @@ and out of "where ferry loses" below. What it did differently is in its scenario
 | `yaml_small` | ferry-bound | not measured | 13.1µs ±0% | not measured | not measured | 103 |
 | `yaml_large` | ferry-bound | not measured | 86.7µs ±1% | not measured | not measured | 744 |
 | `dump_large` | ferry-bound | not measured | 398µs ±108% | not measured | not measured | 1910 |
+| `dump_fresh` | ferry-bound | not measured | not measured | not measured | not measured | not measured |
 
 ## benchstat's geometric mean
 
@@ -273,9 +312,9 @@ absent is named here with the reason.
 | library | scenario | why |
 | --- | --- | --- |
 | `github.com/gojekfarm/xtools/xload` | yaml_large | its first-party provider cannot produce this struct, and the failure is in the flatten rather than in the tag grammar. xload.FlattenMap does not descend into a YAML sequence: it hands the whole sequence to spf13/cast.ToString, which returns the empty string, so /tags arrives as one empty key and its three elements are gone from the loader's map and unrecoverable from it. (A mapping fares better and is merely reshaped: /limits explodes into limits_rps and its siblings, where the tag addresses the map through one delimited key.) Rebuilding the sequence would mean this harness parsing the document itself and charging xload for the result, which would measure the harness. Pinned by TestXloadYAMLProviderDropsASequence. yaml_small has no sequence and no mapping, and xload is measured there with no bridge at all. |
-| `github.com/gojekfarm/xtools/xload` | dump_large | xload is the Load direction only. Its whole contract is a Loader that returns a string for a key, and there is no inverse of it in the package. |
-| `github.com/sethvargo/go-envconfig` | yaml_small, yaml_large, dump_large | environment variables only, by design. No file format and no dump direction. |
-| `github.com/kelseyhightower/envconfig` | yaml_small, yaml_large, dump_large | environment variables only, by design. No file format and no dump direction. |
+| `github.com/gojekfarm/xtools/xload` | dump_large, dump_fresh | xload is the Load direction only. Its whole contract is a Loader that returns a string for a key, and there is no inverse of it in the package. |
+| `github.com/sethvargo/go-envconfig` | yaml_small, yaml_large, dump_large, dump_fresh | environment variables only, by design. No file format and no dump direction. |
+| `github.com/kelseyhightower/envconfig` | yaml_small, yaml_large, dump_large, dump_fresh | environment variables only, by design. No file format and no dump direction. |
 | `github.com/caarlos0/env` | all | its tag parser rejects both the prefix= and the separator= options as unsupported, which xload and go-envconfig share, so it cannot join the pooled env: tag. Giving it a third tag key would lengthen every struct tag in the fixture and charge that length to every library that reflects per call - see BenchmarkStructTagCost for what that costs. |
 
 ## The struct-tag confound

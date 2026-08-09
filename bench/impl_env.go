@@ -40,6 +40,7 @@ const (
 func xloadEnv[T any]() Impl {
 	return Impl{
 		Name: "xload", Module: "github.com/gojekfarm/xtools/xload", Notes: xloadNotes,
+		Remark: "reflects per call; one delimited variable",
 		New: func(*Fixture) (Loader, error) {
 			return func(dst any) error {
 				if _, err := dstOf[T](dst); err != nil {
@@ -61,6 +62,7 @@ func xloadEnvLarge() Impl { return xloadEnv[Large]() }
 func goEnvconfigEnv[T any]() Impl {
 	return Impl{
 		Name: "go-envconfig", Module: "github.com/sethvargo/go-envconfig", Notes: goEnvconfigNotes,
+		Remark: "reflects per call; one delimited variable",
 		New: func(*Fixture) (Loader, error) {
 			return func(dst any) error {
 				if _, err := dstOf[T](dst); err != nil {
@@ -82,6 +84,7 @@ func goEnvconfigEnvLarge() Impl { return goEnvconfigEnv[Large]() }
 func kelseyEnv[T any]() Impl {
 	return Impl{
 		Name: "kelseyhightower", Module: "github.com/kelseyhightower/envconfig", Notes: kelseyNotes,
+		Remark: "reflects per call; names from the fields",
 		New: func(*Fixture) (Loader, error) {
 			return func(dst any) error {
 				if _, err := dstOf[T](dst); err != nil {
