@@ -315,3 +315,128 @@ func parsesTo(t *testing.T, text, want string) {
 		t.Errorf("Parse(%q) is %q, want %q", text, got, want)
 	}
 }
+
+// The invariant the two tables above sample, stated so that nothing can get
+// past it.
+//
+// [readNumber] tries the two integer arms before the float one, and a guard in
+// front of them decides which texts reach them at all. The guard is allowed to
+// admit a text the arms then refuse - that costs a refusal nobody reads and the
+// float arm answers - and it is never allowed to refuse one the arms would have
+// taken. That direction is not a performance question: a text that skips the
+// integer arms reaches ParseFloat, which reads 017 as seventeen where the
+// integer arm reads the octal fifteen, so a guard with a hole in it changes a
+// value and reports no error at all.
+//
+// So the property is one-directional. Wherever strconv's own base-0 integer
+// parsers accept a text, this plane's spelling has to carry that integer's
+// canonical decimal, and the guard is only correct for as long as that holds.
+// It is asserted through the spelling rather than over the guard, so it stays
+// true of whatever shape the guard is next written in, or of none.
+
+// integerAlphabet is every byte that can appear in a base-0 integer or float
+// literal: the digits, the letters the three radix prefixes and hexadecimal
+// use, both exponent markers, the radix point, the sign and the separator.
+//
+// A character outside it cannot make either parser accept a text it would
+// otherwise refuse, so a sweep over this alphabet covers the property.
+const integerAlphabet = "0123456789aAbBcCeEfFoOxXpP._+-"
+
+// wantInteger is what this plane's spelling must carry for a text strconv's
+// base-0 integer parsers accept, and reports whether they accept it at all.
+//
+// It is strconv's answer rather than the driver's, which is the point: an
+// oracle written from the code under test proves only that the code agrees with
+// itself.
+func wantInteger(text string) (string, bool) {
+	// The spelling strips the separator before it parses, so the oracle reads
+	// the same text the arms are handed.
+	plain := strings.ReplaceAll(text, "_", "")
+
+	if n, err := strconv.ParseInt(plain, 0, 64); err == nil {
+		// A negative zero stays negative: the two are distinguishable in Go and
+		// formatting the parsed int back would lose the sign.
+		if n == 0 && strings.HasPrefix(plain, "-") {
+			return plain, true
+		}
+
+		return strconv.FormatInt(n, 10), true
+	}
+
+	if n, err := strconv.ParseUint(plain, 0, 64); err == nil {
+		return strconv.FormatUint(n, 10), true
+	}
+
+	return "", false
+}
+
+// checkInteger is the property for one text, and does nothing for a text the
+// integer parsers do not take.
+func checkInteger(t *testing.T, text string) {
+	t.Helper()
+
+	want, ok := wantInteger(text)
+	if !ok {
+		return
+	}
+
+	got, err := yaml.Numbers.Parse(text)
+	if err != nil {
+		t.Fatalf("Parse(%q) refused with %v, and strconv reads it as the integer %s", text, err, want)
+	}
+
+	if got != want {
+		t.Fatalf("Parse(%q) is %q, and strconv reads it as the integer %s", text, got, want)
+	}
+}
+
+// TestNumberSpellingTakesEveryShortIntegerLiteral sweeps the property over
+// every text up to four bytes from [integerAlphabet], which is every radix
+// prefix, every sign, both exponent markers and the radix point in every
+// arrangement they fit into.
+//
+// It is a test and not only a seed for the fuzz target below because `go test`
+// runs a fuzz target's corpus and nothing more: a property nobody fuzzes is a
+// property nobody checks, and this is the half that runs on every commit.
+func TestNumberSpellingTakesEveryShortIntegerLiteral(t *testing.T) {
+	sweep(t, "", 4)
+}
+
+// sweep walks every text up to n bytes over the alphabet, checking each.
+func sweep(t *testing.T, prefix string, n int) {
+	t.Helper()
+
+	checkInteger(t, prefix)
+
+	if n == 0 {
+		return
+	}
+
+	for _, c := range integerAlphabet {
+		sweep(t, prefix+string(c), n-1)
+	}
+}
+
+// FuzzNumberSpellingTakesEveryIntegerLiteral is the same property with no
+// bound on the length, for the arrangements a four-byte sweep cannot reach: a
+// prefix and a separator and an exponent-looking digit in one text, and the
+// widths' own bounds, which are twenty digits long.
+//
+// The seeds are the cases that would catch a wrong guard out. 0x1E and 0XE
+// spell e and E as hexadecimal digits where they are exponents everywhere
+// else; 0x1p-2 is the hexadecimal float where p is the exponent that e is not;
+// 017 is the octal a float parser reads as seventeen; and the largest unsigned
+// is refused by ParseInt and taken by ParseUint, so a guard that read only the
+// first arm's answer would drop it.
+func FuzzNumberSpellingTakesEveryIntegerLiteral(f *testing.F) {
+	for _, s := range []string{
+		"0", "-0", "+0", "017", "0o17", "0O17", "0x1F", "0x1E", "0XE", "0b101", "0B1",
+		"1_000", "0x_1F", "-0x10", "18446744073709551615", "-9223372036854775808",
+		"9223372036854775807", "3.5", "1e5", "1E5", "0x1p-2", "1_000.5", ".inf", ".nan",
+		"", "0x", "0b", "0o", "_", "-", "+", "e", "0e0", "00", "0_0",
+	} {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, text string) { checkInteger(t, text) })
+}
