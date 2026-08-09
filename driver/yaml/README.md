@@ -103,6 +103,17 @@ note: untouched
 is what saving `[]string{"x"}` leaves of a three-element list whose first position carried that anchor and that comment.
 A list is cut at the last position saved, which is what keeps the positions before it from being renumbered.
 
+## A leaf is the whole document
+
+A value that is not a struct at all names one address, the document itself.
+`ferry.Dump(ctx, 8080, yaml.NewSink(path))` writes `8080`, and `ferry.Load[int]` of that file reads it back.
+Every leaf kind works, `[]byte` included, and it is written under `!!binary` exactly as a byte field at a key would be.
+
+Saving one over a file that already holds a mapping replaces the whole file: `keep: me` and `other: 2` become `8080` and nothing else.
+That is the rule above and not an exception to it.
+The keys a save leaves alone are the ones no field of yours maps, and a value whose only address is the root leaves none.
+A struct still patches, so nothing about the section above changes.
+
 A struct's fields are not touched by this rule: a field your value leaves out is left exactly where it is, and so is every key no field of yours maps.
 
 ## An anchor is kept, so an alias to it moves

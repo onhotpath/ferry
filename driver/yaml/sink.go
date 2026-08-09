@@ -47,6 +47,14 @@ const indent = 2
 // all survive - and a struct's fields are untouched by the rule, since a field
 // your value leaves out is left exactly where it is rather than removed.
 //
+// A value that is a leaf rather than a struct - an int, a string, a []byte -
+// maps one address, the document itself, and saving one replaces the whole file:
+// a file holding "keep: me" and "other: 2" is "8080" and nothing else after
+// saving 8080 to it. That is the same rule as the one above and not an exception
+// to it. There is no replace-or-patch switch to set here; a save always replaces
+// what it writes, and the root is simply the one address with nothing above it
+// left over to keep.
+//
 // An anchor is the exception, and it is deliberate. A value ferry replaces keeps
 // the anchor you wrote on it, so a key no field maps that aliases it reads back
 // as the value just written: its line does not change and its value does. A key
