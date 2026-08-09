@@ -118,8 +118,10 @@ func lastSegment(addr ferry.Path) string {
 	return text
 }
 
-// keyed is the struct one key travels in, for the reason [holder] gives: the
-// root of a schema is a struct, and a bare map is refused for naming no address.
+// keyed is the struct one key travels in, for the reason [holder] gives: this
+// runs against the caller's plane, and no real driver names the root until the
+// driver spellings land. A bare root map is refused in its own right and would
+// not be an option either (ADR-0010).
 type keyed[T comparable] struct {
 	Map map[T]string `ferry:"m"`
 }

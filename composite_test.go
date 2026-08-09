@@ -776,11 +776,6 @@ func TestTheRootMustBeAStructFerryWalks(t *testing.T) {
 	t.Parallel()
 
 	run(t, []compileCase{{
-		name:     "a root leaf",
-		run:      Compile[int],
-		want:     []string{"int compiles to a leaf", "the empty path", "wrap it in a struct"},
-		elements: 1,
-	}, {
 		name:     "a root array",
 		run:      Compile[rootArray],
 		want:     []string{"ferry.rootArray is not a struct ferry walks"},
@@ -795,40 +790,83 @@ func TestTheRootMustBeAStructFerryWalks(t *testing.T) {
 		run:      Compile[rootMap],
 		want:     []string{"ferry.rootMap is not a struct ferry walks"},
 		elements: 1,
-	}, {
-		name:     "and a root pointer to a leaf",
-		run:      Compile[*int],
-		want:     []string{"*int compiles to a leaf"},
-		elements: 1,
 	}})
+}
 
-	t.Run("through Load", func(t *testing.T) {
+// TestARootLeafCompilesToOneAddress is the other half of the root rule: a type
+// that resolves to a leaf sits at the root address, which is an address, so it
+// compiles and the plane is asked about exactly one place.
+func TestARootLeafCompilesToOneAddress(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a root leaf", bindsToTheRoot(func(src Source) error {
+		_, err := Bind[int](src)
+
+		return err
+	}))
+
+	t.Run("and a root pointer to a leaf", bindsToTheRoot(func(src Source) error {
+		_, err := Bind[*int](src)
+
+		return err
+	}))
+
+	t.Run("through Load", aRootLeafLoadsFromTheRoot)
+	t.Run("and through Dump", aRootLeafWritesTheRoot)
+}
+
+// bindsToTheRoot is one bind that must succeed and hand the driver exactly one
+// address, which is the root. Every root-leaf shape in this file is asserted
+// through it, so "one address, and it is the root" is written once.
+func bindsToTheRoot(bind func(Source) error) func(*testing.T) {
+	return func(t *testing.T) {
 		t.Parallel()
 
 		p := newPlane(map[Path]Value{})
-		if _, err := Load[int](t.Context(), planeSource{p: p}); err == nil {
-			t.Fatal("Load[int] returned no error")
+		if err := bind(planeSource{p: p}); err != nil {
+			t.Fatalf("bind: %+v", err)
 		}
 
-		if p.bound != nil {
-			t.Error("a driver was bound for a type that names no address")
-		}
-	})
+		mustBeMembers(t, kinded(p.bound), []string{"leaf "})
+	}
+}
 
-	t.Run("and through Dump", func(t *testing.T) {
-		t.Parallel()
+func aRootLeafLoadsFromTheRoot(t *testing.T) {
+	t.Parallel()
 
-		p := newPlane(map[Path]Value{})
-		if err := Dump(t.Context(), 7, planeSink{p: p}); err == nil {
-			t.Fatal("Dump of an int returned no error")
-		}
-	})
+	p := newPlane(map[Path]Value{{}: Number("7")})
+
+	got, err := Load[int](t.Context(), planeSource{p: p})
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if got != 7 {
+		t.Errorf("loaded %d, want the value the plane held at the root", got)
+	}
+
+	mustBeMembers(t, kinded(p.bound), []string{"leaf "})
+}
+
+func aRootLeafWritesTheRoot(t *testing.T) {
+	t.Parallel()
+
+	p := newPlane(map[Path]Value{})
+	if err := Dump(t.Context(), 7, planeSink{p: p}); err != nil {
+		t.Fatalf("dump: %+v", err)
+	}
+
+	mustBeAddresses(t, p.set, []string{""})
 }
 
 // treeSink is a sink shaped like a document format: every segment but the last
-// names a node and the last names the value. It is the shape the root rule was
-// measured against, where a YAML sink handed a root leaf wrote "{}" and returned
-// a nil error.
+// names a node and the last names the value.
+//
+// It is the shape that has no name for the root: handed the empty path there is
+// no last segment to write at and no node to write it in. So it says so, which
+// is the answer ADR-0004 asks of a plane that cannot hold an address, and it is
+// what this fixture exists to demonstrate. Writing nothing and reporting success
+// is the failure mode it used to have, and the one the refusal replaces.
 type treeSink struct{ wrote map[string]Value }
 
 func (s *treeSink) Bind(*AddressSet) (OpenWriterFunc, error) {
@@ -836,13 +874,7 @@ func (s *treeSink) Bind(*AddressSet) (OpenWriterFunc, error) {
 }
 
 // Set writes v at the name the last segment gives, under the node the ones
-// before it name.
-//
-// Handed the empty path there is no last segment, so there is no name to write
-// at and no node to write it in - and no error either, because a sink asked to
-// put a value nowhere has done exactly what it was asked. That is the whole
-// failure mode, and it is why the root rule is a refusal rather than a
-// documented edge.
+// before it name, and refuses the root.
 func (s *treeSink) Set(_ context.Context, addr LeafAddr, v Value) error {
 	return s.write(addr.Path(), v)
 }
@@ -860,7 +892,7 @@ func (s *treeSink) Ensure(_ context.Context, addr Container, p Presence) error {
 func (s *treeSink) write(addr Path, v Value) error {
 	segs := slices.Collect(addr.Segments())
 	if len(segs) == 0 {
-		return nil
+		return errNoRootNode
 	}
 
 	at := make([]string, 0, len(segs))
@@ -873,23 +905,40 @@ func (s *treeSink) write(addr Path, v Value) error {
 	return nil
 }
 
-// TestTheRootCheckStandsBecauseTheEmptyPathIsSilent demonstrates the failure
-// mode rather than asserting the refusal a second time.
+// errNoRootNode is the tree-shaped sink saying it has no node to put the root's
+// value in, which is what a plane with no name for an address says.
+var errNoRootNode = errors.New("this document has no node at the root to write a value in")
+
+// TestARootCompositeIsRefusedBecauseTheEmptyPathIsWhereItsNullWouldGo is why
+// the refusal narrowed to maps, slices and arrays rather than lifting whole.
 //
-// A root leaf mints the empty path, which renders as nothing and is therefore
-// not distinguishable from no address at all, and a sink handed one writes
-// nothing and reports success.
-//
-// A root map or a root slice is the same hole reached by the other door, and it
-// is the value a first run most often has: a nil or empty one writes a Null at
-// its own address, that address is the empty path, and the whole dump is one
-// write nobody can see.
-func TestTheRootCheckStandsBecauseTheEmptyPathIsSilent(t *testing.T) {
+// A root leaf now has an address and a plane that cannot name it says so. A
+// root map or slice does not get that: it is the value a first run most often
+// has, a nil or empty one writes a Null at its own address, that address is the
+// root, and the leaf that would have carried the members is never reached. So
+// the compiler refuses it and nothing reaches a plane at all.
+func TestARootCompositeIsRefusedBecauseTheEmptyPathIsWhereItsNullWouldGo(t *testing.T) {
 	t.Parallel()
 
 	if got := At().String(); got != "" {
-		t.Fatalf("the empty path renders as %q, want nothing at all", got)
+		t.Fatalf("the root address renders as %q, want nothing at all", got)
 	}
+
+	sink := &treeSink{wrote: map[string]Value{}}
+
+	if err := Dump(t.Context(), rootMap(nil), sink); err == nil {
+		t.Fatal("Dump of a root map returned no error")
+	}
+
+	if len(sink.wrote) != 0 {
+		t.Errorf("the sink was written %v for a schema that never compiled", sink.wrote)
+	}
+}
+
+// TestATreeShapedSinkStillTakesAnOrdinarySchema keeps the fixture above honest:
+// it refuses the root and nothing else.
+func TestATreeShapedSinkStillTakesAnOrdinarySchema(t *testing.T) {
+	t.Parallel()
 
 	sink := &treeSink{wrote: map[string]Value{}}
 
@@ -899,26 +948,6 @@ func TestTheRootCheckStandsBecauseTheEmptyPathIsSilent(t *testing.T) {
 
 	if len(sink.wrote) != 2 {
 		t.Fatalf("the sink wrote %v, and it is meant to work for an ordinary schema", sink.wrote)
-	}
-
-	for _, v := range []Value{String("the whole configuration"), Null} {
-		mustWriteNothingAtTheEmptyPath(t, sink, v)
-	}
-}
-
-// mustWriteNothingAtTheEmptyPath is the failure mode itself: a sink asked to put
-// a value nowhere has done exactly what it was asked, and reports success.
-func mustWriteNothingAtTheEmptyPath(t *testing.T, sink *treeSink, v Value) {
-	t.Helper()
-
-	before := len(sink.wrote)
-	if err := sink.Set(t.Context(), leafOf(At()), v); err != nil {
-		t.Fatalf("the sink refused the empty path with %v, which is not the failure mode", err)
-	}
-
-	if len(sink.wrote) != before {
-		t.Errorf("the sink wrote %v at the empty path, and the refusal exists because it writes nothing",
-			sink.wrote)
 	}
 }
 
@@ -1139,65 +1168,79 @@ type holdsEndpoint struct {
 	E rootEndpoint `ferry:"e"`
 }
 
-// TestARootTypeACodecClaimsIsRefusedAsALeaf is #306: the registry and the chain
-// are consulted at the root in the order they are consulted below it, and what
-// the root compiled to is what the refusal names (ADR-0007, ADR-0010).
-func TestARootTypeACodecClaimsIsRefusedAsALeaf(t *testing.T) {
+// TestARootTypeACodecClaimsCompilesAsALeaf is #306's ordering, unchanged: the
+// registry and the chain are consulted at the root in the order they are
+// consulted below it, and what the root compiled to is what it is (ADR-0007,
+// ADR-0010).
+//
+// What moved is the answer. A type either of them claims is one leaf at the
+// root address rather than a refusal, and the ordering is still what decides
+// which of them claimed it.
+func TestARootTypeACodecClaimsCompilesAsALeaf(t *testing.T) {
 	t.Parallel()
 
-	run(t, []compileCase{{
-		name:     "the chain claims it, and the tagged fields no longer hide that",
-		run:      Compile[rootEndpoint],
-		want:     []string{"ferry.rootEndpoint compiles to a leaf", "the empty path", "wrap it in a struct"},
-		elements: 1,
-	}, {
-		name:     "and a registration claims it at the root as it does anywhere else",
-		run:      Compile[rootEndpoint],
-		opts:     []Option{WithRegistry(MustRegistry(StringText[rootEndpoint]()))},
-		want:     []string{"ferry.rootEndpoint compiles to a leaf"},
-		elements: 1,
-	}, {
-		// netip.Addr has no exported field, so the maps-no-address backstop
-		// reached it first and named the wrong thing: being a struct is not
-		// what makes it refusable at the root.
-		name:     "and the refusal names what the type compiled to rather than its Go kind",
-		run:      Compile[netip.Addr],
-		want:     []string{"netip.Addr compiles to a leaf"},
-		elements: 1,
-	}})
+	t.Run("the chain claims it, and the tagged fields no longer hide that",
+		bindsToTheRoot(func(src Source) error {
+			_, err := Bind[rootEndpoint](src)
+
+			return err
+		}))
+
+	t.Run("and a registration claims it at the root as it does anywhere else",
+		bindsToTheRoot(func(src Source) error {
+			_, err := Bind[rootEndpoint](src, WithRegistry(MustRegistry(StringText[rootEndpoint]())))
+
+			return err
+		}))
+
+	// netip.Addr has no exported field, so the maps-no-address backstop reached
+	// it first: being a struct is not what decides the root.
+	t.Run("and what the type compiled to decides, rather than its Go kind",
+		bindsToTheRoot(func(src Source) error {
+			_, err := Bind[netip.Addr](src)
+
+			return err
+		}))
 }
 
-// TestACodecdRootIsRefusedThroughLoad is the same refusal at the verb, and it
-// asserts the second half too: the refusal is a compile, so no driver is bound
-// and no plane is reached.
-func TestACodecdRootIsRefusedThroughLoad(t *testing.T) {
+// TestACodecdRootLoadsThroughTheRootAddress is the same rule at the verb: the
+// plane is asked about the root and the codec reads what it answers.
+func TestACodecdRootLoadsThroughTheRootAddress(t *testing.T) {
 	t.Parallel()
 
-	p := newPlane(map[Path]Value{})
+	p := newPlane(map[Path]Value{{}: String("h:8080")})
 
-	if _, err := Load[rootEndpoint](t.Context(), planeSource{p: p}); err == nil {
-		t.Fatal("Load of a codec'd root returned no error")
+	got, err := Load[rootEndpoint](t.Context(), planeSource{p: p})
+	if err != nil {
+		t.Fatalf("load: %+v", err)
 	}
 
-	if p.bound != nil {
-		t.Error("a driver was bound for a type that names no address")
+	if want := (rootEndpoint{Host: "h", Port: 8080}); got != want {
+		t.Errorf("loaded %v, want %v", got, want)
 	}
+
+	mustBeAddresses(t, p.got, []string{""})
 }
 
-// TestACodecdRootIsRefusedThroughDump is the write half, against the sink shape
-// the empty path is silent on: before the refusal it wrote nothing and said so
-// with a nil error.
-func TestACodecdRootIsRefusedThroughDump(t *testing.T) {
+// TestACodecdRootIsRefusedByASinkWithNoNameForTheRoot is the write half, and
+// the refusal moved with it: the compiler no longer stands in the way, so the
+// sink shaped like a document is asked about the root and answers for itself.
+func TestACodecdRootIsRefusedByASinkWithNoNameForTheRoot(t *testing.T) {
 	t.Parallel()
 
 	sink := &treeSink{wrote: map[string]Value{}}
 
-	if err := Dump(t.Context(), rootEndpoint{Host: "h", Port: 8080}, sink); err == nil {
-		t.Fatal("Dump of a codec'd root returned no error")
+	err := Dump(t.Context(), rootEndpoint{Host: "h", Port: 8080}, sink)
+	if err == nil {
+		t.Fatal("the tree-shaped sink took a value at the root and said nothing")
+	}
+
+	if !errors.Is(err, errNoRootNode) {
+		t.Errorf("the report is %+v, want the sink's own refusal in the chain", err)
 	}
 
 	if len(sink.wrote) != 0 {
-		t.Errorf("the sink was written %v for a schema that never compiled", sink.wrote)
+		t.Errorf("the sink wrote %v at an address it says it has no node for", sink.wrote)
 	}
 }
 
@@ -1244,13 +1287,13 @@ func TestTwoRegistriesDisagreeingAboutTheRootCompileTwoSchemas(t *testing.T) {
 		func(text string) (rootOpaque, error) { return rootOpaque{V: text}, nil },
 	)))
 
-	load := func(t *testing.T, opts ...Option) (rootOpaque, error) {
+	load := func(t *testing.T, at Path, opts ...Option) (rootOpaque, error) {
 		t.Helper()
 
-		return Load[rootOpaque](t.Context(), planeSource{p: newPlane(map[Path]Value{At("v"): String("x")})}, opts...)
+		return Load[rootOpaque](t.Context(), planeSource{p: newPlane(map[Path]Value{at: String("x")})}, opts...)
 	}
 
-	got, err := load(t)
+	got, err := load(t, At("v"))
 	if err != nil {
 		t.Fatalf("with no registry the type is a section and must load: %+v", err)
 	}
@@ -1259,13 +1302,20 @@ func TestTwoRegistriesDisagreeingAboutTheRootCompileTwoSchemas(t *testing.T) {
 		t.Errorf("loaded %v, want the section's own leaf", got)
 	}
 
-	if _, err := load(t, claims); err == nil {
-		t.Fatal("the registry that holds the root's codec compiled the same schema as the one that does not")
+	// With the registry the same type is one leaf at the root, which is a
+	// different schema over the same reflect.Type, read at a different address.
+	claimed, err := load(t, Path{}, claims)
+	if err != nil {
+		t.Fatalf("with the registry the type is one root leaf and must load: %+v", err)
 	}
 
-	// And the refusal did not land in the other registry's slot, which is the
-	// whole of what the registry component of the key buys.
-	if _, err := load(t); err != nil {
-		t.Errorf("the second load against the first registry: %+v", err)
+	if claimed.V != "x" {
+		t.Errorf("loaded %v, want the whole value the codec read at the root", claimed)
+	}
+
+	// And the second schema did not land in the first registry's slot, which is
+	// the whole of what the registry component of the key buys.
+	if again, err := load(t, At("v")); err != nil || again.V != "x" {
+		t.Errorf("the second load against the first registry: %v, %+v", again, err)
 	}
 }

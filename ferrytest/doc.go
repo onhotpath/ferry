@@ -17,7 +17,7 @@
 // Absent, Null, Bool, Number, String and Bytes. A plane declares which of them
 // it can carry, and that declaration is the thing a suite holds it to.
 //
-// Conformance is the twenty-two-case suite [Driver] runs over one plane.
+// Conformance is the twenty-three-case suite [Driver] runs over one plane.
 // Passing it is what "this driver implements ferry's contract" means.
 //
 // # Who this is for

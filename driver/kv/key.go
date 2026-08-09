@@ -70,11 +70,10 @@ func keyFunc(prefix []string, root string) ferry.KeyFunc {
 		parts := make([]string, 0, len(prefix)+segmentsHint)
 		parts = append(parts, prefix...)
 
-		// The empty path is the schema's own root, which has no segment of its
-		// own to be named by, so the loop below would skip every check and hand
-		// back the prefix itself - the folder every other address is written
-		// under. A comparison is what asks, because Path is comparable.
-		if addr == (ferry.Path{}) {
+		// The root has no segment of its own to be named by, so the loop below
+		// would skip every check and hand back the prefix itself - the folder
+		// every other address is written under (ADR-0003, #334).
+		if addr.IsRoot() {
 			return rootName(parts, root)
 		}
 
