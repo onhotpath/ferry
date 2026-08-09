@@ -1003,42 +1003,59 @@ func heldAt(s site, tg tag) (required, omitzero bool) {
 	return tg.required, tg.omitzero
 }
 
-// refusalMsg is the diagnosis for a type outside the set, and it is three
-// messages rather than one because ADR-0005 sorts the refusals by what actually
-// limits each and only one group is permanent.
+// refusalMsg is the diagnosis for a type outside the set, and every one of them
+// names registration as the remedy, because every refusal core makes is one a
+// registered codec lifts (ADR-0005).
 //
-// Offering registration as the remedy for a chan would be naming a remedy that
-// does not exist, which is the same mistake ADR-0005 corrected for time.Time as
-// a map key.
+// This used to print a message for chan, func, uintptr and unsafe.Pointer
+// saying no codec could be written for them, on ADR-0005's category (a).
+// Measured under #116, against this package's own Registry: a codec registers
+// and round-trips for chan, uintptr and unsafe.Pointer, and registers for func.
+// The identity table is consulted before reflect.Kind, so the kind switch below
+// is never reached for a registered type and the claim was false for all four.
+// What is true of them is narrower and belongs in the reason, not the remedy.
 func refusalMsg(t reflect.Type) string {
 	head := fmt.Sprintf("%s is not a type ferry maps to an address", t)
 
-	switch {
-	case permanentlyRefused(t.Kind()):
-		return head + fmt.Sprintf(": a %s exists only inside the process that made it, so no text could carry "+
-			"it and no codec can be written for it", t.Kind())
-	case t.Kind() == reflect.Complex64 || t.Kind() == reflect.Complex128:
-		return head + ": no plane in ferry's range has a complex type, so this is a refusal by policy rather " +
-			"than by constraint: register a codec for it if yours does"
-	default:
-		return head + ": register a codec for it, or model it as a type ferry carries"
+	if why, ok := notCarriedByDefault(t.Kind()); ok {
+		return head + ": " + why
 	}
+
+	return head + ": register a codec for it, or model it as a type ferry carries"
 }
 
-// permanentlyRefused is ADR-0005's category (a), the only refusals nothing
-// lifts: a codec has to produce a kind and text and rebuild the value from that
-// text alone, and for these there is nothing text could carry.
+// notCarriedByDefault is the kinds core declines to carry itself, each with the
+// reason it declines rather than a different remedy (ADR-0005).
 //
-// func is the sharpest of the four and fails on the encode side before the
-// decode side is reached: measured, reflect.TypeFor[func()]().Comparable() is
-// false, so a codec cannot even ask which registered function this is. A chan
-// is comparable, and its identity is a pointer into this process's heap.
-func permanentlyRefused(k reflect.Kind) bool {
+// The reason is per kind because the kinds differ, and the difference is the
+// whole of what #116 found. func is the sharpest: measured,
+// reflect.TypeFor[func()]().Comparable() is false, so a codec's encode half
+// cannot ask which registered function this is and only the nil case can work.
+// A chan is comparable, so a name table serves both halves, and its identity is
+// still local to this process. A uintptr is an integer the garbage collector
+// does not track, so it goes stale silently where it holds a real address and
+// carries a size, an offset or a handle where it does not - core cannot tell
+// which from the type, which is why it declines rather than guesses.
+func notCarriedByDefault(k reflect.Kind) (string, bool) {
 	switch k {
-	case reflect.Chan, reflect.Func, reflect.UnsafePointer, reflect.Uintptr:
-		return true
+	case reflect.Chan:
+		return "a chan's identity is local to the process that made it, so core does not carry one by " +
+			"default: register a codec if yours names something a plane can carry", true
+	case reflect.Func:
+		return "a func cannot be identified once stored, because reflect reports func as not comparable, " +
+			"so core does not carry one by default: register a codec if yours names something a plane can carry", true
+	case reflect.Uintptr:
+		return "a uintptr is an integer the garbage collector does not track, so one holding a live address " +
+			"goes stale silently: core does not carry one by default, so register a codec if yours is a " +
+			"size, an offset or a handle rather than an address", true
+	case reflect.UnsafePointer:
+		return "an unsafe.Pointer is an address and names nothing in another process, so core does not carry " +
+			"one by default: register a codec only where your program can rebuild what it points at", true
+	case reflect.Complex64, reflect.Complex128:
+		return "no plane in ferry's range has a complex type, so core does not carry one by default: " +
+			"register a codec for it if yours does", true
 	default:
-		return false
+		return "", false
 	}
 }
 

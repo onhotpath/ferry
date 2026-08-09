@@ -52,7 +52,7 @@ Four questions this ADR had to answer that the ticket did not name, all of which
 | what stops a struct admitted by kind from being a silent total loss | [A struct that maps no address](#a-struct-that-maps-no-address-does-not-compile) |
 | whether a recursive type has a finite address set | [A recursive type](#a-recursive-type-does-not-compile) |
 | whether an array is a static or a dynamic composite | [The enumerated set](#the-enumerated-set) |
-| what actually limits each refusal, and which are permanent | [Every refusal is one of three kinds](#every-refusal-is-one-of-three-kinds-and-only-one-of-them-is-permanent) |
+| what actually limits each refusal, and what lifts it | [Every refusal is one of three kinds](#every-refusal-is-one-of-three-kinds-and-registration-lifts-all-three) |
 
 **Three things this ADR does not close, stated here rather than left to the reader to notice.**
 
@@ -212,7 +212,7 @@ Key admissibility is declared per entry, and core's own entries declare it like 
 > Evidence: `K31=<n|all>` on [`proto/31-mapkey`](https://github.com/onhotpath/ferry/tree/proto/31-mapkey).
 
 **Refused, at schema compile.**
-Sorted below into what actually limits each, because only four of these are permanent.
+Sorted below into what actually limits each, because the limits differ and registration lifts every one.
 
 - `complex64`, `complex128`, `chan`, `func`, `interface`, `uintptr`, `unsafe.Pointer`.
 - A map whose key type is not `string`, an integer kind, or a registered key codec. *(Amended under [#31](https://github.com/onhotpath/ferry/issues/31): as published this read "or a registered codec", which admitted `time.Time` through the identity table.)*
@@ -337,19 +337,36 @@ Measured: `struct{ Name string; Next *Node }`, `struct{ Kids []Tree }` and `stru
 
 This is not a limitation ferry chose so much as one ADR-0003 already implies: an address set that cannot be enumerated cannot be handed to `Bind` before I/O, which is the precondition the driver-side injectivity rule needs.
 
-### Every refusal is one of three kinds, and only one of them is permanent
+### Every refusal is one of three kinds, and registration lifts all three
 
 "Refused" is not one thing, and lumping the refusals together makes ferry look more closed than it is.
 Sorted by what actually limits them, and tested against a registered codec rather than reasoned about:
 
-**(a) The value does not exist outside the process.**
-`chan`, `func`, `unsafe.Pointer`, `uintptr` used as a real pointer.
+**(a) The value is local to the process that made it.**
+`chan`, `func`, `unsafe.Pointer`, `uintptr`.
 
 A codec has to produce a `Value`, which is a kind and text, and rebuild the value from that text alone.
-For these there is nothing text could carry.
-The sharpest case is `func`, and it fails on the encode side before the decode side is even reached: measured, `reflect.TypeFor[func()]().Comparable()` is **false**, so a codec cannot even ask which registered function this is.
-A `chan` is comparable, but its identity is a pointer into this process's heap.
-**Nothing lifts these, and they are the only permanent refusals.**
+For these, core cannot write that codec, because core has nothing to write it against: what the text would have to name is a table, a handle or a hardware address that belongs to the program and not to ferry.
+So core declines to guess one, and the registrant supplies it.
+
+The kinds differ, and the differences are the sharp edges rather than one shared verdict.
+`func` is the sharpest: measured, `reflect.TypeFor[func()]().Comparable()` is **false**, so a codec's encode half cannot ask which registered function this is, and only the `nil` case can work.
+A `chan` is comparable, so a name table serves both halves, and its identity is still local to this process.
+A `uintptr` is an integer the garbage collector does not track: where it holds a real address it goes stale silently, and where it holds a size, an offset or a handle it was never an address at all.
+`unsafe.Pointer` is the pointer type proper, tracked by the collector and only ever an address, and `go vet` reports `possible misuse of unsafe.Pointer` on any decode half that rebuilds one from a number.
+
+**None of this is permanent, and core never enforced that it was.**
+`classify` consults the identity table before `reflect.Kind`, so a registered type is a leaf and the kind switch that refuses these is never reached, exactly as in category (b).
+
+> **Amended under [#116](https://github.com/onhotpath/ferry/issues/116).**
+> As published this category was headed "The value does not exist outside the process", listed "`uintptr` used as a real pointer", and closed "**Nothing lifts these, and they are the only permanent refusals.**"
+> Both claims were wrong, and the second was wrong in the shipped code rather than only on the page.
+> Measured against core's own `Registry`: a codec registers and round-trips for `chan`, `uintptr` and `unsafe.Pointer`, and registers for `func`.
+> The only gate a registration passes is totality over the zero value, which every one of the four meets by mapping the zero to `""`.
+> "used as a real pointer" was not implementable in the first place, because a `uintptr` holding an address and one holding an offset are the same `reflect.Type`.
+> `uintptr` was also listed under (c) below, which is the contradiction the issue was filed for; it stays here, because the reason core declines it is the one this category states.
+> What changed in code: `refusalMsg` names registration as the remedy for all four, and `permanentlyRefused` is deleted.
+> Evidence: [`proto/116-refusal-remedy`](https://github.com/onhotpath/ferry/tree/proto/116-refusal-remedy).
 
 **(b) Core cannot compute an address set for the type.**
 Interfaces, recursive types, and structs that map no address.
@@ -388,17 +405,22 @@ Injectivity is not checkable in general, so it is a proof obligation on the regi
 > A weaker relation cannot see an entry disappear, because under it the entry was never there.
 > The consequence is that a key type must satisfy a **stricter** relation than its own leaf proof, so a type can be a legal leaf and an illegal key, and `time.Time` is the first instance.
 
-**(c) Refused by policy, not by constraint.**
-`complex64`, `complex128`, `uintptr`.
+**(c) No plane in ferry's range has the type.**
+`complex64`, `complex128`.
 
 Nothing structural refuses these and the ADR should not imply otherwise.
 Measured: `strconv.FormatComplex` and `ParseComplex` are a total inverse pair, `(1+2i)` round-trips bit-exactly.
 They are out because no plane in ferry's range has a complex type, and because a config or i18n or query-parameter struct containing a `complex128` is not a case worth a row in a table that has to be maintained forever.
-`uintptr` round-trips as a `uint` and means nothing in another process.
 Registration is available for anyone who disagrees, which is the correct amount of effort to ask of that user.
 
-**So the honest summary is that ferry refuses four Go kinds permanently, and everything else is a matter of who supplies the codec.**
+> **Amended under [#116](https://github.com/onhotpath/ferry/issues/116).**
+> As published this category was headed "Refused by policy, not by constraint", listed `uintptr` alongside the two complex kinds, and carried the sentence "`uintptr` round-trips as a `uint` and means nothing in another process."
+> `uintptr` is in (a) and only in (a); the round-trip sentence goes with it, because it argued against (a) while (a) also claimed the type.
+> The heading changed because "by policy, not by constraint" was the distinguishing label of a category that no longer distinguishes anything: **every** refusal here is by policy, which is the correction above.
+
+**So the honest summary is that core carries a small closed set and declines the rest, and every declination is one a codec lifts.**
 That is a materially different claim from "the set is closed", and it is the one ADR-0001 actually made: core's set is closed, extension is explicit, and extension carries its proof.
+What core will not do is guess a representation on the user's behalf, and that is the whole of what a refusal means.
 
 **One ordering consequence, and it is [#12](https://github.com/onhotpath/ferry/issues/12)'s to take.**
 Category (b) shrinks a lot if the codec chain consults `encoding.TextMarshaler` and `TextUnmarshaler` before kind admission, with no registration by anyone.
@@ -1225,8 +1247,9 @@ Core's test iterates the identity table and the admitted kind list and asserts t
 
 - Core's supported set is small and enumerable, and a contributor can read it off one table rather than off the walk.
   The cost is that ordinary types people expect to work, `netip.Addr` and `url.URL` among them, do not until somebody registers them, and the compile error is the only thing standing between that and a silent empty field.
-- Only four Go kinds are refused permanently: `chan`, `func`, `unsafe.Pointer` and `uintptr`, and they fail because the value does not exist outside the process.
-  Everything else refused is a question of who supplies the codec, because a codec collapses a type to a leaf and a leaf needs no address set.
+- Four Go kinds are refused because the value is local to the process that made it: `chan`, `func`, `unsafe.Pointer` and `uintptr`.
+  Core declines to guess a representation for them and a registered codec supplies one, which is the same answer everything else refused gets, because a codec collapses a type to a leaf and a leaf needs no address set.
+  *(Amended under [#116](https://github.com/onhotpath/ferry/issues/116): as published this read "Only four Go kinds are refused permanently", and none of the four is permanent. See [category (a)](#every-refusal-is-one-of-three-kinds-and-registration-lifts-all-three).)*
   That includes the two cases that look impossible, an interface and a recursive type, both measured round-tripping after registration.
   ferry is therefore much less closed than the word "refused" suggests, and the ADR says so rather than letting the list read as a wall.
 - The refusal list is partly [#12](https://github.com/onhotpath/ferry/issues/12)'s to shorten.

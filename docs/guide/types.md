@@ -295,13 +295,19 @@ Two members rendering to one address are refused as the address is minted, namin
 
 ## What is refused
 
-Only four Go kinds are refused permanently, because the value does not exist outside the process and no text could carry it:
+Core carries none of these by default, because the value is local to the process that made it and core has nothing to write a codec against:
 
 ```
 chan    func    unsafe.Pointer    uintptr
 ```
 
-`complex64` and `complex128` are refused by policy rather than by constraint: no plane in ferry's range has a complex type, and registering a codec lifts it if yours does.
+Registering a codec lifts every one, and what differs is the reason core declines and the sharp edge that comes with overriding it.
+A `func` cannot be identified once stored, because `reflect` reports `func` as not comparable, so only the `nil` case can work.
+A `chan` is comparable, so a name table serves both halves, and its identity is still local to this process.
+A `uintptr` is an integer the collector does not track: register one when yours is a size, an offset or a handle, and not when it holds a live address, which goes stale silently.
+`unsafe.Pointer` is only ever an address, and `go vet` reports `possible misuse of unsafe.Pointer` on a decode half that rebuilds one from a number.
+
+`complex64` and `complex128` are declined for a different reason: no plane in ferry's range has a complex type, and registering a codec lifts it if yours does.
 
 Two whole-type refusals fall out of the address model, and both name registration as the fix:
 

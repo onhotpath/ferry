@@ -104,9 +104,11 @@
 //
 // chan, func, complex64, complex128, unsafe.Pointer and uintptr are refused. So
 // is a struct that maps no address, and so is a recursive type, whose address
-// set is unbounded; registering a codec collapses either to a leaf and is the
-// remedy for both. Every violation in a type is reported rather than the first,
-// each naming the address and the type, sorted.
+// set is unbounded. Core carries none of these by default, and registering a
+// codec collapses any of them to a leaf, which is the remedy for every one:
+// what core will not do is guess a representation for you. Every violation in a
+// type is reported rather than the first, each naming the address and the type,
+// sorted.
 //
 // On Load a leaf accepts its own kind, and additionally accepts a string, whose
 // text is parsed by exactly the parser that leaf's own kind uses. Nothing else
