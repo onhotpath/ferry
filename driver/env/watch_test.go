@@ -166,6 +166,46 @@ func TestABurstOfEventsIsOneCall(t *testing.T) {
 	}
 }
 
+// TestSeveralFilesInOneDirectoryOpenOneWatch is the deduplication, and what it
+// buys is one inotify watch per directory rather than one per file: naming five
+// layers in one directory is the ordinary case.
+//
+// Both files still fire, which is what says the deduplication is over the
+// directories rather than over the files.
+func TestSeveralFilesInOneDirectoryOpenOneWatch(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	base, local := filepath.Join(dir, "base.env"), filepath.Join(dir, "local.env")
+
+	write(t, base, "HOST=base\n")
+	write(t, local, "HOST=local\n")
+
+	fired := make(calls, 8)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	src := New(Environ(noEnviron), DotEnv(base, local), WatchFiles(ctx, func(context.Context) {
+		select {
+		case fired <- struct{}{}:
+		default:
+		}
+	}))
+
+	if _, err := ferry.Bind[host](src); err != nil {
+		t.Fatalf("bind: %+v", err)
+	}
+
+	for _, path := range []string{base, local} {
+		write(t, path, "HOST=changed\n")
+
+		if !fired.fired(t) {
+			t.Errorf("the callback did not run for a write to %s", filepath.Base(path))
+		}
+	}
+}
+
 // TestLosingTheWatchFiresOnceAndStops is the one ending that speaks.
 //
 // There is nowhere to report a watch that is gone, so the callback runs once and

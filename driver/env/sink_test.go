@@ -1,6 +1,7 @@
 package env
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -351,6 +352,235 @@ func TestAContainerPresenceThisPlaneHasNoAnswerForIsRefused(t *testing.T) {
 
 	if err := ensurer.Ensure(t.Context(), at, ferry.PresenceAbsent); err == nil {
 		t.Error("the writer answered for an absent container, want a refusal: there is nothing to write")
+	}
+}
+
+// TestASinkBuiltWithAnUnusableOptionIsRefusedAtBind is where a constructor that
+// returns no error puts its refusal: the first moment the driver is asked for
+// anything, and before any file is opened.
+func TestASinkBuiltWithAnUnusableOptionIsRefusedAtBind(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		name string
+		opt  Naming
+	}{
+		{"a separator no variable name can hold", Separator("-")},
+		{"boolean words that are not whole pairs", BoolWords("on", "off", "yes")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			refusesTheOption(t, c.opt)
+		})
+	}
+}
+
+// refusesTheOption is one unusable option, lifted out of its table.
+func refusesTheOption(t *testing.T, opt Naming) {
+	t.Helper()
+
+	path := staged(t, "KEEP=me\n")
+
+	_, err := ferry.BindSink[host](NewDotEnvSink(path, opt))
+	if err == nil {
+		t.Fatal("the sink bound with this option, want a refusal")
+	}
+
+	answers(t, err, ferry.ErrPlane, ErrOption)
+
+	if got := read(t, path); got != "KEEP=me\n" {
+		t.Errorf("the file holds %q, want it untouched: Bind does no I/O", got)
+	}
+}
+
+// TestASaveOverAFileThatDoesNotParseIsRefused is the refusal that matters most
+// on this half: a save merges into the file it read, so a file this driver
+// cannot read is one it must not overwrite.
+func TestASaveOverAFileThatDoesNotParseIsRefused(t *testing.T) {
+	t.Parallel()
+
+	const broken = "HOST=ok\nthis is not an assignment\n"
+
+	path := staged(t, broken)
+
+	err := ferry.Dump(t.Context(), host{Host: "new"}, NewDotEnvSink(path))
+	if err == nil {
+		t.Fatal("the save took a file it cannot read, want a refusal")
+	}
+
+	answers(t, err, ferry.ErrPlane, ErrMalformed)
+
+	if got := read(t, path); got != broken {
+		t.Errorf("the file holds %q, want it byte for byte as it was", got)
+	}
+}
+
+// TestAnOpenUnderACancelledContextDoesNothing is the check every open owes: the
+// caller gave up before the save started, so no file is read and none is staged.
+func TestAnOpenUnderACancelledContextDoesNothing(t *testing.T) {
+	t.Parallel()
+
+	path := staged(t, "HOST=old\n")
+
+	set, err := addrsOf[host]()
+	if err != nil {
+		t.Fatalf("compiling the fixture: %+v", err)
+	}
+
+	open, err := NewDotEnvSink(path).Bind(set)
+	if err != nil {
+		t.Fatalf("bind: %+v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if _, err := open(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("the open answered %+v, want the cancellation", err)
+	}
+
+	if left := staging(t, path); len(left) != 0 {
+		t.Errorf("the open staged %v, want nothing: the caller had already given up", left)
+	}
+}
+
+// TestACommitUnderACancelledContextWritesNothing is the same check one step
+// later, and it is the one that matters: the commit is where the file is
+// replaced.
+func TestACommitUnderACancelledContextWritesNothing(t *testing.T) {
+	t.Parallel()
+
+	path := staged(t, "HOST=old\n")
+
+	set, w := writerOver[host](t, NewDotEnvSink(path))
+	defer closeWriter(t, w)
+
+	if err := w.Set(t.Context(), leafOf(t, set, ferry.At("host")), ferry.String("mine")); err != nil {
+		t.Fatalf("set: %+v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if err := committerOf(t, w).Commit(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("the commit answered %+v, want the cancellation", err)
+	}
+
+	if got := read(t, path); got != "HOST=old\n" {
+		t.Errorf("the file holds %q, want it as it was", got)
+	}
+}
+
+// TestASaveFollowsARelativeSymlinkAndRefusesACycle is the two arms of the link
+// walk that an absolute link does not reach.
+func TestASaveFollowsARelativeSymlinkAndRefusesACycle(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a relative link is resolved against its own directory", savesThroughARelativeLink)
+	t.Run("a cycle of links stops at the bound", refusesACycleOfLinks)
+}
+
+// savesThroughARelativeLink is the arm an absolute link does not reach: the
+// destination is joined to the link's own directory rather than to the working
+// directory.
+func savesThroughARelativeLink(t *testing.T) {
+	t.Parallel()
+
+	target := staged(t, "HOST=old\n")
+	link := filepath.Join(filepath.Dir(target), "link.env")
+
+	if err := os.Symlink(filepath.Base(target), link); err != nil {
+		t.Skipf("this filesystem has no symlinks: %v", err)
+	}
+
+	if err := ferry.Dump(t.Context(), host{Host: "new"}, NewDotEnvSink(link)); err != nil {
+		t.Fatalf("dump: %+v", err)
+	}
+
+	if got := read(t, target); got != "HOST=new\n" {
+		t.Errorf("the file the link names holds %q, want the save to have gone through the link", got)
+	}
+}
+
+// refusesACycleOfLinks is what the bound is for: a path this driver did not
+// create cannot make a save spin, and the read at the end of the walk is what
+// reports the cycle.
+func refusesACycleOfLinks(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a.env"), filepath.Join(dir, "b.env")
+
+	if err := os.Symlink(b, a); err != nil {
+		t.Skipf("this filesystem has no symlinks: %v", err)
+	}
+
+	if err := os.Symlink(a, b); err != nil {
+		t.Fatalf("the second link: %v", err)
+	}
+
+	if err := ferry.Dump(t.Context(), host{Host: "new"}, NewDotEnvSink(a)); err == nil {
+		t.Error("the save took a cycle of links, want the read at the end of the walk to refuse")
+	}
+}
+
+// TestTwoMapKeysThatFoldToOneVariableAreRefused is the collision the Bind-time
+// injectivity check cannot see, because the keys come from the value rather than
+// from the type.
+//
+// A file holds one value per name, so writing both would lose one of them, and
+// the refusal is per address and before anything is committed.
+func TestTwoMapKeysThatFoldToOneVariableAreRefused(t *testing.T) {
+	t.Parallel()
+
+	type limits struct {
+		At map[string]string `ferry:"at"`
+	}
+
+	path := staged(t, "KEEP=me\n")
+
+	// "a-b" and "a_b" both fold to AT_A_B, because every byte outside A-Z, 0-9
+	// and _ becomes _.
+	err := ferry.Dump(t.Context(), limits{At: map[string]string{"a-b": "one", "a_b": "two"}},
+		NewDotEnvSink(path))
+	if err == nil {
+		t.Fatal("the save took two keys that fold to one variable, want a refusal: one of the two writes " +
+			"would be lost")
+	}
+
+	answers(t, err, ferry.ErrPlane)
+
+	if got := read(t, path); got != "KEEP=me\n" {
+		t.Errorf("the file holds %q, want it byte for byte as it was", got)
+	}
+}
+
+// TestASectionThatIsThereAndHoldsNothingWritesNothing is Ensure's other arm, and
+// it is a no-op with a consequence worth pinning: a container has no variable of
+// its own here, so there is nothing to write and nothing comes back.
+func TestASectionThatIsThereAndHoldsNothingWritesNothing(t *testing.T) {
+	t.Parallel()
+
+	type opts struct {
+		Trace string `ferry:"trace,omitzero"`
+	}
+
+	type outer struct {
+		Opts *opts  `ferry:"opts"`
+		Host string `ferry:"host"`
+	}
+
+	path := filepath.Join(t.TempDir(), ".env")
+
+	// The pointer is set and every field under it is omitted, which is the one
+	// case with nowhere else to be said.
+	if err := ferry.Dump(t.Context(), outer{Opts: &opts{}, Host: "db.internal"}, NewDotEnvSink(path)); err != nil {
+		t.Fatalf("dump: %+v", err)
+	}
+
+	if got := read(t, path); got != "HOST=db.internal\n" {
+		t.Errorf("the file holds %q, want the leaf alone: a section that is there and holds nothing has no "+
+			"variable to be written at", got)
 	}
 }
 

@@ -618,14 +618,19 @@ func (f *file) put(name, text string) {
 	ln.a.value = text
 }
 
-// valueAt is what the file now holds at one name, and the empty string where it
-// holds nothing.
+// valueAt is what the file now holds at one name.
+//
+// It is only ever asked about a name this dump wrote, and [file.put] indexes
+// every one of those, so a name that is not here cannot arise: the empty string
+// is what a bug in that pairing would produce rather than a case with its own
+// meaning.
 func (f *file) valueAt(name string) string {
-	if i, held := f.index[name]; held {
-		return f.lines[i].a.value
+	i, held := f.index[name]
+	if !held {
+		return ""
 	}
 
-	return ""
+	return f.lines[i].a.value
 }
 
 // insert adds a line for a name the file does not hold, beside the lines it is
