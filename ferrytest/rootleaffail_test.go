@@ -65,6 +65,51 @@ func TestDriverCase23ReportsADumpThatLandedNowhere(t *testing.T) {
 	}
 }
 
+// TestDriverCase23SkipsAPlaneThatRefusesTheWriteInstead is the answer late
+// rather than a wrong one: the plane bound the schema and then said no, which
+// loses nothing, so the case says where the refusal came from and skips.
+func TestDriverCase23SkipsAPlaneThatRefusesTheWriteInstead(t *testing.T) {
+	c := &capture{}
+
+	ferrytest.Driver(c, wrapPlane("late", func(inst *ferrytest.Instance) {
+		inst.Sink = pickyWriteSink{inner: inst.Sink,
+			refuse: func(_ *ferry.AddressSet, addr ferry.Path, _ ferry.Value) error {
+				if addr.IsRoot() {
+					return errNoRootNode
+				}
+
+				return nil
+			}}
+	}))
+
+	if !anyLineContains(c.logs, "case 23 skipped") {
+		t.Errorf("the suite logged %q, want case 23 saying the refusal came at the write", c.logs)
+	}
+
+	if anyLineContains(c.lines, "case 23") {
+		t.Errorf("the suite reported %q, want case 23 silent about a refusal that loses nothing", c.lines)
+	}
+}
+
+// errNoRootNode is the plane saying it has no place to put the root's value.
+var errNoRootNode = fmt.Errorf("%w: this plane has no node at the root", ferry.ErrPlane)
+
+// TestDriverCase23SkipsAPlaneThatCannotCarryAString is the other scaling half:
+// the value the case round trips has to be one the plane declared it holds.
+func TestDriverCase23SkipsAPlaneThatCannotCarryAString(t *testing.T) {
+	c := &capture{}
+
+	p := ferrytest.MemPlane()
+	p.Name = "stringless"
+	p.Kinds = []ferry.VKind{ferry.KindAbsent, ferry.KindNull, ferry.KindNumber}
+
+	ferrytest.Driver(c, p)
+
+	if !anyLineContains(c.logs, "case 23 skipped") {
+		t.Errorf("the suite logged %q, want case 23 skipped for a plane that carries no String", c.logs)
+	}
+}
+
 // TestDriverCase23SaysNothingWithoutBothHalves is the pair the case cannot run
 // without: it round trips, so a plane missing either half is not asked and says
 // nothing.
