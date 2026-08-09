@@ -176,13 +176,14 @@ the floor rather than a competitor: no library beats it, so it is published as t
 the row is read against rather than ranked against one. The results file gives every library's
 multiple over it, ferry's computed the same way as the rest.
 
-| scenario | ferry (warm) | fastest other library | | baseline: no mapping layer |
-| --- | --- | --- | --- | --- |
-| `env_small` | 3.08µs | 736ns (go-envconfig) | ferry 4.18x slower | 177ns (stdlib) |
-| `env_large` | 36.8µs | 12.7µs (go-envconfig) | ferry 2.89x slower | 2.50µs (stdlib) |
-| `yaml_small` | 24.3µs | 37.0µs (viper) | ferry 1.52x faster | 23.0µs (stdlib) |
-| `yaml_large` | 131µs | 259µs (viper) | ferry 1.98x faster | 128µs (stdlib) |
-| `dump_large` | 552µs | 486µs (koanf) | ferry 1.14x slower | 325µs (stdlib) |
+| scenario | remarks | ferry (warm) | fastest other library | | baseline: no mapping layer |
+| --- | --- | --- | --- | --- | --- |
+| `env_small` | five flat fields | 4.58µs | 697ns (go-envconfig) | ferry 6.57x slower | 174ns (stdlib) |
+| `env_large` | fifty-one leaves, three levels | 63.3µs | 11.5µs (go-envconfig) | ferry 5.49x slower | 2.58µs (stdlib) |
+| `yaml_small` | five fields, parsed per load | 24.3µs | 31.8µs (viper) | ferry 1.31x faster | 22.6µs (stdlib) |
+| `yaml_large` | fifty-one leaves, parsed per load | 125µs | 219µs (viper) | ferry 1.74x faster | 107µs (stdlib) |
+| `dump_large` | over an existing file; ferry merges | 512µs | 421µs (koanf) | ferry 1.22x slower | 268µs (stdlib) |
+| `dump_fresh` | no file at the path; all write whole | 358µs | 396µs (koanf) | ferry 1.11x faster | 240µs (stdlib) |
 
 Left out of the comparison above because its warm figure measures a different job:
 `xload` in `yaml_small`.
