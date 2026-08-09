@@ -283,13 +283,18 @@ func indexOf(text string) (int, error) {
 // leaf write, and a container for [writer.Ensure] (ADR-0016). It decides
 // nothing but how far an alias at the last step is followed, for the reason
 // [through] gives.
+//
+// The empty path is an address here and not a refusal: it is the root, which
+// this driver names by construction because an address is a path through the
+// document rather than a key built out of joined segments (#339). [docRoot] is
+// what it answers with.
 func place(doc *yamlv3.Node, addr ferry.Path, last yamlv3.Kind) (*yamlv3.Node, error) {
 	// The segments are collected rather than ranged over, because the write
 	// side needs to look one segment ahead: what a container has to be is
 	// decided by the kind of the segment under it.
 	segs := slices.Collect(addr.Segments())
 	if len(segs) == 0 {
-		return nil, fmt.Errorf("%w: the empty path is not an address", ferry.ErrPlane)
+		return docRoot(doc), nil
 	}
 
 	n := rootFor(doc, segs[0].Kind())
@@ -348,6 +353,22 @@ func through(n *yamlv3.Node, kind yamlv3.Kind) *yamlv3.Node {
 	}
 
 	return n
+}
+
+// docRoot is the document's own content node, minted where the document is
+// empty. It is shaped by nothing, because the root leaf's own write decides what
+// it becomes (ADR-0003, #339).
+//
+// That is the whole contrast with [rootFor], which forces the top level into the
+// container the first segment is looked up in. The root address has no segment
+// under it, so there is nothing the top level has to be, and leaving it unshaped
+// is what makes a scalar document writable at all.
+func docRoot(doc *yamlv3.Node) *yamlv3.Node {
+	if len(doc.Content) == 0 {
+		doc.Content = []*yamlv3.Node{{}}
+	}
+
+	return doc.Content[0]
 }
 
 // rootFor is the document's content node, minted where the document is empty
