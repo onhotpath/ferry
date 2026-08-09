@@ -50,6 +50,12 @@ func (e *fakeEnviron) environ() []string {
 	return out
 }
 
+// rootVar is what this plane calls the root address, so that the conformance
+// run exercises the root-leaf case rather than skipping it. Without one this
+// driver has no name for the root and refuses it, which is the other legitimate
+// answer and is the one every schema in the rest of this package gets.
+const rootVar = "ROOT"
+
 // plane describes the env plane for the conformance suite, with both halves over
 // one environment.
 //
@@ -78,7 +84,7 @@ func plane(opts ...Option) ferrytest.Plane {
 		},
 		Open: func() ferrytest.Instance {
 			e := newEnviron()
-			src := New(append([]Option{Environ(e.environ)}, opts...)...)
+			src := New(append([]Option{Environ(e.environ), RootVar(rootVar)}, opts...)...)
 
 			return ferrytest.Instance{Source: src, Sink: standInSink{cfg: src.cfg, env: e}}
 		},

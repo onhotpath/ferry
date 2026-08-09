@@ -1,6 +1,7 @@
 package env
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,8 +14,10 @@ import (
 //
 // No fold rescues these two: an empty tag name has no environment variable name
 // however it is folded, and a name beginning with a digit is one no shell can
-// set. A tagged field is refused at Bind, and a map key that mints one is
-// refused as it is minted, in either case before the read it belongs to.
+// set. The root address is the third shape and the one shape a caller can
+// lift, since it holds no segment to fold and [RootVar] is the only thing that
+// gives it a name. A tagged field is refused at Bind, and a map key that mints
+// one is refused as it is minted, in either case before the read it belongs to.
 //
 // It wraps [ferry.ErrPlane], and it stays reachable under ferry's wrapper, so
 // errors.Is answers for it on what [ferry.Load] returned.
@@ -41,16 +44,21 @@ const driverName = "env"
 // file, a Dockerfile ENV, a Kubernetes env: block or a systemd unit. Keeping the
 // dot buys nothing on Load either, because the uppercase fold has already
 // destroyed the segment's own spelling.
-func (c config) key(addr ferry.Path) (string, error) {
+func (c *config) key(addr ferry.Path) (string, error) {
 	name, err := c.join(addr)
 	if err != nil {
 		return "", err
 	}
 
 	// Every segment contributes at least one byte, so an empty name is an
-	// address with no segments: the empty path, which is not an address at all.
+	// address with no segments: the root address. Every name the fold produces
+	// comes from a segment, so the only name the root can have is the one the
+	// caller gave it (ADR-0003, #337).
+	name = cmp.Or(name, c.rootVar)
+
 	if name == "" {
-		return "", illegalName("there is nothing here to name")
+		return "", illegalName("the root address holds no segment to fold a name out of - " +
+			"name the variable with env.RootVar")
 	}
 
 	if !nameStart(name[0]) {
@@ -62,7 +70,7 @@ func (c config) key(addr ferry.Path) (string, error) {
 
 // join is the transform and the join, without the checks on the shape of the
 // whole name that [config.key] adds around it.
-func (c config) join(addr ferry.Path) (string, error) {
+func (c *config) join(addr ferry.Path) (string, error) {
 	var b strings.Builder
 
 	// One allocation rather than a run of doublings up from nothing. The

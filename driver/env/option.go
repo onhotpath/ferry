@@ -18,8 +18,8 @@ import (
 // [ferry.Load] returned.
 var ErrOption = errors.New("env: unusable driver option")
 
-// Option configures a [Source]. The set is closed at four: [Separator],
-// [Canonical], [Environ] and [BoolWords].
+// Option configures a [Source]. The set is closed at five: [Separator],
+// [Canonical], [Environ], [BoolWords] and [RootVar].
 type Option interface {
 	apply(*config)
 }
@@ -34,8 +34,13 @@ func (f optionFunc) apply(c *config) { f(c) }
 // that a Source reconfigured after Bind cannot change a binding already handed
 // out.
 type config struct {
-	sep     string
-	canon   Form
+	sep   string
+	canon Form
+	// rootVar is the variable the root address is read from, and it is empty
+	// until [RootVar] names one. The root carries no segment, so there is
+	// nothing to fold a name out of and this is the only name it can have
+	// (ADR-0003, #337).
+	rootVar string
 	environ func() []string
 	// bools is the spelling [BoolWords] built, and it is nil until it is asked
 	// for: this plane holds text and nothing else, so a variable is a String
@@ -146,9 +151,31 @@ func Environ(fn func() []string) Option {
 	return optionFunc(func(c *config) { c.environ = fn })
 }
 
+// RootVar names the environment variable a schema whose root is a single value
+// is read from.
+//
+//	port, err := ferry.Load[int](ctx, env.New(env.RootVar("APP_PORT")))
+//
+// Without it such a schema is refused at Bind, before any environment is read.
+// The root address carries no segment, so the join that names every other
+// address has nothing to join and this driver has no name to read it at.
+//
+// The name is taken as written rather than folded, and that is the whole of the
+// sharp edge: the fold turns every byte outside A-Z, 0-9 and _ into _, so no
+// segment could ever produce the name of a root leaf and naming it here is the
+// only route to one. A name beginning with a digit is refused at Bind like any
+// other, because no shell will set it.
+//
+// It names one variable and nothing else. Every address with a segment of its
+// own is named by that segment as before, and a root whose variable is not set
+// is absent, which leaves whatever [ferry.LoadOver] was seeded with in place.
+func RootVar(name string) Option {
+	return optionFunc(func(c *config) { c.rootVar = name })
+}
+
 // validate refuses a configuration this driver cannot serve, and it runs at Bind
 // because that is the first moment the driver is asked for anything.
-func (c config) validate() error {
+func (c *config) validate() error {
 	if !legalSeparator(c.sep) {
 		return optionError("the separator must be a non-empty run of A-Z, 0-9 and _, " +
 			"spelled as it appears in the name")
