@@ -97,7 +97,7 @@ func schemaWith(t reflect.Type, cfg config, keep retention) (*schema, error) {
 		return compileSchema(t, cfg)
 	}
 
-	return cfg.registry.schemaFor(schemaKey{typ: t, tagKey: cfg.tagKey, decl: cfg.registry.exts.decl}, cfg)
+	return cfg.registry.schemaFor(schemaKey{typ: t, tagKey: cfg.tagKey, decl: cfg.registry.exts.decl, root: cfg.root}, cfg)
 }
 
 // schema is a compiled type: the node tree a walk iterates, and the address set
@@ -306,8 +306,29 @@ func (c *compiler) compileRoot(t reflect.Type) *node {
 	}
 
 	n, _ := c.compileStruct(t, site{}, nil)
+	c.declareOnStructRoot(n)
 
 	return n
+}
+
+// declareOnStructRoot applies the root declaration to a root that is a struct
+// rather than a leaf (PROTOTYPE, #309).
+//
+// required is admissible there for the reason ADR-0006 admits it on a nested
+// struct: it means the plane supplied at least one of the root's children, and
+// [walker] already answers it at that node. default= is not, for the reason
+// [compiler.checkNoDefault] gives - a struct's value lives at many addresses and
+// a declaration holds one text.
+func (c *compiler) declareOnStructRoot(n *node) {
+	if c.cfg.root.defSet {
+		c.errAt(Path{}, "ferry.RootDefault was supplied and the root is a struct: a default is one text and a "+
+			"struct's value lives at many addresses - declare the default on the field it belongs to, or seed "+
+			"it through LoadOver")
+	}
+
+	if n != nil {
+		n.required = c.cfg.root.required
+	}
 }
 
 // compileRootLeaf compiles a root that resolves to a leaf, at the address
@@ -320,10 +341,27 @@ func (c *compiler) compileRootLeaf(t reflect.Type) *node {
 		return nil
 	}
 
-	n := &node{kind: nodeLeaf, addr: s.addr, codec: cd}
+	d := c.cfg.root
+	c.checkRootDecl(s.addr)
+
+	n := &node{
+		kind: nodeLeaf, addr: s.addr, codec: cd,
+		def: String(d.def), hasDef: d.defSet, required: d.required,
+	}
 	c.recordLeaf(s)
 
 	return n
+}
+
+// checkRootDecl holds the root declaration to the one rule the tag grammar
+// holds a field's to: required and default= answer the same absence in two
+// ways, so declaring both is refused (PROTOTYPE, #309, ADR-0006).
+func (c *compiler) checkRootDecl(addr Path) {
+	if c.cfg.root.required && c.cfg.root.defSet {
+		c.errAt(addr, "the root declares both ferry.RootRequired and ferry.RootDefault: a default answers the "+
+			"absence required forbids, so one of them can never fire - keep the one that says what should "+
+			"happen when the plane holds nothing at the root")
+	}
 }
 
 // rootLeafCodec is the codec [compiler.rootIsLeaf] already found.

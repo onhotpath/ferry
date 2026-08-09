@@ -44,6 +44,10 @@ type schemaKey struct {
 	typ    reflect.Type
 	tagKey string
 	decl   extDecl
+	// root is the root leaf's declaration (PROTOTYPE, #309). It is
+	// compile-affecting in exactly the sense this type documents: one
+	// reflect.Type yields two schemas under two values of it.
+	root rootDecl
 }
 
 // This is the whole mechanism behind the rule above, and it is the only one Go

@@ -62,6 +62,22 @@ type config struct {
 	// (ADR-0019).
 	budget    int
 	budgetSet bool
+
+	// root is the root leaf's declaration (PROTOTYPE, #309). A root leaf has no
+	// struct tag to spell required or default= on, so what the tag would have
+	// said is said in the Option list instead. Compile-affecting, so it is in
+	// [schemaKey].
+	root rootDecl
+}
+
+// rootDecl is what a struct tag would have said about the root, and it is one
+// comparable value so that adding it to [schemaKey] is one field
+// (PROTOTYPE, #309).
+type rootDecl struct {
+	required    bool
+	requiredSet bool
+	def         string
+	defSet      bool
 }
 
 // defaultTagKey is the key ferry reads when nobody says otherwise.
@@ -283,4 +299,46 @@ const del = 0x7f
 // moment, which is where a report of "your Options are wrong" belongs.
 func optionError(msg string) error {
 	return newError(momentCompile, ErrSchema, Path{}, msg)
+}
+
+// RootRequired declares the root address required (PROTOTYPE, #309).
+//
+//	port, err := ferry.Load[int](ctx, src, ferry.RootRequired())
+//
+// It is what "required" on a struct tag says, at the one address that has no
+// tag to say it on: a plane holding nothing at the root fails with [ErrMissing]
+// rather than leaving the zero value.
+//
+// It is refused beside [RootDefault], which is the same pair the tag grammar
+// refuses.
+func RootRequired() Option {
+	return optionFunc(func(c *config) error {
+		if c.root.requiredSet {
+			return optionError("ferry.RootRequired was supplied twice in one call")
+		}
+
+		c.root.required, c.root.requiredSet = true, true
+
+		return nil
+	})
+}
+
+// RootDefault declares the text the root address takes where the plane holds
+// nothing (PROTOTYPE, #309).
+//
+//	port, err := ferry.Load[int](ctx, src, ferry.RootDefault("8080"))
+//
+// It is what "default=" on a struct tag says, and it travels the same path: the
+// text is decoded by the root's own codec, on every load, and only where the
+// plane reported absence.
+func RootDefault(text string) Option {
+	return optionFunc(func(c *config) error {
+		if c.root.defSet {
+			return optionError("ferry.RootDefault was supplied twice in one call")
+		}
+
+		c.root.def, c.root.defSet = text, true
+
+		return nil
+	})
 }

@@ -38,6 +38,15 @@ func main() {
 
 	fmt.Printf("################ MODE: sentinel=%q ################\n", mode)
 
+	if mode == "decl" {
+		ferry.RootSentinel = ""
+
+		coreShape()
+		driverShape()
+
+		return
+	}
+
 	runAll()
 }
 
@@ -199,6 +208,26 @@ func realEnvLoad[T any]() {
 
 	got, err := ferry.Load[T](context.Background(), env.New())
 	report("env  Load(real environ)", err, fmt.Sprintf("%#v (os.Getenv(_)=%q)", got, os.Getenv("_")))
+}
+
+// kvDumpWith dumps under core root Options, which is the write side of a
+// load-side declaration.
+func kvDumpWith[T any](v T, opt ferry.Option) {
+	label := fmt.Sprintf("kv   Dump(v=%v, opt)", v)
+
+	defer guard(label)
+
+	store := newMemKV()
+
+	sink, err := kv.NewSink(store)
+	if err != nil {
+		report(label, err, "")
+
+		return
+	}
+
+	err = ferry.Dump(context.Background(), v, sink, opt)
+	report(label, err, "keys="+dumpKeys(store))
 }
 
 // kvDumpPrefixed writes through a prefixed sink, where the empty path renders
