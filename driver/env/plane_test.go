@@ -1,11 +1,13 @@
 package env
 
 import (
+	"bytes"
 	"context"
-	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
+	"testing"
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/ferrytest"
@@ -17,25 +19,25 @@ import (
 // A driver test that reads the real process environment is two hazards at once:
 // testing.T.Setenv forbids t.Parallel, and a test that mutates the environment
 // of the process it runs in is not hermetic against anything else in the same
-// binary. So the driver takes its environment from a function ([Environ]) and
-// every test here supplies one over a map it owns.
+// binary. So the driver takes its environment from a function ([Environ]) and its
+// process writes through a [Process], and every test here supplies both over a
+// map it owns.
 //
-// The write half is the second half of the same idea and it is a harder call, so
-// it is stated rather than assumed. This package ships no [ferry.Sink] and never
-// will, which is the whole point of the plane - and it means that the round-trip
-// half of ferrytest.RoundTrip never executes, because ferrytest.Driver guards
-// five of its cases on a nil sink. The guarantee [Canonical] exists to provide
-// would then be unproven rather than proven. So the tests supply a stand-in sink
-// over the same fake environment, exactly as ferrytest's own memory plane does,
-// which exercises the key function against its own inverse as a composed pair.
-// It lives in a _test.go file and is reachable from nowhere else: a sink in this
-// package's exported surface would be the thing the plane exists not to have.
+// That is also what puts the composite plane itself under the conformance suite.
+// One fake is the process half in both directions: [Environ] reads it and the
+// dump's own [Setenv] half writes it, over the same file the sink writes. A
+// second run supplies no environment at all, so the plane is the files alone and
+// what the suite proves is the format.
 
-// fakeEnviron is one test's environment, written by the stand-in sink and read
-// by the driver.
+// fakeEnviron is one test's process environment: read by the driver through
+// [Environ], and written by a dump's process half through [Process].
 type fakeEnviron struct{ vars map[string]string }
 
 func newEnviron() *fakeEnviron { return &fakeEnviron{vars: map[string]string{}} }
+
+// Setenv and Unsetenv are the whole of [Process] over the map.
+func (e *fakeEnviron) Setenv(name, value string) error { e.vars[name] = value; return nil }
+func (e *fakeEnviron) Unsetenv(name string) error      { delete(e.vars, name); return nil }
 
 // environ renders the map the way os.Environ does, sorted so that a test
 // asserting on a load is not asserting on Go's map iteration order.
@@ -56,153 +58,132 @@ func (e *fakeEnviron) environ() []string {
 // answer and is the one every schema in the rest of this package gets.
 const rootVar = "ROOT"
 
-// plane describes the env plane for the conformance suite, with both halves over
-// one environment.
+// planeKinds is what this plane carries end to end, and the one kind missing
+// from it is the whole of what it cannot do.
 //
-// Kinds is a declaration and not a wish, and the one kind missing from it is
-// the whole of what this plane cannot do. An environment variable is text, so
-// Bool and Number are carried as their spellings - PORT=8080 is the most
-// ordinary environment variable there is, and a plane that refused it would be
-// describing something other than env. ADR-0005 measured a flattening plane
-// with no null at 11 of 11 core types, and every value it refused was a nil or
-// empty composite, which the walk writes as Null at a container address.
+// An environment variable is text, so Bool and Number are carried as their
+// spellings - PORT=8080 is the most ordinary environment variable there is, and
+// a plane that refused it would be describing something other than env.
+// ADR-0005 measured a flattening plane with no null at 11 of 11 core types, and
+// every value it refused was a nil or empty composite, which the walk writes as
+// Null at a container address.
 //
 // So there is no Null. FOO= is a zero-length string rather than a null
-// (ADR-0004), and a value ferry can only express as a Null has no
-// representation here at all: the suite holds the plane to refusing those
-// loudly rather than mangling them.
+// (ADR-0004), and a value ferry can only express as a Null has no representation
+// here at all: the suite holds the plane to refusing those loudly rather than
+// mangling them.
 //
-// There is no Golden and no Contents. A golden artefact pins a driver's own
-// spelling of a value, and this driver has none: it never writes, so the only
-// spelling a row could pin is the stand-in sink's, which is a test's and not a
-// compatibility promise (ADR-0013).
-func plane(opts ...Option) ferrytest.Plane {
-	return ferrytest.Plane{
-		Name: driverName,
-		Kinds: []ferry.VKind{
-			ferry.KindAbsent, ferry.KindBool, ferry.KindNumber, ferry.KindString, ferry.KindBytes,
-		},
-		Open: func() ferrytest.Instance {
-			e := newEnviron()
-			src := New(append([]Option{Environ(e.environ), RootVar(rootVar)}, opts...)...)
-
-			return ferrytest.Instance{Source: src, Sink: standInSink{cfg: src.cfg, env: e}}
-		},
-	}
+// The Except is one byte and not a class of them. A byte sequence that is not
+// valid UTF-8 is written through raw inside double quotes, so unlike driver/yaml
+// this plane needs no exception for those. A NUL is the one value it cannot
+// hold, and it is a fact about the plane rather than about the format: the
+// environment block is handed to a new process as NUL-terminated strings, so no
+// spelling of one in a file could be applied to a process.
+var planeKinds = []ferry.VKind{
+	ferry.KindAbsent, ferry.KindBool, ferry.KindNumber, ferry.KindString, ferry.KindBytes,
 }
 
-// standInSink is the write half of the fake environment, built on the driver's
-// own key function so that what a round trip composes is this driver's fold
-// against this driver's enumeration and not a test's idea of either.
-type standInSink struct {
-	cfg config
-	env *fakeEnviron
-}
-
-// Bind checks the same two things the source's does, through the same helper, so
-// a schema the plane refuses is refused in both directions.
-func (s standInSink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
-	if err := s.cfg.validate(); err != nil {
-		return nil, err
-	}
-
-	keys, err := ferry.NewKeys(addrs, driverName, s.cfg.key)
-	if err != nil {
-		return nil, err
-	}
-
-	env := s.env
-
-	return func(context.Context) (ferry.Writer, error) {
-		return standInWriter{keys: keys.Open(), env: env, sep: s.cfg.sep}, nil
-	}, nil
-}
-
-// standInWriter is one open write side. It implements neither ferry.Committer
-// nor ferry.Releaser, because a map stages nothing and holds nothing.
-type standInWriter struct {
-	keys ferry.KeyFunc
-	env  *fakeEnviron
-	// sep is the separator this plane's keys are built with, which is what the
-	// retraction needs to tell a key under a composite from a key beside it.
-	sep string
-}
-
-// Set writes one address, or refuses a value this plane cannot hold.
-//
-// The refusal is per address and loud, which is what a plane with no null owes:
-// an environment variable is text, so a Null has no representation here, and
-// writing one as an empty string would make an empty composite and a composite
-// of one empty element the same bytes.
-// It implements no ferry.Ensurer, and that absence is the declaration: a
-// container that is present and holds nothing, and a container that is null,
-// have no spelling in an environment, so core refuses those writes naming this
-// plane rather than this plane storing something misleading (ADR-0016).
-func (w standInWriter) Set(_ context.Context, addr ferry.LeafAddr, v ferry.Value) error {
-	text, err := carried(v)
-	if err != nil {
-		return ferry.ErrorAt(addr.Path(), err)
-	}
-
-	key, err := w.keys(addr.Path())
-	if err != nil {
-		return err
-	}
-
-	w.env.vars[key] = text
-
-	return nil
-}
-
-// Unset forgets every variable under a composite's own key, which is what makes
-// a dump of a slice or a map a replacement of it: an environment holding
-// TAGS_0, TAGS_1 and TAGS_2 from an earlier dump would otherwise load back as
-// three elements after a dump of one.
-//
-// The prefix is the composite's key followed by the separator, so a variable
-// whose name merely starts with the same letters is not swept up with it.
-func (w standInWriter) Unset(_ context.Context, addr ferry.CompositeAddr) error {
-	key, err := w.keys(addr.Path())
-	if err != nil {
-		return err
-	}
-
-	for held := range w.env.vars {
-		if held == key || strings.HasPrefix(held, key+w.sep) {
-			delete(w.env.vars, held)
-		}
-	}
-
-	return nil
-}
-
-// carried is the plane's kind declaration as a function: the text an
-// environment variable would hold, or a refusal naming the kind.
-//
-// Bool and Number are text here, which is what makes PORT=8080 an ordinary
-// environment variable rather than a value this plane refuses. ADR-0005
-// measured a flattening plane with no null at 11 of 11 core types, with the
-// only refusals being the nil and empty composites the walk writes as Null at
-// a container address - so the kinds this plane cannot carry number exactly
-// one, and it is Null.
-func carried(v ferry.Value) (string, error) {
+// holdsNUL is [ferrytest.Plane.Except]: the values inside a kind this plane
+// declares that it cannot spell.
+func holdsNUL(v ferry.Value) bool {
 	switch v.Kind() {
-	case ferry.KindBool:
-		b, err := v.AsBool()
-
-		return strconv.FormatBool(b), err
-	case ferry.KindNumber:
-		return v.AsNumber()
 	case ferry.KindString:
-		return v.AsString()
+		s, err := v.AsString()
+
+		return err == nil && strings.IndexByte(s, 0) >= 0
 	case ferry.KindBytes:
 		b, err := v.AsBytes()
 
-		return string(b), err
+		return err == nil && bytes.IndexByte(b, 0) >= 0
 	default:
-		return "", fmt.Errorf("%w: an environment variable holds text, and this plane cannot carry a %s",
-			ferry.ErrPlane, v.Kind())
+		return false
 	}
+}
+
+// filePlane is the plane the .env files make on their own: [Environ] answers
+// with nothing, so nothing ambient can shadow, invent or collide with what a
+// file holds, and what the suite proves is the file format.
+//
+// It is the run that carries the golden rows, because the file is the artefact
+// whose spelling is a compatibility promise (ADR-0013).
+func filePlane(t *testing.T, opts ...Naming) ferrytest.Plane {
+	t.Helper()
+
+	return ferrytest.Plane{
+		Name:   driverName,
+		Kinds:  planeKinds,
+		Except: holdsNUL,
+		Golden: goldenRows(),
+		Open: func() ferrytest.Instance {
+			path := filepath.Join(t.TempDir(), ".env")
+
+			return ferrytest.Instance{
+				Source:   New(sourceWith(opts, Environ(noEnviron), DotEnv(path))...),
+				Sink:     NewDotEnvSink(path, sinkWith(opts)...),
+				Contents: func() ([]byte, error) { return os.ReadFile(path) },
+			}
+		},
+	}
+}
+
+// compositePlane is the whole plane: one file under one process environment,
+// with the dump writing both halves.
+//
+// It is the run the composite itself is under, and it is what makes the process
+// half of a dump a proof rather than a claim: the same fake is what [Environ]
+// reads and what [Setenv] writes, so a save that leaves the two disagreeing
+// fails the round trip.
+func compositePlane(t *testing.T, opts ...Naming) ferrytest.Plane {
+	t.Helper()
+
+	return ferrytest.Plane{
+		Name:   driverName,
+		Kinds:  planeKinds,
+		Except: holdsNUL,
+		Open: func() ferrytest.Instance {
+			path := filepath.Join(t.TempDir(), ".env")
+			e := newEnviron()
+
+			return ferrytest.Instance{
+				Source:   New(sourceWith(opts, Environ(e.environ), DotEnv(path))...),
+				Sink:     NewDotEnvSink(path, sinkWith(opts, Setenv(e))...),
+				Contents: func() ([]byte, error) { return os.ReadFile(path) },
+			}
+		},
+	}
+}
+
+// noEnviron is the empty process environment, and it is the escape hatch this
+// package's own documentation names: whatever it returns is the top layer, so
+// returning nothing is how a load reads the files alone.
+func noEnviron() []string { return nil }
+
+// sourceWith and sinkWith are the one list of [Naming] settings a plane is built
+// from, widened to each constructor's own option type.
+//
+// Building both halves from one list is what the shipped godoc tells a caller to
+// do, and it is why these tests cannot drift into a source and a sink that fold
+// names differently.
+func sourceWith(shared []Naming, also ...Option) []Option {
+	out := make([]Option, 0, len(shared)+len(also)+1)
+	out = append(out, RootVar(rootVar))
+
+	for _, o := range shared {
+		out = append(out, o)
+	}
+
+	return append(out, also...)
+}
+
+func sinkWith(shared []Naming, also ...SinkOption) []SinkOption {
+	out := make([]SinkOption, 0, len(shared)+len(also)+1)
+	out = append(out, RootVar(rootVar))
+
+	for _, o := range shared {
+		out = append(out, o)
+	}
+
+	return append(out, also...)
 }
 
 // The apparatus for asking this driver a question directly.

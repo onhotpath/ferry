@@ -12,10 +12,14 @@ import (
 // Source is the environment as a ferry plane, read side.
 //
 //	cfg, err := ferry.Load[Config](ctx, env.New())
+//	cfg, err := ferry.Load[Config](ctx, env.New(env.DotEnv()))
 //
-// There is no env.Sink beside it. This package loads only, so [ferry.Dump]
-// through it is a compile error at the call site rather than a failure at run
-// time.
+// The plane is the process environment on its own, and it grows .env files
+// underneath it when [DotEnv] names any. The process is always the top layer, so
+// a variable that is exported wins over every file that names it.
+//
+// The write half is [DotEnvSink], which is a separate type over a path, so a
+// round trip names the file twice.
 //
 // A Source is safe for use from many goroutines, and so is a binding it hands
 // back: the names a binding holds are computed once, at Bind, and nothing writes
@@ -27,8 +31,6 @@ type Source struct {
 	cfg config
 }
 
-// Source is the whole of what this package implements, and the absence of
-// [ferry.Sink] beside it is the point rather than an omission.
 var _ ferry.Source = (*Source)(nil)
 
 // New builds a [Source] over the process environment.
@@ -36,12 +38,23 @@ var _ ferry.Source = (*Source)(nil)
 //	cfg, err := ferry.Load[Config](ctx, env.New())
 //
 // With no options it joins nested fields with [DefaultSeparator], returns map
-// keys in [Lower] case, and reads the process environment. Change any of the
-// three with [Separator], [Canonical] and [Environ].
+// keys in [Lower] case, reads the process environment and reads no file. Change
+// any of those with [Separator], [Canonical], [Environ] and [DotEnv].
+//
+// It touches nothing, and starts nothing, unless it is given [WatchFiles]. That
+// is the one setting that does something before a load: it opens a watch on the
+// directories holding the files [DotEnv] named, here, on the caller's own
+// goroutine, and watches from a goroutine of its own until the context it was
+// given is done. A watch that cannot be opened is reported at Bind, because this
+// call returns no error.
 func New(opts ...Option) *Source {
 	c := defaults()
 	for _, o := range opts {
 		o.apply(&c)
+	}
+
+	if c.watch != nil {
+		c.refuse(c.watch.start(c.dotenv))
 	}
 
 	return &Source{cfg: c}
@@ -81,13 +94,18 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 	cfg := s.cfg
 
 	return func(context.Context) (ferry.Reader, error) {
+		env, err := cfg.snapshot()
+		if err != nil {
+			return nil, err
+		}
+
 		return &reader{
 			cfg:      cfg,
 			names:    keys,
 			keys:     keys.Open(),
 			declared: declared,
 			sections: sections,
-			env:      environMap(cfg.environ()),
+			env:      env,
 		}, nil
 	}, nil
 }

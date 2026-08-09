@@ -16,3 +16,7 @@ go 1.27
 //
 // No `replace` directive either, ever. That is ADR-0002's rule rather than a
 // convenience, and CI fails a build that checks one in.
+
+require github.com/fsnotify/fsnotify v1.9.0
+
+require golang.org/x/sys v0.13.0 // indirect

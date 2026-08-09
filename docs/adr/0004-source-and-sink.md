@@ -757,6 +757,23 @@ Query params ship no sink here either, but they could have one: a query string i
 Env cannot, for the reason ADR-0002 gave: setting the process environment is process-global mutation nobody wants, and the thing people do want is a `.env` file, which is a format.
 So env is the only plane where the absence of a `Sink` implementation is a property of the plane rather than a decision about scope, which is exactly what makes it the case that keeps `Source` and `Sink` honestly separate.
 
+> **Amended under [#352](https://github.com/onhotpath/ferry/issues/352): the env plane is the composite, and it has a Dump.**
+>
+> As published this row and the paragraph above it say that env structurally has no Dump, that the absence of a `Sink` is a property of the plane, and that env is what keeps `Source` and `Sink` honestly separate.
+> `driver/env` now ships `DotEnvSink`.
+> The plane it writes is one composite for environment variables: the process environment is the anchor and always wins, and `.env` files are optional layers underneath it.
+> A dump writes the file, and writes the process too where the caller passed `Setenv`.
+>
+> **What was true is now stated precisely rather than dropped.**
+> Setting a process's own environment is still process-global mutation nobody should get by accident, and that is why the process half is opt-in and off by default rather than why there is no sink at all.
+> The `.env` half is a format, which is what this ADR and [ADR-0002](0002-core-and-sub-modules.md) both said the thing people want is; a format belongs to a driver, and that is where it landed.
+>
+> **What keeps `Source` and `Sink` separate now is `driver/http`'s read-only query plane and `driver/kv`'s dynamically read-only sink**, not this row.
+> The axis table's "structurally has no Dump" column has no member left, and it is kept above because the reasoning that put it there is what this amendment is answering.
+>
+> **One row of the contract moved with it.** The `.env` writer implements `Ensurer` and answers `PresencePresent` by writing nothing, because a container has no variable of its own here.
+> It refuses `PresenceNull`, on the same ground `driver/kv` refuses one at a leaf: a plane with no null cannot spell one, and [ADR-0014](0014-what-ferrytest-exports.md)'s suite holds a plane that does not declare `KindNull` to refusing every null it is handed.
+
 **The list is `yaml`, `kv` and `env`, with `query` named as a candidate rather than a commitment.**
 
 - **yaml** reaches four axes nothing else does, and is the only driver needing both lifecycle interfaces. It is what keeps the conformance suite honest.

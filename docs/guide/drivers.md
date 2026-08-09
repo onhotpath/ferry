@@ -7,7 +7,7 @@ The decision records are [ADR-0004](../adr/0004-source-and-sink.md) for the cont
 
 [The dump lifecycle](dump-lifecycle.md) is the same contract read the other way round, as seven stages and the ladder of what refuses at each one; read it if you want the shape before the signatures.
 
-Four drivers ship in this repository and are worth reading beside this page: [`driver/env`](../../driver/env/), a read-only flat plane; [`driver/kv`](../../driver/kv/), a flat plane in both directions with a caller-supplied client; [`driver/yaml`](../../driver/yaml/), a tree plane that edits a file in place; and [`driver/http`](../../driver/http/), a read-only plane over a query string or a header block, which is the one that has to spell one address two ways.
+Four drivers ship in this repository and are worth reading beside this page: [`driver/env`](../../driver/env/), a flat plane over the process environment and `.env` files; [`driver/kv`](../../driver/kv/), a flat plane in both directions with a caller-supplied client; [`driver/yaml`](../../driver/yaml/), a tree plane that edits a file in place; and [`driver/http`](../../driver/http/), a read-only plane over a query string or a header block, which is the one that has to spell one address two ways.
 `ferrytest.MemPlane` in [`ferrytest/memplane.go`](../../ferrytest/memplane.go) is a complete, working driver of about the size yours will be, and is the shortest thing to read first.
 
 ## The vocabulary
@@ -86,8 +86,9 @@ A read-only driver implements **two methods in total**: one `Bind` and one `Get`
 Both required methods take a **leaf**, so neither is ever asked about a container's own address.
 What a plane holds at a container address is `Prober`'s answer, and what a dump has to say there is `Ensurer`'s, both below.
 
-`Source` and `Sink` are separate interfaces rather than two halves of one, and the deciding case is environment variables, which have no honest dump.
-With two interfaces the refusal is free: `driver/env` does not implement `Sink`, so `ferry.Dump` with it is a compile error at the call site rather than a runtime error or an `ErrUnsupported` nobody reads.
+`Source` and `Sink` are separate interfaces rather than two halves of one, and what that buys is a refusal for free: a plane with no honest dump ships no `Sink`, so `ferry.Dump` with it is a compile error at the call site rather than a runtime error or an `ErrUnsupported` nobody reads.
+`driver/http`'s query and header planes are the case today - a request's own query string is not a dump target.
+`driver/env` was the original case and is no longer one: it ships `env.DotEnvSink`, which writes a `.env` file, and applies the dump to the running process only where the caller passed `env.Setenv` ([ADR-0004](../adr/0004-source-and-sink.md) is amended in place with what moved and why).
 
 The cost is stated rather than hidden: a driver serving both directions ships **two types**, because one type cannot have two `Bind` methods, so a round trip names the plane twice.
 

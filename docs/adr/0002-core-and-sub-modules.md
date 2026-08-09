@@ -57,6 +57,21 @@ The Dump target people actually want is a `.env` file or an `[]string` environ f
 `.env` is a format, with quoting, escaping and multiline rules, and a format is plane knowledge.
 So an environment plane in core forces core either to ship half a driver, breaking ferry's bidirectional premise on its one blessed plane, or to make a `.env` quoting decision, breaking the veto.
 
+> **Amended under [#352](https://github.com/onhotpath/ferry/issues/352): the `.env` quoting decision has been made, in `driver/env`, and core's veto is untouched.**
+>
+> As published this section reads as though the `.env` quoting decision were open, and the heading above it says environment variables have no honest Dump.
+> `driver/env` now ships `DotEnvSink`, a `.env` reader that layers files under the process environment, and the quoting and escape table that goes with them.
+> [ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md) carries that table as a pinned representation.
+>
+> **The argument is unchanged and is the reason the code landed where it did.**
+> This section's conclusion is that a `.env` quoting decision is plane knowledge and therefore cannot be core's; the driver is outside core, so making it there is this rule being followed rather than overturned.
+> The sentence that moves is only the reading that nobody had made the decision yet.
+>
+> **The dependency is new and is the cost.**
+> `driver/env`'s `require` block was empty and now carries `github.com/fsnotify/fsnotify`, which every consumer of the process-environment source pulls even though that half touches no filesystem.
+> Core's own rule - stdlib, unconditionally - is untouched, because this is a driver module.
+> [ADR-0020](0020-watch-and-reload.md) is where the dependency is argued.
+
 ### The memory plane is apparatus, and the line that keeps it so
 
 The round-trip property harness has to move a value: `Dump` it into something, `Load` it back, compare.

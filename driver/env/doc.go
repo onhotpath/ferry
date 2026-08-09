@@ -1,6 +1,17 @@
-// Package env loads configuration from environment variables into a Go struct.
+// Package env loads configuration from environment variables and .env files into
+// a Go struct, and writes a .env file back.
 //
 //	cfg, err := ferry.Load[Config](ctx, env.New())
+//	cfg, err := ferry.Load[Config](ctx, env.New(env.DotEnv()))
+//	err = ferry.Dump(ctx, cfg, env.NewDotEnvSink(".env"))
+//
+// # One plane, in layers
+//
+// The process environment and a .env file share one namespace and one name, so
+// they are one plane here rather than two. The process is the anchor and always
+// wins; the files [DotEnv] names are layers underneath it, in the order they were
+// named, each winning over the one before. A file that is not there is an empty
+// layer, and a file that is there and does not parse is a refusal.
 //
 // # Variable names come from the tags
 //
@@ -23,12 +34,49 @@
 // an environment variable is text and this plane holds no type information of
 // its own.
 //
-// # There is no way to write back
+// # Writing a file back
 //
-// This package loads only. Nothing in it implements [ferry.Sink], so
-// [ferry.Dump] with this package does not compile rather than failing at run
-// time. Setting the running process's own environment is rarely what anyone
-// wants, and writing a .env file is a different job for a different package.
+// [DotEnvSink] saves a struct into a .env file, and a save is a merge: the
+// variables your struct maps are replaced where they stand, and the comments, the
+// order, the "export " prefixes, the spacing and every variable no field of yours
+// maps are all left as they were. The write is atomic and the file is read before
+// it is written, so a save that fails leaves your file byte for byte as it was.
+//
+// # Sharp edges
+//
+// These are the ones that cost time in production rather than at the keyboard,
+// and every one of them comes from the same fact: the process environment is
+// above the files, and it is not yours.
+//
+// A save can look as though it did nothing. [ferry.Dump] writes DB_HOST to the
+// file, the running process still exports the DB_HOST it started with, and the
+// next load answers with that one. Pass [Setenv] to make a save write both halves.
+//
+// A save replaces the file and not the union. Clearing a slice removes its
+// variables from the file, and without [Setenv] the process goes on serving the
+// ones it holds.
+//
+// An ambient variable can invent a map key or make a container look present.
+// A map's and a slice's members are whatever the environment holds under their
+// name, over the union of every layer, so TAGS_5 exported by somebody else adds
+// a sixth element to a slice the file gives two of.
+//
+// Ambient names collide with short field names. A field tagged path reads PATH
+// and one tagged home reads HOME, and what a file says about either is what gets
+// silently overridden.
+//
+// A report names the variable, and editing the file may not fix it. The name a
+// report opens with is a function of the address and this driver's settings, so it
+// cannot say that the process is shadowing the file.
+//
+// "export " is kept on a line that has it and is not added to a new one, so a
+// shell sourcing the file gets a variable its own children do not.
+//
+// The sink writes the file a symlink names, so a deployment that swaps the link
+// between two saves sends them to two different files.
+//
+// The way out of the first five is env.Environ(func() []string { return nil }),
+// which makes the files the whole plane.
 //
 // The design records behind these decisions are in docs/adr/.
 package env
