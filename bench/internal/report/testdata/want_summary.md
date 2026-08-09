@@ -8,11 +8,11 @@ the floor rather than a competitor: no library beats it, so it is published as t
 the row is read against rather than ranked against one. The results file gives every library's
 multiple over it, ferry's computed the same way as the rest.
 
-| scenario | ferry (warm) | fastest other library | | baseline: no mapping layer |
-| --- | --- | --- | --- | --- |
-| `env_small` | 2.75µs | 570ns (go-envconfig) | ferry 4.82x slower | 166ns (stdlib) |
-| `yaml_small` | 17.4µs | 26.6µs (viper) | ferry 1.53x faster | 16.6µs (stdlib) |
-| `no_such_scenario` | not measured | not measured |  | not measured |
+| scenario | remarks | ferry (warm) | fastest other library | | baseline: no mapping layer |
+| --- | --- | --- | --- | --- | --- |
+| `env_small` | five flat fields | 2.75µs | 570ns (go-envconfig) | ferry 4.82x slower | 166ns (stdlib) |
+| `yaml_small` | five fields, parsed per load | 17.4µs | 26.6µs (viper) | ferry 1.53x faster | 16.6µs (stdlib) |
+| `no_such_scenario` |  | not measured | not measured |  | not measured |
 
 Left out of the comparison above because its warm figure measures a different job:
 `xload` in `yaml_small`.

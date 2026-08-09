@@ -136,6 +136,21 @@ type Scenario struct {
 	// What it measures, in one line, rendered into the results file.
 	What string
 
+	// Remark is what separates this scenario from the others, rendered inside
+	// the README's summary table beside the scenario's name.
+	//
+	// It exists because that table is one row per scenario and one competitor
+	// per row, so [Impl.Remark] - which qualifies a library against the library
+	// beside it - has nowhere to go in it. What a reader of that table compares
+	// is two rows, and the question they arrive at is why the same library reads
+	// as slower on one and faster on the next. The two dump rows are the case:
+	// one saves over a document that is already there and one does not, and
+	// without that said in the row the flip reads as noise.
+	//
+	// It is a phrase and not a sentence. [Scenario.What] is the sentence, and
+	// anything that needs one belongs there.
+	Remark string
+
 	// Setup runs before the equivalence check and before every benchmark of
 	// this scenario. It is where the process environment is replaced.
 	Setup func(*Fixture)
@@ -266,6 +281,7 @@ func envSmallScenario() Scenario {
 	return Scenario{
 		Name:   "env_small",
 		What:   "five flat fields out of the process environment, where a mapping layer has the least room to hide.",
+		Remark: "five flat fields",
 		Setup:  func(*Fixture) { ApplyEnv(EnvSmall()) },
 		NewDst: func() any { return new(Small) },
 		Want:   WantSmall(),
@@ -281,6 +297,7 @@ func envLargeScenario() Scenario {
 		Name: "env_large",
 		What: "fifty-one leaves over three levels, including a slice and a map, " +
 			"out of the process environment.",
+		Remark: "fifty-one leaves, three levels",
 		Setup:  func(*Fixture) { ApplyEnv(EnvLarge()) },
 		NewDst: func() any { return new(Large) },
 		Want:   WantLarge(),
@@ -295,6 +312,7 @@ func yamlSmallScenario() Scenario {
 	return Scenario{
 		Name:   "yaml_small",
 		What:   "the same five fields, read from a YAML file on disk on every iteration.",
+		Remark: "five fields, parsed per load",
 		Setup:  func(*Fixture) { ApplyEnv(nil) },
 		NewDst: func() any { return new(Small) },
 		Want:   WantSmall(),
@@ -309,6 +327,7 @@ func yamlLargeScenario() Scenario {
 	return Scenario{
 		Name:   "yaml_large",
 		What:   "the same fifty-one leaves, read from a YAML file on disk on every iteration.",
+		Remark: "fifty-one leaves, parsed per load",
 		Setup:  func(*Fixture) { ApplyEnv(nil) },
 		NewDst: func() any { return new(Large) },
 		Want:   WantLarge(),
@@ -342,6 +361,7 @@ func dumpLargeScenario() Scenario {
 		Name: "dump_large",
 		What: "the other direction: the same fifty-one leaves written back out over a YAML file that is " +
 			"already there, then read back to prove the round trip.",
+		Remark: "over an existing file; ferry merges",
 		Setup:  func(*Fixture) { ApplyEnv(nil) },
 		NewDst: func() any { return new(Large) },
 		Want:   WantLarge(),
@@ -354,6 +374,7 @@ func dumpFreshScenario() Scenario {
 		Name: "dump_fresh",
 		What: "the same fifty-one leaves written out to a path with no file at it, so no column has a " +
 			"document to merge into and every one of them is writing the file whole.",
+		Remark: "no file at the path; all write whole",
 		Setup:  func(*Fixture) { ApplyEnv(nil) },
 		NewDst: func() any { return new(Large) },
 		Want:   WantLarge(),
