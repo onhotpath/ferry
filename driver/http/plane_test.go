@@ -54,13 +54,18 @@ import (
 // and a decoder wrong in the same direction - is caught here instead by
 // wire_test.go, which pins what the shipped half reads out of a query string
 // spelled by hand.
+//
+// Both planes are given a name for the root address, so that conformance case
+// 23 runs rather than skipping: this driver has no name for the root until an
+// option gives it one, and a suite run against a plane that refuses it proves
+// only the refusal.
 func queryPlaneFor(opts ...Option) ferrytest.Plane {
 	return ferrytest.Plane{
 		Name:  "query",
 		Kinds: flatKinds(),
 		Open: func() ferrytest.Instance {
 			v := url.Values{}
-			src := NewQuerySource(opts...)
+			src := NewQuerySource(withRoot(RootParam(rootParam), opts)...)
 
 			return ferrytest.Instance{
 				Source: src,
@@ -91,7 +96,7 @@ func headerPlaneFor(opts ...Option) ferrytest.Plane {
 		Except: notAFieldValue,
 		Open: func() ferrytest.Instance {
 			h := http.Header{}
-			src := NewHeaderSource(opts...)
+			src := NewHeaderSource(withRoot(RootField(rootField), opts)...)
 
 			return ferrytest.Instance{
 				Source: src,
@@ -102,6 +107,19 @@ func headerPlaneFor(opts ...Option) ferrytest.Plane {
 			}
 		},
 	}
+}
+
+// rootParam and rootField are what the two planes call the root address in
+// every run of the suite, and they are two names because they are two options.
+const (
+	rootParam = "value"
+	rootField = "Value"
+)
+
+// withRoot puts the plane's own root option in front of the caller's, so that a
+// run naming a root of its own still wins.
+func withRoot(root Option, opts []Option) []Option {
+	return append([]Option{root}, opts...)
 }
 
 // flatKinds is the declaration both planes make, and it is five of the six kinds
