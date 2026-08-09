@@ -21,10 +21,27 @@ Every number below is from that prototype unless it cites the survey.
 
 ### The address is a structured path, and core never joins it
 
-A leaf addresses a plane by an ordered, non-empty sequence of **segments**.
+A leaf addresses a plane by an ordered sequence of **segments**, which may be empty.
+The empty sequence is the **root address**, and it is where a type whose whole value is one leaf sits.
 Core does not produce a plane key, because a separator is plane knowledge and producing one would require core to know what the plane is.
 
 > Flattening is the driver's, always.
+
+> **Amended under [#335](https://github.com/onhotpath/ferry/issues/335): the sequence may be empty, and the empty one is the root address.**
+>
+> As published this line reads "an ordered, non-empty sequence of **segments**", and it is what [ADR-0010](0010-the-entry-point-and-the-schema-cache.md) refused a root leaf on.
+> The emptiness clause is the whole of what moves.
+> A type that resolves to a leaf compiles to a one-leaf schema, so the address it needs is the empty one; the alternative was a hole in the type set that a wrapper struct is not a good answer to, because the wrapper changes the plane's shape in order to satisfy a rule of core's.
+>
+> **Three consequences, stated rather than left to be discovered.**
+> The root address has no parent, so nothing above it is ever asked about it.
+> It is never enumerated: a plane is asked for the value *at* it and never for its children, because a schema whose only member is the root has nothing under it.
+> Prefix-freeness is vacuous over such a schema, since the rule is about two distinct leaves and there is only one.
+>
+> **And one obligation on drivers, which is new.**
+> A plane names the root address by its own rule or refuses it, and refusing it at `Bind` is the expected shape.
+> An option holding the key to use is one such rule, and a file whose whole document is the value is another.
+> A plane whose keys are segments joined together has none, and says so at `Bind`, where the caller still holds the whole schema and nothing has been asked of the plane.
 
 This is the plane-agnosticism veto applied to the address.
 An environment driver joins segments with `_`; a YAML driver walks them as a tree; a Registry driver walks them as subkeys.

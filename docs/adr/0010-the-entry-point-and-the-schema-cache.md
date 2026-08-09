@@ -846,6 +846,26 @@ Not a panic and not a wrong value.
 The sink writes an empty mapping and returns a nil error, so the value is **silently and totally lost**.
 That is ADR-0005's maps-no-address class arriving at the one address ADR-0003 forgot to protect, and it is what makes this a refusal rather than a documented sharp edge.
 
+> **Amended under [#335](https://github.com/onhotpath/ferry/issues/335): a root that resolves to a leaf compiles, the refusal narrows to maps, slices and arrays, and both of the measurements above are stale.**
+>
+> **The ordering ruling does not move.**
+> "The root must be a struct ferry **walks**, decided after the chain and the registry have been asked rather than before" is correct, is what #306 fixed, and is what the compiler still does: `leafFor` and `pointerLeaf` are consulted at the root exactly as they are at every position below it.
+> What moves is the consequence of the answer.
+> A root that resolves to a leaf now compiles to a one-leaf schema at the root address, which [ADR-0003](0003-how-a-leaf-addresses-a-plane.md) names an address; the four **refused** rows for `int`, `time.Duration`, `netip.Addr` and `big.Int` read **one leaf at the root** now, and the three composite rows are unchanged.
+>
+> **The refusal narrows to maps, slices and arrays, for the reasons this section already gives and which are unchanged.**
+> An empty or nil one writes its `Null` at its own address, that address is the root, and the whole dump is one write nobody can see.
+> `[0]T` mints nothing at all.
+> Neither reason is about the emptiness of the path; both are about a composite having no member to be reached through, so lifting the leaf case leaves them exactly where they were.
+>
+> **Both measurements in the block above are stale and are corrected here rather than deleted, because what they were evidence for is what changed.**
+> YAML does not write `{}` with a nil error: on today's `main` it refuses loudly, at `driver/yaml/tree.go`'s `place`, so the value is not lost and the caller is told.
+> kv does not write zero keys either: it writes one, on the folder key that every other address is written under, which is [#334](https://github.com/onhotpath/ferry/issues/334)'s defect and is now refused at `Bind` unless `kv.RootKey` names a key for it.
+> The `IsRoot=true` in the block is real rather than aspirational: `Path.IsRoot` is published, and it is what a driver's key function asks before it walks the segments.
+>
+> **What replaced the refusal is the driver obligation ADR-0003 now carries**: a plane names the root by a rule of its own or refuses it at `Bind`, which is where a refusal costs the caller least.
+> `driver/env` and `driver/http` refuse it there by their own published rule, `driver/yaml` refuses at the write, and `driver/kv` names it when `RootKey` does.
+
 #### A root map and a root slice are refused too, and an earlier draft got this wrong
 
 The draft let them through, on the grounds that they mint non-empty addresses and that "plane-to-plane transfer is exactly the caller who would depend on it".
@@ -1005,9 +1025,9 @@ Nothing is added to that package, and one thing is handed to it: the equivalence
   The shape taken costs 32 ns and no allocations against a compile in the tens of microseconds, so nothing is lost except a number in an earlier ADR that should not be quoted forward.
 - A compile-affecting Option must be comparable, and the static assertion turns a violation into a build error rather than the runtime panic ADR-0006 measured.
   The assertion works only because the key is a plain-map-shaped struct; the `sync.Map` the cache actually uses would not catch it.
-- **The root must be a struct ferry walks**, so a root leaf, a root map, a root slice and a root array are all refused at schema compile.
+- **The root is either a leaf or a struct ferry walks**, so a root map, a root slice and a root array are refused at schema compile, and a root leaf compiles at the root address ([#335](https://github.com/onhotpath/ferry/issues/335) amended this bullet, which as published refused a root leaf too).
   An earlier draft admitted the dynamic composites, on a justification that cited plane-to-plane transfer - which ADR-0006 had already measured as address-to-address and building no Go value, so it never calls `Load[T]`.
-  A nil or empty root map writes `Null` at the empty path and the YAML sink writes `{}` with a nil error, so the permission reopened the hole the root-leaf rule closes, at the value a first run most often has.
+  A nil or empty root map writes `Null` at the root address and the value is lost with nothing under it to be reached, at the value a first run most often has.
   Refusing is additive to lift later; the draft argued the reverse on a caller that does not exist.
 - **The schema and the walk cannot disagree about the static address set**, because they are one list rather than two computations of one rule.
   That closes the defect ADR-0008 found in a real ferry prototype, and it covers the static tier only - a dynamic address is minted by the walk and was never in the schema.
