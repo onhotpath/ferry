@@ -211,6 +211,35 @@ The same request reads the same way every run, which is what lets a test assert 
 `?x=` loads as the empty string.
 `x` not being in the query at all is a different observation, and `required` can tell them apart: `ferry:"token,required"` is satisfied by `?token=` and fails when `token` is absent.
 
+## A whole schema can be one value
+
+`?q=ferry` read into a `string` is an ordinary handler, and the schema is the string rather than a struct holding one.
+Such a schema has one address, the root, and the root carries no part for this driver to name it by, so an option names it:
+
+```go
+func ExampleRootParam() {
+	src := ferryhttp.NewQuerySource(ferryhttp.RootParam("q"))
+
+	ctx := ferryhttp.WithQuery(context.Background(), url.Values{"q": {"ferry"}})
+
+	q, err := ferry.Load[string](ctx, src)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Println(q)
+	// Output: ferry
+}
+```
+
+`ferryhttp.RootField` is the header plane's, held to the grammar a field name has and canonicalised like every other field name: `RootField("x-request-id")` reads `X-Request-Id`.
+Without the option the load is refused before the request is looked at, and the refusal names the option that lifts it.
+
+One plane's option given to the other plane's source does not compile, which is why there are two names rather than one.
+`RootParam` returns a `ferryhttp.QueryOption` and `RootField` a `ferryhttp.HeaderOption`, while `Separator` and `BytesAs` return a `ferryhttp.Option`, which is both and goes to either constructor.
+
 ## Two fields cannot share a name
 
 Nesting joins with `.`, so a field tagged `db.host` and a nested `db`/`host` both want `db.host`.

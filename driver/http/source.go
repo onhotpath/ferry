@@ -75,14 +75,26 @@ type values = map[string][]string
 
 // plane is the half of a [Source] that differs between query parameters and
 // header fields: what to call it, how to render an address as a name, how to
-// spell a name back as a map key, and how to find the request in a context.
+// spell a name back as a map key, which option names the root address, and how
+// to find the request in a context.
+//
+// It is 80 bytes, which is where gocritic's hugeParam starts, so the two seams
+// that take one take a pointer to it.
 type plane struct {
 	name     string
 	sep      string
-	key      func(sep string) ferry.KeyFunc
+	key      func(sep string, root rootName) ferry.KeyFunc
 	mint     func(text string) string
 	checkSep func(sep string) error
-	from     func(ctx context.Context) (values, error)
+
+	// rootOption is the option the caller of this plane's constructor reaches
+	// for to name the root address, and it is a constant of the plane rather
+	// than a reading of the configuration: that constructor's own parameter type
+	// is the only thing that admits the option, so the other plane's cannot have
+	// arrived here (#338).
+	rootOption string
+
+	from func(ctx context.Context) (values, error)
 }
 
 // queryPlane describes the query-parameter plane.
@@ -92,12 +104,13 @@ type plane struct {
 // through it unchanged.
 func queryPlane() plane {
 	return plane{
-		name:     "query",
-		sep:      QuerySeparator,
-		key:      flatKey,
-		mint:     func(text string) string { return text },
-		checkSep: notEmpty,
-		from:     queryFrom,
+		name:       "query",
+		sep:        QuerySeparator,
+		key:        flatKey,
+		mint:       func(text string) string { return text },
+		checkSep:   notEmpty,
+		rootOption: "ferryhttp.RootParam",
+		from:       queryFrom,
 	}
 }
 
@@ -109,12 +122,13 @@ func queryPlane() plane {
 // that is not comes back lower whatever this driver does.
 func headerPlane() plane {
 	return plane{
-		name:     "header",
-		sep:      HeaderSeparator,
-		key:      headerKey,
-		mint:     strings.ToLower,
-		checkSep: tokenSeparator,
-		from:     headerFrom,
+		name:       "header",
+		sep:        HeaderSeparator,
+		key:        headerKey,
+		mint:       strings.ToLower,
+		checkSep:   tokenSeparator,
+		rootOption: "ferryhttp.RootField",
+		from:       headerFrom,
 	}
 }
 
@@ -188,9 +202,21 @@ var _ ferry.Source = (*Source)(nil)
 //	f, err := ferry.Load[Filter](ferryhttp.WithQuery(r.Context(), r.URL.Query()), src)
 //
 // With no options it joins nested fields with [QuerySeparator]. Change that with
-// [Separator].
-func NewQuerySource(opts ...Option) *Source {
-	return newSource(queryPlane(), opts)
+// [Separator], and name the parameter a schema whose root is a single value
+// reads from with [RootParam].
+//
+// The two constructors take two option types because the option that names the
+// root is one plane's and not the other's. Everything else is an [Option] and
+// goes to either.
+func NewQuerySource(opts ...QueryOption) *Source {
+	s := &Source{p: queryPlane()}
+	s.cfg.sep = s.p.sep
+
+	for _, o := range opts {
+		o.applyQuery(&s.cfg)
+	}
+
+	return s
 }
 
 // NewHeaderSource builds a [Source] over a request's header fields.
@@ -199,18 +225,17 @@ func NewQuerySource(opts ...Option) *Source {
 //	t, err := ferry.Load[Tenant](ferryhttp.WithHeaders(r.Context(), r.Header), src)
 //
 // With no options it joins nested fields with [HeaderSeparator]. Change that
-// with [Separator].
-func NewHeaderSource(opts ...Option) *Source {
-	return newSource(headerPlane(), opts)
-}
+// with [Separator], and name the field a schema whose root is a single value
+// reads from with [RootField].
+func NewHeaderSource(opts ...HeaderOption) *Source {
+	s := &Source{p: headerPlane()}
+	s.cfg.sep = s.p.sep
 
-func newSource(p plane, opts []Option) *Source {
-	c := config{sep: p.sep}
 	for _, o := range opts {
-		o.apply(&c)
+		o.applyHeader(&s.cfg)
 	}
 
-	return &Source{p: p, cfg: c}
+	return s
 }
 
 // Bind computes this schema's parameter or field names and checks them, and it
@@ -225,7 +250,7 @@ func newSource(p plane, opts []Option) *Source {
 // a request has been supplied. A load with no request in its context is refused
 // when that load starts, which is the first moment the absence is visible.
 func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
-	keys, static, err := bindPlane(s.p, s.cfg, addrs)
+	keys, static, err := bindPlane(&s.p, s.cfg, addrs)
 	if err != nil {
 		return nil, err
 	}
@@ -238,13 +263,16 @@ func (s *Source) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 			return nil, err
 		}
 
-		return newReader(p, cfg, keys, static, vals), nil
+		return newReader(&p, cfg, keys, static, vals), nil
 	}, nil
 }
 
 // bindPlane is the whole of binding, for either direction: check the options,
 // build the checked name table, and read it back the other way.
-func bindPlane(p plane, cfg config, addrs *ferry.AddressSet) (*ferry.Keys, map[string]ferry.Path, error) {
+//
+// The plane arrives by pointer because it is 80 bytes, which is where gocritic's
+// hugeParam starts. It is read and never written to.
+func bindPlane(p *plane, cfg config, addrs *ferry.AddressSet) (*ferry.Keys, map[string]ferry.Path, error) {
 	sep := cfg.sep
 
 	if err := p.checkSep(sep); err != nil {
@@ -255,7 +283,13 @@ func bindPlane(p plane, cfg config, addrs *ferry.AddressSet) (*ferry.Keys, map[s
 		return nil, nil, cfg.bytesErr
 	}
 
-	keys, err := ferry.NewKeys(addrs, p.name, p.key(sep))
+	// The root name is the plane's own option and the configuration's name for
+	// it, and there is no crossed case to refuse: the constructor's parameter
+	// type is what admits the option, so the name in hand was given by this
+	// plane's (#338).
+	root := rootName{name: cfg.root, option: p.rootOption}
+
+	keys, err := ferry.NewKeys(addrs, p.name, p.key(sep, root))
 	if err != nil {
 		return nil, nil, err
 	}

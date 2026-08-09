@@ -54,13 +54,18 @@ import (
 // and a decoder wrong in the same direction - is caught here instead by
 // wire_test.go, which pins what the shipped half reads out of a query string
 // spelled by hand.
-func queryPlaneFor(opts ...Option) ferrytest.Plane {
+//
+// Both planes are given a name for the root address, so that conformance case
+// 23 runs rather than skipping: this driver has no name for the root until an
+// option gives it one, and a suite run against a plane that refuses it proves
+// only the refusal.
+func queryPlaneFor(opts ...QueryOption) ferrytest.Plane {
 	return ferrytest.Plane{
 		Name:  "query",
 		Kinds: flatKinds(),
 		Open: func() ferrytest.Instance {
 			v := url.Values{}
-			src := NewQuerySource(opts...)
+			src := NewQuerySource(withRoot(RootParam(rootParam), opts)...)
 
 			return ferrytest.Instance{
 				Source: src,
@@ -84,14 +89,14 @@ func queryPlaneFor(opts ...Option) ferrytest.Plane {
 // Two of the suite's own string cases are excepted by it, so declaring it buys a
 // loud refusal the stand-in has to actually make rather than a case that stops
 // running (ADR-0005).
-func headerPlaneFor(opts ...Option) ferrytest.Plane {
+func headerPlaneFor(opts ...HeaderOption) ferrytest.Plane {
 	return ferrytest.Plane{
 		Name:   "header",
 		Kinds:  flatKinds(),
 		Except: notAFieldValue,
 		Open: func() ferrytest.Instance {
 			h := http.Header{}
-			src := NewHeaderSource(opts...)
+			src := NewHeaderSource(withRoot(RootField(rootField), opts)...)
 
 			return ferrytest.Instance{
 				Source: src,
@@ -102,6 +107,23 @@ func headerPlaneFor(opts ...Option) ferrytest.Plane {
 			}
 		},
 	}
+}
+
+// rootParam and rootField are what the two planes call the root address in
+// every run of the suite, and they are two names because they are two options.
+const (
+	rootParam = "value"
+	rootField = "Value"
+)
+
+// withRoot puts the plane's own root option in front of the caller's, so that a
+// run naming a root of its own still wins.
+//
+// It is generic over the plane's own option type because []QueryOption and
+// []HeaderOption are two slice types and Go converts neither to the other. A
+// caller still passes an Option, which is assignable to either one (#338).
+func withRoot[O any](root O, opts []O) []O {
+	return append([]O{root}, opts...)
 }
 
 // flatKinds is the declaration both planes make, and it is five of the six kinds
@@ -162,7 +184,7 @@ type standInSink struct {
 // Bind checks the same things the source's does, through the same helper, so a
 // schema the plane refuses is refused in both directions.
 func (s standInSink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
-	keys, _, err := bindPlane(s.src.p, s.src.cfg, addrs)
+	keys, _, err := bindPlane(&s.src.p, s.src.cfg, addrs)
 	if err != nil {
 		return nil, err
 	}
