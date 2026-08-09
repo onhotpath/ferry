@@ -26,6 +26,10 @@ type Sink struct {
 	client Client
 	prefix []string
 
+	// rootName is the key a root value is written at, under the prefix, or
+	// empty where [RootKey] named none (#334).
+	rootName string
+
 	// raw is the spelling [Raw] declared, or nil where this plane's values are
 	// text (ADR-0018).
 	raw ferry.Spelling[[]byte, []byte]
@@ -56,7 +60,7 @@ func NewSink(client Client, opts ...Option) (*Sink, error) {
 			"together, so there is no per-key half of it to choose against")
 	}
 
-	return &Sink{client: client, prefix: cfg.prefix, raw: cfg.raw}, nil
+	return &Sink{client: client, prefix: cfg.prefix, rootName: cfg.rootKey, raw: cfg.raw}, nil
 }
 
 // Bind computes this schema's store keys and checks them, exactly as
@@ -65,7 +69,7 @@ func NewSink(client Client, opts ...Option) (*Sink, error) {
 // It does no I/O, so a sink binds successfully against a store it may not be
 // allowed to write to. See [ACL] for where that is discovered.
 func (s *Sink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
-	keys, err := ferry.NewKeys(addrs, driverName, keyFunc(s.prefix))
+	keys, err := ferry.NewKeys(addrs, driverName, keyFunc(s.prefix, s.rootName))
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +88,7 @@ func (s *Sink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
 // [ferry.ErrReadOnly]: a portable signal is what lets the conformance suite
 // hold every driver to the placement instead of the rule being prose.
 func (s *Sink) opener(keys *ferry.Keys) ferry.OpenWriterFunc {
-	root := rootKey(s.prefix)
+	root := prefixKey(s.prefix)
 
 	return func(ctx context.Context) (ferry.Writer, error) {
 		if err := ctx.Err(); err != nil {

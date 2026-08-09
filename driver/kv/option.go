@@ -10,7 +10,7 @@ import (
 )
 
 // Option is a setting handed to [NewSource] or [NewSink]. The set is closed at
-// three: [WithPrefix], [WithBatch] and [Raw].
+// four: [WithPrefix], [WithBatch], [RootKey] and [Raw].
 type Option func(*config) error
 
 // config is the resolved Option set one source or sink runs under.
@@ -19,6 +19,11 @@ type config struct {
 	// what makes a second WithPrefix a refusal rather than a silent last-wins.
 	prefix    []string
 	prefixSet bool
+
+	// rootKey is the key a schema whose root is a single value is written at,
+	// under the prefix. It is empty until [RootKey] names one, and such a schema
+	// is refused while it is (#334).
+	rootKey string
 
 	// batch is the whole of the batch-versus-lazy choice: one bool, read once
 	// per open, which ferry never sees (ADR-0004).
@@ -121,6 +126,30 @@ func prefixSegments(segments []string) error {
 func WithBatch() Option {
 	return func(c *config) error {
 		c.batch = true
+
+		return nil
+	}
+}
+
+// RootKey names the key a schema whose root is a single value is written at,
+// which is this name under the prefix.
+//
+//	sink, err := kv.NewSink(store, kv.WithPrefix("app"), kv.RootKey("value"))
+//
+// With WithPrefix("app") and RootKey("value") that root is the key "app/value",
+// which is an ordinary key beside every other one this driver writes.
+//
+// Without it such a schema is refused, in both directions. The store's own key
+// at the prefix is the folder everything else is written under, so a value
+// there would sit on an interior node, and a driver with no prefix would be
+// asked to write at the empty key, which a real store rejects.
+//
+// The name is one key and never a path: it may not be empty and may not contain
+// "/". It says nothing about any other schema, since every address with a
+// segment of its own is named by that segment as before.
+func RootKey(name string) Option {
+	return func(c *config) error {
+		c.rootKey = name
 
 		return nil
 	}
