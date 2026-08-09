@@ -218,6 +218,13 @@ type AddressSet struct {
 	// here rather than being plumbed because this is the handoff a driver
 	// already receives (ADR-0021).
 	ext ExtTable
+
+	// kinds is what the schema wants at every static leaf, and elems is what it
+	// wants at the leaves a composite's value mints. Both are filled by the
+	// compiler alone, which is what keeps the seal: a driver reads the kind of
+	// an address it was handed and cannot state one (proto: #309).
+	kinds map[LeafAddr]VKind
+	elems map[CompositeAddr]VKind
 }
 
 // newAddressSet builds a set from the members given, sorting them segment-wise.
@@ -311,6 +318,55 @@ func (a *AddressSet) Extension(key string) map[Path]map[string]string {
 	}
 
 	return a.ext.Extension(key)
+}
+
+// KindAt is the [VKind] the schema wants at one leaf, and whether this set
+// holds that leaf at all.
+//
+// It is what lets a plane carrying no type information of its own apply a
+// spelling only where the schema asks for one: a driver reads it once, at Bind,
+// into a table beside its plane keys.
+//
+//	for m := range addrs.Seq() {
+//	    if leaf, ok := m.(ferry.LeafAddr); ok {
+//	        if k, ok := addrs.KindAt(leaf); ok && k == ferry.KindBool {
+//	            d.spell[leaf] = true
+//	        }
+//	    }
+//	}
+//
+// The kind is what the field's own codec declares, so it is the plane
+// vocabulary of [VKind] and never a Go type. A leaf accepts a [KindString]
+// beside its own kind whatever this answers, so the kind is what the schema
+// wants rather than the whole of what it will take.
+//
+// The sharp edge is that an address a value mints is in no address set, so this
+// answers false for one: ask [AddressSet.ElemKind] about the composite that
+// will mint it instead.
+func (a *AddressSet) KindAt(addr LeafAddr) (VKind, bool) {
+	if a == nil {
+		return KindAbsent, false
+	}
+
+	k, ok := a.kinds[addr]
+
+	return k, ok
+}
+
+// ElemKind is the [VKind] the schema wants at the leaves a composite's value
+// mints, and whether those members are leaves at all.
+//
+// A slice of structs mints sections rather than leaves and answers false, and
+// so does a composite this set does not hold. Every member of one composite has
+// one type, so one answer covers all of them however many the value mints.
+func (a *AddressSet) ElemKind(addr CompositeAddr) (VKind, bool) {
+	if a == nil {
+		return KindAbsent, false
+	}
+
+	k, ok := a.elems[addr]
+
+	return k, ok
 }
 
 // Has reports whether the set holds this address, at this kind.

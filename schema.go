@@ -195,6 +195,12 @@ type compiler struct {
 	// (ADR-0005).
 	stack []reflect.Type
 
+	// elemKinds is the kind of the leaves a composite's value mints, for the
+	// composites whose element is a leaf at all. A minted address is in no
+	// address set, so this is the only thing a driver can ask about one before
+	// it exists (proto: #309).
+	elemKinds map[Path]VKind
+
 	// ext is what the declared foreign tag keys carried, address by address. It
 	// is accumulated here and lands on the address set, because that is the
 	// handoff a driver already receives (ADR-0021).
@@ -206,6 +212,11 @@ type compiler struct {
 type leaf struct {
 	addr  Path
 	field Path
+
+	// kind is the Value kind the leaf's own codec declares, carried here so
+	// that the address set can answer what the schema wants at an address. It
+	// is meaningless on a section or a composite entry (proto: #309).
+	kind VKind
 }
 
 // site is where a field sits: the address its container occupies, the Go field
@@ -705,6 +716,7 @@ func (c *compiler) compileSlice(t reflect.Type, parent *node, s site, tg tag) in
 
 	parent.fields = append(parent.fields, n)
 	c.recordComposite(s)
+	c.recordElemKind(s, t.Elem())
 
 	return count
 }
@@ -734,6 +746,7 @@ func (c *compiler) compileMap(t reflect.Type, parent *node, s site, tg tag) int 
 
 	parent.fields = append(parent.fields, n)
 	c.recordComposite(s)
+	c.recordElemKind(s, t.Elem())
 
 	return count
 }
@@ -773,12 +786,12 @@ func (c *compiler) checkDynamicOptions(t reflect.Type, addr Path, tg tag) {
 // recordLeaf adds a leaf address to the static set, and adds nothing under a
 // dynamic composite: what is compiled there is a shape, a driver is never handed
 // one, and there is nothing at it to fetch or write (ADR-0003).
-func (c *compiler) recordLeaf(s site) {
+func (c *compiler) recordLeaf(s site, kind VKind) {
 	if s.dynamic {
 		return
 	}
 
-	c.leaves = append(c.leaves, leaf{addr: s.addr, field: s.field})
+	c.leaves = append(c.leaves, leaf{addr: s.addr, field: s.field, kind: kind})
 }
 
 // recordSection adds a place whose children are known from the type: a struct,
@@ -794,6 +807,26 @@ func (c *compiler) recordSection(s site) {
 	}
 
 	c.sections = append(c.sections, leaf{addr: s.addr, field: s.field})
+}
+
+// recordElemKind records the kind of the leaves this composite's value will
+// mint, where its element is a leaf at all.
+//
+// It is the half of the kind seam a static address set cannot carry: /m/name
+// under a map[string]bool does not exist until there is a value, so nothing in
+// the set is keyed by it and a driver asking about a minted address asks about
+// the composite instead (proto: #309).
+func (c *compiler) recordElemKind(s site, elem reflect.Type) {
+	cd, ok := c.cfg.registry.leafFor(elem)
+	if s.dynamic || !ok {
+		return
+	}
+
+	if c.elemKinds == nil {
+		c.elemKinds = map[Path]VKind{}
+	}
+
+	c.elemKinds[s.addr] = cd.kind
 }
 
 // recordComposite adds a place whose children come from the value, which is
@@ -939,7 +972,7 @@ func (c *compiler) compileLeaf(cd leafCodec, t reflect.Type, parent *node, s sit
 	n.required, n.omitzero = heldAt(s, tg)
 
 	parent.fields = append(parent.fields, n)
-	c.recordLeaf(s)
+	c.recordLeaf(s, cd.kind)
 
 	return 1
 }
@@ -1275,8 +1308,32 @@ func (c *compiler) addressSet() *AddressSet {
 
 	a := newAddressSet(members...)
 	a.ext = c.ext
+	a.kinds = c.leafKinds()
+	a.elems = c.compositeElemKinds()
 
 	return a
+}
+
+// leafKinds is the kind the schema wants at every static leaf, keyed by the
+// typed address a driver holds (proto: #309).
+func (c *compiler) leafKinds() map[LeafAddr]VKind {
+	out := make(map[LeafAddr]VKind, len(c.leaves))
+	for _, l := range c.leaves {
+		out[leafOf(l.addr)] = l.kind
+	}
+
+	return out
+}
+
+// compositeElemKinds is the same answer for the addresses a value mints, keyed
+// by the composite that will mint them (proto: #309).
+func (c *compiler) compositeElemKinds() map[CompositeAddr]VKind {
+	out := make(map[CompositeAddr]VKind, len(c.elemKinds))
+	for addr, kind := range c.elemKinds {
+		out[compositeOf(addr)] = kind
+	}
+
+	return out
 }
 
 // errAt records one refusal. Every refusal a compile produces is one of these:
