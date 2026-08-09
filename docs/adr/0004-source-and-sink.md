@@ -807,6 +807,37 @@ The memory plane's column is empty on every axis, which is ADR-0002's own point 
 >
 > **Nothing in the decision moves.** The admission rule is still one row per axis, the axes are still read off the contract, and a driver still earns its place by owning a row no other driver has.
 
+> **Amended under [#272](https://github.com/onhotpath/ferry/issues/272): three of env's cells were left stale by [#352](https://github.com/onhotpath/ferry/issues/352), and the table gains a fifth driver.**
+>
+> As published the env column is blank at **has a serialization format**, at **real I/O, cancellation, partial failure** and at **`Committer` and `Releaser` together**.
+> All three were true when the table was written and none of them survived `DotEnvSink`.
+> The amendment above rewrote the prose around the "structurally has no Dump" row and did not walk the rest of the column, which is what this correction is.
+> Counted off the shipped code: `driver/env` writes a `.env` file whose quoting and escape table [ADR-0013](0013-what-a-plane-holds-is-a-published-interface.md) now pins, it reads and atomically rewrites real files and reports what a partial write left behind, and `dotEnvWriter` asserts both `ferry.Committer` and `ferry.Releaser` because it stages a replacement and holds an open file.
+>
+> `driver/windows` is the fifth driver and its column is new.
+> The table as it should now read, with the three corrected cells and the new column, and every other cell exactly as published:
+>
+> | axis | env | query | kv | yaml | windows | memory plane |
+> | --- | --- | --- | --- | --- | --- | --- |
+> | produces a plane key, so carries the injectivity obligation | yes | yes | yes | | yes | |
+> | walks segments as a tree instead | | | | yes | | |
+> | has a serialization format | yes | | | yes | | |
+> | carries plane-side type information | | | | yes | yes | |
+> | opaque bytes only | | | yes | | | |
+> | real I/O, cancellation, partial failure | yes | | yes | yes | yes | |
+> | batch versus lazy inside one open | | | yes | | | |
+> | `Committer` without `Releaser` | | | yes | | yes | |
+> | `Committer` and `Releaser` together | yes | | | yes | | |
+> | structurally has no Dump | | | | | | |
+> | per-request, hot path | | yes | | | | |
+> | `Enumerator` | yes | | yes | yes | yes | |
+>
+> **The windows column owns no row here outright, and that is a property of the table rather than of the driver.**
+> The five axes it was admitted on are recorded in [ADR-0002](0002-core-and-sub-modules.md)'s own amendment, and none of them has a row above: a tree-shaped live store read and written key by key, two namespaces at every level so that a value and a subkey of one name are two objects, a plane whose values carry a type tag of their own on the *flat* side of the first row, `ErrReadOnly` with a cause the operating system supplied rather than a hook that simulates one, and a decorator over another driver's `Source` and `Sink`.
+> That is the same shape as the #168 note above: **this table predates the axes it is being asked about**, exactly as it predates five of the eight optional interfaces, and the admission rule is read against the contract rather than against the table's row list.
+>
+> **Nothing in the decision moves**, again. One row per axis, axes read off the contract, and a driver earning its place by owning something no other driver here does.
+
 ### What this ADR does not decide
 
 - Whether an absent address takes a default, whether `null` and absent mean the same thing to a Go field, and whether present-and-empty satisfies `required`: [#8](https://github.com/onhotpath/ferry/issues/8).

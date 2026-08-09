@@ -141,15 +141,22 @@ Coalesce, compare, or mark your own writes; the loop above deliberately does not
 Treat a signal as "the plane may have changed", nothing more.
 The reload reads the truth; a spurious wake costs one load.
 
-## The two drivers that announce changes
+## The three drivers that announce changes
 
 Everything above is plane-independent: the loop is yours and the signal is the driver's.
-Two first-party drivers have a signal to give, and both give it as a callback rather than a channel, because there is no `Notifier` interface in core to shape one ([ADR-0020](../adr/0020-watch-and-reload.md) specifies that interface and deliberately does not ship it).
+Three first-party drivers have a signal to give, and all three give it as a callback rather than a channel, because there is no `Notifier` interface in core to shape one ([ADR-0020](../adr/0020-watch-and-reload.md) specifies that interface and deliberately does not ship it).
 
 The yaml driver is the one described below.
 `driver/env` is the second, and its Option is the same shape with one difference: `env.WatchFiles(ctx, onChange)` takes no interval, because it watches with fsnotify rather than by polling.
 It watches every file `env.DotEnv` named, refuses at Bind when no file was named or a directory is not there, and coalesces the burst one save produces into a single call.
 [ADR-0020](../adr/0020-watch-and-reload.md) is amended in place with why that driver takes the dependency and this one does not.
+
+`driver/windows` is the third, and `winreg.Watch(ctx, onChange)` is the same shape again, also without an interval, because `RegNotifyChangeKeyValue` has none.
+It watches the whole subtree under the key the source was built over, so a change to any value or any subkey beneath it fires the callback and a change elsewhere in the hive does not, and it refuses at Bind when the registry behind the source reports no change of its own.
+The one thing to know that the other two do not have: your own dump through a `winreg.Sink` over the same key fires your own watcher, and nothing in the driver suppresses that.
+
+The three agree on everything but the mechanism, which is deliberate: callback not channel, no error return, no `Stop`, cancellation rides the context you passed, and the watch opens inside the constructor so a failure has somewhere to go.
+Wiring a second watchable source under one binding is not answered here or in the ADR - [#361](https://github.com/onhotpath/ferry/issues/361) is where that question lives.
 
 ```go
 onChange := func(ctx context.Context) {
@@ -177,7 +184,7 @@ Publish the binding through something that orders the two - an atomic pointer, o
 
 **Looking is a stat, not fsnotify.**
 This driver takes no dependency to watch a file, so the interval is yours to name and a rewrite that lands in the same modification-time tick without changing the file's length is not seen.
-`driver/env` makes the other choice and pays for it in its `require` block.
+`driver/env` and `driver/windows` both make the other choice and pay for it in their `require` blocks.
 
 **A save refuses a file that changed underneath it.**
 A dump reads the document, stages a replacement and renames it into place, and an edit landing in that window would be swapped away in silence.

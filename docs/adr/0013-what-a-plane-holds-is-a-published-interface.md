@@ -214,6 +214,43 @@ It matters here because the promise is exactly as wide as the table: a member wi
 > **One promise it does not make.** Every value here round trips through this driver, and every value except two classes is also one `sh` reads back identically when the file is sourced: a shell does not unescape `\n`, `\r` or `\t`, and a value holding a single quote together with a `$` or a backtick has to be double-quoted and is then expanded.
 > Inventing a `\$` escape would fix the second and make the file unreadable to every other `.env` reader, which is the [ADR-0018](0018-the-spelling-seam.md) trade this driver declines.
 
+> **Amended under [#272](https://github.com/onhotpath/ferry/issues/272): the registry value representation joins the pinned tier, owned by `driver/windows`.**
+>
+> As published, and as amended above, the pinned tier is core's identity and kind tables plus `driver/yaml`'s scalar forms, its `!!binary` and `driver/env`'s quoting table.
+> `winreg` reads and writes a plane whose values carry a type tag of their own, so what it stores is a representation in exactly this section's sense, and it is pinned by golden rows in that module's own conformance run.
+>
+> **The read table**, which is wider than the write table because Group Policy and human operators write types this driver does not:
+>
+> | stored as | read as |
+> | --- | --- |
+> | `REG_SZ` | `String`, the stored text |
+> | `REG_EXPAND_SZ` | `String`, the stored text raw, never expanded |
+> | `REG_DWORD` | `Number`, its own base-10 spelling |
+> | `REG_QWORD` | `Number`, its own base-10 spelling |
+> | `REG_BINARY` | `Bytes`, every byte |
+> | `REG_MULTI_SZ` | refused, `ErrPlane` |
+>
+> **The write table**, which is two rows and no more:
+>
+> | value | written as |
+> | --- | --- |
+> | `Bytes` | `REG_BINARY`, the bytes |
+> | `String`, `Number`, `Bool` | `REG_SZ`, the boundary's own spelling |
+>
+> **Why the write side is `REG_SZ` alone.**
+> This ADR's own instrument is that a plane holds the text somebody chose, and core requires a `Number` to carry the plane's own spelling across the boundary intact.
+> `REG_SZ` is the only registry type that can: `007`, `3.14159265358979` and `18446744073709551615` all come back exactly as they went in.
+> `REG_DWORD` can express none of the three.
+> `REG_QWORD` normalises `007` to `7`, which is the silently-wrong row of [the three outcomes](#an-old-artefact-under-a-new-rule-has-three-outcomes) manufactured on every write, and it cannot hold a float at all.
+> So the type annotation a value carries is a thing this driver reads and never a thing it preserves: a value an operator retyped by hand is retyped back to `REG_SZ` on the next dump, with the data intact, and that is documented in the driver rather than worked around.
+>
+> **Why `REG_EXPAND_SZ` is never expanded on read.**
+> Expanding is not a read-side convenience here, because the value goes back out again.
+> A driver that expanded `%SystemRoot%-literal` on load would write `C:\WINDOWS-literal` on the next dump, over what the operator wrote, which is a plane-compatibility break in the precise sense this ADR defines and one committed by the driver on somebody else's data.
+>
+> **The tier is this ADR's own, and so is the consequence**: a change to any row above is a major version of `github.com/onhotpath/ferry/driver/windows`, not a test-fixture edit.
+> The golden rows that hold it there pin the whole of what the plane holds - the subkey each address lives under, the value name inside it, the registry type and the payload - because a round trip over a self-consistent reader and writer cannot see any of the four.
+
 **Tier two transfers with the guarantee ADR-0001 already transfers**, and the mechanism is not ADR-0009's.
 
 ADR-0009 communicates obligations through a diagnostic, and is explicit that this is the point: "the diagnostic is where the obligation gets communicated ... it is the only moment a registrant is guaranteed to read".
