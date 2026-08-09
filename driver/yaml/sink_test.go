@@ -857,6 +857,80 @@ func TestAMergeKeySurvivesASave(t *testing.T) {
 	}
 }
 
+// TestAnInheritedKeyIsWrittenIntoTheMappingThatInheritsIt is the write side of
+// #234, and it is where the read side stops.
+//
+// A read follows a merge key, so a section loads the members it inherits. A
+// write does not: the value lands in the mapping the address names, as a key
+// that shadows the merged one, and the mapping it merges from is left alone.
+// Writing through to the source would move the value under every other mapping
+// merging it, which is not what one field of one struct asked for.
+func TestAnInheritedKeyIsWrittenIntoTheMappingThatInheritsIt(t *testing.T) {
+	path := write(t, inherited)
+
+	v := inheritedSection{DB: inheritedMembers{Host: "elsewhere", Port: 5433}}
+	if err := ferry.Dump(t.Context(), v, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	want := "defaults: &d\n  host: localhost\n  port: 1\ndb:\n  <<: *d\n  port: 5433\n  host: elsewhere\n"
+	if got := read(t, path); got != want {
+		t.Errorf("the plane holds %q, want %q: an override belongs in the mapping that inherits, and the mapping "+
+			"it merges from is somebody else's", got, want)
+	}
+}
+
+// TestAnInheritedKeyRoundTrips is the same walk read back, which is the property
+// that matters: what the load saw is what the reload sees.
+func TestAnInheritedKeyRoundTrips(t *testing.T) {
+	path := write(t, inherited)
+
+	first, err := ferry.Load[inheritedSection](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("the first load: %v", err)
+	}
+
+	if err := ferry.Dump(t.Context(), first, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	second, err := ferry.Load[inheritedSection](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("the second load: %v", err)
+	}
+
+	if first != second {
+		t.Errorf("the reload holds %+v, want %+v", second, first)
+	}
+}
+
+// TestAReplacedMappingThatMergedLosesTheMergeKey is dump-is-replace meeting a
+// merge key, and it is the one place the two rules meet awkwardly enough to be
+// pinned rather than left to be discovered (#220, #234).
+//
+// A map your struct maps is replaced whole. Its merge key is not a member the
+// replacement keeps, because the members it brought in are members this dump did
+// not write - and it cannot be kept either, since keeping it would leave every
+// inherited key in the file that the dump meant to remove. So the values the
+// load saw are written out and the `<<` line goes.
+func TestAReplacedMappingThatMergedLosesTheMergeKey(t *testing.T) {
+	path := write(t, inheritedText)
+
+	loaded, err := ferry.Load[inheritedMap](t.Context(), yaml.NewSource(path))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if err := ferry.Dump(t.Context(), loaded, yaml.NewSink(path)); err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+
+	want := "defaults: &d\n  host: localhost\n  port: \"1\"\ndb:\n  port: \"5432\"\n  host: localhost\n"
+	if got := read(t, path); got != want {
+		t.Errorf("the plane holds %q, want %q", got, want)
+	}
+}
+
 // TestAnAliasNoFieldMapsIsUntouched is the promise the alias work must not have
 // cost: a dump at one address leaves an anchor and an alias somewhere else in
 // the document exactly as they were parsed.
