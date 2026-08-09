@@ -643,11 +643,16 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      # The verbose pass names the build-tagged tests as they run, because the
+      # thing this job exists to prove is that they RAN. A skip reads as a pass
+      # in the plain output, and a suite that quietly skipped the real syscalls
+      # is exactly the hole this job was added to close.
       - name: Build, vet and test driver/windows on Windows
         working-directory: driver/windows
         run: |
           go build ./...
           go vet ./...
+          go test -v -run 'Windows|Machine|DPAPI' ./...
           go test ./...
           go test -race ./...
 
