@@ -248,3 +248,70 @@ func TestYAMLNumberSpellingObeysTheLaws(t *testing.T) {
 		[]string{"zzz", "", "0x", "true", "1.2.3"},
 	)
 }
+
+// TestYAMLIntegerSpellingsReachTheIntegerArms pins the precondition the two
+// integer parsers now sit behind.
+//
+// [readNumber] tries the integer arms before the float one because a leading
+// zero is octal, and the guard in front of them decides only which texts can
+// reach them at all. So the guard has to admit every spelling YAML gives an
+// integer, and the two that would catch a wrong one out are here by name: a
+// hexadecimal literal spells e and E as digits rather than as an exponent, and
+// the largest unsigned is refused by ParseInt and taken by ParseUint, so a
+// guard reading only the first arm's answer would drop it.
+//
+// A case that came back with the wrong text would be a value changing rather
+// than an allocation moving, which is why this is a table of exact texts and
+// not a round trip.
+func TestYAMLIntegerSpellingsReachTheIntegerArms(t *testing.T) {
+	for _, c := range []struct{ text, want string }{
+		{"0x1F", "31"},
+		{"0x1E", "30"},
+		{"0XE", "14"},
+		{"0o17", "15"},
+		{"017", "15"},
+		{"0b101", "5"},
+		{"1_000", "1000"},
+		{"-0x10", "-16"},
+		{"18446744073709551615", "18446744073709551615"},
+		{"-9223372036854775808", "-9223372036854775808"},
+		{"-0", "-0"},
+	} {
+		t.Run(c.text, func(t *testing.T) { parsesTo(t, c.text, c.want) })
+	}
+}
+
+// TestYAMLFloatSpellingsPassTheIntegerGuard is the other side of it: a text the
+// guard sends straight to the float arm still parses, and still carries the
+// document's own spelling rather than a reformatted one.
+//
+// The hexadecimal float is the case the guard's own hexadecimal arm exists for:
+// there a p is an exponent where an e is a digit.
+func TestYAMLFloatSpellingsPassTheIntegerGuard(t *testing.T) {
+	for _, c := range []struct{ text, want string }{
+		{"3.5", "3.5"},
+		{"1e5", "1e5"},
+		{"1E5", "1E5"},
+		{"0x1p-2", "0x1p-2"},
+		{"1_000.5", "1000.5"},
+		{"1e309", "1e309"},
+		{"99999999999999999999999999", "99999999999999999999999999"},
+	} {
+		t.Run(c.text, func(t *testing.T) { parsesTo(t, c.text, c.want) })
+	}
+}
+
+// parsesTo is one spelling and the canonical text it carries, lifted out of the
+// two tables above so that each stays a table.
+func parsesTo(t *testing.T, text, want string) {
+	t.Helper()
+
+	got, err := yaml.Numbers.Parse(text)
+	if err != nil {
+		t.Fatalf("Parse(%q): %v", text, err)
+	}
+
+	if got != want {
+		t.Errorf("Parse(%q) is %q, want %q", text, got, want)
+	}
+}
