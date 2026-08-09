@@ -161,9 +161,9 @@ v0 is the only place semver allows a decision to be taken back, and ferry is usi
 Both the Go API and the text ferry writes into a plane are still free to move.
 The trigger for v1 is the tag grammar surviving real use, and the golden table that pins what a plane holds settling (ADR-0013).
 
-**The Go floor is 1.27**, declared by every module in this repository.
-Go 1.27 is not GA at the time of writing: `go1.27rc2` is what exists, and it is what this repository's `go.work` pins.
-ferry uses `errors.AsType` and the 1.27 standard library, and core takes no non-stdlib dependency at all.
+**The Go floor is 1.26**, declared by every module in this repository.
+This is temporary: the floor returns to 1.27 when Go 1.27 is generally available.
+`errors.AsType` is what sets it, and core takes no non-stdlib dependency at all.
 
 ## Performance
 

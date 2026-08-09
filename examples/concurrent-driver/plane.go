@@ -72,7 +72,7 @@ func (p *Plane) Bind(*ferry.AddressSet) (ferry.OpenFunc, error) {
 		p.mu.Unlock()
 
 		if p.tolerates {
-			return Reader{p: p}, nil
+			return Reader{reader{p: p}}, nil
 		}
 
 		return reader{p: p}, nil

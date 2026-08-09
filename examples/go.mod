@@ -3,8 +3,11 @@ module github.com/onhotpath/ferry/examples
 // ADR-0002: a module in this workspace declares its own `go` directive and may
 // raise it above core's, never lower it, because the floor is transitive
 // through imports and the lever only points up. No `toolchain` directive here
-// either; go.work carries the pin.
-go 1.27
+// either; no file in this repository carries one.
+//
+// The floor is go 1.26 while #366 is open, not core's usual 1.27, because 1.27
+// is not yet GA.
+go 1.26
 
 // There is deliberately no `require` on github.com/onhotpath/ferry, even though
 // this module imports it, and this is the same convention driver/env and

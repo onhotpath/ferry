@@ -98,10 +98,10 @@ permissions:
   contents: read
 
 env:
-  # The same pin ci.yml carries, for the same reason: ADR-0001's floor is
-  # go 1.27 and only the release candidate exists. These two must not drift, so
-  # if one moves the other moves in the same commit.
-  GO_VERSION: '1.27.0-rc.2'
+  # The same pin ci.yml carries, for the same reason: #366 drops ADR-0001's
+  # floor to a released go 1.26 for as long as go 1.27 is not GA. These two
+  # must not drift, so if one moves the other moves in the same commit.
+  GO_VERSION: '1.26.x'
 
   # Pinned rather than @latest, so a change in a published figure is always this
   # repository's doing and never a benchstat release nobody asked for.

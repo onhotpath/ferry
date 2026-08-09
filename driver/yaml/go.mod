@@ -2,9 +2,12 @@ module github.com/onhotpath/ferry/driver/yaml
 
 // ADR-0002: a driver module declares its own `go` directive and may raise it
 // above core's, never lower it, because the floor is transitive through imports
-// and the lever only points up. No `toolchain` directive here either; go.work
-// carries the pin.
-go 1.27
+// and the lever only points up. No `toolchain` directive here either; no file
+// in this repository carries one.
+//
+// The floor is go 1.26 while #366 is open, not core's usual 1.27, because 1.27
+// is not yet GA.
+go 1.26
 
 // This module imports core and does not require it, which is deliberate and
 // temporary. Core carries no v* tag yet, so github.com/onhotpath/ferry@v0.0.0

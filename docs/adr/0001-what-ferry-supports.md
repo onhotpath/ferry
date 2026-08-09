@@ -200,6 +200,22 @@ The decision is reversible without redesigning core.
 The fallback is core at `go 1.26` with no json/v2 import and the v2 dependency in a sub-module at `go 1.27`.
 Whether every sub-module takes core's floor is [#3](https://github.com/onhotpath/ferry/issues/3)'s.
 
+> **Amended under [#366](https://github.com/onhotpath/ferry/issues/366): the floor is `go 1.26` for as long as Go 1.27 is not GA, and returns to `go 1.27` at GA.**
+>
+> As published this section named `go 1.27` as the floor because that is the first release in which `encoding/json/v2` is generally available.
+> That reason is unspent: no module in the repo imports `encoding/json/v2` or `encoding/json/jsontext`, CI asserts it on every push, and `make nojsonv2` proves core builds without them.
+> A floor justified by an import nobody makes is a floor paid for and not spent.
+>
+> **This is the fallback the section already recorded, taken exactly as designed, not a reversal of it.**
+> Core sits at `go 1.26` with no json/v2 import, and the v2 dependency stays reachable from a sub-module at `go 1.27` the day one is written.
+> The two paragraphs above stay published because both routes they rejected are rejected on their own merits, independent of which release core floors at, and no module imports json/v2 either before this amendment or after it.
+>
+> **The priced cost has inverted.**
+> The exclusion was affordable because ferry was in design with no code and would not ship before 1.27 was out, which named the users the exclusion would never reach.
+> ferry now has code that people want to use, and Go 1.27 is still not out - only `go1.27rc2` exists.
+> Since the `go` directive is a strict minimum, `go 1.27` today excludes everyone on a released toolchain, which is precisely the population the original reasoning said it would not reach.
+> The floor drops to `go 1.26` to stop bearing a cost the section itself said was conditional on ferry not existing yet, and returns to `go 1.27` when Go 1.27 reaches GA.
+
 ### What ferry will not support
 
 Two kinds, and the charter says which, because a flat list invites readers to assume the strong reading for both.

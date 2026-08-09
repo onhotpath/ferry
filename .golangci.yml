@@ -37,40 +37,19 @@ linters:
     - errorlint
     - govet
     - ineffassign
-    # - staticcheck
+    - staticcheck
     #
-    # TEMPORARILY OFF, AND THE ONLY LINTER HERE THAT IS. Re-enable it by
-    # deleting the comment marker above; nothing else has to change.
+    # staticcheck could not run at all under go1.27rc2: its IR builder failed
+    # to parse Go 1.27 standard-library source and took the whole metalinter
+    # down with it, not just its own findings. #366 moves the floor and CI onto
+    # a released Go, which clears that. It goes back off if the floor ever
+    # returns to a release candidate the bundled analyser cannot read.
     #
-    # staticcheck cannot run at all under go1.27rc2. Its IR builder
-    # (honnef.co/go/tools v0.7.0, which golangci-lint v2.12.2 bundles) fails to
-    # parse Go 1.27 standard-library source and takes the whole run down with
-    # it, not just its own findings:
-    #
-    #   buildir: panic during analysis: unexpected expr: *ast.KeyValueExpr
-    #   Running error: can't run linter goanalysis_metalinter
-    #
-    # Measured, not assumed: a single file whose only import is "fmt" is enough,
-    # because fmt reaches internal/poll, and the panic is raised while analysing
-    # that dependency's source. A tree with no imports at all - which is what
-    # this repository is today - never reaches it, so the failure would first
-    # appear on whichever pull request adds ferry's first import and would look
-    # like that author's fault. Hence off now, with the reason written down.
-    #
-    # Not fixable here: the analyser is compiled into golangci-lint, v2.12.2 is
-    # the newest release, and the newest honnef.co/go/tools is v0.8.0-rc.1,
-    # which no golangci-lint release bundles yet.
-    #
-    # TODO: re-enable with the golangci-lint bump that ships a staticcheck able
-    # to read Go 1.27 source. This expires with the same event as the
-    # workarounds in .github/workflows/ci.yml: Go 1.27 going GA.
-    #
-    # `unused` is unaffected and stays on - but it shares the metalinter runner
-    # named above, so "unaffected" is a property of which analyser golangci-lint
-    # happens to bundle and not a property of this file. Renovate moves that pin
-    # (#271). `make lint-canary` asserts it on every run instead, by feeding
-    # `unused` a function that is dead on purpose and failing when it goes
-    # unreported.
+    # `unused` shares the same metalinter runner, so its health is a property
+    # of which analyser golangci-lint happens to bundle and not a property of
+    # this file. Renovate moves that pin (#271). `make lint-canary` asserts it
+    # on every run instead, by feeding `unused` a function that is dead on
+    # purpose and failing when it goes unreported.
     - unused
     - bodyclose        # driver/kv will speak HTTP to a KV backend (ADR-0002).
     - copyloopvar
@@ -242,6 +221,19 @@ linters:
         # exclusion list and a better message, so gosec's copy only duplicates
         # the report.
         - G104
+
+    staticcheck:
+      checks:
+        - all
+        # S1016 wants treeReader(s) in place of treeReader{p: s.p}. A Source
+        # and the Reader it opens are separate types deliberately, per
+        # ADR-0004's bind-open split. They have the same fields today by
+        # coincidence rather than by design. A type conversion welds those two
+        # field lists together, so adding a field to the Source would break
+        # the Reader at a distance, in a different file, with an error that
+        # names neither decision. S1016 is asking ferry to undo a seam it
+        # maintains on purpose.
+        - "-S1016"
 
   exclusions:
     generated: strict

@@ -25,8 +25,8 @@ Three module rules are asserted by CI and are not stylistic:
   Its `require` block stays empty, unconditionally.
   A driver may have dependencies; core may not.
   Core must also never import `encoding/json/v2` or `encoding/json/jsontext`, and `make nojsonv2` proves it still builds without them.
-- **No `go.mod` carries a `toolchain` directive.**
-  The floor is Go 1.27, which is not GA, so `go1.27rc2` is named once in `go.work` and nowhere else.
+- **No file carries a `toolchain` directive, `go.work` included.**
+  The floor is temporarily Go 1.26, pending Go 1.27 going GA (#366).
   A consumer resolves the floor with whatever toolchain they have.
 - **No `replace` directive is ever checked in.**
   `go.work` gives local development its sibling-on-disk resolution instead, and `GOWORK=off` exercises the resolution a real consumer gets.
@@ -174,8 +174,8 @@ A stale cache from a deleted worktree can report failures in files that no longe
 `make lint` starts with `make lint-canary`, which asserts that the `unused` linter still reports dead code.
 
 A linter that never ran and a linter that found nothing both print `0 issues`, so a linter can go missing without anything turning red.
-`unused` is the one at risk: golangci-lint runs it inside the same metalinter as `staticcheck`, which is switched off today because the analyser bundled with the pinned release cannot parse Go 1.27 source and takes the whole runner down with it.
-Renovate moves that pin, so whether `unused` survives a bump is not something `.golangci.yml` can promise on its own.
+`unused` is the one at risk: golangci-lint runs it inside the same metalinter as `staticcheck`, so an analyser that panics takes the whole runner down and both go quiet at once.
+Which analyser is bundled is decided by the golangci-lint pin, which Renovate moves, so whether `unused` survives a bump is not something `.golangci.yml` can promise on its own.
 
 The canary is `lintcanary.go`, a single dead function behind the `ferrylintcanary` build tag.
 No ordinary build, vet, test or lint run sets that tag, so the function is invisible everywhere else.

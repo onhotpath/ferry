@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -30,16 +31,40 @@ func TestCoreCallsNeitherGetNorLookup(t *testing.T) {
 
 	fset := token.NewFileSet()
 
-	pkgs, err := parser.ParseDir(fset, ".", nil, 0)
+	for name, file := range parseCoreDir(t, fset) {
+		checkNoLookup(t, fset, name, file)
+	}
+}
+
+// parseCoreDir parses every .go file in this package's directory, the same
+// set go/parser.ParseDir would have walked. ParseDir is deprecated as of Go
+// 1.25, and its replacement lives in golang.org/x/tools, which core cannot
+// depend on: ADR-0002 keeps core's require block empty. os.ReadDir plus
+// parser.ParseFile is the stdlib-only equivalent, one file at a time.
+func parseCoreDir(t *testing.T, fset *token.FileSet) map[string]*ast.File {
+	t.Helper()
+
+	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("parsing core: %v", err)
 	}
 
-	for _, pkg := range pkgs {
-		for name, file := range pkg.Files {
-			checkNoLookup(t, fset, name, file)
+	files := make(map[string]*ast.File)
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
 		}
+
+		file, err := parser.ParseFile(fset, entry.Name(), nil, 0)
+		if err != nil {
+			t.Fatalf("parsing core: %v", err)
+		}
+
+		files[entry.Name()] = file
 	}
+
+	return files
 }
 
 func checkNoLookup(t *testing.T, fset *token.FileSet, name string, file *ast.File) {
