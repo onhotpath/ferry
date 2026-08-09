@@ -5,7 +5,7 @@ This file explains how the repository is organised and what the conventions mean
 `make help` lists the developer targets.
 `make check` and `make lint` are what CI runs, and both must be green before a pull request is opened.
 
-## The repository is five modules and one workspace
+## The repository is six modules and one workspace
 
 | module | what it is |
 | --- | --- |
@@ -14,6 +14,7 @@ This file explains how the repository is organised and what the conventions mean
 | `driver/yaml` | a YAML file, edited in place |
 | `driver/kv` | a Consul-shaped key-value store |
 | `driver/http` | one HTTP request's query parameters or header fields, bound once and loaded through per request |
+| `driver/windows` | the Windows registry, over a seam an in-memory store fills so the suite runs everywhere |
 
 `ferrytest` is a package inside core, not a module of its own.
 It ships from the same place as the rule it checks, because a conformance suite that ships from somewhere else binds nobody.

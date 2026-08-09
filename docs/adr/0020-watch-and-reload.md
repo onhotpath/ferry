@@ -209,6 +209,50 @@ The fsnotify machinery never runs unless it is asked for, which joins the driver
 > One polls a stat and one reads an inotify queue, and what a common interface would carry between them is a channel neither driver publishes and core never reads.
 > The trigger is restated as the one that would actually bite: **a caller writing the same watch wiring against two drivers and wanting one binding for both.**
 
+> **Amended under [#272](https://github.com/onhotpath/ferry/issues/272): there are three watchable drivers, the shape held a third time, and `Notifier` stays declined with the composition question filed.**
+>
+> As published, and as amended above, this ADR counts two: `driver/yaml`, which polls a stat, and `driver/env`, which reads an fsnotify queue.
+> `driver/windows` is the third.
+> `winreg.Watch(ctx, onChange)` watches the whole subtree under the driver's key through `RegNotifyChangeKeyValue`, and every sentence above that counts to two is now counting to three.
+>
+> **The shape constraints are what this amendment exists to record, because a third driver is where a shape either is one or was never one.**
+> Every one of them held, checked against the shipped code rather than against the intent:
+>
+> - a callback and not a channel, `onChange func(context.Context)`;
+> - an Option and not a method on the source;
+> - no error return from the callback, because there is still nowhere to put one;
+> - no `Stop`, and cancelling the context that was passed in is the whole lifecycle;
+> - the watch opened synchronously inside the constructor, on the caller's own goroutine, so a failure has somewhere to go;
+> - a failure to open refused at `Bind` rather than at the first load, as `ErrWatch` wrapping [`ferry.ErrPlane`](0011-the-error-model.md);
+> - the callback unfenced, one call at a time, and told only that the plane may have changed;
+> - and no interval, because `RegNotifyChangeKeyValue` has none, which is the same difference `driver/env` has from `driver/yaml` and for the same reason.
+>
+> Two drivers agreeing could have been one driver copied.
+> Three agreeing over three unrelated mechanisms - a poll, an inotify queue and a Win32 notification handle - is the shape being a shape.
+>
+> **One promise the shape makes is not free on this mechanism, and it is the one thing this driver had to build rather than inherit.**
+> "Changes that land while the callback runs are one call afterwards" is true of a poll and of an fsnotify queue because the watch is persistent: it is still armed while the callback runs, and events queue behind it.
+> `RegNotifyChangeKeyValue` is armed once and consumed once, so a driver that registered inside its own wait would have no registration for the whole of the callback and the load inside it, and a change landing in that window would fire nothing ever again - a process left holding stale configuration with no signal that it is stale.
+> The fix is in the driver's own seam rather than in the shape: registering and waiting are two calls, `Notifier.Arm` answering with a `Change` that is waited on once, and the loop arms the next registration **before** it runs the callback and before it releases the current one.
+> The shape's promise then holds on all three, and the seam's own test double models the same thing rather than modelling something stronger.
+>
+> **The registration is placed inside the constructor**, which is what makes "the watch is opened on the caller's goroutine so a failure has somewhere to go" a fact about this driver rather than only about its type assertion: a registration that cannot be placed is `ErrWatch` at `Bind`.
+> A key that does not exist yet is deliberately not that failure.
+> The registration goes on the nearest existing key above it and watches that subtree, so the bootstrap case - a process watching the key its own first dump will create - fires when the dump creates it and moves down to the key itself on the next turn.
+> Refusing at `Bind` instead was the honest alternative and was rejected: a configuration key that does not exist yet is ordinary, and the refusal would land on the whole load rather than on the watch.
+>
+> **`Notifier` stays declined, and this amendment states the position rather than leaving a third watcher to reopen it silently.**
+> Its trigger was met at two and deliberately not taken; a third does not change any of the four costs recorded above, and the fourth of them gets stronger rather than weaker, because there is now a third mechanism with nothing in common with the other two.
+> What a common interface would carry between a stat, an inotify queue and a registry notification is still a channel no driver publishes and core never reads.
+>
+> **What a third watcher does change is the question the restated trigger names**, and that question is now filed rather than restated a third time: [#361](https://github.com/onhotpath/ferry/issues/361), two watchable sources composed into one load, detect it, coordinate it or document it.
+> With three drivers announcing changes, a caller wiring two of them under one binding is an ordinary configuration rather than a hypothetical, and what happens when both fire is undecided here.
+> This ADR does not decide it, and #361 is where it gets decided.
+>
+> **Two sentences elsewhere in this document read as counts and are now wrong.**
+> The bullet under [What this ADR does not decide](#what-this-adr-does-not-decide) says `driver/env` "is a second one"; there is a third, and it is opt-in like both of the others.
+> The last consequence says "until a second watchable driver exists", which stopped being the live condition under [#352](https://github.com/onhotpath/ferry/issues/352) and is superseded here: the condition is now #361's answer, not a count.
+
 ### `Notifier` is recorded as the upgrade path, and does not ship
 
 The one thing a watcher needs that is not a ferry concept is the change signal, and today it is the driver's own: a channel, an fsnotify loop, a Consul watch plan.

@@ -385,27 +385,46 @@ func extVocabulary(key string, words []string) string {
 // keyed by tag key and then by the address the word sits at.
 //
 // [ExtensionTable] returns one, and [AddressSet.Extension] is the same view a
-// driver reads at its own Bind. The zero value holds nothing, which is what a
-// type compiled against a registry that declares nothing produces.
+// driver reads at its own Bind. The zero value holds nothing and was declared
+// nothing, which is what a type compiled against a registry that declares
+// nothing produces.
 type ExtTable struct {
 	byKey map[string]map[Path]map[string]string
+
+	// declared is the registry's declared keys, sorted, exactly the slice
+	// extSet.seal sorted at the registry's birth (ADR-0021). It is a sorted
+	// []string rather than a set because the registry already holds one in that
+	// form and it is frozen with the registry, so every compile against that
+	// registry shares the backing array and no compile allocates: an ExtTable is
+	// copied by value onto the AddressSet, and copying a slice header of
+	// immutable elements is the whole cost. The zero ExtTable has a nil slice,
+	// which answers false for every key, which is what a schema compiled against
+	// a registry declaring nothing must answer.
+	declared []string
 }
 
 // Extension is one tag key's address-keyed view: for each address whose field
 // carried that key, the words it carried and the text of each.
 //
-//	for addr, words := range table.Extension("yamlext") {
+//	view, declared := table.Extension("yamlext")
+//	for addr, words := range view {
 //	    nodeTags[addr] = words["node"]
 //	}
 //
 // A word declared without a value reads as the empty string, and asking whether
 // the word is there is the two-result map index.
 //
-// The result is freshly allocated and the caller's to keep, so writing to it
-// changes nothing about the compiled schema it came from. A key nothing
-// declared, and a key no field carried, both yield an empty view rather than an
-// error: an extension nobody used is not a defect.
-func (t ExtTable) Extension(key string) map[Path]map[string]string {
+// The second result reports the key having been declared on the registry this
+// schema was compiled against, and it is the only way to tell a declaration
+// nobody used from one nobody made. A declared key no field carried yields an
+// empty view and true; a key that was never declared yields an empty view and
+// false. Neither is an error, and a consumer for whom the difference matters is
+// the one that must look: a forgotten declaration otherwise reads as a struct
+// carrying no words.
+//
+// The view is freshly allocated and the caller's to keep, so writing to it
+// changes nothing about the compiled schema it came from.
+func (t ExtTable) Extension(key string) (map[Path]map[string]string, bool) {
 	src := t.byKey[key]
 	out := make(map[Path]map[string]string, len(src))
 
@@ -413,7 +432,25 @@ func (t ExtTable) Extension(key string) map[Path]map[string]string {
 		out[addr] = maps.Clone(words)
 	}
 
-	return out
+	return out, t.declares(key)
+}
+
+// declares reports the key being one the registry this table was compiled
+// against was given, which is a different question from any field having
+// carried it (ADR-0021). The slice is sorted by extSet.seal, so the search is
+// the binary one.
+func (t ExtTable) declares(key string) bool {
+	_, ok := slices.BinarySearch(t.declared, key)
+
+	return ok
+}
+
+// declare records the whole declared key set on the table, at the start of a
+// compile and never per field: a type with no fields at all compiled against a
+// registry that declares a key must still answer that the key was declared
+// (ADR-0021).
+func (t *ExtTable) declare(keys []string) {
+	t.declared = keys
 }
 
 // put records one address's words under one key, while the table is still
@@ -434,7 +471,8 @@ func (t *ExtTable) put(key string, addr Path, words map[string]string) {
 // tags carried, without a plane and without a driver.
 //
 //	table, err := ferry.ExtensionTable[Config](ferry.WithRegistry(registry))
-//	for addr, words := range table.Extension("docs") {
+//	view, _ := table.Extension("docs")
+//	for addr, words := range view {
 //	    fmt.Println(addr, words["desc"])
 //	}
 //
@@ -448,7 +486,9 @@ func (t *ExtTable) put(key string, addr Path, words map[string]string) {
 // retains no resolution.
 //
 // The table is empty where the registry this call resolves against declares no
-// tag key, which is every call that names no registry of its own.
+// tag key, which is every call that names no registry of its own, and it
+// reports every key that registry did declare as declared whether or not a
+// field carried one.
 func ExtensionTable[T any](opts ...Option) (ExtTable, error) {
 	sch, err := schemaOf(reflect.TypeFor[T](), opts, discarded)
 	if err != nil {

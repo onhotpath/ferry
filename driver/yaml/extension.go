@@ -106,8 +106,13 @@ func Extension() ferry.KeyExtension {
 //
 // A set carrying no declaration at all builds no map, which is every load and
 // every save under a registry that was not given [Extension].
+//
+// Whether the key was declared is deliberately discarded: a node tag is an
+// optional annotation, so a schema that declares the key and carries no word is
+// the same file this driver would have written anyway, and a registry that was
+// never given [Extension] loses nothing it was promised (ADR-0021).
 func nodeTags(addrs *ferry.AddressSet) (map[ferry.Path]string, error) {
-	view := addrs.Extension(ExtensionKey)
+	view, _ := addrs.Extension(ExtensionKey)
 	if len(view) == 0 {
 		return nil, nil
 	}

@@ -146,6 +146,58 @@ The list is deferred to [#5](https://github.com/onhotpath/ferry/issues/5), becau
 > [ADR-0004](0004-source-and-sink.md) took the deferred list and named `yaml`, `kv` and `env`; `driver/http`, the query-parameter plane, is the fourth, and it is in on the axis this rule exists to test - a plane constructed per request, which nothing else exercises and which [ADR-0012](0012-the-caller-held-binding.md)'s held binding is shaped around.
 > **The rule is unchanged and it worked.** "Roughly three" was an estimate of how many axes the contract has, not a quota, and the fourth driver was admitted by making exactly the argument this paragraph demands of it.
 
+> **Amended under [#272](https://github.com/onhotpath/ferry/issues/272): five drivers ship, and the fifth is the first whose module cannot be built without a dependency.**
+>
+> As published, and as corrected above, the list is four and `driver/http` is the fourth.
+> `driver/windows` is the fifth, and it is the Windows registry in both directions: `winreg` is a `Source` and a `Sink`, and `protect` is a decorator that wraps another driver's `Source` and `Sink` and puts DPAPI-NG between them and the plane.
+> The estimate above is the sentence this admission keeps being read against, so it is restated rather than re-argued: the cap is however many axes the contract turns out to have, and a driver is admitted by naming one no shipped driver occupies.
+>
+> **Five axes, argued one at a time.**
+>
+> - **A tree-shaped live store.** The plane's hierarchy is the store's own syntax, and it is read and written one key at a time against a running system, where `driver/yaml` holds a document it parses whole and `driver/kv` holds a flat namespace with no hierarchy of its own.
+>   Note what this does *not* make it: `winreg` is a **flat** driver in ferry's sense, because `RegOpenKeyEx` takes a subkey path string, so the driver builds a plane key and calls `ferry.NewKeys` like every other flat driver.
+>   The axis is the shape of the store, not the shape of the driver's obligation.
+> - **Two namespaces at every level.** A value lives under a key, so the last segment of an address names a value and the segments before it name a subkey.
+>   That is the first plane where [ADR-0003](0003-how-a-leaf-addresses-a-plane.md)'s leaves and containers tables are two real namespaces of the plane rather than one namespace core splits for its own checking.
+>   It rests on one fact, that a value `foo` and a subkey `foo` coexist under one key, which is asserted in [#272](https://github.com/onhotpath/ferry/issues/272)'s prose and is **not** in its measured table.
+>   The measurement it was owed is now a test rather than a session: `TestWindowsHoldsAValueAndASubkeyOfOneNameAtOnce` writes both under one key on the CI runner's own registry, lists them, and loads a schema holding a leaf beside a section of that name.
+>   It fails loudly rather than skipping if Windows ever disagrees, because this axis and the address mapping both fall with it.
+> - **A typed plane.** `REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY` and `REG_EXPAND_SZ` are type tags stored beside the data, so a read carries plane-side type information.
+>   [ADR-0004](0004-source-and-sink.md)'s axis table has "carries plane-side type information" against `yaml` alone, and `yaml` is the driver that walks segments as a tree, so this is the first plane that produces a key and still carries a type.
+>   What the other flat drivers store is untyped, in two different ways rather than one: `env` and `http` store text, and `driver/kv` stores opaque bytes, which is its own row in the same table.
+> - **`ErrReadOnly` with a real cause.** Opening HKLM for write without the rights returns `ERROR_ACCESS_DENIED`, which is [ADR-0004](0004-source-and-sink.md)'s "writable in principle but not right now" arriving from the operating system.
+>   Today the only producer of that error in the tree is `driver/kv`'s optional `ACL` hook, which simulates it.
+> - **A decorator over another `Source` and `Sink`.** `protect` implements neither plane nor format: it wraps a driver and rewrites the values crossing the boundary.
+>   Nothing in this repository exercises that composition, and it is the axis that says whether the contract is composable at all rather than only implementable.
+>   The axis is the composition and not the protection, which matters because the first run of the real DPAPI-NG on a Windows runner moved what the package's own defaults are without touching this admission.
+>   `SID=` and `SDDL=` protection descriptors are resolved through Active Directory's key distribution service, so they need a domain controller the machine can reach ([MS-GKDI](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-gkdi/60b439bf-d845-4bee-8487-b231d6fdfb92): the server "runs on a DC with a DC functional level of DS_BEHAVIOR_WIN2012 or higher in an Active Directory domain").
+>   `windows-latest` is standalone, so `SID=S-1-5-18` - the package's original headline descriptor - failed every save with `NTE_ENCRYPTION_FAILURE` (`0x80090034`), which is the first thing this driver measured that no test double could have.
+>   The package now defaults to the `LOCAL=` rules, which the machine resolves for itself, and says in its README which descriptor works in which deployment.
+>   None of that changes the axis, and it is recorded here because this is where the driver was admitted.
+>
+> **Case folding is not one of the axes, and the issue's headline claim that it is does not survive.**
+> `driver/env` folds every segment to upper case, which [ADR-0003](0003-how-a-leaf-addresses-a-plane.md) carries as the fourth column of its key-function table, and `driver/http`'s header plane folds through `textproto.CanonicalMIMEHeaderKey`.
+> A folding plane was already shipped twice over, and this driver's fold is a reason it must build a key rather than a reason it may ship.
+>
+> **The dependency is `golang.org/x/sys`, and it is argued here because no other ADR owns it.**
+> The Win32 registry and DPAPI-NG are reached through system calls and through DLL procedure lookups, and `golang.org/x/sys/windows` is the only maintained Go binding for either.
+>
+> The claim to be careful with here is that the module could not be written without it, because that is not true and the honest argument is a different one.
+> Stdlib `syscall` carries the registry read surface on Windows: `RegOpenKeyEx`, `RegQueryValueEx`, `RegQueryInfoKey`, `RegEnumKeyEx` and `RegCloseKey` are all exported from it.
+> It carries none of the write surface - there is no `RegCreateKeyEx`, `RegSetValueEx`, `RegDeleteValue` or `RegDeleteKey` in it - and it has nothing from `ncrypt.dll` either, but `syscall.NewLazyDLL` resolves a procedure out of any DLL, which is the same mechanism `protect` already uses for DPAPI-NG.
+> So the gap could be closed by hand.
+>
+> **The argument is maintained versus frozen, and that argument holds.**
+> `syscall`'s own package documentation says most new code should prefer `golang.org/x/sys`, and points at the Go 1.4 proposal that closed `syscall` to new additions; its Windows surface is what it was when that policy landed and will not grow.
+> `golang.org/x/sys/windows` is where Windows API work in Go actually happens, and it is what every other Go project reaching this surface is already on.
+> Writing the missing half against raw DLL lookups would be reimplementing a maintained package with an unmaintained copy, and getting the handle, rights and UTF-16 conventions right in it is exactly the work that package exists to have already done.
+> That makes this a dependency traded against a frozen equivalent rather than against a convenience, which is not the trade `driver/env`'s fsnotify made: there is no polling fallback for a registry handle.
+> It is also a `golang.org/x` module, which is the Go project's own repository for the platform surfaces the standard library does not export, so it is third party in the module graph and is not third party in the sense this ADR's rule is guarding against.
+>
+> **Who pays is every consumer of `driver/windows` and nobody else.**
+> It is a module of its own, so core's `require` block is untouched and stays empty, and a program that imports `driver/yaml` and never imports this one never sees `golang.org/x/sys`.
+> That is the layout rule above doing the work it exists for, and it is the whole of the mitigation.
+
 ### Core's dependency set is stdlib, unconditionally
 
 > Core's `go.mod` carries no non-stdlib `require`, and core imports only stdlib packages that are unconditionally available at core's declared floor.

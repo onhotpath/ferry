@@ -75,7 +75,10 @@ func TestADeclaredKeyReachesTheDriverAtItsOwnAddresses(t *testing.T) {
 
 	addrs := boundTo[extConf](t, WithRegistry(extRegistry(t, mylibExt())))
 
-	view := addrs.Extension("mylib")
+	view, declared := addrs.Extension("mylib")
+	if !declared {
+		t.Error("a declared key reports itself undeclared")
+	}
 
 	want := map[string]map[string]string{
 		"/wait": {"node": "mycompany:duration", "secret": ""},
@@ -100,14 +103,16 @@ func TestAWordReachesNoAddressWhereTheFieldNamesNone(t *testing.T) {
 
 	addrs := boundTo[extConf](t, WithRegistry(extRegistry(t, mylibExt())))
 
-	for addr := range addrs.Extension("mylib") {
+	view, _ := addrs.Extension("mylib")
+
+	for addr := range view {
 		if strings.Contains(addr.String(), "nowhere") || addr.String() == "/Off" {
 			t.Errorf("the skipped field reached the table at %s", addr)
 		}
 	}
 
-	if len(addrs.Extension("mylib")) != 2 {
-		t.Errorf("the view holds %d addresses, and 2 were expected", len(addrs.Extension("mylib")))
+	if len(view) != 2 {
+		t.Errorf("the view holds %d addresses, and 2 were expected", len(view))
 	}
 }
 
@@ -125,8 +130,14 @@ func TestAnUndeclaredKeyIsNeverClaimed(t *testing.T) {
 	}
 
 	addrs := boundTo[conf](t)
-	if n := len(addrs.Extension("mylib")); n != 0 {
+
+	view, declared := addrs.Extension("mylib")
+	if n := len(view); n != 0 {
 		t.Errorf("an undeclared key yielded %d addresses, and none was expected", n)
+	}
+
+	if declared {
+		t.Error("a key nobody declared reports itself declared")
 	}
 }
 
@@ -290,7 +301,7 @@ func TestAnExtensionValueIsATokenLikeFerrysOwn(t *testing.T) {
 		Port string `ferry:"port" mylib:"node='it''s'"`
 	}
 
-	view := boundTo[conf](t, WithRegistry(extRegistry(t, mylibExt()))).Extension("mylib")
+	view, _ := boundTo[conf](t, WithRegistry(extRegistry(t, mylibExt()))).Extension("mylib")
 
 	got := map[string]string{}
 	for addr, words := range view {
@@ -506,16 +517,8 @@ func TestExtensionTableReadsWithoutAPlane(t *testing.T) {
 		t.Fatalf("the type was refused: %+v", err)
 	}
 
-	if n := len(table.Extension("mylib")); n != 2 {
-		t.Errorf("the mylib view holds %d addresses, and 2 were expected", n)
-	}
-
-	if n := len(table.Extension("docs")); n != 0 {
-		t.Errorf("a declared key no field carried holds %d addresses, and none was expected", n)
-	}
-
-	if n := len(table.Extension("nobody")); n != 0 {
-		t.Errorf("an undeclared key holds %d addresses, and none was expected", n)
+	for _, w := range extWants() {
+		w.check(t, extAnswer(table.Extension(w.key)))
 	}
 
 	if _, err := ExtensionTable[struct{ Host string }](); err == nil {
@@ -531,13 +534,13 @@ func TestTheViewIsTheCallersToKeep(t *testing.T) {
 	reg := extRegistry(t, mylibExt())
 	addrs := boundTo[extConf](t, WithRegistry(reg))
 
-	view := addrs.Extension("mylib")
+	view, _ := addrs.Extension("mylib")
 	for addr, words := range view {
 		delete(view, addr)
 		words["node"] = "rewritten"
 	}
 
-	after := addrs.Extension("mylib")
+	after, _ := addrs.Extension("mylib")
 	if len(after) != 2 {
 		t.Fatalf("the second view holds %d addresses, and 2 were expected", len(after))
 	}
@@ -556,8 +559,13 @@ func TestANilAddressSetHasNoExtension(t *testing.T) {
 
 	var a *AddressSet
 
-	if n := len(a.Extension("mylib")); n != 0 {
+	view, declared := a.Extension("mylib")
+	if n := len(view); n != 0 {
 		t.Errorf("a nil address set yielded %d addresses", n)
+	}
+
+	if declared {
+		t.Error("a nil address set reports a key declared")
 	}
 }
 
@@ -612,7 +620,7 @@ func TestAWordUnderADynamicContainerIsHeldAndNotRecorded(t *testing.T) {
 		Region  string          `ferry:"region" mylib:"node=text"`
 	}
 
-	view := boundTo[conf](t, WithRegistry(extRegistry(t, mylibExt()))).Extension("mylib")
+	view, _ := boundTo[conf](t, WithRegistry(extRegistry(t, mylibExt()))).Extension("mylib")
 
 	if len(view) != 1 {
 		t.Errorf("the view holds %d addresses, and only the static one was expected: %v", len(view), view)
@@ -629,4 +637,145 @@ func TestAWordUnderADynamicContainerIsHeldAndNotRecorded(t *testing.T) {
 	}
 
 	mustRefuse(t, Compile[broken](WithRegistry(extRegistry(t, mylibExt()))), `unknown word "noed"`)
+}
+
+// TestADeclarationNobodyUsedIsNotADeclarationNobodyMade is the distinction the
+// second result exists for: three keys, one carried, one declared and unused,
+// one never declared, and the two empty views do not read alike.
+func TestADeclarationNobodyUsedIsNotADeclarationNobodyMade(t *testing.T) {
+	t.Parallel()
+
+	for _, w := range extWants() {
+		t.Run(w.name, func(t *testing.T) {
+			t.Parallel()
+
+			addrs := boundTo[extConf](t, WithRegistry(extRegistry(t, mylibExt(), docsExt())))
+
+			w.check(t, extAnswer(addrs.Extension(w.key)))
+		})
+	}
+}
+
+// extWant is one expected Extension answer over [extConf] compiled against a
+// registry declaring mylib and docs: the three cases the second result exists
+// to tell apart.
+type extWant struct {
+	name     string
+	key      string
+	addrs    int
+	declared bool
+}
+
+func extWants() []extWant {
+	return []extWant{
+		{name: "carried", key: "mylib", addrs: 2, declared: true},
+		{name: "declared and unused", key: "docs", addrs: 0, declared: true},
+		{name: "never declared", key: "nobody", addrs: 0, declared: false},
+	}
+}
+
+// check asserts one Extension result against what the key was declared and
+// carried.
+func (w extWant) check(t *testing.T, got extWant) {
+	t.Helper()
+
+	if got.addrs != w.addrs || got.declared != w.declared {
+		t.Errorf("the %s key holds %d addresses declared=%v, and %d addresses declared=%v were expected",
+			w.key, got.addrs, got.declared, w.addrs, w.declared)
+	}
+}
+
+// extAnswer packs one Extension result so the two results are compared as one
+// value.
+func extAnswer(view map[Path]map[string]string, declared bool) extWant {
+	return extWant{addrs: len(view), declared: declared}
+}
+
+// TestADeclarationSurvivesATypeWithNoFieldsToRead is why the declared set is
+// recorded at the compile rather than at a field: a root leaf has no struct
+// field for any tag to sit on, and the declaration is still the registry's.
+func TestADeclarationSurvivesATypeWithNoFieldsToRead(t *testing.T) {
+	t.Parallel()
+
+	table, err := ExtensionTable[pollInterval](WithRegistry(rootLeafRegistry(t)))
+	if err != nil {
+		t.Fatalf("the root leaf was refused: %+v", err)
+	}
+
+	view, declared := table.Extension("mylib")
+	if len(view) != 0 {
+		t.Errorf("a type with no fields holds %d addresses, and none was expected", len(view))
+	}
+
+	if !declared {
+		t.Error("a type with no fields lost its registry's declaration")
+	}
+}
+
+// rootLeafRegistry declares the extension beside the codec that makes
+// pollInterval a leaf, so the compile visits no struct field at all.
+func rootLeafRegistry(t *testing.T) *Registry {
+	t.Helper()
+
+	reg, err := NewRegistry(DurationLike[pollInterval](), WithTagKeys(mylibExt()))
+	if err != nil {
+		t.Fatalf("the registry was refused: %+v", err)
+	}
+
+	return reg
+}
+
+// TestTheZeroExtensionTableDeclaresNothing is the zero value's whole contract:
+// it holds nothing and it was told nothing, so it answers false rather than
+// panicking or claiming a key.
+func TestTheZeroExtensionTableDeclaresNothing(t *testing.T) {
+	t.Parallel()
+
+	var table ExtTable
+
+	view, declared := table.Extension("mylib")
+	if len(view) != 0 {
+		t.Errorf("the zero table holds %d addresses", len(view))
+	}
+
+	if declared {
+		t.Error("the zero table reports a key declared")
+	}
+}
+
+// TestTheTwoDoorsAgree is ADR-0021's two readers over one table: the out-of-band
+// door and the driver's own Bind answer the same for every key.
+func TestTheTwoDoorsAgree(t *testing.T) {
+	t.Parallel()
+
+	for _, w := range extWants() {
+		t.Run(w.name, func(t *testing.T) {
+			t.Parallel()
+			assertDoorsAgree(t, w.key)
+		})
+	}
+}
+
+// assertDoorsAgree reads one key through both doors, off one registry, and
+// compares the two answers.
+func assertDoorsAgree(t *testing.T, key string) {
+	t.Helper()
+
+	reg := extRegistry(t, mylibExt(), docsExt())
+
+	table, err := ExtensionTable[extConf](WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("the type was refused: %+v", err)
+	}
+
+	fromTable, tableSays := table.Extension(key)
+	fromAddrs, addrsSays := boundTo[extConf](t, WithRegistry(reg)).Extension(key)
+
+	if tableSays != addrsSays {
+		t.Errorf("ExtensionTable says declared=%v and the address set says %v", tableSays, addrsSays)
+	}
+
+	if len(fromTable) != len(fromAddrs) {
+		t.Errorf("the two views hold %d and %d addresses", len(fromTable), len(fromAddrs))
+	}
 }

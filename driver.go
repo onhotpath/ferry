@@ -36,6 +36,16 @@ type Source interface {
 // directions ships two types, since one type cannot have two Bind methods, so a
 // round trip names the plane twice.
 //
+// The separation is between the two interfaces and not between the two
+// directions. A Sink may read the plane it writes, and a sink over a plane
+// somebody maintains by hand usually should: editing what is already there is a
+// read-modify-write, and it is how a file sink keeps the comments and key order
+// of the document it saves over. What that must not become is a Dump that
+// depends on a Load - one that needs a [Source] constructed or passed, or that
+// carries state from a load into a dump. The read belongs inside the open or
+// the commit, where the caller never sees it, and a sink says in its own
+// documentation whether it merges into what the plane held or replaces it.
+//
 // A plane that is writable in principle but not right now refuses inside the
 // [OpenWriterFunc], with an error wrapping [ErrReadOnly]: not at Bind, which
 // does no I/O and cannot know, and not at the first write, which has already

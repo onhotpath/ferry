@@ -17,7 +17,7 @@ BIN_DIR := $(PROJECT_DIR)/.bin
 # whether or not anyone remembers this file. The two are checked against each
 # other by the "go.work uses every discovered module" step, which fails when
 # they disagree.
-MODULES := . driver/env driver/http driver/kv driver/yaml examples
+MODULES := . driver/env driver/http driver/kv driver/windows driver/yaml examples
 
 # Pinned, not `latest`: a lint failure should always be this repository's doing
 # and never a tool release nobody asked for. This file is the only place either

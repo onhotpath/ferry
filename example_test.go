@@ -370,7 +370,7 @@ func ExampleWithTagKeys() {
 		return
 	}
 
-	view := table.Extension("docs")
+	view, _ := table.Extension("docs")
 	for _, addr := range []ferry.Path{ferry.At("host"), ferry.At("port")} {
 		fmt.Println(addr, "-", view[addr]["desc"])
 	}

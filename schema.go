@@ -196,9 +196,9 @@ type compiler struct {
 	// (ADR-0005).
 	stack []reflect.Type
 
-	// ext is what the declared foreign tag keys carried, address by address. It
-	// is accumulated here and lands on the address set, because that is the
-	// handoff a driver already receives (ADR-0021).
+	// ext is which foreign tag keys the registry declared, and what they carried
+	// address by address. It is accumulated here and lands on the address set,
+	// because that is the handoff a driver already receives (ADR-0021).
 	ext ExtTable
 }
 
@@ -264,6 +264,10 @@ func (s site) locate() Path {
 // through this function and no other.
 func compileSchema(t reflect.Type, cfg config) (*schema, error) {
 	c := &compiler{cfg: cfg}
+	// The declared key set is a property of the registry and not of any field,
+	// so it is recorded once here rather than in readExtensions, which runs per
+	// field and never runs at all for a type with none (ADR-0021).
+	c.ext.declare(cfg.registry.exts.keys)
 
 	root := c.compileRoot(t)
 	c.checkPrefixFree()

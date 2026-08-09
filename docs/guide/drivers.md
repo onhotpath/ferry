@@ -7,7 +7,7 @@ The decision records are [ADR-0004](../adr/0004-source-and-sink.md) for the cont
 
 [The dump lifecycle](dump-lifecycle.md) is the same contract read the other way round, as seven stages and the ladder of what refuses at each one; read it if you want the shape before the signatures.
 
-Four drivers ship in this repository and are worth reading beside this page: [`driver/env`](../../driver/env/), a flat plane over the process environment and `.env` files; [`driver/kv`](../../driver/kv/), a flat plane in both directions with a caller-supplied client; [`driver/yaml`](../../driver/yaml/), a tree plane that edits a file in place; and [`driver/http`](../../driver/http/), a read-only plane over a query string or a header block, which is the one that has to spell one address two ways.
+Five drivers ship in this repository and are worth reading beside this page: [`driver/env`](../../driver/env/), a flat plane over the process environment and `.env` files; [`driver/kv`](../../driver/kv/), a flat plane in both directions with a caller-supplied client; [`driver/yaml`](../../driver/yaml/), a tree plane that edits a file in place; [`driver/http`](../../driver/http/), a read-only plane over a query string or a header block, which is the one that has to spell one address two ways; and [`driver/windows`](../../driver/windows/winreg/), a flat plane in both directions over the Windows registry, which is the one whose values carry a type of their own and whose keys and values are two namespaces rather than one.
 `ferrytest.MemPlane` in [`ferrytest/memplane.go`](../../ferrytest/memplane.go) is a complete, working driver of about the size yours will be, and is the shortest thing to read first.
 
 ## The vocabulary
@@ -91,6 +91,10 @@ What a plane holds at a container address is `Prober`'s answer, and what a dump 
 `driver/env` was the original case and is no longer one: it ships `env.DotEnvSink`, which writes a `.env` file, and applies the dump to the running process only where the caller passed `env.Setenv` ([ADR-0004](../adr/0004-source-and-sink.md) is amended in place with what moved and why).
 
 The cost is stated rather than hidden: a driver serving both directions ships **two types**, because one type cannot have two `Bind` methods, so a round trip names the plane twice.
+
+**Two types is a statement about the published interfaces and not about what your sink may do.**
+The separation says a plane with no honest dump ships no `Sink`, so that dumping to it does not compile.
+It does not say your `Sink` may not read the plane it writes; it may, and [what a sink may read](#what-a-sink-may-read) below is where that is spelled out.
 
 ### The three lifetimes
 
@@ -283,12 +287,13 @@ type PlaneNamer interface {
 | `Concurrent` | your open instance tolerates overlapping calls |
 | `PlaneNamer` | your plane has a name of its own for an address, and a report reads better opening with it |
 
-Of the four drivers here, `driver/yaml` implements six of the eight and the flat planes implement fewer: `driver/kv` reads with `Prober` and `Enumerator` and writes with `Committer` and `Unsetter`, and its refusal to implement `Ensurer` is a declaration rather than an omission, because a store that holds bytes at keys has no way to say that a container is there and holds nothing.
+Of the five drivers here, `driver/yaml` implements six of the eight and the flat planes implement fewer: `driver/kv` reads with `Prober` and `Enumerator` and writes with `Committer` and `Unsetter`, and its refusal to implement `Ensurer` is a declaration rather than an omission, because a store that holds bytes at keys has no way to say that a container is there and holds nothing.
+`driver/windows` is the flat plane that implements the most of them, because the registry can answer almost everything the contract asks: it reads with `Prober`, `Enumerator`, `Concurrent` and `PlaneNamer`, and writes with `Ensurer`, `Unsetter`, `Committer` and `PlaneNamer` - and it is `Ensurer` where it parts company with the other flat planes, because an empty subkey is a real object there.
 
 That spread is the case for making them optional rather than methods on `Reader` and `Writer`: a required `Close` would be `return nil` boilerplate in four of ADR-0004's six sinks, and in the source that is indistinguishable from a driver that should have rolled back and did not.
 The same argument holds for `Ensurer`: a stub that stored a zero-length value would make "the section is present and empty" and "the field is empty text" one observation, which is precisely the collision the kinds exist to keep apart.
 `Concurrent` is the one of the eight that is a promise rather than a capability, and it has a section of its own below.
-`Preparer` is the one no driver here implements, because all four either stage or ship no sink at all, and it has a section of its own below too.
+`Preparer` is the one no driver here implements, because all five either stage or ship no sink at all, and it has a section of its own below too.
 `PlaneNamer` is the one that changes nothing about what your plane does and only what a failure reads as, and it has a section of its own below as well.
 
 ### `Releaser` and `Committer`
@@ -670,6 +675,21 @@ A composite with no elements still writes a null at its own address, exactly as 
 
 **A plane that is writable in principle but not right now refuses inside the `OpenWriterFunc`**, with an error wrapping `ferry.ErrReadOnly`.
 Not at `Bind`, which does no I/O and so cannot know, and not at the first `Set`, which has already half-written the plane.
+
+### What a sink may read
+
+**Your `Sink` may read the plane it writes, and for a plane an operator owns that is the shape to write rather than a compromise.**
+Editing something that already holds data is a read-modify-write, and a dump not depending on a load means the two directions are independent capabilities, not that they cannot be composed.
+Two of the drivers here are already read-modify-write sinks: `driver/yaml` parses the operator's document at the open and edits only the addresses the schema maps, which is what keeps the comments, the key order, the anchors and every key no field maps; and `env.DotEnvSink` reads the `.env` file at the open, rewrites the line each variable already occupied in the quoting that line used, and refuses at `Commit` if somebody else edited the file in between.
+
+**What is forbidden is making a caller's dump depend on their load.**
+Your `Dump` must work with no prior `Load`, must need no `Source` constructed or passed to reach its result, and must not carry state from a load into a dump behind the caller's back.
+The read is yours, inside your open or your `Commit`, and invisible at the call site: the caller still writes `ferry.Dump(ctx, cfg, sink)` and hands over nothing else.
+
+**Decide which kind of plane yours is, and say so in your own documentation.**
+A read costs a round trip per open or per address, and it makes the result of a dump depend on what the plane already held.
+That dependence is what makes it right for a file or a registry a human edits, where structure you did not write is worth preserving, and wrong for a plane ferry alone writes, where the read buys nothing and a stale read is a new way to lose a write.
+A caller cannot tell a merging sink from a replacing one by its type, so the sentence saying which has to be in your godoc.
 
 ## Declaring the kinds your plane carries
 
@@ -1072,7 +1092,7 @@ func TestConformance(t *testing.T) {
 ```
 
 That is the whole file.
-`Driver` is twenty-two cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
+`Driver` is twenty-three cases and it calls `RoundTrip` rather than restating it, because a suite you can partially adopt is a suite that measures nothing.
 
 ### The four fields
 
@@ -1120,7 +1140,7 @@ See [plane compatibility](compatibility.md).
 `Want` is one string, which puts an obligation on a plane holding more than one storage unit: what it renders for this comparison must be **deterministic and injective over stores**.
 That is the same obligation your key function already carries.
 
-### The twenty-two cases
+### The twenty-three cases
 
 1. Every proof the plane can express round-trips, and every kind it declared it cannot carry is refused loudly.
 2. `Bind` succeeds against an unreachable plane, and the refusal lands inside the open.
@@ -1144,6 +1164,7 @@ That is the same obligation your key function already carries.
 20. A reader declaring `Enumerator` lists a sequence of twelve members by position: they come back where they were written, and not in the order their addresses render.
 21. An address a dump was silent at holds nothing afterwards: a value whose `omitzero` field is at its zero value is dumped, and a load over a seed reads the seed there.
 22. A reader declaring `PlaneNamer` names an address the same way twice, and names the same addresses identically over an empty plane and a populated one.
+23. A type that resolves to a leaf names one address, the root, and a plane either has a name for it or refuses it at `Bind`: a plane that takes the dump, reports no error and holds nothing afterwards is the shape that fails.
 
 Case 14 is where a driver that keeps mutable state in the closure it handed back is found, and the case creates the concurrency rather than judging it: run your own suite under `go test -race`, which is what actually reports the defect.
 It opens the write half concurrently and walks nothing, because what the contract obligates is the open.
@@ -1174,6 +1195,12 @@ It reads one leaf and nothing else, so a source that cannot list is asked nothin
 Case 22 is the third capability-scaled one, and it is skipped, out loud, for every reader that is no `PlaneNamer` - which is every plane keyed by the address itself, and correctly so.
 It asks the same address twice for the determinism, and asks the same addresses over an empty plane and over one carrying a fixture for the purity: what a report opens with may not depend on what the plane turned out to hold.
 The addresses it asks about are not confined to the set your read half was bound to, because `PlaneName` takes a `ferry.Path` and core asks it about addresses a value minted.
+
+Case 23 is the root address, which is the empty path, and it accepts two answers rather than one.
+A plane whose keys are segments joined together has nothing to join there, so refusing at `Bind` is the expected shape and the case says so out loud and skips - `kv.RootKey`, `env.RootVar` and `ferryhttp.RootParam` exist so that such a plane can be given a name instead.
+A plane with a name of its own for the root round-trips a `String` there and is held to reading it back.
+What fails is the shape between the two: a dump at no key at all returns a nil error, so the write half alone cannot tell a value that landed from a value that was lost, and the load is what catches it.
+It is skipped, out loud, for a plane that does not carry `KindString`, and a refusal at the write rather than at `Bind` is a skip too, naming where the refusal came from, because it is the same answer late rather than a wrong one.
 
 Cases 8 and 9 reach a value-minted address by dumping a one-entry map rather than by calling `Set` directly, because the address kinds are sealed and only the compiler mints one.
 Case 9 mints case 8's first key as well as its own: case 8 stops where a write is refused, correctly, and a store that cannot spell a hyphen would otherwise be asked by nothing.

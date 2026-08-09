@@ -126,19 +126,40 @@ Collisions refuse at declaration, once, before any tag parses: claiming `ferry`'
 ### The table rides the `AddressSet`, so nobody plumbs anything
 
 > ```go
-> func (a *AddressSet) Extension(key string) /* an address-keyed view */
+> func (a *AddressSet) Extension(key string) (map[Path]map[string]string, bool)
+> func (t ExtTable) Extension(key string)    (map[Path]map[string]string, bool)
 > func ExtensionTable[T any](opts ...Option) (ExtTable, error)
 > ```
 >
 > A driver reads its own key's view at its own `Bind`, which is a handoff it already receives.
 > An out-of-band consumer reads the whole table without a plane.
+> The second result is whether the key was declared on the registry the schema was compiled against.
+
+> **Amended under [#272](https://github.com/onhotpath/ferry/issues/272), on the second consumer: `Extension` returns a second result, because "hands back" was lossy.**
+>
+> As published the signature is `Extension(key string) /* an address-keyed view */`, one result, and the doc comments on both methods said in words that "a key nothing declared, and a key no field carried, both yield an empty view rather than an error: an extension nobody used is not a defect".
+> That sentence merged two facts that are opposites for some consumers.
+> Shipped, `ExtTable.put` is called only where a field carried a word, so a key that was declared and used by nothing left no entry and was indistinguishable from a key nobody declared, and the registry's declared set - which it holds, sorted, from construction - was dropped at compile time.
+>
+> **What is unchanged is the whole of the "Inert to core" section below: core validates, hands back, and acts on nothing.**
+> What changed is only that "hands back" now includes which keys were declared, which is a fact about the registry the caller built and not a new authority over any value.
+> The declared set is recorded on the `ExtTable` once at the start of the compile rather than per field, because a type may reach a compiled schema with no struct field read at all - a root leaf is the plain case - and the declaration is the registry's either way.
+>
+> **Why one consumer may discard the bool and another may not.**
+> `driver/yaml` reads `yamlext` for a node tag, which is an optional annotation: a schema that declares the key and carries no word asks for the file this driver would have written anyway, and a registry never given `yaml.Extension()` loses nothing it was promised.
+> An unused `node` tag is genuinely not a defect, so the driver discards the bool and says so where it does.
+> A consumer that acts on the **absence** of a word is the opposite case.
+> A secrets decorator writes a value in plaintext exactly where no `protect:"secret"` was carried, so a forgotten `ferry.WithTagKeys(protect.TagKey)` reads to it as a struct holding no secrets, and it fails open - silently, with every marked value written in the clear.
+> With the second result it refuses at `Bind` instead, which is the moment before any I/O, and the refusal names the missing declaration rather than the values it would have leaked.
+> The general rule the two cases share: a consumer whose words are additive may discard the bool, and a consumer whose default behaviour on absence is the unsafe one must check it.
 
 The `Bind` handoff is what makes this cost a caller nothing:
 
 ```go
 func (s Sink) Bind(addrs *ferry.AddressSet) (ferry.OpenWriterFunc, error) {
-    nodeTags := map[ferry.Path]string{}
-    for addr, words := range addrs.Extension("yamlext") {
+    view, _ := addrs.Extension("yamlext")        // a node tag is optional, so the
+    nodeTags := map[ferry.Path]string{}          // declared bool is discarded here
+    for addr, words := range view {
         nodeTags[addr] = words["node"]           // memoised once per schema
     }
     ...
@@ -223,6 +244,7 @@ A `go vet`-style analyzer over extension tags is deferred: it is buildable outsi
 - **Declarations live on the registry**, so they join the schema cache key with no new machinery, they are complete at construction, and the canonical form is order-independent and fixed at `Bind`, which is what keeps a live binding stable.
 - **The table rides the `AddressSet`**, so a driver reads its own view at a handoff it already receives and a caller plumbs nothing.
   A driver sees extension data only for addresses it was bound to.
+  It also reads whether its key was declared at all, which is what lets a consumer acting on the absence of a word refuse a missing declaration rather than fail open on it.
 - **Diagnostics cover declared vocabularies without degrading ferry's own**, which is the third of [#34](https://github.com/onhotpath/ferry/issues/34)'s asks and the reason the declaration is typed rather than a set of strings.
 - **Core is inert and a consumer may act**, with the line drawn at whether ferry's own semantics change.
   A driver acting on its declared words is the authority a driver already has over its plane's spelling; ferry refusing a value on a foreign word would be the second authority, and it is refused.
