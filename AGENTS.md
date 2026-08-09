@@ -80,7 +80,7 @@ A figure that was typed rather than measured does not go in a file.
 ## Module rules, asserted by CI
 
 - Core's `require` block stays empty, and core never imports `encoding/json/v2` or `encoding/json/jsontext`.
-- No `go.mod` carries a `toolchain` directive. The pin lives in `go.work` alone.
+- No file carries a `toolchain` directive, `go.work` included. The floor is temporarily go 1.26, pending Go 1.27 GA (#366).
 - No `replace` directive is ever checked in.
 - A driver carries no `require` on core until core is tagged.
 

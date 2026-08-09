@@ -28,9 +28,6 @@ GCI_VERSION ?= v0.14.0
 GOLANGCI_LINT := $(BIN_DIR)/golangci-lint
 GCI := $(BIN_DIR)/gci
 
-# Whatever toolchain the workspace resolves, which go.work pins to go1.27rc2.
-GOVERSION := $(shell go env GOVERSION)
-
 # Tools install into .bin and never into the user's $GOPATH/bin, so building
 # ferry cannot change the version of a tool used on some other project.
 GOINSTALL := GOBIN=$(BIN_DIR) go install
@@ -201,17 +198,11 @@ tools: $(GOLANGCI_LINT) $(GCI) ## Install the pinned tools into .bin.
 
 $(GOLANGCI_LINT):
 	@echo "==> installing golangci-lint $(GOLANGCI_LINT_VERSION)"
-	@# Built from source with GOTOOLCHAIN forced to the workspace's toolchain.
-	@# Every released golangci-lint binary is compiled with Go 1.26 and refuses
-	@# a module targeting 1.27 outright:
-	@#   "the Go language version (go1.26) used to build golangci-lint is lower
-	@#    than the targeted Go version (1.27)"
-	@# Building it with the toolchain go.work pins produces a binary that
-	@# accepts ADR-0001's floor. Measured on v2.12.2 with go1.27rc2.
-	@#
-	@# TODO: drop the GOTOOLCHAIN prefix once a golangci-lint release is built
-	@# with Go 1.27, which cannot happen before Go 1.27 is GA.
-	@GOTOOLCHAIN=$(GOVERSION) $(GOINSTALL) github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	@# The GOTOOLCHAIN prefix this install used to carry is gone under #366.
+	@# It was there because golangci-lint refuses a module whose directive is
+	@# newer than the Go it was built with, and the floor is a released Go now.
+	@# It comes back if the floor returns to a release candidate.
+	@$(GOINSTALL) github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	@$(GOLANGCI_LINT) --version
 
 $(GCI):

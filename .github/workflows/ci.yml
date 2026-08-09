@@ -23,15 +23,15 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # ADR-0001 sets the floor at go 1.27, which is not GA yet: go1.27rc2 is what
-  # exists. setup-go spells that release candidate '1.27.0-rc.2'.
+  # ADR-0001's floor is go 1.27, which is not GA, so #366 drops it to 1.26
+  # until it is. This pin names a released toolchain rather than a release
+  # candidate, so the floor CI enforces is one a consumer can install.
   #
-  # TODO: move this to '1.27.x' once Go 1.27 is released. Four workarounds
-  # expire on the same day: this pin, the toolchain guard in the GOWORK=off
-  # step, the source build of golangci-lint (now in the Makefile), and
-  # staticcheck being switched off in .golangci.yml because the version
-  # golangci-lint bundles cannot parse Go 1.27 source.
-  GO_VERSION: '1.27.0-rc.2'
+  # Three of the four workarounds the release candidate forced are cleared by
+  # that: the GOWORK=off toolchain guard, the source build of golangci-lint,
+  # and staticcheck being switched off in .golangci.yml. This pin is the
+  # fourth, and it returns to '1.27.x' when Go 1.27 goes GA.
+  GO_VERSION: '1.26.x'
 
   # The golangci-lint pin used to live here. It lives in the Makefile now, as
   # GOLANGCI_LINT_VERSION, because the lint job runs `make lint` and there is no
@@ -310,16 +310,19 @@ jobs:
 
           # Gate 2: outside the workspace there is no toolchain line, by design,
           # so the go directive has to be satisfiable by a released toolchain.
-          # While the floor is 1.27 and only go1.27rc2 exists, it is not.
+          # Kept as a defensive probe even though it is not expected to fire
+          # while #366 holds the floor at a released Go: if a go directive ever
+          # outruns what is installed again, this is what catches it.
           if ! probe=$(GOWORK=off go list -m 2>&1); then
             case "$probe" in
               *toolchain*|*"requires go >="*)
                 echo "SKIPPED: GOWORK=off build of ${{ matrix.module }}"
                 echo "  why: $probe"
-                echo "       go.work carries 'toolchain go1.27rc2' and no go.mod"
-                echo "       does (ADR-0002), so outside the workspace the go"
-                echo "       directive resolves to a Go 1.27 that is not released."
-                echo "  clears: when GO_VERSION moves to 1.27.x."
+                echo "       the go directive resolves to a toolchain that"
+                echo "       is not installed outside the workspace."
+                echo "  note: not expected to fire while #366 holds the floor"
+                echo "        at a released Go. Gate 1 above skips the job"
+                echo "        first anyway until core is tagged."
                 exit 0
                 ;;
             esac

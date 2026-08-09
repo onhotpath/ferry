@@ -265,6 +265,27 @@ Core at `go 1.26` with no json/v2 import, and the v2 dependency in a sub-module 
 Verified buildable on this design as of this date: core compiles under `GOTOOLCHAIN=local` on go1.26.5, and the `go 1.27` sub-module importing `encoding/json/v2` compiles under `GOTOOLCHAIN=go1.27rc2`.
 As of this date Go 1.27 is still `go1.27rc2` with `"stable": false`, so the fallback is live rather than theoretical.
 
+> **Amended under [#366](https://github.com/onhotpath/ferry/issues/366): core's floor drops to `go 1.26`, and the launch exception is narrowed and re-based to cover it, not withdrawn.**
+>
+> The general rule above is that core's directive never names a release newer than the second-most-recent stable Go release.
+> With `go 1.26` current, the second-most-recent stable release is `go 1.25`, so `go 1.26` is still newer than the general rule allows.
+> **The launch exception stays in force, sized to a smaller directive, rather than the repo coming back into compliance with the general rule.**
+> Reading this as compliance restored would be wrong: the rule still names 1.25, and core still does not sit there.
+>
+> **What now holds the floor above the rule is `errors.AsType`, a Go 1.26 API used in ten places in `error.go`, not `encoding/json/v2`.**
+> The exception's justification changes along with its size: it no longer prices in a whole release's worth of json/v2 access, only the one API core's own error model already depends on.
+> Reaching `go 1.25` and the general rule would mean giving up `errors.AsType` in `error.go`, which is a different decision with its own cost and is not taken here.
+>
+> **The fallback paragraph above is now spent rather than hypothetical, and it held.**
+> Every module compiles, vets and tests under `-gcflags=-lang=go1.26`, including test binaries and `driver/windows` under `GOOS=windows`, and a `go doc -all` diff between real 1.26 and 1.27 GOROOTs across all 48 stdlib packages the repo imports finds no 1.27-only symbol referenced anywhere in core or a driver.
+> The one line in the repo that needed 1.27 was in `examples/concurrent-driver/plane.go`, using promoted fields in a composite literal, a 1.27 language feature, and it is rewritten to a form that compiles on both.
+> `toolchain go1.27rc2` is deleted from `go.work`, so no file in the repository carries a toolchain directive at all, and CI moves to a released Go 1.26.x so the floor is genuinely exercised rather than merely declared.
+>
+> **"Raising core's floor is never a patch release" cuts both ways.**
+> The return to `go 1.27` at GA is the same kind of event as this drop and gets the same treatment: a deliberate, named change to core's directive, not a release nobody notices.
+>
+> **Unchanged**: a driver module may still declare a higher `go` directive than core and never a lower one, CI still asserts it, and the comparison stays relative, so a uniform drop across core and drivers passes it untouched.
+
 ### Development and release
 
 **No `replace` directive is ever checked in.**

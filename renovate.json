@@ -14,7 +14,7 @@
       "groupName": "github actions"
     },
     {
-      "description": "Never touch the Go language or toolchain version. ADR-0002 makes core's `go` directive a deliberate release decision - raising core's floor is never a patch release, because that line decides who can import ferry at all - and CI separately asserts that no driver module sits below core. The `toolchain go1.27rc2` pin lives in go.work and is intentional for as long as Go 1.27 is not GA. A routine bot bump of any of those three would break a policy nobody would see being broken, so this is a decision that stays with a human.",
+      "description": "Never touch the Go language or toolchain version. ADR-0002 makes core's `go` directive a deliberate release decision - raising core's floor is never a patch release, because that line decides who can import ferry at all - and CI separately asserts that no driver module sits below core. There is no toolchain directive anywhere in the repo now, and the `go` directive is temporarily 1.26 under #366 for as long as Go 1.27 is not GA, which makes it even more emphatically a human decision. A routine bot bump of any of those three would break a policy nobody would see being broken, so this is a decision that stays with a human.",
       "matchManagers": ["gomod"],
       "matchDepNames": ["go"],
       "matchDepTypes": ["golang", "toolchain"],
