@@ -480,7 +480,7 @@ func TestALeafLinkThatNamesNowhereIsRefused(t *testing.T) {
 func TestALeafRedirectReadsAsAStatement(t *testing.T) {
 	t.Parallel()
 
-	err := &LeafRedirect{Target: leafOf(At("db", "host"))}
+	err := &LeafRedirect{Target: leafOf(At("db", "host"), KindString)}
 
 	if got, want := err.Error(), "the value lives at /db/host"; got != want {
 		t.Errorf("the redirect reads %q, want %q", got, want)

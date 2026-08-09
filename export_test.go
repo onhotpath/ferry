@@ -13,22 +13,24 @@ package ferry
 // go doc never prints it: the published surface still has no constructor, which
 // is what the sealing is.
 
-// LeafSet builds an address set of leaves, for a test outside this package.
-func LeafSet(addrs ...Path) *AddressSet {
+// LeafSet builds an address set of leaves, each wanting one kind, for a test
+// outside this package.
+func LeafSet(want VKind, addrs ...Path) *AddressSet {
 	members := make([]Member, 0, len(addrs))
 	for _, addr := range addrs {
-		members = append(members, leafOf(addr))
+		members = append(members, leafOf(addr, want))
 	}
 
 	return newAddressSet(members...)
 }
 
-// Leaf is the leaf address at one path, for a test outside this package that
-// has to hand one to a Reader or a Writer directly.
-func Leaf(addr Path) LeafAddr { return leafOf(addr) }
+// Leaf is the leaf address at one path, wanting one kind, for a test outside
+// this package that has to hand one to a Reader or a Writer directly.
+func Leaf(addr Path, want VKind) LeafAddr { return leafOf(addr, want) }
 
 // Section is the section address at one path.
 func Section(addr Path) SectionAddr { return sectionOf(addr) }
 
-// Composite is the composite address at one path.
-func Composite(addr Path) CompositeAddr { return compositeOf(addr) }
+// Composite is the composite address at one path, wanting one kind at its
+// members.
+func Composite(addr Path, want VKind) CompositeAddr { return compositeOf(addr, want) }

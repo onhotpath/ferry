@@ -45,6 +45,25 @@ The sealing is [ADR-0009](0009-typed-codec-registration.md)'s own device applied
 The three types partition the address space and they are not interchangeable.
 `/db` as a `SectionAddr` and `/db` as a `CompositeAddr` are different addresses, and asking whether a set holds one answers nothing about the other.
 
+> **Amended under [#340](https://github.com/onhotpath/ferry/issues/340): a typed address carries the kind of value the schema wants at it.**
+>
+> As published, an address said what kind of place it names and nothing about what is at it.
+> A plane carrying no type information of its own then had to decide a spelling for the whole plane or not at all, which is what [ADR-0018](0018-the-spelling-seam.md) ratified for `env.BoolWords` and named as a sharp edge.
+>
+> What moved: `LeafAddr` carries the kind the schema wants at it and publishes it as `Wants() VKind`.
+> The compiler mints that answer for an address the type determines, and the walk mints it from the node it is standing at for an address a value produced, so an address answers for itself and a driver reads it off the address it was already handed.
+> `CompositeAddr` carries the same answer for the leaves its members are, and **publishes nothing**: the fact is held so that a composite address the walk mints is `==` to the one the set holds, and so that publishing an element accessor when a driver asks for one is a method body and no plumbing.
+> `SectionAddr` carries none, because a section holds no value and has no kind to want.
+>
+> `Wants` is the schema's answer and not the whole of what a leaf takes: every leaf accepts a `KindString` beside its own kind, and a `Writer` still answers with what its plane holds, which is the `Value` in hand.
+> The two can legitimately differ, and a nil pointer leaf writing a `Null` at an address whose schema kind is the pointee's is the case that says so.
+>
+> What it costs is that the mint takes the kind at every site: there is no arity that compiles without one, so a mint that forgot the answer is a build failure rather than an address silently equal to nothing.
+> What it buys is that a driver needs no table and no prefix scan for the addresses it did not get at `Bind`, because the answer arrives with the question.
+> The whole of `env`'s change is one expression.
+>
+> The width moved with it, and the correction is in the two places below that quote a number.
+
 **The contract is re-signed once, and the three questions separate:**
 
 ```go
@@ -134,7 +153,14 @@ S3 is rejected on the diagnostic: a generic address type puts `Addr[leafK]` in e
 Three methods, not three per kind.
 The alternative drawn was `Leaves()`, `Sections()` and `Composites()`, and it was proven bind-equivalent - the env driver builds the identical key table either way - so the choice is made on surface count under the rule that every export is a contact point maintained forever.
 
-A driver binds with one range and one cold-path type switch, and the typed addresses are comparable 16-byte map keys:
+A driver binds with one range and one cold-path type switch, and the typed addresses are comparable map keys:
+
+> **Corrected under [#340](https://github.com/onhotpath/ferry/issues/340): two of the three are 24 bytes and not 16.**
+>
+> As published this sentence read "comparable 16-byte map keys", which was true of all three when an address carried a `Path` and nothing else.
+> Measured on the shipped types: `Path` 16 B, `SectionAddr` 16 B, `LeafAddr` 24 B, `CompositeAddr` 24 B.
+> The kind the schema wants is the extra word, on the two kinds that carry one.
+> Comparability, which is the property the loop below rests on, is unchanged and is asserted at the type.
 
 ```go
 for m := range set.Seq() {
@@ -445,6 +471,14 @@ The rule taken is the loud refusal scoped to exactly the planes that cannot spel
 
 - **Three address types replace one `Path` in the driver contract, and the wrong question stops compiling.**
   Four open issues are retired as classes rather than as instances, and the deciding evidence is that the two alternatives were built and measured at parity: 16 B and ~18.8 ns/op at zero allocations against 24 B and ~16.4 ns, so safety was the only axis left.
+
+  > **Corrected under [#340](https://github.com/onhotpath/ferry/issues/340): the shipped address is now the same width as the alternative it was measured against.**
+  >
+  > The sentence above stays as it is, because it is the record of what was measured when the choice was made.
+  > What changed since is the shipped side of it: `LeafAddr` and `CompositeAddr` are 24 B, and `SectionAddr` is 16 B.
+  > **Nothing about the S1-over-S2 decision moves, and this note says so rather than leaving it to be read into the numbers.**
+  > S2 was rejected because a `Path` plus a `Kind()` leaves the wrong question compiling, caught at run time and only if a driver remembers to check.
+  > What ships is still three sealed types, and the width is a payload on an address whose kind is already in its type rather than a classification a driver has to test.
 - **A driver's `Bind` classifies once, from one iterator over a sealed sum**, which is what [#239](https://github.com/onhotpath/ferry/issues/239)'s identical address sets made impossible.
   The cost is a type switch in every flattening driver's `Bind`, on the cold path, and a tree driver still pays nothing.
 - **Three methods on `AddressSet` rather than three per kind**, chosen on surface count after both were proven to build the identical key table.

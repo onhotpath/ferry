@@ -205,7 +205,7 @@ type spot struct {
 // rather than carried on the node, because a node under a dynamic composite
 // holds an address shape and the address is the one the walk realised
 // (ADR-0016).
-func (s spot) leaf() LeafAddr { return leafOf(s.at) }
+func (s spot) leaf() LeafAddr { return leafOf(s.at, s.n.codec.kind) }
 
 // container is the typed address of the container this position occupies, at
 // the kind the compiler decided for it. Its callers are the three arms that
@@ -216,12 +216,12 @@ func (s spot) container() Container {
 		return sectionOf(s.at)
 	}
 
-	return compositeOf(s.at)
+	return compositeOf(s.at, elemWantOf(s.n))
 }
 
 // composite is the typed address of a dynamic container, which is what a driver
 // is asked to enumerate.
-func (s spot) composite() CompositeAddr { return compositeOf(s.at) }
+func (s spot) composite() CompositeAddr { return compositeOf(s.at, elemWantOf(s.n)) }
 
 // child is the address of one member a driver enumerated: the driver minted the
 // segment and the schema types what is at it (ADR-0016).
@@ -389,6 +389,29 @@ func member(s spot, i int) spot {
 // compiled once and realised per member, so the field list holds exactly one
 // node and it is that shape.
 const elemShape = 0
+
+// elemWantOf is what the schema wants at the leaves one container's value
+// mints: the kind the element's codec declared, and KindAbsent where the
+// element is not a leaf (ADR-0016).
+//
+// A pointer defers to what it points at, for the reason [containerKind] gives:
+// it mints no segment and takes the address of its pointee, so *[]string wants
+// at its members what []string wants.
+//
+// The compiler records this off the element node and the walk reads it off the
+// same node, so the address the set holds and the address the walk mints for
+// one place are ==, rather than two spellings that agree only by inspection.
+func elemWantOf(n *node) VKind {
+	if len(n.fields) == 0 {
+		return KindAbsent
+	}
+
+	if n.kind == nodePointer {
+		return elemWantOf(n.fields[elemShape])
+	}
+
+	return n.fields[elemShape].codec.kind
+}
 
 // realised is where one member sits: its own compiled address in the static
 // tier, and the same suffix under the realised address in the dynamic one.
@@ -1410,8 +1433,14 @@ func sortedKeys(s spot) ([]entry, error) {
 // them, so nothing is minted across the scheduler seam and the refusal is the
 // same on every run whatever order the members are walked in.
 type realising struct {
-	s     spot
-	kind  addrKind
+	s    spot
+	kind addrKind
+
+	// want is what the schema wants at a member, carried so that the address
+	// this container mints for a question is == to the one the set holds
+	// (ADR-0016).
+	want VKind
+
 	addrs *AddressSet
 	b     batch
 }
@@ -1422,6 +1451,7 @@ func (d dumpTo) realising(s spot, n int) *realising {
 	return &realising{
 		s:     s,
 		kind:  elemKind(s),
+		want:  elemWantOf(s.n),
 		addrs: d.addrs,
 		b:     batch{out: outcome{minted: make(map[Path]spot, n)}},
 	}
@@ -1459,7 +1489,7 @@ func (r *realising) member(v reflect.Value, at Path, into descend) {
 // once, at [collided].
 func (r *realising) mint(at Path) error {
 	_, taken := r.b.out.minted[at]
-	if taken || r.addrs.Has(memberAt(r.kind, at)) {
+	if taken || r.addrs.Has(memberAt(r.kind, at, r.want)) {
 		return collided(at, r.s)
 	}
 

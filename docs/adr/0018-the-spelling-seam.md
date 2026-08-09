@@ -129,6 +129,24 @@ So `ferry:"transform=uppercase"` is refused now and stays refused: ferry's names
 > A kind-gated refinement - consulting the schema's kind at the address before applying a spelling - is contingent on the address set exposing a per-address kind, which it does not, and is parked at [#309](https://github.com/onhotpath/ferry/issues/309).
 > Nothing here anticipates it.
 
+> **Amended under [#340](https://github.com/onhotpath/ferry/issues/340): the contingency the paragraph above names is satisfied, and the kind-gated refinement shipped.**
+>
+> As published, the option was plane-wide because there was nowhere to read a per-address kind from, and the paragraph above parked the refinement on exactly that.
+> [ADR-0016](0016-the-sealed-address-model.md) now has a typed address carry the kind the schema wants at it, published as `LeafAddr.Wants`, so the contingency is met and the option changed with it.
+>
+> What moved: the words are consulted where the schema wants a bool and nowhere else.
+> A `string` field over `FEATURE=on` loads the text `on` rather than being refused.
+>
+> **The old remedy is retired.**
+> Choosing words your text values do not use is no longer the answer, because there is no longer a collision to avoid inside one schema: a bool field and a string field over two variables holding the same declared word both load, each getting what it asked for.
+>
+> **The sharp edge is kept and it is a different one.**
+> A variable holding a declared word is a boolean where the schema wants one and text where it does not, so two programs reading one environment can read one variable two ways, and which way is the schema's business rather than the environment's.
+>
+> **The write side is unaffected, and nothing in this ADR's laws moves.**
+> A `Value` carries its own kind, so a sink renders a `KindBool` with the words and everything else as text, and there is nothing at a write for an address to decide.
+> The seam is still plane-wide in what it declares; what is per-address is only where the declaration lands.
+
 Some duplication between drivers, zero shared surface, and every vocabulary stays honest to its plane.
 Core's `require` block stays empty, which is a module rule and not a preference: a shared spelling module would be a fourth thing to version and a place for a plane-untrue rendering to hide.
 

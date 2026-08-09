@@ -367,7 +367,7 @@ func dumpVisitsTheAddressSet(t *testing.T) {
 func mustBeOneList(t *testing.T, bound *AddressSet, visited []Path) {
 	t.Helper()
 
-	if !bound.Has(leafOf(At("name"))) || bound.Has(leafOf(At("walkTop", "Name"))) {
+	if !bound.Has(leafOf(At("name"), KindString)) || bound.Has(leafOf(At("walkTop", "Name"), KindString)) {
 		t.Errorf("the address set promotes nothing: %v", kinded(bound))
 	}
 
