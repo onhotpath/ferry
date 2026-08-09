@@ -62,12 +62,14 @@ func readNumber(text string) (string, error) {
 		return word, nil
 	}
 
-	if n, err := strconv.ParseInt(plain, autoBase, numBits); err == nil {
-		return signedText(plain, n), nil
-	}
+	if integral(plain) {
+		if n, err := strconv.ParseInt(plain, autoBase, numBits); err == nil {
+			return signedText(plain, n), nil
+		}
 
-	if n, err := strconv.ParseUint(plain, autoBase, numBits); err == nil {
-		return strconv.FormatUint(n, decimal), nil
+		if n, err := strconv.ParseUint(plain, autoBase, numBits); err == nil {
+			return strconv.FormatUint(n, decimal), nil
+		}
 	}
 
 	if float, ok := floatText(plain); ok {
@@ -227,4 +229,28 @@ func carrySpelling(at, spelled *yamlv3.Node) {
 	}
 
 	spelled.Value = at.Value
+}
+
+// integral reports whether text could be an integer literal under strconv's
+// base 0, which is the two integer parsers' precondition and nothing more.
+//
+// It exists because the order the parsers are tried in is the resolver's own
+// and cannot be changed: a leading zero is octal, so the integer arms have to
+// run before the float one. That leaves every float in the document being
+// refused twice before it reaches the arm that takes it, and a strconv refusal
+// is a heap-allocated *strconv.NumError this function is about to discard.
+//
+// It answers "could be" and never "is". A text this admits may still fail both
+// parsers - it is a range check, not a grammar - and the arms below it decide.
+// What it excludes is only what no integer literal can hold.
+func integral(text string) bool {
+	text = strings.TrimLeft(text, "+-")
+
+	// Hexadecimal spells e and E as digits, so only a radix point or a binary
+	// exponent makes one a float there.
+	if len(text) > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X') {
+		return !strings.ContainsAny(text, ".pP")
+	}
+
+	return !strings.ContainsAny(text, ".eEpP")
 }

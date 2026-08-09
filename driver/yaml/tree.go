@@ -3,7 +3,6 @@ package yaml
 import (
 	"fmt"
 	"iter"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -289,40 +288,64 @@ func indexOf(text string) (int, error) {
 // document rather than a key built out of joined segments (#339). [docRoot] is
 // what it answers with.
 func place(doc *yamlv3.Node, addr ferry.Path, last yamlv3.Kind) (*yamlv3.Node, error) {
-	// The segments are collected rather than ranged over, because the write
-	// side needs to look one segment ahead: what a container has to be is
-	// decided by the kind of the segment under it.
-	segs := slices.Collect(addr.Segments())
-	if len(segs) == 0 {
-		return docRoot(doc), nil
-	}
+	// The write side has to look one segment ahead - what a container has to be
+	// is decided by the kind of the segment under it - and that lookahead is
+	// the loop variable rather than an index into a collected slice: each
+	// segment is acted on one step late, holding the one before it, so the
+	// address is walked without a slice per write (#351). The last segment has
+	// nothing under it and is settled after the loop, where last applies.
+	var (
+		n    *yamlv3.Node
+		prev ferry.Segment
+		held bool
+	)
 
-	n := rootFor(doc, segs[0].Kind())
+	for seg := range addr.Segments() {
+		if !held {
+			n = rootFor(doc, seg.Kind())
+			prev, held = seg, true
 
-	for i, seg := range segs {
-		child, err := slot(n, seg)
-		if err != nil {
+			continue
+		}
+
+		var err error
+		if n, err = descendTo(n, prev, seg.Kind(), kindFor(seg.Kind())); err != nil {
 			return nil, err
 		}
 
-		n = through(child, wanted(segs, i, last))
-
-		if i+1 < len(segs) {
-			shape(n, segs[i+1].Kind())
-		}
+		prev = seg
 	}
 
-	return n, nil
+	if !held {
+		return docRoot(doc), nil
+	}
+
+	child, err := slot(n, prev)
+	if err != nil {
+		return nil, err
+	}
+
+	return through(child, last), nil
 }
 
-// wanted is the node kind the address needs at step i: the container the next
-// segment is looked up in, or what the caller asked for at the last step.
-func wanted(segs []ferry.Segment, i int, last yamlv3.Kind) yamlv3.Kind {
-	if i+1 == len(segs) {
-		return last
+// descendTo takes one step of [place]: the slot prev names, followed to the
+// container the segment under it needs, shaped for that segment.
+func descendTo(n *yamlv3.Node, prev ferry.Segment, next ferry.SegmentKind, want yamlv3.Kind) (*yamlv3.Node, error) {
+	child, err := slot(n, prev)
+	if err != nil {
+		return nil, err
 	}
 
-	if segs[i+1].Kind() == ferry.Index {
+	at := through(child, want)
+	shape(at, next)
+
+	return at, nil
+}
+
+// kindFor is the node kind a container has to be to hold a member named by a
+// segment of this kind.
+func kindFor(k ferry.SegmentKind) yamlv3.Kind {
+	if k == ferry.Index {
 		return yamlv3.SequenceNode
 	}
 
