@@ -164,7 +164,7 @@ func boolTable(words []string) (map[string]bool, error) {
 // with no type information of its own carries a kind at all: the words are the
 // type information, and they are the operator's own rather than a guess this
 // driver makes (ADR-0018).
-func (c config) observe(text string) ferry.Value {
+func (c *config) observe(text string) ferry.Value {
 	if c.bools == nil {
 		return ferry.String(text)
 	}

@@ -76,8 +76,6 @@ type config struct {
 type rootDecl struct {
 	required    bool
 	requiredSet bool
-	def         string
-	defSet      bool
 }
 
 // defaultTagKey is the key ferry reads when nobody says otherwise.
@@ -303,42 +301,39 @@ func optionError(msg string) error {
 
 // RootRequired declares the root address required (PROTOTYPE, #309).
 //
-//	port, err := ferry.Load[int](ctx, src, ferry.RootRequired())
+//	port, err := ferry.Load[int](ctx, src, ferry.RootRequired)
 //
 // It is what "required" on a struct tag says, at the one address that has no
 // tag to say it on: a plane holding nothing at the root fails with [ErrMissing]
-// rather than leaving the zero value.
+// rather than leaving the zero value. On a root that is a struct it means what
+// it means on a nested one, that the plane supplied at least one of its
+// children.
 //
-// It is refused beside [RootDefault], which is the same pair the tag grammar
-// refuses.
-func RootRequired() Option {
-	return optionFunc(func(c *config) error {
-		if c.root.requiredSet {
-			return optionError("ferry.RootRequired was supplied twice in one call")
-		}
-
-		c.root.required, c.root.requiredSet = true, true
-
-		return nil
-	})
-}
-
-// RootDefault declares the text the root address takes where the plane holds
-// nothing (PROTOTYPE, #309).
+// There is no RootDefault beside it, and the absence is the decision: a seed is
+// the caller's default. [LoadOver] returns the seed at every address the plane
+// is silent about, the root included, so a root with a default is
+// LoadOver(ctx, 8080, src) and needs no declaration at all.
 //
-//	port, err := ferry.Load[int](ctx, src, ferry.RootDefault("8080"))
+// It is a value rather than a constructor because it carries no argument. Its
+// type has exactly one value, so assigning to it can only store what it already
+// holds.
+var RootRequired rootRequired
+
+// rootRequired is [RootRequired]'s type, and it is a struct{} so that the
+// exported var is a constant in everything but name: the only value assignable
+// to it is the one it starts with.
 //
-// It is what "default=" on a struct tag says, and it travels the same path: the
-// text is decoded by the root's own codec, on every load, and only where the
-// plane reported absence.
-func RootDefault(text string) Option {
-	return optionFunc(func(c *config) error {
-		if c.root.defSet {
-			return optionError("ferry.RootDefault was supplied twice in one call")
-		}
+// An Option-typed var would not have that property. It would be reassignable to
+// any other Option in the package, process-wide, from any init in the binary,
+// which is a mutable global the closed Option set has no answer for.
+type rootRequired struct{}
 
-		c.root.def, c.root.defSet = text, true
+func (rootRequired) apply(c *config) error {
+	if c.root.requiredSet {
+		return optionError("ferry.RootRequired was supplied twice in one call")
+	}
 
-		return nil
-	})
+	c.root.required, c.root.requiredSet = true, true
+
+	return nil
 }

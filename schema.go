@@ -97,7 +97,9 @@ func schemaWith(t reflect.Type, cfg config, keep retention) (*schema, error) {
 		return compileSchema(t, cfg)
 	}
 
-	return cfg.registry.schemaFor(schemaKey{typ: t, tagKey: cfg.tagKey, decl: cfg.registry.exts.decl, root: cfg.root}, cfg)
+	k := schemaKey{typ: t, tagKey: cfg.tagKey, decl: cfg.registry.exts.decl, root: cfg.root}
+
+	return cfg.registry.schemaFor(k, cfg)
 }
 
 // schema is a compiled type: the node tree a walk iterates, and the address set
@@ -316,16 +318,8 @@ func (c *compiler) compileRoot(t reflect.Type) *node {
 //
 // required is admissible there for the reason ADR-0006 admits it on a nested
 // struct: it means the plane supplied at least one of the root's children, and
-// [walker] already answers it at that node. default= is not, for the reason
-// [compiler.checkNoDefault] gives - a struct's value lives at many addresses and
-// a declaration holds one text.
+// [walker] already answers it at that node.
 func (c *compiler) declareOnStructRoot(n *node) {
-	if c.cfg.root.defSet {
-		c.errAt(Path{}, "ferry.RootDefault was supplied and the root is a struct: a default is one text and a "+
-			"struct's value lives at many addresses - declare the default on the field it belongs to, or seed "+
-			"it through LoadOver")
-	}
-
 	if n != nil {
 		n.required = c.cfg.root.required
 	}
@@ -341,27 +335,10 @@ func (c *compiler) compileRootLeaf(t reflect.Type) *node {
 		return nil
 	}
 
-	d := c.cfg.root
-	c.checkRootDecl(s.addr)
-
-	n := &node{
-		kind: nodeLeaf, addr: s.addr, codec: cd,
-		def: String(d.def), hasDef: d.defSet, required: d.required,
-	}
+	n := &node{kind: nodeLeaf, addr: s.addr, codec: cd, required: c.cfg.root.required}
 	c.recordLeaf(s)
 
 	return n
-}
-
-// checkRootDecl holds the root declaration to the one rule the tag grammar
-// holds a field's to: required and default= answer the same absence in two
-// ways, so declaring both is refused (PROTOTYPE, #309, ADR-0006).
-func (c *compiler) checkRootDecl(addr Path) {
-	if c.cfg.root.required && c.cfg.root.defSet {
-		c.errAt(addr, "the root declares both ferry.RootRequired and ferry.RootDefault: a default answers the "+
-			"absence required forbids, so one of them can never fire - keep the one that says what should "+
-			"happen when the plane holds nothing at the root")
-	}
 }
 
 // rootLeafCodec is the codec [compiler.rootIsLeaf] already found.
@@ -390,16 +367,6 @@ func (c *compiler) rootIsLeaf(t reflect.Type) bool {
 	_, ok := c.cfg.registry.leafFor(t)
 
 	return ok
-}
-
-// rootLeafMsg refuses a type that resolved to a leaf at the root, and it names
-// what the type compiled to rather than what its Go kind is: netip.Addr and a
-// registered struct are both structs, and being a struct is not what makes them
-// refusable here (ADR-0010).
-func rootLeafMsg(t reflect.Type) string {
-	return fmt.Sprintf("%s compiles to a leaf, so at the root it would sit at the empty path, which is not an "+
-		"address: a leaf there is written nowhere and the write reports no error - wrap it in a struct whose "+
-		"field names the address it should sit at", t)
 }
 
 // compileStruct compiles every field of a struct at the address the struct

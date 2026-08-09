@@ -34,16 +34,11 @@ func (f optionFunc) apply(c *config) { f(c) }
 // that a Source reconfigured after Bind cannot change a binding already handed
 // out.
 type config struct {
-	sep     string
-	canon   Form
+	sep   string
+	canon Form
 	// rootVar is the variable a root leaf reads (PROTOTYPE, #309). Empty means
 	// there is none, and the empty address is refused as it is today.
 	rootVar string
-	// rootRequired and rootDef are what a struct tag would have said about the
-	// root, said per plane instead (PROTOTYPE, #309).
-	rootRequired bool
-	rootDef      string
-	rootDefSet   bool
 	environ func() []string
 	// bools is the spelling [BoolWords] built, and it is nil until it is asked
 	// for: this plane holds text and nothing else, so a variable is a String
@@ -156,7 +151,7 @@ func Environ(fn func() []string) Option {
 
 // validate refuses a configuration this driver cannot serve, and it runs at Bind
 // because that is the first moment the driver is asked for anything.
-func (c config) validate() error {
+func (c *config) validate() error {
 	if !legalSeparator(c.sep) {
 		return optionError("the separator must be a non-empty run of A-Z, 0-9 and _, " +
 			"spelled as it appears in the name")
@@ -203,26 +198,9 @@ func optionError(msg string) error {
 //
 // Without it a schema whose root is a leaf has no name on this plane and is
 // refused at Bind, which is what happens today.
-func RootVar(name string, opts ...RootOption) Option {
-	return optionFunc(func(c *config) {
-		c.rootVar = name
-		for _, o := range opts {
-			o(c)
-		}
-	})
-}
-
-// RootOption is what [RootVar] takes beside the name (PROTOTYPE, #309).
-type RootOption func(*config)
-
-// RootRequired refuses a load where the root variable is not set
-// (PROTOTYPE, #309).
-func RootRequired() RootOption {
-	return func(c *config) { c.rootRequired = true }
-}
-
-// RootDefault is the text the root takes where the root variable is not set
-// (PROTOTYPE, #309).
-func RootDefault(text string) RootOption {
-	return func(c *config) { c.rootDef, c.rootDefSet = text, true }
+// It names the variable and says nothing about whether the root is required or
+// what it defaults to. Naming is this plane's knowledge; requiredness is a fact
+// about the schema and is declared once, in core, by [ferry.RootRequired].
+func RootVar(name string) Option {
+	return optionFunc(func(c *config) { c.rootVar = name })
 }

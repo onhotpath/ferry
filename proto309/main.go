@@ -41,8 +41,7 @@ func main() {
 	if mode == "decl" {
 		ferry.RootSentinel = ""
 
-		coreShape()
-		driverShape()
+		trimmedShape()
 
 		return
 	}

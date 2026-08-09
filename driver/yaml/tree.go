@@ -151,11 +151,7 @@ func place(doc *yamlv3.Node, addr ferry.Path, last yamlv3.Kind) (*yamlv3.Node, e
 	// PROTOTYPE (#309): the empty path is the document root, and a root leaf
 	// there is a scalar document.
 	if len(segs) == 0 {
-		if len(doc.Content) == 0 {
-			doc.Content = []*yamlv3.Node{{}}
-		}
-
-		return doc.Content[0], nil
+		return docRoot(doc), nil
 	}
 
 	n := rootFor(doc, segs[0].Kind())
@@ -218,6 +214,17 @@ func through(n *yamlv3.Node, kind yamlv3.Kind) *yamlv3.Node {
 
 // rootFor is the document's content node, minted where the document is empty
 // and reshaped where its top level is not what the first segment needs.
+// docRoot is the document's own content node, minted where the document is
+// empty. It is shaped by nothing, because the root leaf's own write decides what
+// it becomes (PROTOTYPE, #309).
+func docRoot(doc *yamlv3.Node) *yamlv3.Node {
+	if len(doc.Content) == 0 {
+		doc.Content = []*yamlv3.Node{{}}
+	}
+
+	return doc.Content[0]
+}
+
 func rootFor(doc *yamlv3.Node, k ferry.SegmentKind) *yamlv3.Node {
 	if len(doc.Content) == 0 {
 		doc.Content = []*yamlv3.Node{{}}

@@ -307,33 +307,10 @@ func (r *reader) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error
 		return ferry.Value{}, deeperThanLeaf()
 	}
 
-	// PROTOTYPE (#309): the root leaf's declaration, answered by the driver
-	// because the root has no struct tag to carry it.
-	// Path is comparable, so the root address is the zero one. A published
-	// Path.IsRoot would be the readable spelling of this line.
-	if addr.Path() == (ferry.Path{}) {
-		return r.cfg.rootAbsent()
-	}
-
+	// The root variable being unset is ordinary absence, reported as absence.
+	// Whether that absence is a failure is the schema's to say and not this
+	// plane's (#309).
 	return ferry.Value{}, nil
-}
-
-// rootAbsent is what this plane answers where the root variable is not set.
-//
-// A default becomes an observation, which is the same path a declared default
-// travels in core. required has no such path: a driver cannot mint
-// ferry.ErrMissing at an address, so the closest it reaches is a plane error
-// that wraps the sentinel (PROTOTYPE, #309).
-func (c config) rootAbsent() (ferry.Value, error) {
-	switch {
-	case c.rootDefSet:
-		return ferry.String(c.rootDef), nil
-	case c.rootRequired:
-		return ferry.Value{}, fmt.Errorf("%w: %w: env: %s is required and is not set",
-			ferry.ErrPlane, ferry.ErrMissing, c.rootVar)
-	default:
-		return ferry.Value{}, nil
-	}
 }
 
 // holdsBelow reports whether the environment holds any name strictly below this

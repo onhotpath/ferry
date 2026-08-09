@@ -85,7 +85,9 @@ func checkKey(t *testing.T, tc keyCase) {
 func TestKeyLegalityIsAPlaneRefusal(t *testing.T) {
 	t.Parallel()
 
-	_, err := defaults().key(ferry.At("1st"))
+	cfg := defaults()
+
+	_, err := cfg.key(ferry.At("1st"))
 
 	for _, want := range []error{ferry.ErrPlane, ErrIllegalName} {
 		if !errors.Is(err, want) {

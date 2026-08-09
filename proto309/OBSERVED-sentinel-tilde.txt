@@ -43,22 +43,22 @@
 
 --- root type: netip.Addr ---
   compile                      ok   schema compiled
-  env  Load                    ok   netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x1ef621cb8120)}}
-  http Load(query)             ok   netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x1ef621cb8120)}}
+  env  Load                    ok   netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x3a51f4830108)}}
+  http Load(query)             ok   netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x3a51f4830108)}}
   yaml Dump                    ok   file="\"~\": 10.0.0.1\n"
   yaml Load                    ok   netip.Addr{addr:netip.uint128{hi:0x0, lo:0x0}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(nil)}}
-  yaml roundtrip               ok   file="\"~\": 10.0.0.1\n" -> netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x1ef621cb8120)}}
+  yaml roundtrip               ok   file="\"~\": 10.0.0.1\n" -> netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x3a51f4830108)}}
   kv   Dump                    ok   keys={"~"="10.0.0.1"}
-  kv   roundtrip               ok   store={"~"="10.0.0.1"} -> netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x1ef621cb8120)}}
+  kv   roundtrip               ok   store={"~"="10.0.0.1"} -> netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x3a51f4830108)}}
 
 --- root type: *int ---
   compile                      ok   schema compiled
-  env  Load                    ok   (*int)(0x1ef621cbb9f8)
+  env  Load                    ok   (*int)(0x3a51f481d938)
   yaml Dump                    ok   file="\"~\": 8080\n"
   yaml Load                    ok   (*int)(nil)
-  yaml roundtrip               ok   file="\"~\": 8080\n" -> (*int)(0x1ef621cbbbd8)
+  yaml roundtrip               ok   file="\"~\": 8080\n" -> (*int)(0x3a51f481db18)
   kv   Dump                    ok   keys={"~"="8080"}
-  kv   roundtrip               ok   store={"~"="8080"} -> (*int)(0x1ef621cbbce8)
+  kv   roundtrip               ok   store={"~"="8080"} -> (*int)(0x3a51f481dc28)
 
 --- root type: prefix and overwrite hazards (int root) ---
   kv   Dump(prefix=app)        ok   keys={"app/other"="kept", "app/~"="8080"}

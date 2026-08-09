@@ -40,7 +40,7 @@ const driverName = "env"
 // file, a Dockerfile ENV, a Kubernetes env: block or a systemd unit. Keeping the
 // dot buys nothing on Load either, because the uppercase fold has already
 // destroyed the segment's own spelling.
-func (c config) key(addr ferry.Path) (string, error) {
+func (c *config) key(addr ferry.Path) (string, error) {
 	name, err := c.join(addr)
 	if err != nil {
 		return "", err
@@ -66,7 +66,7 @@ func (c config) key(addr ferry.Path) (string, error) {
 
 // join is the transform and the join, without the checks on the shape of the
 // whole name that [config.key] adds around it.
-func (c config) join(addr ferry.Path) (string, error) {
+func (c *config) join(addr ferry.Path) (string, error) {
 	var b strings.Builder
 
 	// One allocation rather than a run of doublings up from nothing. The

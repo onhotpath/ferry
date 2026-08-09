@@ -1,41 +1,29 @@
 ################ MODE: sentinel="decl" ################
 
---- root type: SHAPE 1 - core Option: ferry.RootRequired / ferry.RootDefault ---
-  neither, present             ok   8080
-  neither, absent              ok   0
-  required, present            ok   8080
-  required, absent             ERR  ferry: required, and the plane holds nothing at this address
-                                    ErrMissing=true ErrPlane=false ErrSchema=false
-  default, present             ok   8080
-  default, absent              ok   9999
-  both, absent                 ERR  ferry: the root declares both ferry.RootRequired and ferry.RootDefault: a default answers the absence required forbids, so one of them can never fire - keep the one that says what should happen when the plane holds nothing at the root
-                                    ErrMissing=false ErrPlane=false ErrSchema=true
-  LoadOver seed=4242, absent   ok   4242
-  LoadOver seed=4242, default  ok   9999
-  LoadOver seed=4242, required ERR  ferry: required, and the plane holds nothing at this address
-                                    ErrMissing=true ErrPlane=false ErrSchema=false
-  struct root + RootRequired   ERR  ferry: required, and the plane supplied nothing under it
-                                    ErrMissing=true ErrPlane=false ErrSchema=false
-  struct root + RootDefault    ERR  ferry: ferry.RootDefault was supplied and the root is a struct: a default is one text and a struct's value lives at many addresses - declare the default on the field it belongs to, or seed it through LoadOver
-                                    ErrMissing=false ErrPlane=false ErrSchema=true
-  Compile[int] required+default ERR  ferry: the root declares both ferry.RootRequired and ferry.RootDefault: a default answers the absence required forbids, so one of them can never fire - keep the one that says what should happen when the plane holds nothing at the root
-                                    ErrMissing=false ErrPlane=false ErrSchema=true
-  Compile[int] required only   ok   0
-  cache: 111 / 222 / none      ok   111 / 222 / 0
+--- root type: Load - no seed ---
+  Load, present, no declaration ok   8080
+  Load, absent, no declaration ok   0
+  Load, present, RootRequired  ok   8080
+  Load, absent, RootRequired   ERR  ferry: required, and the plane holds nothing at this address
+                                   ErrMissing=true ErrPlane=false ErrSchema=false
+  Load, RootRequired twice     ERR  ferry: ferry.RootRequired was supplied twice in one call
+                                   ErrMissing=false ErrPlane=false ErrSchema=true
+
+--- root type: LoadOver - the seed IS the default ---
+  LoadOver 4242, present, no declaration ok   8080
+  LoadOver 4242, absent, no declaration ok   4242
+  LoadOver 4242, absent, RootRequired ERR  ferry: required, and the plane holds nothing at this address
+                                   ErrMissing=true ErrPlane=false ErrSchema=false
+  LoadOver 4242, present, RootRequired ok   8080
+
+--- root type: no regression ---
+  struct root + RootRequired, absent ERR  ferry: required, and the plane supplied nothing under it
+                                   ErrMissing=true ErrPlane=false ErrSchema=false
+  struct root, no declaration, present ok   main.portHolder{Port:1}
+  Compile[int], RootRequired   ok   0
+  Compile[int], no declaration ok   0
+  cache: same type, two Option sets ok   required -> (0, err=true) / none -> (0, err=false)
   kv   Dump(v=8080, opt)       ok   keys={""="8080"}
   kv   Dump(v=0, opt)          ok   keys={""="0"}
-  kv   Dump(v=0, opt)          ok   keys={""="0"}
-
---- root type: SHAPE 2 - driver Option: env.RootVar(name, env.RootRequired()/RootDefault()) ---
-  neither, present             ok   8080
-  neither, absent              ok   0
-  required, present            ok   8080
-  required, absent             ERR  ferry: the driver failed: plane error: missing: env: APP_PORT is required and is not set
-                                    ErrMissing=true ErrPlane=true ErrSchema=false
-  default, present             ok   8080
-  default, absent              ok   9999
-  both, absent                 ok   9999
-  LoadOver seed=4242, default  ok   9999
-  source A (required), absent  ERR  ferry: the driver failed: plane error: missing: env: APP_PORT is required and is not set
-                                    ErrMissing=true ErrPlane=true ErrSchema=false
-  source B (not required), absent ok   0
+  after reassigning ferry.RootRequired ERR  ferry: required, and the plane holds nothing at this address
+                                   ErrMissing=true ErrPlane=false ErrSchema=false

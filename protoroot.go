@@ -1,15 +1,12 @@
 package ferry
 
-// PROTOTYPE ONLY - branch proto/309-root-leaf, issue #309.
-//
 // RootSentinel decides the address a root leaf compiles to.
 //
-// Empty means the empty path, which is ADR-0003's "not an address" and the
-// literal reading of "legalise the root leaf". A non-empty value means the root
-// leaf sits at a one-Name-segment address spelled with that text, so every
-// plane has a name to write.
+// Empty means the empty path, which is the literal reading of "legalise the
+// root leaf". A non-empty value means the root leaf sits at a one-Name-segment
+// address spelled with that text, so every plane has a name to write.
 //
-// This is a package-level knob because the four drivers are separate modules
+// PROTOTYPE ONLY. This is a package-level knob because the four drivers are separate modules
 // and a prototype has to flip the mode from all of them. Nothing like it would
 // ship.
 var RootSentinel = ""

@@ -46,19 +46,19 @@
   env  Load                    ERR  ferry: the driver refused the address set: plane error: env: address has no environment variable name: the empty address names nothing
   http Load(query)             ERR  ferry: the driver refused the address set: plane error: http: address has no name on this plane: the empty address names nothing
   yaml Dump                    ok   file="10.0.0.1\n"
-  yaml Load                    ok   netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x26ff92d70120)}}
-  yaml roundtrip               ok   file="10.0.0.1\n" -> netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x26ff92d70120)}}
+  yaml Load                    ok   netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x1abfe5a8108)}}
+  yaml roundtrip               ok   file="10.0.0.1\n" -> netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x1abfe5a8108)}}
   kv   Dump                    ok   keys={""="10.0.0.1"}
-  kv   roundtrip               ok   store={""="10.0.0.1"} -> netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x26ff92d70120)}}
+  kv   roundtrip               ok   store={""="10.0.0.1"} -> netip.Addr{addr:netip.uint128{hi:0x0, lo:0xffff0a000001}, z:unique.Handle[net/netip.addrDetail]{value:(*netip.addrDetail)(0x1abfe5a8108)}}
 
 --- root type: *int ---
   compile                      ok   schema compiled
   env  Load                    ERR  ferry: the driver refused the address set: plane error: env: address has no environment variable name: the empty address names nothing
   yaml Dump                    ok   file="8080\n"
-  yaml Load                    ok   (*int)(0x26ff92d737b0)
-  yaml roundtrip               ok   file="8080\n" -> (*int)(0x26ff92d73858)
+  yaml Load                    ok   (*int)(0x1abfe5936f0)
+  yaml roundtrip               ok   file="8080\n" -> (*int)(0x1abfe593798)
   kv   Dump                    ok   keys={""="8080"}
-  kv   roundtrip               ok   store={""="8080"} -> (*int)(0x26ff92d73978)
+  kv   roundtrip               ok   store={""="8080"} -> (*int)(0x1abfe5938b8)
 
 --- root type: prefix and overwrite hazards (int root) ---
   kv   Dump(prefix=app)        ok   keys={"app"="8080", "app/other"="kept"}
