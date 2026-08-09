@@ -11,7 +11,9 @@ import (
 //	cfg, err := ferry.Load[Config](ctx, yaml.NewSource("app.yaml"))
 //
 // Every field the plane is silent about keeps T's zero value, and a field
-// declaring default= takes its default there instead.
+// declaring default= takes its default there instead. A root that is a leaf has
+// no tag and so declares no default; [LoadOver] is where it gets one, and the
+// seed is it.
 //
 // On failure it returns the zero value of T and never a partly built one. Range
 // the failure with [Elements], and match a member against [ErrSchema],
@@ -28,12 +30,15 @@ func Load[T any](ctx context.Context, src Source, opts ...Option) (T, error) {
 
 // LoadOver builds a value of T from src, over a seed the caller supplies.
 //
-// It has two uses. A seed is how a composite default is spelled, since a struct
-// tag holds one text and a composite's value lives at many addresses; and a
-// reload is the caller writing the carry-over out loud rather than getting it
-// from a destination that happens to be populated:
+// It has three uses. A seed is how a composite default is spelled, since a
+// struct tag holds one text and a composite's value lives at many addresses; it
+// is also the only default the root has, because a declared default is written
+// on a tag and the root has no tag; and a reload is the caller writing the
+// carry-over out loud rather than getting it from a destination that happens to
+// be populated:
 //
 //	cfg, err := ferry.LoadOver(ctx, Config{Tags: []string{"default"}}, src)
+//	port, err := ferry.LoadOver(ctx, 8080, src)
 //	cfg, err = ferry.LoadOver(ctx, cfg, src)
 //
 // An address the plane does not have is absent, and absence does not write, so

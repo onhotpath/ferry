@@ -6,8 +6,8 @@ import (
 )
 
 // Option is a setting a caller hands to [Load], [LoadOver], [Dump], [Compile],
-// [Bind] or [BindSink]. There are three: [TagKey], [WithRegistry] and
-// [MaxConcurrency].
+// [Bind] or [BindSink]. There are four: [TagKey], [WithRegistry],
+// [MaxConcurrency] and [RootRequired].
 //
 // The set is closed, because the interface's one method is unexported. A
 // library built on ferry can therefore change where ferry reads its annotation
@@ -15,10 +15,10 @@ import (
 //
 // Every one of them is refused when supplied twice in one call.
 //
-// [TagKey] and [WithRegistry] change what a type compiles to, so both are part
-// of the key a compiled schema is cached under. [MaxConcurrency] changes only
-// how a load is run, so it is not in that key and two loads of one type under
-// two budgets still compile once.
+// [TagKey], [WithRegistry] and [RootRequired] change what a type compiles to, so
+// all three are part of the key a compiled schema is cached under.
+// [MaxConcurrency] changes only how a load is run, so it is not in that key and
+// two loads of one type under two budgets still compile once.
 type Option interface {
 	apply(*config) error
 }
@@ -62,7 +62,24 @@ type config struct {
 	// (ADR-0019).
 	budget    int
 	budgetSet bool
+
+	// root is what the Option list declared about the root address, which is
+	// the one address the grammar cannot reach because a declaration is written
+	// on a tag and the root has none (ADR-0008). It is compile-affecting in
+	// ADR-0010's sense - one reflect.Type yields two schemas under two values of
+	// it - so it is in [schemaKey].
+	root rootDecl
 }
+
+// rootDecl is the declaration the root address carries, in the shape a tag
+// would have carried it in below the root.
+//
+// required is the only member, and there is no declared default beside it: a
+// default is text a tag spells and the root has no tag, so the seed [LoadOver]
+// takes is the root's default instead (ADR-0006). requiredSet is what makes a
+// second [RootRequired] a refusal rather than a silent idempotent one, which is
+// the rule every other Option already obeys.
+type rootDecl struct{ required, requiredSet bool }
 
 // defaultTagKey is the key ferry reads when nobody says otherwise.
 const defaultTagKey = "ferry"
@@ -237,6 +254,44 @@ func MaxConcurrency(n int) Option {
 			return nil
 		}
 	})
+}
+
+// RootRequired declares the root address required, which is the one address no
+// struct tag can name.
+//
+//	port, err := ferry.Load[int](ctx, src, ferry.RootRequired)
+//
+// A load fails with [ErrMissing] where the plane holds nothing at the root.
+// Where the root is a leaf that is the presence test required always is,
+// satisfied by any observation the plane makes there and by no other thing,
+// including an explicit empty text and a null. Where the root is a struct it
+// means the plane supplied at least one of that struct's own children, which is
+// what required means at every other section address.
+//
+// It is a presence test about the plane, so a seed does not answer it: sharp
+// edge, ferry.LoadOver(ctx, 8080, src, ferry.RootRequired) still fails where the
+// plane went silent, which is what a reload wants. [Dump] accepts it and writes
+// what it was given, because requiredness is a question only a load asks.
+//
+// It changes what a type compiles to, so it is part of the schema cache key, and
+// it is refused when supplied twice in one call.
+var RootRequired rootRequired
+
+// rootRequired is a type with exactly one inhabitant, which is what makes the
+// exported var immutable without a function around it: the only value
+// assignable to it is the value it already holds, and the compiler says so. An
+// Option-typed var would be a process-wide global any init in the binary could
+// repoint (ADR-0010).
+type rootRequired struct{}
+
+func (rootRequired) apply(c *config) error {
+	if c.root.requiredSet {
+		return optionError("ferry.RootRequired was supplied twice in one call")
+	}
+
+	c.root.required, c.root.requiredSet = true, true
+
+	return nil
 }
 
 // checkTagKey holds a supplied key to what a struct tag key can be. The
