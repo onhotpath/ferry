@@ -335,6 +335,118 @@ func TestMalformedDocumentThroughLoad(t *testing.T) {
 	}
 }
 
+// TestADuplicatedKeyIsRefused is #257: the file said one thing to yaml.v3, which
+// refuses it outright, another to every reader that takes the last spelling, and
+// a third to ferry, which took the first and reported nothing.
+//
+// A save made that worse: it rewrote the occurrence an address reaches and left
+// the other, so the file came back holding the new value and the old one, and
+// the old one is the one a last-wins reader believes.
+func TestADuplicatedKeyIsRefused(t *testing.T) {
+	type config struct {
+		Host string `ferry:"host"`
+		Port int    `ferry:"port"`
+	}
+
+	_, err := ferry.Load[config](t.Context(), yaml.NewSource(write(t, "host: a\nport: 1\nhost: b\n")))
+	if err == nil {
+		t.Fatal("loading a document that spells one key twice succeeded, and the file says two different things")
+	}
+
+	if !errors.Is(err, ferry.ErrValue) {
+		t.Errorf("Load reported %v, want an error carrying ferry.ErrValue: a document ferry could read and cannot "+
+			"make sense of is the operator's file", err)
+	}
+
+	if errors.Is(err, ferry.ErrPlane) {
+		t.Errorf("Load declared ferry.ErrPlane (%v), which is what core would have defaulted to", err)
+	}
+}
+
+// TestADuplicatedKeyIsRefusedWhereverItIs asserts the refusal is about the
+// document and not about the addresses: a save re-emits the whole file, so a
+// duplicate under a key no field maps is one a save would rewrite half of.
+func TestADuplicatedKeyIsRefusedWhereverItIs(t *testing.T) {
+	type config struct {
+		Host string `ferry:"host"`
+	}
+
+	docs := []string{
+		"host: a\nnested:\n  k: 1\n  k: 2\n",
+		"host: a\nlist:\n  - k: 1\n    k: 2\n",
+	}
+
+	for _, doc := range docs {
+		if _, err := ferry.Load[config](t.Context(), yaml.NewSource(write(t, doc))); !errors.Is(err, ferry.ErrValue) {
+			t.Errorf("loading %q reported %v, want an error carrying ferry.ErrValue", doc, err)
+		}
+	}
+}
+
+// TestADuplicatedKeyRefusesTheSaveAtTheOpen is the write half, and it is the
+// half the refusal exists for: the refusal lands before anything is staged, so
+// the operator's file is byte-identical and no temporary is left behind.
+func TestADuplicatedKeyRefusesTheSaveAtTheOpen(t *testing.T) {
+	type config struct {
+		Host string `ferry:"host"`
+		Port int    `ferry:"port"`
+	}
+
+	before := "host: a\nport: 1\nhost: b\n"
+	path := write(t, before)
+
+	err := ferry.Dump(t.Context(), config{Host: "z", Port: 9}, yaml.NewSink(path))
+	if err == nil {
+		t.Fatal("a save into a document that spells one key twice succeeded, and it rewrites one of the two")
+	}
+
+	if !errors.Is(err, ferry.ErrValue) {
+		t.Errorf("Dump reported %v, want an error carrying ferry.ErrValue", err)
+	}
+
+	if got := read(t, path); got != before {
+		t.Errorf("the plane holds %q, want %q: a save that refused leaves the file byte-identical", got, before)
+	}
+}
+
+// TestTwoKeysThatMerelyLookAlikeAreTwoKeys is the boundary the refusal must not
+// cross. Core never folds or normalises segment text, so two case-variant keys
+// are two members and a document holding both is a document this driver reads.
+func TestTwoKeysThatMerelyLookAlikeAreTwoKeys(t *testing.T) {
+	type config struct {
+		Upper string `ferry:"Host"`
+		Lower string `ferry:"host"`
+	}
+
+	got, err := ferry.Load[config](t.Context(), yaml.NewSource(write(t, "Host: a\nhost: b\n")))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if want := (config{Upper: "a", Lower: "b"}); got != want {
+		t.Errorf("loaded %+v, want %+v", got, want)
+	}
+}
+
+// TestAKeyThatIsNotAScalarIsPassedOver is the other boundary. YAML lets a
+// mapping key be a collection, no address reaches one, and the refusal is about
+// which of two occurrences an address reads - so a document holding one is read
+// exactly as it was before, and the key beside it still loads.
+func TestAKeyThatIsNotAScalarIsPassedOver(t *testing.T) {
+	type config struct {
+		Host string `ferry:"host"`
+	}
+
+	got, err := ferry.Load[config](t.Context(), yaml.NewSource(write(t, "? [a, b]\n: v\nhost: a\n")))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got.Host != "a" {
+		t.Errorf("loaded %+v, want host a", got)
+	}
+}
+
 // TestMissingFileHoldsNothing asserts that a plane with no file at it opens and
 // reports absence, rather than failing.
 //

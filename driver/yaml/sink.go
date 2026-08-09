@@ -393,20 +393,18 @@ func (w *writer) written(at string, held int) int {
 // members is a replaced mapping's content with every pair this dump did not
 // write taken out.
 //
-// A key spelled twice keeps its first pair only, which is the one an address
-// reaches: [member] reads the first and [keys] enumerates it once, so leaving
-// the second behind would leave a member no address can reach under a mapping
-// the dump replaced.
+// One pass and no bookkeeping, because one key is one pair: a mapping spelling
+// one key twice is refused at the open (#257), so there is no second occurrence
+// here for a keep to leave behind.
 func (w *writer) members(at string, held []*yamlv3.Node) []*yamlv3.Node {
-	out, seen := held[:0], make(map[string]bool, len(held)/2)
+	out := held[:0]
 
 	for i := 0; i+1 < len(held); i += 2 {
 		k := held[i]
-		if k.Kind != yamlv3.ScalarNode || seen[k.Value] || !w.wrote[at+mark(ferry.NameSegment(k.Value))] {
+		if k.Kind != yamlv3.ScalarNode || !w.wrote[at+mark(ferry.NameSegment(k.Value))] {
 			continue
 		}
 
-		seen[k.Value] = true
 		out = append(out, k, held[i+1])
 	}
 

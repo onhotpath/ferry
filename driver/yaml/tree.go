@@ -88,6 +88,10 @@ func step(n *yamlv3.Node, seg ferry.Segment, pick memberFunc) *yamlv3.Node {
 // member is the value a mapping holds under one key, comparing the key text
 // byte for byte. Core never folds or normalises segment text, so neither does
 // this: two case-variant keys are two members.
+//
+// One key is one pair, because a mapping spelling one twice is refused at the
+// open (#257), so which of two occurrences this answers with is a question the
+// document cannot pose.
 func member(n *yamlv3.Node, name string) *yamlv3.Node {
 	if n == nil || n.Kind != yamlv3.MappingNode {
 		return nil
@@ -550,11 +554,10 @@ func positions(n int) []ferry.Segment {
 // what enumeration answers and what a read at each answer finds are the same
 // mapping.
 //
-// A duplicate key is a document YAML's own grammar permits and this driver
-// answers once for, because two entries under one key are one address and
-// [member] reads the first of them: enumerating it twice would hand core an
-// address it then reads a single value from, twice. A key a merge would supply
-// and the mapping already has is the same case one level out.
+// The bookkeeping is for the merge and nothing else. A mapping spelling one key
+// twice is refused at the open (#257), so what [own] can meet twice is a key one
+// mapping has and another it merges from also has, and the nearer answer is the
+// one that stands.
 func keys(n *yamlv3.Node) []ferry.Segment {
 	if n.Kind != yamlv3.MappingNode {
 		return nil
