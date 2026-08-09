@@ -83,14 +83,41 @@ type Registry interface {
 // It is optional. A Registry that is no Notifier is refused at Bind when a watch
 // was asked for, because a watch that opens successfully and never fires is the
 // failure the option exists to avoid.
+//
+// Registering and waiting are two calls rather than one, and that is the whole
+// point of the shape. [Watch] arms the next registration before it runs the
+// callback, so a registration is live for the entire time the callback and the
+// load inside it take. An implementation that registered inside the wait would
+// have no registration during that window and would lose every change that
+// landed in it.
 type Notifier interface {
-	// Notify blocks until something under the driver's own key changes, until
-	// ctx is done, or until the watch cannot be kept.
+	// Arm registers for the next change under the driver's own key and answers
+	// with the [Change] that waits for it.
 	//
-	// It reports true where a change happened. False with a nil error is the
-	// watch ending quietly, which is what a cancelled context produces, and any
-	// error is the watch being lost.
-	Notify(ctx context.Context) (bool, error)
+	// The registration is live when Arm returns, so a change between Arm and
+	// [Change.Wait] is reported by that Wait rather than missed. ctx bounds the
+	// registration itself and not the wait that follows it.
+	Arm(ctx context.Context) (Change, error)
+}
+
+// Change is one armed registration: one wait, and the release that follows it.
+//
+// It is what [Notifier.Arm] answers with, and a watcher waits on it once and
+// closes it once.
+type Change interface {
+	// Wait blocks until the change this registration was armed for happens,
+	// until ctx is done, or until the watch cannot be kept.
+	//
+	// It reports true where a change happened, including one that landed before
+	// Wait was called. False with a nil error is the watch ending quietly, which
+	// is what a cancelled context produces, and any error is the watch being
+	// lost.
+	Wait(ctx context.Context) (bool, error)
+
+	// Close releases the registration. It is called once, after the wait, and
+	// whatever it reports is discarded: there is nothing a watcher could do with
+	// it.
+	Close() error
 }
 
 // Listing is what one subkey holds directly: the names of its values, and the

@@ -59,14 +59,23 @@ type watcher struct {
 // driver's key fires it, and a change elsewhere in the hive does not.
 //
 // It refuses at Bind, before any load, when the registry behind this source
-// reports no changes. On Windows the machine's own registry always does; a
-// [Store] of your own has to say so as well.
+// reports no changes and when the first registration could not be placed. On
+// Windows the machine's own registry always reports changes; a [Store] of your
+// own has to say so as well.
+//
+// A key that is not there yet is not a refusal. The registration goes on the
+// nearest key above it that does exist, so a watch over the key a first save will
+// create fires when that save creates it, and moves down to the key itself from
+// then on. The cost is that until the key exists a change to something else under
+// that ancestor wakes it too, which is a spurious call and costs one load.
 //
 // Sharp edges, and they are the reason this is a callback and not a stream.
 //
 // onChange runs on the watching goroutine and one call at a time. A slow callback
 // delays the next look rather than running beside itself, and changes that land
-// while it runs are one call afterwards rather than several.
+// while it runs are one call afterwards rather than several: the next
+// registration is placed before the callback starts, so the whole of a slow
+// reload is covered by it.
 //
 // A panic in onChange takes the process down, exactly as it would on a goroutine
 // the caller started. Nothing here recovers it: there is no result to hand a
@@ -100,9 +109,14 @@ func Watch(ctx context.Context, onChange func(context.Context)) Option {
 	})
 }
 
-// start finds the registry's change notification and puts the loop on a goroutine
-// of its own. It runs inside the constructor, on the caller's goroutine, which is
-// what gives a failure somewhere to go (ADR-0020).
+// start finds the registry's change notification, places the first registration
+// and puts the loop on a goroutine of its own. It runs inside the constructor, on
+// the caller's goroutine, which is what gives a failure somewhere to go
+// (ADR-0020).
+//
+// A context that is already done is a watch that has already ended, so nothing is
+// registered and no goroutine is started. That is what the loop would do with it
+// anyway, one wait later.
 func (w *watcher) start(store Registry) error {
 	on, ok := store.(Notifier)
 	if !ok {
@@ -111,13 +125,33 @@ func (w *watcher) start(store Registry) error {
 
 	w.on = on
 
-	go w.run()
+	if w.done() {
+		return nil
+	}
+
+	armed, err := on.Arm(w.ctx)
+	if err != nil {
+		return fmt.Errorf("%w: %w: the registry would not report its changes: %w", ferry.ErrPlane, ErrWatch, err)
+	}
+
+	go w.run(armed)
 
 	return nil
 }
 
-// run is the loop: wait for a change, call back, until the context ends or the
-// watch is lost.
+// done reports a watch whose context ended before it began, which is one that
+// registers nothing and starts no goroutine.
+func (w *watcher) done() bool {
+	select {
+	case <-w.ctx.Done():
+		return true
+	default:
+		return false
+	}
+}
+
+// run is the loop: wait for the armed change, arm the next one, call back, until
+// the context ends or the watch is lost.
 //
 // The callback runs on this goroutine and one at a time, so a slow callback delays
 // the next look rather than piling up beside itself. That is the same contract a
@@ -126,31 +160,69 @@ func (w *watcher) start(store Registry) error {
 //
 // Nothing here fences the callback. It is user code, and the panicking call is the
 // top of this goroutine's own stack.
-func (w *watcher) run() {
-	for {
-		changed, err := w.on.Notify(w.ctx)
+func (w *watcher) run(armed Change) {
+	for armed != nil {
+		armed = w.step(armed)
+	}
+}
 
-		// The context is read before the answer is, and that ordering matters: a
-		// watch cancelled while a change was already in flight would otherwise be
-		// able to call back once more afterwards. Cancelling is the only way to
-		// stop a watch, so it has to mean stopped.
-		if w.ctx.Err() != nil {
-			return
-		}
+// step is one turn of the loop, and the ordering inside it is the whole of what
+// stops a change being lost.
+//
+// The next registration is placed before the callback runs and before the current
+// one is released, so there is no moment between a change and the next
+// registration where the plane is unwatched. A change landing during the callback
+// signals the registration that is already armed, and the wait that follows
+// returns at once.
+//
+// It answers with the registration the next turn waits on, and nil where the
+// watch has ended.
+func (w *watcher) step(armed Change) Change {
+	changed, err := armed.Wait(w.ctx)
+	if err != nil || !changed {
+		return w.stop(armed, err)
+	}
 
-		if err != nil {
-			// The watch is gone. One call, so that the load which follows reports
-			// whatever is actually wrong through a surface the caller handles.
-			w.fire()
+	next, err := w.on.Arm(w.ctx)
 
-			return
-		}
+	release(armed)
 
-		if !changed {
-			return
-		}
+	if err != nil {
+		return w.stop(next, err)
+	}
 
+	w.fire()
+
+	return next
+}
+
+// stop releases the registration and ends the loop, speaking once where the watch
+// was lost rather than cancelled.
+//
+// The context is read before the answer is, inside [watcher.fire], and that
+// ordering matters: a watch cancelled while a change was already in flight would
+// otherwise be able to call back once more afterwards. Cancelling is the only way
+// to stop a watch, so it has to mean stopped.
+func (w *watcher) stop(armed Change, err error) Change {
+	release(armed)
+
+	if err != nil {
+		// The watch is gone. One call, so that the load which follows reports
+		// whatever is actually wrong through a surface the caller handles.
 		w.fire()
+	}
+
+	return nil
+}
+
+// release closes one registration, and nothing where there is none: an Arm that
+// failed answers with no Change to close.
+//
+// What it reports is discarded, because a watcher that is stopping has nowhere to
+// put it and the caller has already been told everything it can act on.
+func release(armed Change) {
+	if armed != nil {
+		_ = armed.Close()
 	}
 }
 

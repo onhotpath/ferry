@@ -230,11 +230,12 @@ It matters here because the promise is exactly as wide as the table: a member wi
 > | `REG_BINARY` | `Bytes`, every byte |
 > | `REG_MULTI_SZ` | refused, `ErrPlane` |
 >
-> **The write table**, which is two rows and no more:
+> **The write table**, which is three rows:
 >
 > | value | written as |
 > | --- | --- |
 > | `Bytes` | `REG_BINARY`, the bytes |
+> | `String` at an address already stored as `REG_EXPAND_SZ` | `REG_EXPAND_SZ`, the boundary's own spelling |
 > | `String`, `Number`, `Bool` | `REG_SZ`, the boundary's own spelling |
 >
 > **Why the write side is `REG_SZ` alone.**
@@ -242,7 +243,17 @@ It matters here because the promise is exactly as wide as the table: a member wi
 > `REG_SZ` is the only registry type that can: `007`, `3.14159265358979` and `18446744073709551615` all come back exactly as they went in.
 > `REG_DWORD` can express none of the three.
 > `REG_QWORD` normalises `007` to `7`, which is the silently-wrong row of [the three outcomes](#an-old-artefact-under-a-new-rule-has-three-outcomes) manufactured on every write, and it cannot hold a float at all.
-> So the type annotation a value carries is a thing this driver reads and never a thing it preserves: a value an operator retyped by hand is retyped back to `REG_SZ` on the next dump, with the data intact, and that is documented in the driver rather than worked around.
+> So the type annotation a value carries is a thing this driver reads and, with one exception, not a thing it preserves: a value an operator retyped to `REG_DWORD` by hand is written back as `REG_SZ` on the next dump, with the data intact, and that is documented in the driver rather than worked around.
+>
+> **The exception is `REG_EXPAND_SZ`, and holding both positions at once was the inconsistency.**
+> The paragraph below refuses to expand on read, because expanding and then dumping would write `C:\WINDOWS-literal` over what the operator wrote and that is a plane-compatibility break committed by this driver on somebody else's data.
+> Retyping an existing `REG_EXPAND_SZ` to `REG_SZ` on the way out is the same break by another route: the value's own text survives, and every other consumer of that key stops getting an expansion it was written to get.
+> A driver cannot refuse the first and commit the second.
+> So a `String` written where the registry already holds `REG_EXPAND_SZ` is stored as `REG_EXPAND_SZ`, and nothing else changes: a fresh write is `REG_SZ`, bytes are `REG_BINARY`, and no ferry-side annotation chooses a type.
+>
+> **What it costs is one read per string a dump writes**, and that is a real cost on the write path rather than a free one.
+> It is the cost the house already pays wherever a plane has structure the operator owns: `driver/yaml` reads the document before writing it so comments and anchors survive, and `driver/env`'s `DotEnvSink` is a read-modify-write merge for the same reason.
+> A read that fails is reported against that address rather than guessed at, because guessing `REG_SZ` there would commit the break this rule exists to refuse.
 >
 > **Why `REG_EXPAND_SZ` is never expanded on read.**
 > Expanding is not a read-side convenience here, because the value goes back out again.

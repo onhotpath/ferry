@@ -18,8 +18,12 @@ import (
 // The real seam is behind //go:build windows and cannot be entered here at all,
 // so this is not a convenience: it is what puts the whole driver - the key
 // function, the two namespaces, the staging, the sweep and the watch - under the
-// conformance suite on the machines the suite is run on. The Windows job runs the
-// same suite over the real registry.
+// conformance suite on the machines the suite is run on.
+//
+// It is a model, and a model is only worth what it is checked against.
+// machine_windows_test.go is where the facts this store asserts about the
+// registry - two namespaces under one key, the type tags, the change
+// notification - are put to the machine's own registry instead.
 //
 // It is test apparatus rather than module surface, and it lives in a _test.go file
 // so that it is neither shipped code nor covered code.
@@ -45,16 +49,24 @@ type fake struct {
 
 	// changed is what a watch waits on: every write closes it and arms the next
 	// one, which is the shape RegNotifyChangeKeyValue has.
+	//
+	// An armed registration holds the channel it was armed with, so a write while
+	// a callback is running closes the channel that callback's successor is
+	// already waiting on. That is the registration outliving the wait, which is
+	// what the real notification does and what this store has to model or the
+	// tests would prove a guarantee the driver does not have.
 	changed chan struct{}
 
 	// failOn is the folded subkeys whose every operation fails, which is how a
 	// read failure and a key that may not be written are both staged.
 	failOn map[string]bool
 
-	// watchFails stages a watch that is lost rather than one that fires, and
-	// watchEnds one that ends quietly without being cancelled.
+	// watchFails stages a watch that is lost rather than one that fires,
+	// watchEnds one that ends quietly without being cancelled, and armFails a
+	// registration that could not be placed at all.
 	watchFails bool
 	watchEnds  bool
+	armFails   bool
 
 	// failDelete is the folded value names whose removal fails, which is the one
 	// failure the sweep cannot stage through failOn: a listing that succeeded is
@@ -114,6 +126,17 @@ func (f *fake) failWatch() *fake {
 	defer f.mu.Unlock()
 
 	f.watchFails = true
+
+	return f
+}
+
+// failArm makes every registration fail, which is the one watch failure that
+// happens before any wait and so lands at Bind.
+func (f *fake) failArm() *fake {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.armFails = true
 
 	return f
 }
@@ -366,12 +389,36 @@ func (f *fake) DeleteKey(ctx context.Context, subkey string) error {
 	return nil
 }
 
-// Notify is the [winreg.Notifier] half: it wakes on the next write anywhere in
-// this store, and ends when the context does.
-func (f *fake) Notify(ctx context.Context) (bool, error) {
+// Arm is the [winreg.Notifier] half: it takes the registration that the next
+// write anywhere in this store will signal.
+//
+// It succeeds whether or not the driver's own key is there, which is the ancestor
+// walk the machine's own registry does: a watch over a key the first save will
+// create is registered above that key until the key exists.
+func (f *fake) Arm(context.Context) (winreg.Change, error) {
 	f.mu.Lock()
-	wait, lost, ended := f.changed, f.watchFails, f.watchEnds
-	f.mu.Unlock()
+	defer f.mu.Unlock()
+
+	if f.armFails {
+		return nil, errFake
+	}
+
+	return &armed{f: f, wait: f.changed}, nil
+}
+
+// armed is one registration this store handed out, holding the channel it was
+// armed with rather than reading the current one at the wait.
+type armed struct {
+	f    *fake
+	wait chan struct{}
+}
+
+var _ winreg.Change = (*armed)(nil)
+
+func (a *armed) Wait(ctx context.Context) (bool, error) {
+	a.f.mu.Lock()
+	lost, ended := a.f.watchFails, a.f.watchEnds
+	a.f.mu.Unlock()
 
 	if lost {
 		return false, errFake
@@ -384,10 +431,12 @@ func (f *fake) Notify(ctx context.Context) (bool, error) {
 	select {
 	case <-ctx.Done():
 		return false, nil
-	case <-wait:
+	case <-a.wait:
 		return true, nil
 	}
 }
+
+func (*armed) Close() error { return nil }
 
 // fire wakes every waiting Notify and arms the next one. The lock is already
 // held by every caller.

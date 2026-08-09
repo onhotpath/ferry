@@ -128,6 +128,7 @@ Reading is wide and writing is narrow.
 | write | becomes |
 | --- | --- |
 | a `[]byte` field | `REG_BINARY` |
+| text at an address already stored as `REG_EXPAND_SZ` | `REG_EXPAND_SZ`, the new text |
 | everything else | `REG_SZ` |
 
 `REG_EXPAND_SZ` is read raw because expanding it is not reversible.
@@ -135,8 +136,12 @@ Reading is wide and writing is narrow.
 
 `REG_MULTI_SZ` is refused because it spells a sequence inside one value, and ferry addresses each element of a sequence in its own right.
 
-`REG_SZ` is the only type this driver writes text as, because it is the only one that carries a number's own spelling intact: `007`, `3.14159265358979` and `18446744073709551615` all come back exactly as they went in, where `REG_DWORD` can express none of the three and `REG_QWORD` normalises the first and cannot hold the second at all.
-Typed writes are not in scope.
+`REG_SZ` carries a number's own spelling intact: `007`, `3.14159265358979` and `18446744073709551615` all come back exactly as they went in.
+That is why it is what a number is written as, and there is no option to choose another type.
+
+The one type a save preserves is `REG_EXPAND_SZ`.
+A save reads the address first, and text written where the registry already holds an expandable string is stored as one, because retyping it would destroy the expansion for every other reader of that key - the same break this driver refuses to commit by expanding on read.
+It costs one read per string a save writes.
 
 ## The seam
 
@@ -158,13 +163,21 @@ Absence is a result and not an error: `Get` and `List` report an object that is 
 Removal is idempotent, and `DeleteKey` removes everything under the key as well as the key itself.
 `Set` creates every subkey on the way down to the value it writes.
 
-A `Registry` that can also say when it changed implements one more method, and that is what [`Watch`](#watch) needs:
+A `Registry` that can also say when it changed implements one more method, and that is what `winreg.Watch` needs:
 
 ```go
 type Notifier interface {
-	Notify(ctx context.Context) (bool, error)
+	Arm(ctx context.Context) (Change, error)
+}
+
+type Change interface {
+	Wait(ctx context.Context) (bool, error)
+	Close() error
 }
 ```
+
+Registering and waiting are two calls so that a registration can outlive a wait.
+The watcher arms the next one before it runs your callback, which is what stops a change landing during a reload from being lost.
 
 The machine's own registry is behind `//go:build windows` and implements both.
 `winreg.Store` is where anything else is handed over, and it is why this module builds, and its tests run, on every platform.
@@ -180,7 +193,8 @@ A nil argument is the machine's own registry, which is the default.
 This is what makes a test hermetic, and it is how a registry this package does not know about arrives.
 
 **`winreg.Watch(ctx, onChange)`** calls `onChange` whenever anything under this driver's key changes, so that a process holding a loaded value can load a fresh one.
-It is refused at `Bind` when the registry behind the source reports no changes.
+It is refused at `Bind` when the registry behind the source reports no changes, and when the first registration cannot be placed.
+A key that does not exist yet is not a refusal: the registration goes on the nearest key above it, so the save that creates the key fires the watch and the watch moves down to it.
 Read its documentation before using it: the callback runs on the watching goroutine one call at a time, a panic in it takes the process down, and cancelling `ctx` is the only way to stop the watch.
 
 There is no separator option.
@@ -188,9 +202,9 @@ The hierarchy is the registry's own syntax, not a taste.
 
 ## What this plane cannot do
 
-**A save replaces a value's type.**
-An operator who retyped a value to `REG_DWORD` by hand gets it retyped back to `REG_SZ` on the next save.
-The data survives, the type annotation does not.
+**The registry has types, and a save chooses between two of them.**
+An operator who retyped a value to `REG_DWORD` by hand gets it back as `REG_SZ` on the next save: the data survives, the type annotation does not.
+`REG_EXPAND_SZ` is the exception and is preserved.
 
 **A save is ordered and it is not atomic.**
 Every write is staged and nothing reaches the registry until the walk has succeeded, so a save that is refused leaves the registry byte for byte as it was.
@@ -211,8 +225,12 @@ A process without them is refused when the save starts, with an error reaching `
 **The fold is Go's and the registry's is Windows'.**
 The two agree on ASCII and can disagree outside it. Where they do, this driver folds less, so the pair that gets through is one the registry would merge.
 
-**Limits.**
-Value data round-trips up to 16384 characters, and a value name may be at most 16383.
+**A value name may be at most 16,383 characters.**
+That is the registry's own limit, and there is no ferry limit under it.
+
+**A value name holding a backslash has no address here.**
+The registry allows one and ferry cannot name it, so a key holding such a value cannot be loaded as a map or a slice: minting that member is refused with `ErrIllegalName`, and every later load of the same composite is refused the same way until the value is renamed or removed.
+A key only ferry has written never holds one.
 
 ## Errors
 

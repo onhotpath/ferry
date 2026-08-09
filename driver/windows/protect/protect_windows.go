@@ -4,7 +4,9 @@ package protect
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -15,17 +17,18 @@ import (
 //
 // They are declared here rather than taken from golang.org/x/sys/windows because
 // that module does not wrap them: as of v0.29.0 it has the classic CryptProtect
-// family and nothing from ncrypt.dll. Declaring five procedures is the whole of
+// family and nothing from ncrypt.dll. Declaring four procedures is the whole of
 // what that costs, and it is why this driver takes no dependency beyond the one
 // ADR-0002 already argued for.
+//
+// NCryptFreeBuffer is deliberately not among them. See [taken].
 var (
 	ncrypt = windows.NewLazySystemDLL("ncrypt.dll")
 
-	procCreateDescriptor  = ncrypt.NewProc("NCryptCreateProtectionDescriptor")
-	procCloseDescriptor   = ncrypt.NewProc("NCryptCloseProtectionDescriptor")
-	procProtectSecret     = ncrypt.NewProc("NCryptProtectSecret")
-	procUnprotectSecret   = ncrypt.NewProc("NCryptUnprotectSecret")
-	procFreeProtectBuffer = ncrypt.NewProc("NCryptFreeBuffer")
+	procCreateDescriptor = ncrypt.NewProc("NCryptCreateProtectionDescriptor")
+	procCloseDescriptor  = ncrypt.NewProc("NCryptCloseProtectionDescriptor")
+	procProtectSecret    = ncrypt.NewProc("NCryptProtectSecret")
+	procUnprotectSecret  = ncrypt.NewProc("NCryptUnprotectSecret")
 )
 
 // silentFlag is NCRYPT_SILENT_FLAG: no user interface, ever. A configuration
@@ -43,9 +46,17 @@ type dpapi struct{}
 var _ Protector = dpapi{}
 
 // Protect encrypts under one protection descriptor rule.
-func (dpapi) Protect(ctx context.Context, descriptor string, plaintext []byte) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
+//
+// The descriptor handle is opened for this call and closed again by
+// [closeDescriptor], and a close that fails discards the ciphertext: a handle the
+// API will not close is not a handle this package should go on believing it used.
+func (dpapi) Protect(ctx context.Context, descriptor string, plaintext []byte) (blob []byte, err error) {
+	if err = ctx.Err(); err != nil {
 		return nil, err
+	}
+
+	if len(plaintext) == 0 {
+		return nil, refusedEmpty("NCryptProtectSecret")
 	}
 
 	h, err := descriptorHandle(descriptor)
@@ -53,7 +64,11 @@ func (dpapi) Protect(ctx context.Context, descriptor string, plaintext []byte) (
 		return nil, err
 	}
 
-	defer func() { _, _, _ = procCloseDescriptor.Call(uintptr(h)) }()
+	defer func() {
+		if cerr := closeDescriptor(h); cerr != nil {
+			blob, err = nil, errors.Join(err, cerr)
+		}
+	}()
 
 	var (
 		out *byte
@@ -63,18 +78,29 @@ func (dpapi) Protect(ctx context.Context, descriptor string, plaintext []byte) (
 	st, _, _ := procProtectSecret.Call(uintptr(h), silentFlag,
 		uintptr(unsafe.Pointer(unsafe.SliceData(plaintext))), uintptr(len(plaintext)),
 		0, 0, uintptr(unsafe.Pointer(&out)), uintptr(unsafe.Pointer(&n)))
+
+	runtime.KeepAlive(plaintext)
+
 	if st != 0 {
 		return nil, status("NCryptProtectSecret", st)
 	}
 
-	return taken(out, n), nil
+	return taken(out, n)
 }
 
 // Unprotect decrypts what Protect wrote. The descriptor is not repeated, because
 // the blob carries it.
+//
+// The first argument is the optional out parameter that would hand back the
+// descriptor the blob was protected under. It is passed as NULL, so no descriptor
+// handle is opened here and there is none to close.
 func (dpapi) Unprotect(ctx context.Context, ciphertext []byte) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+
+	if len(ciphertext) == 0 {
+		return nil, refusedEmpty("NCryptUnprotectSecret")
 	}
 
 	var (
@@ -85,14 +111,22 @@ func (dpapi) Unprotect(ctx context.Context, ciphertext []byte) ([]byte, error) {
 	st, _, _ := procUnprotectSecret.Call(0, silentFlag,
 		uintptr(unsafe.Pointer(unsafe.SliceData(ciphertext))), uintptr(len(ciphertext)),
 		0, 0, uintptr(unsafe.Pointer(&out)), uintptr(unsafe.Pointer(&n)))
+
+	runtime.KeepAlive(ciphertext)
+
 	if st != 0 {
 		return nil, status("NCryptUnprotectSecret", st)
 	}
 
-	return taken(out, n), nil
+	return taken(out, n)
 }
 
 // descriptorHandle turns a rule string into the handle the protection call takes.
+//
+// What comes back is a protection descriptor object, which
+// NCryptCreateProtectionDescriptor documents as freed by
+// NCryptCloseProtectionDescriptor and by nothing else. [closeDescriptor] is the
+// one caller of that, and every path out of [dpapi.Protect] reaches it.
 func descriptorHandle(rule string) (windows.Handle, error) {
 	p, err := windows.UTF16PtrFromString(rule)
 	if err != nil {
@@ -102,6 +136,11 @@ func descriptorHandle(rule string) (windows.Handle, error) {
 	var h windows.Handle
 
 	st, _, _ := procCreateDescriptor.Call(uintptr(unsafe.Pointer(p)), 0, uintptr(unsafe.Pointer(&h)))
+
+	// p is not read again in Go, so nothing else keeps the string alive across a
+	// call that only ever saw its address as an integer.
+	runtime.KeepAlive(p)
+
 	if st != 0 {
 		return 0, status("NCryptCreateProtectionDescriptor", st)
 	}
@@ -109,15 +148,53 @@ func descriptorHandle(rule string) (windows.Handle, error) {
 	return h, nil
 }
 
-// taken copies out of the buffer DPAPI-NG allocated and frees it, so that
-// nothing this package hands back points into memory the API owns.
-func taken(p *byte, n uint32) []byte {
-	defer func() { _, _, _ = procFreeProtectBuffer.Call(uintptr(unsafe.Pointer(p))) }()
+// closeDescriptor releases what [descriptorHandle] opened, and reports a close
+// that failed rather than dropping it.
+//
+// A discarded status here would hide the two states worth knowing about: a handle
+// the API says is invalid, which means this package is tracking one it does not
+// own, and a descriptor object that was never freed, which is a leak per protected
+// value.
+func closeDescriptor(h windows.Handle) error {
+	if st, _, _ := procCloseDescriptor.Call(uintptr(h)); st != 0 {
+		return status("NCryptCloseProtectionDescriptor", st)
+	}
 
+	return nil
+}
+
+// taken copies out of the buffer DPAPI-NG allocated and frees it, so that nothing
+// this package hands back points into memory the API owns.
+//
+// It frees with LocalFree and not with NCryptFreeBuffer. Both NCryptProtectSecret
+// and NCryptUnprotectSecret document the pMemPara argument - the NULL this
+// package passes in both calls - as: "If you set this argument to NULL, the
+// LocalAlloc function is used internally to allocate memory and your application
+// must call LocalFree to release memory pointed to by the ppbProtectedBlob
+// parameter." NCryptFreeBuffer releases what an NCrypt allocator owns; it does not
+// own a LocalAlloc block, so handing it one is two allocators disagreeing about a
+// heap.
+//
+// A free that fails is reported and the plaintext is dropped with it. LocalFree
+// refusing a pointer means this package passed one the process does not own, and
+// carrying on from there is how a corruption stops being local.
+func taken(p *byte, n uint32) ([]byte, error) {
 	out := make([]byte, n)
 	copy(out, unsafe.Slice(p, n))
 
-	return out
+	if _, err := windows.LocalFree(windows.Handle(unsafe.Pointer(p))); err != nil {
+		return nil, fmt.Errorf("protect: LocalFree would not release the buffer DPAPI-NG allocated, which is a "+
+			"pointer this process does not own: %w", err)
+	}
+
+	return out, nil
+}
+
+// refusedEmpty is the zero-length buffer neither call accepts: both document
+// NTE_INVALID_PARAMETER for a length below one, and an empty Go slice has no
+// backing array whose address is worth handing over.
+func refusedEmpty(call string) error {
+	return fmt.Errorf("protect: %s was handed nothing at all, and it takes at least one byte", call)
 }
 
 // status is what a non-zero SECURITY_STATUS reads as. The code is printed as it

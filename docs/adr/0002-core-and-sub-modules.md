@@ -159,9 +159,12 @@ The list is deferred to [#5](https://github.com/onhotpath/ferry/issues/5), becau
 >   The axis is the shape of the store, not the shape of the driver's obligation.
 > - **Two namespaces at every level.** A value lives under a key, so the last segment of an address names a value and the segments before it name a subkey.
 >   That is the first plane where [ADR-0003](0003-how-a-leaf-addresses-a-plane.md)'s leaves and containers tables are two real namespaces of the plane rather than one namespace core splits for its own checking.
->   It rests on one fact, that a value `foo` and a subkey `foo` coexist under one key, which is asserted in [#272](https://github.com/onhotpath/ferry/issues/272)'s prose and is **not** in its measured table, so it is still owed a measurement on Windows.
+>   It rests on one fact, that a value `foo` and a subkey `foo` coexist under one key, which is asserted in [#272](https://github.com/onhotpath/ferry/issues/272)'s prose and is **not** in its measured table.
+>   The measurement it was owed is now a test rather than a session: `TestWindowsHoldsAValueAndASubkeyOfOneNameAtOnce` writes both under one key on the CI runner's own registry, lists them, and loads a schema holding a leaf beside a section of that name.
+>   It fails loudly rather than skipping if Windows ever disagrees, because this axis and the address mapping both fall with it.
 > - **A typed plane.** `REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY` and `REG_EXPAND_SZ` are type tags stored beside the data, so a read carries plane-side type information.
->   Every other flat driver here stores text and nothing else.
+>   [ADR-0004](0004-source-and-sink.md)'s axis table has "carries plane-side type information" against `yaml` alone, and `yaml` is the driver that walks segments as a tree, so this is the first plane that produces a key and still carries a type.
+>   What the other flat drivers store is untyped, in two different ways rather than one: `env` and `http` store text, and `driver/kv` stores opaque bytes, which is its own row in the same table.
 > - **`ErrReadOnly` with a real cause.** Opening HKLM for write without the rights returns `ERROR_ACCESS_DENIED`, which is [ADR-0004](0004-source-and-sink.md)'s "writable in principle but not right now" arriving from the operating system.
 >   Today the only producer of that error in the tree is `driver/kv`'s optional `ACL` hook, which simulates it.
 > - **A decorator over another `Source` and `Sink`.** `protect` implements neither plane nor format: it wraps a driver and rewrites the values crossing the boundary.
@@ -172,8 +175,18 @@ The list is deferred to [#5](https://github.com/onhotpath/ferry/issues/5), becau
 > A folding plane was already shipped twice over, and this driver's fold is a reason it must build a key rather than a reason it may ship.
 >
 > **The dependency is `golang.org/x/sys`, and it is argued here because no other ADR owns it.**
-> The Win32 registry and DPAPI-NG are reached through `syscall` and through DLL procedure lookups, and `golang.org/x/sys/windows` is the only maintained Go binding for either.
-> Nothing in this module could be written without it, so this is not a dependency traded against a convenience the way `driver/env`'s fsnotify was: there is no polling fallback for a registry handle.
+> The Win32 registry and DPAPI-NG are reached through system calls and through DLL procedure lookups, and `golang.org/x/sys/windows` is the only maintained Go binding for either.
+>
+> The claim to be careful with here is that the module could not be written without it, because that is not true and the honest argument is a different one.
+> Stdlib `syscall` carries the registry read surface on Windows: `RegOpenKeyEx`, `RegQueryValueEx`, `RegQueryInfoKey`, `RegEnumKeyEx` and `RegCloseKey` are all exported from it.
+> It carries none of the write surface - there is no `RegCreateKeyEx`, `RegSetValueEx`, `RegDeleteValue` or `RegDeleteKey` in it - and it has nothing from `ncrypt.dll` either, but `syscall.NewLazyDLL` resolves a procedure out of any DLL, which is the same mechanism `protect` already uses for DPAPI-NG.
+> So the gap could be closed by hand.
+>
+> **The argument is maintained versus frozen, and that argument holds.**
+> `syscall`'s own package documentation says most new code should prefer `golang.org/x/sys`, and points at the Go 1.4 proposal that closed `syscall` to new additions; its Windows surface is what it was when that policy landed and will not grow.
+> `golang.org/x/sys/windows` is where Windows API work in Go actually happens, and it is what every other Go project reaching this surface is already on.
+> Writing the missing half against raw DLL lookups would be reimplementing a maintained package with an unmaintained copy, and getting the handle, rights and UTF-16 conventions right in it is exactly the work that package exists to have already done.
+> That makes this a dependency traded against a frozen equivalent rather than against a convenience, which is not the trade `driver/env`'s fsnotify made: there is no polling fallback for a registry handle.
 > It is also a `golang.org/x` module, which is the Go project's own repository for the platform surfaces the standard library does not export, so it is third party in the module graph and is not third party in the sense this ADR's rule is guarding against.
 >
 > **Who pays is every consumer of `driver/windows` and nobody else.**

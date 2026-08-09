@@ -153,7 +153,9 @@ It watches every file `env.DotEnv` named, refuses at Bind when no file was named
 
 `driver/windows` is the third, and `winreg.Watch(ctx, onChange)` is the same shape again, also without an interval, because `RegNotifyChangeKeyValue` has none.
 It watches the whole subtree under the key the source was built over, so a change to any value or any subkey beneath it fires the callback and a change elsewhere in the hive does not, and it refuses at Bind when the registry behind the source reports no change of its own.
-The one thing to know that the other two do not have: your own dump through a `winreg.Sink` over the same key fires your own watcher, and nothing in the driver suppresses that.
+The one thing it does that the other two do not: a registry notification is armed once and consumed once, so the driver places the next registration before it runs your callback.
+That is what makes the guarantee above - a change during a reload is one call afterwards - true here as well as for the other two, where the underlying watch is persistent and gives it for free.
+A key that does not exist yet is watched from the nearest key above it, so the save that creates it fires the watch.
 
 The three agree on everything but the mechanism, which is deliberate: callback not channel, no error return, no `Stop`, cancellation rides the context you passed, and the watch opens inside the constructor so a failure has somewhere to go.
 Wiring a second watchable source under one binding is not answered here or in the ADR - [#361](https://github.com/onhotpath/ferry/issues/361) is where that question lives.

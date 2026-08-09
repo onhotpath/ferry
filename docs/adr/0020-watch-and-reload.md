@@ -230,6 +230,17 @@ The fsnotify machinery never runs unless it is asked for, which joins the driver
 > Two drivers agreeing could have been one driver copied.
 > Three agreeing over three unrelated mechanisms - a poll, an inotify queue and a Win32 notification handle - is the shape being a shape.
 >
+> **One promise the shape makes is not free on this mechanism, and it is the one thing this driver had to build rather than inherit.**
+> "Changes that land while the callback runs are one call afterwards" is true of a poll and of an fsnotify queue because the watch is persistent: it is still armed while the callback runs, and events queue behind it.
+> `RegNotifyChangeKeyValue` is armed once and consumed once, so a driver that registered inside its own wait would have no registration for the whole of the callback and the load inside it, and a change landing in that window would fire nothing ever again - a process left holding stale configuration with no signal that it is stale.
+> The fix is in the driver's own seam rather than in the shape: registering and waiting are two calls, `Notifier.Arm` answering with a `Change` that is waited on once, and the loop arms the next registration **before** it runs the callback and before it releases the current one.
+> The shape's promise then holds on all three, and the seam's own test double models the same thing rather than modelling something stronger.
+>
+> **The registration is placed inside the constructor**, which is what makes "the watch is opened on the caller's goroutine so a failure has somewhere to go" a fact about this driver rather than only about its type assertion: a registration that cannot be placed is `ErrWatch` at `Bind`.
+> A key that does not exist yet is deliberately not that failure.
+> The registration goes on the nearest existing key above it and watches that subtree, so the bootstrap case - a process watching the key its own first dump will create - fires when the dump creates it and moves down to the key itself on the next turn.
+> Refusing at `Bind` instead was the honest alternative and was rejected: a configuration key that does not exist yet is ordinary, and the refusal would land on the whole load rather than on the watch.
+>
 > **`Notifier` stays declined, and this amendment states the position rather than leaving a third watcher to reopen it silently.**
 > Its trigger was met at two and deliberately not taken; a third does not change any of the four costs recorded above, and the fourth of them gets stronger rather than weaker, because there is now a third mechanism with nothing in common with the other two.
 > What a common interface would carry between a stat, an inotify queue and a registry notification is still a channel no driver publishes and core never reads.

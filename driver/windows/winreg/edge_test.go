@@ -393,6 +393,43 @@ func TestAWatchThatEndsQuietlyStopsWithoutSpeaking(t *testing.T) {
 	}
 }
 
+// TestAWatchThatCannotBeReArmedSpeaksOnce is the fourth ending, and the one the
+// two-call registration adds: the wait answered with a change and the next
+// registration could not be placed.
+//
+// It is a lost watch like any other, so it says so once and stops. The callback
+// that would have followed the change is the one call, because there is nothing
+// left to hear the next one with.
+func TestAWatchThatCannotBeReArmedSpeaksOnce(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	store := newFake()
+	fired := make(chan struct{}, 4)
+
+	_ = source(store, winreg.Watch(ctx, func(context.Context) { fired <- struct{}{} }))
+
+	store.failArm()
+
+	if err := store.Create(ctx, "poke"); err != nil {
+		t.Fatalf("poking the store: %v", err)
+	}
+
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a watch that could not be re-armed said nothing")
+	}
+
+	select {
+	case <-fired:
+		t.Error("a lost watch called back more than once")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 // mustDump is a save this test takes as given rather than as the thing under
 // test, so that the case below it reads as one assertion.
 func mustDump[T any](t *testing.T, store winreg.Registry, v T) {

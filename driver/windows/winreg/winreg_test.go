@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,6 +46,11 @@ type (
 	// which is what makes the sweep have to descend.
 	structMap struct {
 		Envs map[string]innerHost `ferry:"envs"`
+	}
+
+	// oneBlob is the smallest schema whose one value is bytes.
+	oneBlob struct {
+		Raw []byte `ferry:"raw"`
 	}
 )
 
@@ -146,20 +152,103 @@ func TestASubkeyWhereAMemberTakesAValueIsRefused(t *testing.T) {
 	}
 }
 
-// TestASaveReplacesTheTypeOfAValue pins the sharp edge this package's
-// documentation states, so that it stays a documented fact rather than becoming a
-// surprise.
-func TestASaveReplacesTheTypeOfAValue(t *testing.T) {
+// TestASaveKeepsAnExpandableStringAndRetypesEverythingElse is the one place this
+// driver reads the plane before writing it, and the two rows are why.
+//
+// REG_EXPAND_SZ survives because retyping it would destroy the expansion for
+// every other reader of that key, which is the plane-compatibility break this
+// driver already refuses to commit by expanding on read. REG_DWORD does not,
+// because REG_SZ is the only type that carries a number's own spelling intact,
+// and the data survives either way.
+func TestASaveKeepsAnExpandableStringAndRetypesEverythingElse(t *testing.T) {
 	t.Parallel()
 
-	store := newFake().put("", "text", winreg.Datum{Type: winreg.TypeDWord, Text: "1"})
+	cases := map[string]struct {
+		held []winreg.Datum
+		want string
+	}{
+		"an expandable string keeps its type": {
+			held: []winreg.Datum{{Type: winreg.TypeExpandString, Text: `%SystemRoot%`}},
+			want: `val "" "text" REG_EXPAND_SZ "2"`,
+		},
+		"a number an operator typed by hand does not": {
+			held: []winreg.Datum{{Type: winreg.TypeDWord, Text: "1"}},
+			want: `val "" "text" REG_SZ "2"`,
+		},
+		"a value that is not there is a fresh REG_SZ": {
+			want: `val "" "text" REG_SZ "2"`,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			checkTypeAfterSave(t, tc.held, tc.want)
+		})
+	}
+}
+
+// checkTypeAfterSave saves one string over whatever the registry already held at
+// that address, and holds the result to one rendered row.
+func checkTypeAfterSave(t *testing.T, held []winreg.Datum, want string) {
+	t.Helper()
+
+	store := newFake()
+	for _, d := range held {
+		store.put("", "text", d)
+	}
 
 	if err := ferry.Dump(t.Context(), oneText{Text: "2"}, sink(store)); err != nil {
 		t.Fatalf("Dump: %v", err)
 	}
 
-	if held := string(store.contents()); !strings.Contains(held, `val "" "text" REG_SZ "2"`) {
+	if got := string(store.contents()); !strings.Contains(got, want) {
+		t.Errorf("the save left this behind:\n%s\nwant %s", got, want)
+	}
+}
+
+// TestBytesOverAnExpandableStringAreStillBinary is the other half of the same
+// rule: what is kept is the type of a value this dump writes text to, and bytes
+// have one type here whatever the address held before.
+func TestBytesOverAnExpandableStringAreStillBinary(t *testing.T) {
+	t.Parallel()
+
+	store := newFake().put("", "raw", winreg.Datum{Type: winreg.TypeExpandString, Text: `%SystemRoot%`})
+
+	if err := ferry.Dump(t.Context(), oneBlob{Raw: []byte{0x00, 'A'}}, sink(store)); err != nil {
+		t.Fatalf("Dump: %v", err)
+	}
+
+	if held := string(store.contents()); !strings.Contains(held, `val "" "raw" REG_BINARY`) {
 		t.Errorf("the save left this behind:\n%s", held)
+	}
+}
+
+// TestTheSweepTellsAValueFromASubkeyOfTheSameName is the aliasing the staging
+// used to have: a value name holding a backslash, which the registry allows and
+// which joined to the key of a value one subkey deeper.
+//
+// A foreign value named a\b under a replaced composite is not something this
+// dump wrote, and keeping it because a member one level down happens to be named
+// b is the sweep leaving behind exactly what dump-is-replace exists to remove.
+//
+// The key's own unnamed value is the same aliasing from the other end, and it is
+// not a case here because core refuses the schema that would reach it: a leaf
+// whose key is a composite's key is refused at Bind, since that composite would
+// enumerate it as one of its own members. This driver still does not lean on
+// that, because the alias is in its own staging and not in core's table.
+func TestTheSweepTellsAValueFromASubkeyOfTheSameName(t *testing.T) {
+	t.Parallel()
+
+	store := newFake().put("m", `a\b`, winreg.Datum{Type: winreg.TypeString, Text: "stale"})
+
+	both := mapOfMaps{M: map[string]map[string]string{"a": {"b": "1"}}}
+	if err := ferry.Dump(t.Context(), both, sink(store)); err != nil {
+		t.Fatalf("Dump: %v", err)
+	}
+
+	if held := string(store.contents()); strings.Contains(held, `"stale"`) {
+		t.Errorf("the sweep kept a value one subkey deeper had the key of:\n%s", held)
 	}
 }
 
@@ -357,26 +446,114 @@ func TestWatchCallsBackOnAChange(t *testing.T) {
 		}
 	}))
 
-	// The watch is opened in the constructor and the loop enters Notify on a
-	// goroutine of its own, so the change is made repeatedly until one of them
-	// lands in a wait rather than once into a race.
-	tick := time.NewTicker(time.Millisecond)
-	defer tick.Stop()
+	// One change and no polling. The registration is placed in the constructor,
+	// on the caller's own goroutine, so it is already live when this returns and
+	// a change after it cannot land in a gap.
+	poke(t, store, "poke")
 
-	deadline := time.After(2 * time.Second)
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the watch never called back")
+	}
+}
 
-	for {
-		if err := store.Create(ctx, "poke"); err != nil {
-			t.Fatalf("poking the store: %v", err)
+// TestAChangeDuringTheCallbackIsNotLost is the window the two-call registration
+// exists to close, and the property [winreg.Watch] documents.
+//
+// A watcher that registered inside its own wait would have no registration for
+// the whole of the callback and the load inside it, so a change landing there
+// would fire nothing ever again. The next registration is placed before the
+// callback runs instead, so a change during it is one call afterwards.
+func TestAChangeDuringTheCallbackIsNotLost(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	var (
+		store   = newFake()
+		inside  = make(chan struct{})
+		release = make(chan struct{})
+		again   = make(chan struct{}, 1)
+		calls   atomic.Int32
+	)
+
+	_ = source(store, winreg.Watch(ctx, func(context.Context) {
+		if calls.Add(1) == 1 {
+			close(inside)
+			<-release
+
+			return
 		}
 
 		select {
-		case <-fired:
-			return
-		case <-deadline:
-			t.Fatal("the watch never called back")
-		case <-tick.C:
+		case again <- struct{}{}:
+		default:
 		}
+	}))
+
+	poke(t, store, "first")
+
+	select {
+	case <-inside:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the watch never called back")
+	}
+
+	// The callback is in hand and nothing else is poking the store, so this is
+	// the change that lands in the window.
+	poke(t, store, "during")
+	close(release)
+
+	select {
+	case <-again:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a change that landed while the callback was running was lost")
+	}
+}
+
+// TestAWatchOverAKeyThatIsNotThereYetFiresWhenItAppears is the bootstrap case: a
+// process that watches the key its own first save will create.
+//
+// The registration goes on the nearest key above one that is not there, so
+// creating it is a change like any other. Refusing instead would leave a
+// configuration that never reloads and says nothing about it.
+func TestAWatchOverAKeyThatIsNotThereYetFiresWhenItAppears(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	store := newFake()
+	if err := store.DeleteKey(ctx, ""); err != nil {
+		t.Fatalf("removing the driver's own key: %v", err)
+	}
+
+	fired := make(chan struct{}, 1)
+
+	_ = source(store, winreg.Watch(ctx, func(context.Context) {
+		select {
+		case fired <- struct{}{}:
+		default:
+		}
+	}))
+
+	poke(t, store, "")
+
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the watch never called back when the key it watches appeared")
+	}
+}
+
+// poke makes one change in a store, which is what every watch test waits for.
+func poke(t *testing.T, store *fake, subkey string) {
+	t.Helper()
+
+	if err := store.Create(t.Context(), subkey); err != nil {
+		t.Fatalf("poking the store: %v", err)
 	}
 }
 
@@ -395,6 +572,27 @@ func TestWatchIsRefusedByARegistryThatReportsNothing(t *testing.T) {
 
 	if !errors.Is(err, ferry.ErrPlane) {
 		t.Errorf("the refusal does not reach ferry.ErrPlane: %v", err)
+	}
+}
+
+// TestAWatchThatCannotBeRegisteredIsRefusedAtBind is the other failure that
+// happens before any wait: the registry reports changes in principle and would
+// not take this registration.
+//
+// It lands at Bind because the registration is placed in the constructor, on the
+// caller's own goroutine, which is the whole reason it is placed there.
+func TestAWatchThatCannotBeRegisteredIsRefusedAtBind(t *testing.T) {
+	t.Parallel()
+
+	src := source(newFake().failArm(), winreg.Watch(t.Context(), func(context.Context) {}))
+
+	err := bindOf[oneText](src)
+	if !errors.Is(err, winreg.ErrWatch) {
+		t.Fatalf("Bind answered %v, want an error reaching winreg.ErrWatch", err)
+	}
+
+	if !errors.Is(err, errFake) {
+		t.Errorf("the refusal does not carry what the registry said: %v", err)
 	}
 }
 

@@ -2,6 +2,8 @@ package protect
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/onhotpath/ferry"
 )
@@ -28,6 +30,11 @@ import (
 // would change how a schema loads without failing anything - a dropped
 // enumeration loads a map as empty. What this hands back declares exactly what
 // the plane underneath declared.
+//
+// A plane that reports a link at a marked address is refused, naming both. The
+// mark travels on the field, the address a link points at is a different one that
+// carries no mark, and a value read through the link would come back as it is
+// stored rather than as what it was protected from.
 //
 // A value the plane holds that was never protected is read back as it stands.
 // That is what lets an existing store migrate: the next save writes it
@@ -108,10 +115,17 @@ var _ ferry.Reader = (*reader)(nil)
 //
 // An absence stays an absence and a null stays a null, at every address, because
 // neither carries anything that could have been encrypted.
+//
+// A link the plane reports at a marked address is the fourth case, and it is
+// refused: see [linkedAway].
 func (r *reader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
 	v, err := r.inner.Get(ctx, addr)
-	if err != nil || !r.marked[addr.Path()] {
+	if !r.marked[addr.Path()] {
 		return v, err
+	}
+
+	if err != nil {
+		return v, linkedAway(addr, err)
 	}
 
 	blob, protected := markedText(v)
@@ -125,6 +139,32 @@ func (r *reader) Get(ctx context.Context, addr ferry.LeafAddr) (ferry.Value, err
 	}
 
 	return out, nil
+}
+
+// linkedAway refuses a [ferry.LeafRedirect] reported at a marked address, and
+// passes every other failure through exactly as the plane reported it.
+//
+// A redirect is not a failure. It is a control answer core acts on by reading
+// again at the target, and the target is a different address, which this
+// decorator was never told holds a secret. So the ciphertext stored there would
+// come back as the field's own text, marker and all, with nothing saying it had
+// ever been protected - which is the one thing this package promises not to do,
+// and it would be silent.
+//
+// Following the link here is not the alternative. The chain, the addresses
+// already visited and the refusal of a cycle are core's (ADR-0016), and a
+// decorator that read the target itself would have none of them. Refusing is,
+// and it is loud: it names both addresses and says what to do about it.
+func linkedAway(addr ferry.LeafAddr, err error) error {
+	var hop *ferry.LeafRedirect
+	if !errors.As(err, &hop) {
+		return err
+	}
+
+	return ferry.ErrorAt(addr.Path(), fmt.Errorf("%w: this plane holds a link here and says the value lives at "+
+		"%s, which this schema does not mark as a secret: a value read through a link comes back as it is "+
+		"stored, so mark the address the link points at as well, or take the link out from under this one",
+		ferry.ErrPlane, hop.Target))
 }
 
 // unprotect turns one marked payload back into the value it was written from,

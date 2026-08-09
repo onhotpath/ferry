@@ -6,6 +6,9 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
+	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -80,7 +83,13 @@ func (m *machine) path(subkey string) string { return joinKey(m.base, subkey) }
 // openKey opens one subkey, reporting a key that is not there as absence rather
 // than as a failure, which is [Registry]'s own rule.
 func (m *machine) openKey(subkey string, access uint32) (registry.Key, bool, error) {
-	k, err := registry.OpenKey(m.root, m.path(subkey), access|m.wow)
+	return m.openPath(m.path(subkey), access)
+}
+
+// openPath is openKey over a path under the hive rather than under this driver's
+// own key, which is what the walk up to a watchable ancestor needs.
+func (m *machine) openPath(path string, access uint32) (registry.Key, bool, error) {
+	k, err := registry.OpenKey(m.root, path, access|m.wow)
 	if errors.Is(err, registry.ErrNotExist) {
 		return 0, false, nil
 	}
@@ -269,8 +278,38 @@ func (m *machine) DeleteKey(ctx context.Context, subkey string) error {
 		}
 	}
 
-	if err := registry.DeleteKey(m.root, m.path(subkey)); err != nil && !errors.Is(err, registry.ErrNotExist) {
+	return m.deleteKey(m.path(subkey))
+}
+
+// advapi32 carries the one registry entry point golang.org/x/sys/windows/registry
+// does not wrap, resolved lazily so that importing this package costs nothing
+// until something is actually removed.
+var (
+	advapi32           = windows.NewLazySystemDLL("advapi32.dll")
+	procRegDeleteKeyEx = advapi32.NewProc("RegDeleteKeyExW")
+)
+
+// deleteKey removes one key in the view this driver was built for, and reports
+// nothing for a key that is not there.
+//
+// It is RegDeleteKeyExW rather than the registry package's DeleteKey, and the
+// difference is the whole reason it is declared here: DeleteKey is RegDeleteKeyW,
+// which takes no samDesired and therefore no KEY_WOW64_* flag. Under [WithView]
+// every other call in this file names the view and that one would not, so the
+// enumeration would read one side of the redirector and the removal would delete
+// from the other.
+//
+// samDesired of zero is what RegDeleteKeyW does, so [ViewNative] goes through the
+// same call and behaves as it always did.
+func (m *machine) deleteKey(path string) error {
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
 		return err
+	}
+
+	st, _, _ := procRegDeleteKeyEx.Call(uintptr(m.root), uintptr(unsafe.Pointer(name)), uintptr(m.wow), 0)
+	if errno := syscall.Errno(uint32(st)); errno != 0 && !errors.Is(errno, registry.ErrNotExist) {
+		return errno
 	}
 
 	return nil
@@ -297,9 +336,18 @@ func (m *machine) childrenOf(subkey string) ([]string, bool, error) {
 // notifyFilter is what a change means here: a value written, and a subkey added
 // or removed. A change to a key's own security descriptor is not a change to what
 // it holds.
-const notifyFilter = windows.REG_NOTIFY_CHANGE_NAME | windows.REG_NOTIFY_CHANGE_LAST_SET
+//
+// REG_NOTIFY_THREAD_AGNOSTIC is not a fourth kind of change; it is what makes the
+// registration outlive the thread that placed it. Without it the notification is
+// dropped when that thread exits, and this one is placed on the caller's goroutine
+// and waited on from another - two goroutines the runtime is free to move between
+// threads and to retire underneath (ADR-0019, ADR-0020).
+const notifyFilter = windows.REG_NOTIFY_CHANGE_NAME |
+	windows.REG_NOTIFY_CHANGE_LAST_SET |
+	windows.REG_NOTIFY_THREAD_AGNOSTIC
 
-// Notify blocks until something under this driver's key changes.
+// Arm places one RegNotifyChangeKeyValue registration and hands back the wait on
+// it.
 //
 // The whole subtree is watched, which is what makes one watch answer for a schema
 // whose addresses are spread over several subkeys.
@@ -307,30 +355,95 @@ const notifyFilter = windows.REG_NOTIFY_CHANGE_NAME | windows.REG_NOTIFY_CHANGE_
 // There is no interval anywhere in it. RegNotifyChangeKeyValue signals an event
 // and the wait is on that event and on a second one the context closes, so a
 // cancelled watch returns at once and a quiet registry costs nothing (ADR-0020).
-func (m *machine) Notify(ctx context.Context) (bool, error) {
-	k, found, err := m.openKey("", registry.NOTIFY)
+//
+// The registration outlives this call, which is why it is a call of its own: the
+// key handle it sits on is held by the [Change] until that is closed, and closing
+// the handle is what cancels the notification (ADR-0020).
+func (m *machine) Arm(ctx context.Context) (Change, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	k, err := m.watchKey()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-
-	if !found {
-		return false, noRegistry()
-	}
-
-	defer func() { _ = k.Close() }()
 
 	changed, err := windows.CreateEvent(nil, 1, 0, nil)
 	if err != nil {
-		return false, err
-	}
+		_ = k.Close()
 
-	defer func() { _ = windows.CloseHandle(changed) }()
+		return nil, err
+	}
 
 	if err := windows.RegNotifyChangeKeyValue(windows.Handle(k), true, notifyFilter, changed, true); err != nil {
-		return false, err
+		_ = windows.CloseHandle(changed)
+		_ = k.Close()
+
+		return nil, err
 	}
 
-	return waitFor(ctx, changed)
+	return &registration{key: k, changed: changed}, nil
+}
+
+// watchKey opens the key one registration is placed on: this driver's own key
+// where it is there, and the nearest key above it that is otherwise.
+//
+// The walk up is what makes a watch over a key that does not exist yet work at
+// all. RegNotifyChangeKeyValue needs an open key, and the bootstrap case - watch
+// the key the first save will create - has none, so the registration goes on the
+// nearest ancestor and watches its subtree. Creating the key fires it, the next
+// registration finds the key itself, and the watch has moved down on its own.
+//
+// The hive is the floor and it is always there, so the walk terminates.
+func (m *machine) watchKey() (registry.Key, error) {
+	for at := m.base; ; at = parentOf(at) {
+		k, found, err := m.openPath(at, registry.NOTIFY)
+
+		switch {
+		case err != nil:
+			return 0, err
+		case found:
+			return k, nil
+		case at == "":
+			return 0, errors.New("winreg: this hive could not be opened to watch it")
+		}
+	}
+}
+
+// parentOf is one step back up a registry path, and the empty path - the hive
+// itself - for a path with no step left in it.
+func parentOf(path string) string {
+	if i := strings.LastIndex(path, separator); i >= 0 {
+		return path[:i]
+	}
+
+	return ""
+}
+
+// registration is one armed notification: the key the registration sits on, held
+// open because closing it cancels the notification, and the event it signals.
+type registration struct {
+	key     registry.Key
+	changed windows.Handle
+}
+
+var _ Change = (*registration)(nil)
+
+// Wait blocks on the event this registration signals, and on a second one the
+// context closes.
+func (r *registration) Wait(ctx context.Context) (bool, error) { return waitFor(ctx, r.changed) }
+
+// Close releases the registration, which is the event handle and the key handle
+// the notification is tied to.
+func (r *registration) Close() error {
+	err := windows.CloseHandle(r.changed)
+
+	if closeErr := r.key.Close(); err == nil {
+		err = closeErr
+	}
+
+	return err
 }
 
 // waitFor blocks on the change event and on a second event the context closes,

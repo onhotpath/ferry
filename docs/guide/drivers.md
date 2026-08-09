@@ -92,6 +92,10 @@ What a plane holds at a container address is `Prober`'s answer, and what a dump 
 
 The cost is stated rather than hidden: a driver serving both directions ships **two types**, because one type cannot have two `Bind` methods, so a round trip names the plane twice.
 
+**Two types is a statement about the published interfaces and not about what your sink may do.**
+The separation says a plane with no honest dump ships no `Sink`, so that dumping to it does not compile.
+It does not say your `Sink` may not read the plane it writes; it may, and [what a sink may read](#what-a-sink-may-read) below is where that is spelled out.
+
 ### The three lifetimes
 
 `Bind` is a phase of its own because the three pieces of state have three lifetimes.
@@ -671,6 +675,21 @@ A composite with no elements still writes a null at its own address, exactly as 
 
 **A plane that is writable in principle but not right now refuses inside the `OpenWriterFunc`**, with an error wrapping `ferry.ErrReadOnly`.
 Not at `Bind`, which does no I/O and so cannot know, and not at the first `Set`, which has already half-written the plane.
+
+### What a sink may read
+
+**Your `Sink` may read the plane it writes, and for a plane an operator owns that is the shape to write rather than a compromise.**
+Editing something that already holds data is a read-modify-write, and a dump not depending on a load means the two directions are independent capabilities, not that they cannot be composed.
+Two of the drivers here are already read-modify-write sinks: `driver/yaml` parses the operator's document at the open and edits only the addresses the schema maps, which is what keeps the comments, the key order, the anchors and every key no field maps; and `env.DotEnvSink` reads the `.env` file at the open, rewrites the line each variable already occupied in the quoting that line used, and refuses at `Commit` if somebody else edited the file in between.
+
+**What is forbidden is making a caller's dump depend on their load.**
+Your `Dump` must work with no prior `Load`, must need no `Source` constructed or passed to reach its result, and must not carry state from a load into a dump behind the caller's back.
+The read is yours, inside your open or your `Commit`, and invisible at the call site: the caller still writes `ferry.Dump(ctx, cfg, sink)` and hands over nothing else.
+
+**Decide which kind of plane yours is, and say so in your own documentation.**
+A read costs a round trip per open or per address, and it makes the result of a dump depend on what the plane already held.
+That dependence is what makes it right for a file or a registry a human edits, where structure you did not write is worth preserving, and wrong for a plane ferry alone writes, where the read buys nothing and a stale read is a new way to lose a write.
+A caller cannot tell a merging sink from a replacing one by its type, so the sentence saying which has to be in your godoc.
 
 ## Declaring the kinds your plane carries
 

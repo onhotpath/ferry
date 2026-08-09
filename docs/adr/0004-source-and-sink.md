@@ -558,6 +558,32 @@ Not at the first `Set`, because Dump is the direction that runs a walk over the 
 `yaml.Source{Path: p}` and `yaml.Sink{Path: p}` means naming the plane twice for a round trip.
 That is the price of the compile-time refusal above, and it is judged worth paying.
 
+> **Amended under [#272](https://github.com/onhotpath/ferry/issues/272): the separation is between the two published interfaces, and it has been read as a rule that a `Sink` may not read.**
+>
+> As published, this section argues the split, prices it at two types, and stops.
+> It says nothing about whether a sink may read the plane it is writing, and a driver author read that silence as a prohibition: asked to preserve a value type the registry already held at an address, they declined on the reasoning that `Source` and `Sink` are two types with no shared state, so preserving it would mean reading the plane on the write path.
+> Nothing above says that, and what it does say licenses the opposite.
+>
+> **Independence is a property of the published interfaces and nothing else.**
+> A plane that can only be read ships a `Source` and no `Sink`, and dumping to it does not compile.
+> That is the whole of what the two types buy, it is what the paragraphs above argue, and it is unchanged.
+>
+> **A `Sink` may read the plane it writes, and for an operator-owned plane that is the correct shape rather than a compromise.**
+> A dump not depending on a load means the two are independent capabilities, not that they cannot be composed: editing a plane that already holds data is a read-modify-write, and a read-modify-write is one capability composed with the other.
+> Two shipped sinks are already exactly that, and neither was ever in tension with this section.
+> `driver/yaml`'s `openWriter` parses the operator's document and edits only the addresses the schema maps, which is what makes the comments, the key order, the anchors and every key no field maps survive the save.
+> `driver/env`'s `DotEnvSink` says it in its own godoc - "a save is a merge into whatever file is already at the path" - and reads the file at the open, rewrites the line each variable already occupied, keeps the quoting that line used, and refuses at `Commit` if the file changed underneath it.
+> Both read on the write path, and both read at the open rather than through a `Source`.
+>
+> **What stays forbidden is the thing the independence is for.**
+> A `Dump` must not require the caller to have performed a `Load`, must not need a `Source` to be constructed or passed to reach its result, and must not carry state from one into the other behind the caller's back.
+> The sink's own read is the sink's business, internal to its open or to its `Commit`, and invisible in the API: the caller still writes `ferry.Dump(ctx, cfg, sink)` and hands over nothing else.
+>
+> **The cost is real and it is the driver author's call, not a blanket licence.**
+> A sink that reads pays a round trip per open or per address, and it makes the result of a dump depend on what the plane already held.
+> That dependence is exactly what makes it right for a plane an operator owns and edits by hand, and wrong for a plane ferry alone writes, where a read buys nothing and a stale read is a new way to lose a write.
+> A driver decides which of the two its plane is, and says which it chose in its own documentation, because a caller cannot tell a merging sink from a replacing one by its type.
+
 ### Release and commit are two different things, and both are optional
 
 `Writer` has one required method, `Set`.

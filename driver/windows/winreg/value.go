@@ -166,12 +166,11 @@ func badType(msg string) error {
 // exactly as they were written, and REG_DWORD can express none of the three while
 // REG_QWORD normalises the first and refuses the second.
 //
-// Writing a value replaces its type, so a value an operator retyped by hand is
-// retyped back on the next dump. The data survives and the type annotation does
-// not, and that is stated in this package's documentation rather than worked
-// around: reading the plane before writing it, to keep the type somebody else
-// chose, would make a dump depend on what the plane already held, and this driver
-// stages a replacement instead.
+// This is the type a value is staged as, and it is the type it is written as
+// everywhere but one: [writer.typed] keeps REG_EXPAND_SZ where the address
+// already holds one, because retyping it would destroy the expansion for every
+// other reader of that key (ADR-0013). Every other type an operator chose by hand
+// is written back as REG_SZ, data intact and the annotation gone.
 //
 // Absent never arrives, because an omitted address gets no write at all.
 func stored(v ferry.Value) (Datum, error) {

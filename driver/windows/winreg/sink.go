@@ -92,7 +92,28 @@ func openWriter(ctx context.Context, cfg *config, keys *ferry.Keys) (ferry.Write
 		return nil, fmt.Errorf("%w: this key could not be opened for writing: %w", ferry.ErrReadOnly, err)
 	}
 
-	return &writer{cfg: *cfg, names: keys, key: keys.Open(), wrote: map[string]bool{}}, nil
+	return &writer{cfg: *cfg, names: keys, key: keys.Open(), wrote: map[valueAt]bool{}}, nil
+}
+
+// valueAt is one registry value as this dump reasons about it: the folded subkey
+// path, and the folded value name inside it, kept as two fields rather than
+// joined into one string.
+//
+// Joining them is what a plane key does, and it is right there and wrong here,
+// because two different registry objects can join to one string. The key's own
+// unnamed value under the subkey tags joins to "tags", which is also the value
+// tags at the top; and a value name may legally hold a backslash, so the value
+// "a\b" under m joins to "m\a\b", which is also the value b under the subkey m\a.
+// Every one of those pairs is two objects, and a sweep that looked the wrong one
+// up would keep a value it was replacing or remove one it had written (ADR-0003).
+type valueAt struct{ subkey, name string }
+
+// valueOf is the folded pair one leaf address names, which is what the staging
+// records and what the sweep looks up.
+func valueOf(addr ferry.Path) valueAt {
+	p := placeOf(addr)
+
+	return valueAt{subkey: fold(p.subkey), name: fold(p.name)}
 }
 
 // pending is one staged write: where it goes, what goes there, and the address it
@@ -146,12 +167,15 @@ type writer struct {
 	// map key under the injectivity check.
 	key ferry.KeyFunc
 
-	// wrote is every value key this dump has written, and it is the backstop in
-	// front of the staging list: the registry would silently take the second of
+	// wrote is every registry value this dump has written, and it is the backstop
+	// in front of the staging list: the registry would silently take the second of
 	// two writes at one name, and this turns that into a refusal at the last
 	// possible moment. It is driver/env's own guard, copied rather than shared,
 	// because ADR-0002 forbids the internal module that would carry it.
-	wrote map[string]bool
+	//
+	// It is keyed by the subkey and the value name apart, for the reason [valueAt]
+	// gives.
+	wrote map[valueAt]bool
 
 	// staged is what Commit will write, in the order the walk produced it, so two
 	// identical dumps make identical sequences of calls.
@@ -196,15 +220,15 @@ func (w *writer) PlaneName(addr ferry.Path) (string, bool) {
 // are minted, and a refusal at the tenth of them leaves the first nine unwritten
 // rather than half-applied.
 //
-// A value is written as REG_BINARY where it is bytes and as REG_SZ otherwise, and
-// the write replaces whatever type was at the name before.
+// A value is written as REG_BINARY where it is bytes and as REG_SZ otherwise,
+// except at an address the registry already holds as REG_EXPAND_SZ, where text
+// keeps that type.
 func (w *writer) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	k, err := w.key(addr.Path())
-	if err != nil {
+	if _, err := w.key(addr.Path()); err != nil {
 		return err
 	}
 
@@ -213,12 +237,13 @@ func (w *writer) Set(ctx context.Context, addr ferry.LeafAddr, v ferry.Value) er
 		return ferry.ErrorAt(addr.Path(), err)
 	}
 
-	if w.wrote[k] {
+	at := valueOf(addr.Path())
+	if w.wrote[at] {
 		return ferry.ErrorAt(addr.Path(), fmt.Errorf("%w: this dump has already written this registry value, "+
 			"and a key holds one value per name, so one of the two writes would be lost", ferry.ErrPlane))
 	}
 
-	w.wrote[k] = true
+	w.wrote[at] = true
 	w.staged = append(w.staged, pending{at: addr.Path(), place: placeOf(addr.Path()), datum: d})
 
 	return nil
@@ -368,7 +393,7 @@ func (w *writer) pruneValues(ctx context.Context, f subkey, names []string) []er
 	var errs []error
 
 	for _, name := range sorted(names) {
-		if w.wrote[joinKey(f.key, fold(name))] {
+		if w.wrote[valueAt{subkey: f.key, name: fold(name)}] {
 			continue
 		}
 
@@ -405,21 +430,33 @@ func (w *writer) pruneKeys(ctx context.Context, f subkey, names []string) []erro
 // keeps reports whether this dump put anything inside one subkey, which is what
 // stops the sweep removing a key the walk is about to write into.
 //
-// A value key equal to the subkey key does not count, because a value and a
-// subkey of one name are two registry objects and only one of them is being
-// asked about.
+// A value of the same name as the subkey does not count, because a value and a
+// subkey of one name are two registry objects and only one of them is being asked
+// about. That falls out of the staging being keyed by [valueAt] rather than being
+// a case here: a value's own name is never part of the subkey it is compared to.
 func (w *writer) keeps(key string) bool {
 	// Every key this is asked about is a subkey of a replaced composite, so it
 	// is never the driver's own key and the join below never produces a bare
 	// backslash.
 	inside := key + separator
 
-	for k := range w.wrote {
-		if strings.HasPrefix(k, inside) {
+	return w.wroteUnder(key, inside) || w.spelled(key, inside)
+}
+
+// wroteUnder reports whether this dump staged a value in one subkey or below it.
+func (w *writer) wroteUnder(key, inside string) bool {
+	for at := range w.wrote {
+		if at.subkey == key || strings.HasPrefix(at.subkey, inside) {
 			return true
 		}
 	}
 
+	return false
+}
+
+// spelled reports whether this dump asked for one subkey, or for one below it, to
+// exist at its own address.
+func (w *writer) spelled(key, inside string) bool {
 	for _, e := range w.ensured {
 		if e.key == key || strings.HasPrefix(e.key, inside) {
 			return true
@@ -447,12 +484,60 @@ func (w *writer) written(ctx context.Context) []error {
 	errs := make([]error, 0, len(w.staged))
 
 	for _, p := range w.staged {
-		if err := w.cfg.store.Set(ctx, p.place.subkey, p.place.name, p.datum); err != nil {
+		if err := w.put(ctx, &p); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", p.at, err))
 		}
 	}
 
 	return errs
+}
+
+// put writes one staged value.
+func (w *writer) put(ctx context.Context, p *pending) error {
+	d, err := w.typed(ctx, p)
+	if err != nil {
+		return err
+	}
+
+	return w.cfg.store.Set(ctx, p.place.subkey, p.place.name, d)
+}
+
+// typed is the type one staged value is written as, and the one thing on this
+// path that reads the registry before writing it.
+//
+// A value the registry already holds as REG_EXPAND_SZ stays REG_EXPAND_SZ. Every
+// other case is the staged type: a fresh write is REG_SZ, bytes are REG_BINARY,
+// and a value an operator retyped to REG_DWORD is written back as REG_SZ, because
+// REG_SZ is the only type that carries the boundary's own spelling of a number
+// intact.
+//
+// The read is the cost, and it is one Get per string this dump writes. It buys
+// the same thing the refusal to expand on read buys: this driver already declines
+// to turn %SystemRoot% into a path because the next dump would write the
+// expansion back over what the operator wrote, and silently retyping the value
+// destroys the expansion for every other reader of that key, which is the same
+// break by another route (ADR-0013). Reading the plane before writing it is also
+// what driver/yaml does to keep comments and what driver/env's DotEnvSink does to
+// merge.
+//
+// A read that fails is reported rather than guessed at. The write that follows it
+// is against the same key and would almost certainly fail too, and answering
+// REG_SZ here would be this driver committing the break it just declined.
+func (w *writer) typed(ctx context.Context, p *pending) (Datum, error) {
+	if p.datum.Type != TypeString {
+		return p.datum, nil
+	}
+
+	held, found, err := w.cfg.store.Get(ctx, p.place.subkey, p.place.name)
+	if err != nil {
+		return Datum{}, fmt.Errorf("reading the type this value is already stored as: %w", err)
+	}
+
+	if found && held.Type == TypeExpandString {
+		return Datum{Type: TypeExpandString, Text: p.datum.Text}, nil
+	}
+
+	return p.datum, nil
 }
 
 // sorted is one listing in a fixed order, over a copy, so that nothing this

@@ -44,15 +44,18 @@
 // sequence inside one value, and ferry addresses each element of a sequence in its
 // own right.
 //
-// A save writes a []byte field as REG_BINARY and everything else as REG_SZ.
-// REG_SZ is the one type that carries a number's own spelling intact, and 007,
-// 3.14159265358979 and 18446744073709551615 all come back exactly as they went in.
+// A save writes a []byte field as REG_BINARY and everything else as REG_SZ, so a
+// number is stored as its own text and 007, 3.14159265358979 and
+// 18446744073709551615 all come back exactly as they went in. One exception: text
+// written to an address the registry already holds as REG_EXPAND_SZ stays
+// REG_EXPAND_SZ, so a save does not destroy an expansion other readers of that key
+// depend on.
 //
 // # Sharp edges
 //
-// A save replaces a value's type. An operator who retyped a value to REG_DWORD by
-// hand gets it retyped back to REG_SZ on the next save. The data survives, the
-// type annotation does not.
+// A save replaces every other type a value was given. An operator who retyped a
+// value to REG_DWORD by hand gets it back as REG_SZ on the next save: the data
+// survives, the type annotation does not.
 //
 // A save is ordered and it is not atomic. The removals a slice or a map implies
 // run first, then the keys a present-and-empty container needs, then every value
@@ -71,8 +74,12 @@
 // Writing under HKEY_LOCAL_MACHINE needs administrator rights, and a process
 // without them is refused when the save starts rather than part way through it.
 //
-// Value data round-trips up to 16384 characters, and a value name may be at most
-// 16383.
+// A value name may be at most 16,383 characters, which is the registry's own
+// limit and not this driver's.
+//
+// A value name holding a backslash is legal in the registry and has no address
+// here, so a key that holds one cannot be loaded as a map or a slice: the member
+// it would mint is refused. A key ferry alone writes never holds one.
 //
 // # Everywhere that is not Windows
 //
