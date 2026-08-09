@@ -141,10 +141,15 @@ Coalesce, compare, or mark your own writes; the loop above deliberately does not
 Treat a signal as "the plane may have changed", nothing more.
 The reload reads the truth; a spurious wake costs one load.
 
-## The yaml driver, which is the one that announces changes
+## The two drivers that announce changes
 
 Everything above is plane-independent: the loop is yours and the signal is the driver's.
-The yaml driver is the first first-party driver that has a signal to give, and it gives it as a callback rather than a channel, because there is no `Notifier` interface in core to shape one ([ADR-0020](../adr/0020-watch-and-reload.md) specifies that interface and deliberately does not ship it).
+Two first-party drivers have a signal to give, and both give it as a callback rather than a channel, because there is no `Notifier` interface in core to shape one ([ADR-0020](../adr/0020-watch-and-reload.md) specifies that interface and deliberately does not ship it).
+
+The yaml driver is the one described below.
+`driver/env` is the second, and its Option is the same shape with one difference: `env.WatchFiles(ctx, onChange)` takes no interval, because it watches with fsnotify rather than by polling.
+It watches every file `env.DotEnv` named, refuses at Bind when no file was named or a directory is not there, and coalesces the burst one save produces into a single call.
+[ADR-0020](../adr/0020-watch-and-reload.md) is amended in place with why that driver takes the dependency and this one does not.
 
 ```go
 onChange := func(ctx context.Context) {
@@ -171,7 +176,8 @@ The option starts looking when the source is built, so a callback that loads thr
 Publish the binding through something that orders the two - an atomic pointer, or a channel the callback reads first - which is what `ExampleWatch` in `driver/yaml` does.
 
 **Looking is a stat, not fsnotify.**
-The driver takes no dependency to watch a file, so the interval is yours to name and a rewrite that lands in the same modification-time tick without changing the file's length is not seen.
+This driver takes no dependency to watch a file, so the interval is yours to name and a rewrite that lands in the same modification-time tick without changing the file's length is not seen.
+`driver/env` makes the other choice and pays for it in its `require` block.
 
 **A save refuses a file that changed underneath it.**
 A dump reads the document, stages a replacement and renames it into place, and an edit landing in that window would be swapped away in silence.

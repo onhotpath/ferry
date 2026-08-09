@@ -2,6 +2,7 @@ package env
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -109,16 +110,21 @@ func TestARootLeafIsRefusedWhereNoRootVarNamesIt(t *testing.T) {
 	}
 }
 
-// TestARootLeafRoundTripsThroughTheVariableRootVarNames is both halves reading
-// one name, over the stand-in sink this package's tests write through, which is
-// what makes the option a plane rule rather than a read-side spelling.
+// TestARootLeafRoundTripsThroughTheVariableRootVarNames is both halves naming
+// one variable, which is what makes the option a plane rule rather than a
+// read-side spelling.
+//
+// The dump writes both halves of the composite - the file and the process
+// environment - so what the load reads back is the plane the save left behind
+// rather than one half of it.
 func TestARootLeafRoundTripsThroughTheVariableRootVarNames(t *testing.T) {
 	t.Parallel()
 
 	e := newEnviron()
-	src := New(Environ(e.environ), RootVar(rootPort))
+	path := filepath.Join(t.TempDir(), ".env")
+	src := New(Environ(e.environ), DotEnv(path), RootVar(rootPort))
 
-	if err := ferry.Dump(t.Context(), 8080, standInSink{cfg: src.cfg, env: e}); err != nil {
+	if err := ferry.Dump(t.Context(), 8080, NewDotEnvSink(path, RootVar(rootPort), Setenv(e))); err != nil {
 		t.Fatalf("dump: %+v", err)
 	}
 

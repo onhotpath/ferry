@@ -35,13 +35,16 @@ import (
 // Bind refuses a list that is not whole pairs, a word that is empty, and a word
 // given twice, because each of those is a spelling that cannot be read back the
 // way it was written.
-func BoolWords(truthy, falsy string, also ...string) Option {
+func BoolWords(truthy, falsy string, also ...string) Naming {
 	return optionFunc(func(c *config) {
 		words := make([]string, 0, len(also)+2)
 		words = append(words, truthy, falsy)
 		words = append(words, also...)
 
-		c.bools, c.wordsErr = boolSpelling(words)
+		spelling, err := boolSpelling(words)
+
+		c.bools = spelling
+		c.refuse(err)
 	})
 }
 

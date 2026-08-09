@@ -178,6 +178,37 @@ The fsnotify machinery never runs unless it is asked for, which joins the driver
 > **One sharp edge falls out of the Option starting the watch when the source is built**: the callback that loads through a `Binding` refers to a binding `ferry.Bind` has not returned yet, so the caller has to order the two.
 > It is in the Option's godoc, in the guide and in the driver's runnable example, because it is the first thing anyone wiring this up hits.
 
+> **Amended under [#352](https://github.com/onhotpath/ferry/issues/352): `driver/env` watches with fsnotify, and `driver/yaml` still polls.**
+>
+> As published the amendment above reads as though polling-not-fsnotify were the project's answer.
+> It is `driver/yaml`'s answer and it is unchanged there.
+> `driver/env` ships `WatchFiles(ctx, onChange)` and it takes the dependency:
+>
+> ```go
+> func WatchFiles(ctx context.Context, onChange func(context.Context)) Option
+> ```
+>
+> **The dependency is argued here because that is what the module rules require, and it is a real cost.**
+> `driver/env`'s `require` block was empty, and every consumer of the process-environment source - which touches no filesystem at all - now pulls `github.com/fsnotify/fsnotify` and `golang.org/x/sys`.
+> What buys it is that this driver watches a set of files rather than one, that a `.env` file is edited by hand far more often than a rendered config file is, and that the interval a poll would need is the one thing this Option has no honest default for when the caller named three files in three directories.
+> `driver/yaml`'s polling watcher is the fallback if the dependency bites, and it is already written.
+>
+> **Everything else about the shape is `yaml.Watch`'s, deliberately.**
+> Callback not channel, no error return, stopping rides the context, no `Stop` method, the watch opened synchronously inside the constructor so a failure has somewhere to go, the callback unfenced, the context read twice, and the same sharp edge about ordering the binding.
+> The one difference is the missing `every time.Duration`, because fsnotify has no interval.
+> Two watchable drivers disagreeing about the shape would be worse than either shape.
+>
+> **What fsnotify buys is answered in kind rather than in latency.**
+> The directory is watched rather than the file, because an editor and this package's own sink both replace a file by renaming another over it and an inotify watch survives that attached to an inode nobody reads any more.
+> Events are filtered by exact name, which is what keeps the sink's own `.ferry-*` staging files out of the callback, and a 50ms settle timer coalesces the burst one save produces.
+> Losing the watch fires the callback once and returns, so the next `Load` reports the truth through a surface the caller already handles.
+>
+> **`Notifier`'s stated trigger is now met, and it is deliberately not taken.**
+> The trigger above is "more than one driver can genuinely announce a change and a caller has to write the assertion twice", and there are two such drivers as of this amendment.
+> It still does not ship, for the three costs the next section lists, all unchanged - and for a fourth this amendment adds: nothing in the two Options is shared.
+> One polls a stat and one reads an inotify queue, and what a common interface would carry between them is a channel neither driver publishes and core never reads.
+> The trigger is restated as the one that would actually bite: **a caller writing the same watch wiring against two drivers and wanting one binding for both.**
+
 ### `Notifier` is recorded as the upgrade path, and does not ship
 
 The one thing a watcher needs that is not a ferry concept is the change signal, and today it is the driver's own: a channel, an fsnotify loop, a Consul watch plan.
@@ -205,7 +236,7 @@ That is the rule of three applied one door down, and it is the same trigger [ADR
 
 ### What this ADR does not decide
 
-- **Whether any first-party driver ever announces changes.** The YAML Option above is the only one on the table and it is opt-in.
+- **Whether any first-party driver ever announces changes.** The YAML Option above is the only one on the table and it is opt-in. *(Amended under [#352](https://github.com/onhotpath/ferry/issues/352): `driver/env` ships `WatchFiles`, which is a second one and is also opt-in.)*
 - **Whether `Notifier` or `ferry.Watch` ever ship.** Recorded with a named trigger, and refusing is the reversible direction.
 - **Drift detection.** [ADR-0001](0001-what-ferry-supports.md) calls drift and watch the pull and push forms of one concern; the plane-inspection half is still Milestoned on its own terms, and this ADR does not move it.
 - **What a watcher does with a partial failure mid-stream.** The error ends the stream, and a caller who wants to continue rebuilds the iterator, which is a caller's policy rather than ferry's.

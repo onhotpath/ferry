@@ -1,6 +1,7 @@
 package env
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -8,27 +9,64 @@ import (
 	"github.com/onhotpath/ferry"
 )
 
-// ErrOption reports a driver option this source cannot be built with: a
-// separator no environment variable name can hold, a [Form] outside the two
-// this package declares, or no environment to read.
+// ErrOption reports a driver option this source or sink cannot be built with: a
+// separator no environment variable name can hold, a [Form] outside the two this
+// package declares, or no environment to read.
 //
-// [New] takes options and returns no error, so this lands at Bind, which is the
-// first moment the driver is asked for anything. It wraps [ferry.ErrPlane] and
-// stays reachable under ferry's wrapper, so errors.Is answers for it on what
-// [ferry.Load] returned.
+// [New] and [NewDotEnvSink] take options and return no error, so this lands at
+// Bind, which is the first moment the driver is asked for anything. It wraps
+// [ferry.ErrPlane] and stays reachable under ferry's wrapper, so errors.Is
+// answers for it on what [ferry.Load] and [ferry.Dump] returned.
 var ErrOption = errors.New("env: unusable driver option")
 
-// Option configures a [Source]. The set is closed at five: [Separator],
-// [Canonical], [Environ], [BoolWords] and [RootVar].
+// Option is a setting handed to [New].
+//
+// Seven of them: [Separator], [RootVar] and [BoolWords], which are also
+// [SinkOption]s, and [Canonical], [Environ], [DotEnv] and [WatchFiles], which
+// belong to the read half alone.
 type Option interface {
 	apply(*config)
 }
 
-// optionFunc is the one implementation, which is what makes every option below
-// a one-line constructor.
+// SinkOption is a setting handed to [NewDotEnvSink].
+//
+// Five of them: [Separator], [RootVar] and [BoolWords], which are also
+// [Option]s, and [Setenv] and [Durable], which belong to the write half alone.
+//
+// It is a separate type from [Option] so that each constructor takes the
+// settings that mean something to it, and the other way round is a compile error
+// rather than a setting that is quietly ignored.
+type SinkOption interface {
+	applySink(*sinkConfig)
+}
+
+// Naming is a setting both halves take, and it is the three that decide what a
+// name is: [Separator], [RootVar] and [BoolWords].
+//
+// They are shared because a sink writing one spelling and a source reading
+// another is a plane that cannot round trip. A sink joining with "_" writes
+// TAGS_0 where a source joining with "__" looks for TAGS__0, and words given to
+// one half alone make the plane write true and read on. Source and sink are two
+// constructors, so nothing checks that the two agree; the failure is a load that
+// finds nothing rather than a value silently corrupted, and the way to avoid it
+// is to build both halves from one slice of these.
+type Naming interface {
+	Option
+	SinkOption
+}
+
+// optionFunc is the implementation behind every setting both halves take, which
+// is what makes each of those a one-line constructor.
 type optionFunc func(*config)
 
-func (f optionFunc) apply(c *config) { f(c) }
+func (f optionFunc) apply(c *config)         { f(c) }
+func (f optionFunc) applySink(c *sinkConfig) { f(&c.config) }
+
+// sourceOnly is the implementation behind a setting only [New] takes, and the
+// whole of what stops it being handed to [NewDotEnvSink].
+type sourceOnly func(*config)
+
+func (f sourceOnly) apply(c *config) { f(c) }
 
 // config is a [Source]'s settled configuration, copied into every binding so
 // that a Source reconfigured after Bind cannot change a binding already handed
@@ -42,18 +80,27 @@ type config struct {
 	// (ADR-0003, #337).
 	rootVar string
 	environ func() []string
+	// dotenv is the files layered under the process environment, lowest first,
+	// and it is nil until [DotEnv] names any. Naming them does no I/O: a Bind
+	// records the paths and the open reads them (ADR-0012).
+	dotenv []string
+	// watch is the file watcher [WatchFiles] asked for, or nil. It is started
+	// inside [New], on the caller's own goroutine, so that a watcher that cannot
+	// be built has somewhere to report it (ADR-0020).
+	watch *watcher
 	// bools is the spelling [BoolWords] built, and it is nil until it is asked
 	// for: this plane holds text and nothing else, so a variable is a String
 	// unless a word of this plane's own says it is a bool (ADR-0018).
 	bools ferry.Spelling[bool, string]
-	// wordsErr is what building it refused with, held until Bind for the reason
-	// [ErrOption] gives: an Option is applied inside [New], which returns no
-	// error, so the refusal waits for the first moment the driver is asked for
-	// anything.
+	// wordsErr is what building the configuration refused with, held until Bind
+	// for the reason [ErrOption] gives: an Option is applied inside [New], which
+	// returns no error, so the refusal waits for the first moment the driver is
+	// asked for anything.
 	wordsErr error
 }
 
-// DefaultSeparator is the join a [Source] uses when no [Separator] is given.
+// DefaultSeparator is the join a [Source] and a [DotEnvSink] use when no
+// [Separator] is given.
 //
 // It is the spelling every operator already reads, and it is deliberately not
 // the safest one: at "_" the fields metric.http.port and metric.http_port want
@@ -62,6 +109,9 @@ type config struct {
 // "__", so the default is the readable one and the check at Bind is what makes
 // either safe.
 const DefaultSeparator = "_"
+
+// DefaultDotEnvFile is the file [DotEnv] reads when it is named none.
+const DefaultDotEnvFile = ".env"
 
 // defaults is the configuration a [Source] starts from.
 func defaults() config {
@@ -80,7 +130,10 @@ func defaults() config {
 //
 // It must be a non-empty run of the bytes an environment variable name may
 // hold: A-Z, 0-9 and _.
-func Separator(sep string) Option {
+//
+// Give the same one to both halves. A sink writing TAGS_0 and a source reading
+// TAGS__0 never meet, and nothing checks that the two agree.
+func Separator(sep string) Naming {
 	return optionFunc(func(c *config) { c.sep = sep })
 }
 
@@ -123,8 +176,11 @@ const (
 // what the nested limits.http.port renders to, and it is read as the nesting,
 // because a driver reading it the other way could not load a map of maps at all.
 // Use env.Separator("__") if your keys contain underscores.
+//
+// It is read-side only. Nothing is folded on the way out, because a key written
+// to a file is written as the struct spells it.
 func Canonical(f Form) Option {
-	return optionFunc(func(c *config) { c.canon = f })
+	return sourceOnly(func(c *config) { c.canon = f })
 }
 
 // Environ names the function a load reads its environment from, in the
@@ -134,8 +190,13 @@ func Canonical(f Form) Option {
 //
 // It is what makes a test hermetic, since testing.T.Setenv forbids t.Parallel
 // and mutating the process environment is visible to everything else in the
-// binary. It is also how an environ captured elsewhere - a child process's, a
-// .env file already parsed - is loaded through this driver.
+// binary.
+//
+// It is also the escape hatch from every sharp edge the process half of this
+// plane has. Whatever it returns is the top layer, above every file [DotEnv]
+// named, so env.Environ(func() []string { return nil }) is how a load reads the
+// files alone and nothing ambient can shadow, invent or collide with what they
+// hold.
 //
 // It is called once per load, so one load sees one consistent snapshot and a
 // later change to the environment reaches the next load rather than half of this
@@ -148,17 +209,48 @@ func Canonical(f Form) Option {
 // or a slice that anything else writes to is not, and nothing here can make it
 // so.
 func Environ(fn func() []string) Option {
-	return optionFunc(func(c *config) { c.environ = fn })
+	return sourceOnly(func(c *config) { c.environ = fn })
+}
+
+// DotEnv layers .env files underneath the process environment.
+//
+//	src := env.New(env.DotEnv())                            // .env, then the process
+//	src := env.New(env.DotEnv("base.env", "local.env"))     // base < local < the process
+//
+// With no paths it reads [DefaultDotEnvFile]. Named several, a later file wins
+// over an earlier one, and the process environment wins over every file: the
+// process is the anchor, and the files are what fills in what it does not say.
+//
+// A file that is not there is an empty layer rather than a failure, which is what
+// makes the files optional: every field takes its default, and a required field
+// fails. A file that is there and does not parse is a refusal, so a .env with a
+// typo in it is never loaded as though it were empty.
+//
+// It does no I/O of its own. The paths are recorded, and each load reads, parses
+// and layers them, so a file edited between two loads reaches the second one.
+//
+// The sharp edge is the one the package documentation opens with: the process
+// wins, so a variable already exported shadows the file that names it, and a
+// [DotEnvSink] save that does not also set the process leaves the next load
+// reading the old value. See [Setenv] and [Environ].
+func DotEnv(paths ...string) Option {
+	return sourceOnly(func(c *config) {
+		if len(paths) == 0 {
+			paths = []string{DefaultDotEnvFile}
+		}
+
+		c.dotenv = paths
+	})
 }
 
 // RootVar names the environment variable a schema whose root is a single value
-// is read from.
+// is read from and written to.
 //
 //	port, err := ferry.Load[int](ctx, env.New(env.RootVar("APP_PORT")))
 //
 // Without it such a schema is refused at Bind, before any environment is read.
 // The root address carries no segment, so the join that names every other
-// address has nothing to join and this driver has no name to read it at.
+// address has nothing to join and this driver has no name to use.
 //
 // The name is taken as written rather than folded, and that is the whole of the
 // sharp edge: the fold turns every byte outside A-Z, 0-9 and _ into _, so no
@@ -169,16 +261,17 @@ func Environ(fn func() []string) Option {
 // It names one variable and nothing else. Every address with a segment of its
 // own is named by that segment as before, and a root whose variable is not set
 // is absent, which leaves whatever [ferry.LoadOver] was seeded with in place.
-func RootVar(name string) Option {
+//
+// Give the same one to both halves, for the reason [Naming] states.
+func RootVar(name string) Naming {
 	return optionFunc(func(c *config) { c.rootVar = name })
 }
 
 // validate refuses a configuration this driver cannot serve, and it runs at Bind
 // because that is the first moment the driver is asked for anything.
 func (c *config) validate() error {
-	if !legalSeparator(c.sep) {
-		return optionError("the separator must be a non-empty run of A-Z, 0-9 and _, " +
-			"spelled as it appears in the name")
+	if err := c.validateNaming(); err != nil {
+		return err
 	}
 
 	if c.canon != Lower && c.canon != Upper {
@@ -189,8 +282,24 @@ func (c *config) validate() error {
 		return optionError("there is no environment to read: env.Environ was given no function")
 	}
 
+	return nil
+}
+
+// validateNaming is the half of the check both directions make, because both
+// fold an address into a name and both spell a boolean.
+func (c *config) validateNaming() error {
+	if !legalSeparator(c.sep) {
+		return optionError("the separator must be a non-empty run of A-Z, 0-9 and _, " +
+			"spelled as it appears in the name")
+	}
+
 	return c.wordsErr
 }
+
+// refuse records a refusal an option constructor made, keeping the first one so
+// that a configuration with two mistakes in it reports the one nearest the
+// beginning rather than the one nearest the end.
+func (c *config) refuse(err error) { c.wordsErr = cmp.Or(c.wordsErr, err) }
 
 // legalSeparator reports whether every byte of the separator is one an
 // environment variable name may hold. A separator that is not is a name no

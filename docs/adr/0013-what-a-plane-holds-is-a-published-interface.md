@@ -187,6 +187,33 @@ It matters here because the promise is exactly as wide as the table: a member wi
 > **Nothing in the argument moves.** The count was evidence that the promise can be narrower than the admitted set by accident, and a count of zero missing members is the same rule with nothing currently failing it.
 > [ADR-0014](0014-what-ferrytest-exports.md)'s table closes it again, at nineteen rows, because it is a different table with a third column - which is the finding below, and that one is **unaffected**: the golden column is still absent from `harness.go`'s proof on `0d86c00`, so `CoreTypes()` is still the proof type that cannot see a representation.
 
+> **Amended under [#352](https://github.com/onhotpath/ferry/issues/352): the `.env` quoting and escape table joins the pinned tier, owned by `driver/env`.**
+>
+> As published this section's pinned tier is core's identity and kind tables, and the driver-owned spellings named anywhere in this ADR are `driver/yaml`'s scalar forms and its `!!binary`.
+> `driver/env` now writes a file, so it has a representation, and it is pinned by golden rows in that module's own conformance run.
+>
+> The rows are the quoting choice and the escape table, in both directions:
+>
+> | value | written |
+> | --- | --- |
+> | `db.internal` | `db.internal`, bare |
+> | `""` | `''` |
+> | `" padded "` | `' padded '` |
+> | `"# not a comment"` | `'# not a comment'` |
+> | `"$HOME"` | `'$HOME'` |
+> | `say "hi"` | `'say "hi"'` |
+> | `"it's"` | `"it's"` |
+> | `"a\nb"` | `"a\nb"`, one physical line |
+> | `"\xff\xfe"` | raw bytes inside double quotes |
+> | `"a\x00b"` | refused, `ErrValue` |
+>
+> Bare is used where every byte is in `A-Z a-z 0-9 _ . / : @ % + , = -`; single quotes where the value holds no `'`, `\n` or `\r` and is valid UTF-8; double quotes otherwise, escaping exactly `\` `"` LF CR TAB as `\\` `\"` `\n` `\r` `\t` and writing every other byte through, invalid UTF-8 included.
+>
+> **The tier is this ADR's own, and so is the consequence**: a change to any row above is a major version of `github.com/onhotpath/ferry/driver/env`, not a test-fixture edit.
+>
+> **One promise it does not make.** Every value here round trips through this driver, and every value except two classes is also one `sh` reads back identically when the file is sourced: a shell does not unescape `\n`, `\r` or `\t`, and a value holding a single quote together with a `$` or a backtick has to be double-quoted and is then expanded.
+> Inventing a `\$` escape would fix the second and make the file unreadable to every other `.env` reader, which is the [ADR-0018](0018-the-spelling-seam.md) trade this driver declines.
+
 **Tier two transfers with the guarantee ADR-0001 already transfers**, and the mechanism is not ADR-0009's.
 
 ADR-0009 communicates obligations through a diagnostic, and is explicit that this is the point: "the diagnostic is where the obligation gets communicated ... it is the only moment a registrant is guaranteed to read".

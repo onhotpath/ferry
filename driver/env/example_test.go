@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sync/atomic"
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/driver/env"
@@ -117,4 +119,143 @@ func ExampleBoolWords() {
 
 	fmt.Printf("%+v\n", cfg)
 	// Output: {Enabled:true}
+}
+
+// ExampleDotEnv layers a .env file underneath the process environment.
+//
+// The file fills in what the process does not say, and the process wins wherever
+// both say something. Naming several files layers them in order, lowest first.
+func ExampleDotEnv() {
+	dir, _ := os.MkdirTemp("", "ferry-env")
+	defer os.RemoveAll(dir)
+
+	path := filepath.Join(dir, ".env")
+	_ = os.WriteFile(path, []byte("# the box the database is on\nDB_HOST=db.internal\nDB_PORT=6543\n"), 0o600)
+
+	environ := func() []string { return []string{"NAME=checkout", "DB_PORT=5432"} }
+
+	cfg, err := ferry.Load[Config](context.Background(), env.New(env.Environ(environ), env.DotEnv(path)))
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Printf("%+v\n", cfg)
+	// Output: {Name:checkout DB:{Host:db.internal Port:5432}}
+}
+
+// ExampleNewDotEnvSink saves a struct back into a .env file somebody else wrote.
+//
+// The variables the struct maps are replaced where they stand. The comment, the
+// order, the export prefix and the variable no field maps are all left as they
+// were, which is what makes a hand-maintained file survive being written back.
+func ExampleNewDotEnvSink() {
+	dir, _ := os.MkdirTemp("", "ferry-env")
+	defer os.RemoveAll(dir)
+
+	path := filepath.Join(dir, ".env")
+	_ = os.WriteFile(path, []byte("# the box the database is on\nexport DB_HOST=old\nUNRELATED=keep me\n"), 0o600)
+
+	cfg := Config{Name: "checkout", DB: DB{Host: "db.internal", Port: 5432}}
+
+	if err := ferry.Dump(context.Background(), cfg, env.NewDotEnvSink(path)); err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	saved, _ := os.ReadFile(path)
+	fmt.Print(string(saved))
+	// Output:
+	// # the box the database is on
+	// export DB_HOST=db.internal
+	// DB_PORT=5432
+	// UNRELATED=keep me
+	// NAME=checkout
+}
+
+// ExampleSetenv saves the file and the running process together, so that the two
+// halves of the plane agree afterwards.
+//
+// Without it the file would hold the new value and the next load would answer
+// with the old one, because the process is the layer above every file. The
+// process here is a stand-in rather than the running one, which is what an
+// example that changes nothing outside itself wants; env.Setenv(nil) names the
+// real thing.
+func ExampleSetenv() {
+	dir, _ := os.MkdirTemp("", "ferry-env")
+	defer os.RemoveAll(dir)
+
+	path := filepath.Join(dir, ".env")
+	vars := map[string]string{"NAME": "old", "DB_HOST": "old"}
+
+	cfg := Config{Name: "checkout", DB: DB{Host: "db.internal", Port: 5432}}
+
+	if err := ferry.Dump(context.Background(), cfg, env.NewDotEnvSink(path, env.Setenv(fake{vars}))); err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Println(vars["NAME"], vars["DB_HOST"])
+	// Output: checkout db.internal
+}
+
+// fake is the stand-in process the example above writes to.
+type fake struct{ vars map[string]string }
+
+func (f fake) Setenv(name, value string) error { f.vars[name] = value; return nil }
+func (f fake) Unsetenv(name string) error      { delete(f.vars, name); return nil }
+
+// ExampleWatchFiles reloads when the file changes underneath a binding.
+//
+// The watch starts when the source is built, which is before ferry.Bind has
+// handed back the binding the callback wants to load through, so the two are
+// ordered by an atomic pointer the callback reads.
+func ExampleWatchFiles() {
+	dir, _ := os.MkdirTemp("", "ferry-env")
+	defer os.RemoveAll(dir)
+
+	path := filepath.Join(dir, ".env")
+	_ = os.WriteFile(path, []byte("NAME=checkout\nDB_HOST=first\n"), 0o600)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var held atomic.Pointer[ferry.Binding[Config]]
+
+	reloaded := make(chan string, 1)
+
+	src := env.New(env.Environ(func() []string { return nil }), env.DotEnv(path),
+		env.WatchFiles(ctx, func(ctx context.Context) {
+			b := held.Load()
+			if b == nil {
+				return // the binding is not published yet, so there is nothing to load through
+			}
+
+			cfg, err := b.Load(ctx)
+			if err != nil {
+				return
+			}
+
+			select {
+			case reloaded <- cfg.DB.Host:
+			default:
+			}
+		}))
+
+	b, err := ferry.Bind[Config](src)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	held.Store(b)
+
+	_ = os.WriteFile(path, []byte("NAME=checkout\nDB_HOST=second\n"), 0o600)
+
+	fmt.Println(<-reloaded)
+	// Output: second
 }

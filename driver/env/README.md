@@ -1,6 +1,6 @@
 # ferry/env
 
-Load configuration from environment variables into a Go struct.
+Load configuration from environment variables and `.env` files into a Go struct, and write a `.env` file back.
 
 ```
 go get github.com/onhotpath/ferry/driver/env
@@ -146,11 +146,145 @@ It is the only route to a root value, because the fold turns every byte outside 
 
 The variable being unset is ordinary absence: the root has no tag to carry `required` or `default=`, so `ferry.Load` gives back the zero value and `ferry.LoadOver` gives back the seed.
 
-## There is no way to write back
+## `.env` files layer under the process environment
 
-This package loads only.
-Setting the running process's own environment is rarely what anyone wants, and writing a `.env` file is a different job that belongs to a different package.
-So `ferry.Dump` with this package does not compile, rather than failing at run time.
+The process environment and a `.env` file share one namespace and one name-folding rule, so they are one plane here rather than two.
+The process is the anchor and always wins.
+Files are optional layers underneath it, in the order you name them.
+
+```go
+func ExampleDotEnv() {
+	dir, _ := os.MkdirTemp("", "ferry-env")
+	defer os.RemoveAll(dir)
+
+	path := filepath.Join(dir, ".env")
+	_ = os.WriteFile(path, []byte("# the box the database is on\nDB_HOST=db.internal\nDB_PORT=6543\n"), 0o600)
+
+	environ := func() []string { return []string{"NAME=checkout", "DB_PORT=5432"} }
+
+	cfg, err := ferry.Load[Config](context.Background(), env.New(env.Environ(environ), env.DotEnv(path)))
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	fmt.Printf("%+v\n", cfg)
+	// Output: {Name:checkout DB:{Host:db.internal Port:5432}}
+}
+```
+
+That is `ExampleDotEnv` in `example_test.go`.
+`DB_PORT` comes from the process because the process wins; `DB_HOST` comes from the file because the process does not say.
+
+`env.DotEnv()` with no paths reads `.env`.
+`env.DotEnv("base.env", "local.env")` reads both, and `local.env` wins over `base.env`.
+A file that is not there is an empty layer, so every field takes its default and a `required` field fails.
+A file that is there and does not parse is a refusal, not an empty load.
+
+## Writing a `.env` file back
+
+`env.NewDotEnvSink(path)` is the write half, and a save is a merge into whatever file is already at the path.
+
+```go
+func ExampleNewDotEnvSink() {
+	dir, _ := os.MkdirTemp("", "ferry-env")
+	defer os.RemoveAll(dir)
+
+	path := filepath.Join(dir, ".env")
+	_ = os.WriteFile(path, []byte("# the box the database is on\nexport DB_HOST=old\nUNRELATED=keep me\n"), 0o600)
+
+	cfg := Config{Name: "checkout", DB: DB{Host: "db.internal", Port: 5432}}
+
+	if err := ferry.Dump(context.Background(), cfg, env.NewDotEnvSink(path)); err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	saved, _ := os.ReadFile(path)
+	fmt.Print(string(saved))
+	// Output:
+	// # the box the database is on
+	// export DB_HOST=db.internal
+	// DB_PORT=5432
+	// UNRELATED=keep me
+	// NAME=checkout
+}
+```
+
+That is `ExampleNewDotEnvSink` in `example_test.go`.
+The comment, the `export`, the key order and the variable no field maps all survive.
+A new variable lands beside the ones whose names it is most like, which is what keeps a slice's elements together.
+
+A slice or a map is the one place the merge stops, because it is replaced whole: a three-element slice saved over with one element leaves one variable, and the comment written directly above each removed line goes with it.
+
+The write is atomic, the file is read before it is written, and a save whose file somebody else edited in between refuses rather than discarding their edit.
+
+**Give both halves the same naming options.**
+`env.Separator`, `env.RootVar` and `env.BoolWords` apply to a source and a sink alike, and nothing checks that the two agree - a sink writing `TAGS_0` and a source reading `TAGS__0` never meet.
+
+### Quoting
+
+A value is written in the narrowest quoting that holds it, and in the quoting the line already used where the new value permits it.
+
+| value | written |
+| --- | --- |
+| `db.internal` | `db.internal` |
+| `""` | `''` |
+| `" padded "` | `' padded '` |
+| `"# not a comment"` | `'# not a comment'` |
+| `"$HOME"` | `'$HOME'` |
+| `say "hi"` | `'say "hi"'` |
+| `"it's"` | `"it's"` |
+| `"a\nb"` | `"a\nb"`, one physical line |
+| `"\xff\xfe"` | raw bytes inside double quotes |
+| `"a\x00b"` | **refused** |
+
+A value holding a NUL is the one thing this plane cannot hold, because the environment block is handed to a new process as NUL-terminated strings.
+
+A value this driver writes is one `sh` reads back identically when the file is sourced, with two exceptions, both in the double-quoted case: `sh` does not read `\n`, `\r` or `\t` as the byte meant by them, and a value holding a single quote together with a `$` or a backtick has to be double-quoted and is then expanded.
+Both round trip through ferry exactly.
+
+## A save can look as though it did nothing
+
+The process environment is above the file, so a save that writes only the file leaves the next load reading the old value.
+
+```go
+sink := env.NewDotEnvSink(".env", env.Setenv(nil))
+```
+
+`env.Setenv` makes a save apply itself to the running process as well, which is what keeps the two halves of the plane in agreement.
+It is off by default, because changing a process's environment is visible to every goroutine in it and to every child it starts.
+It also unsets what a save swept, which is what makes a shortened slice actually shorter on the next load.
+`env.Setenv(nil)` names the running process; anything else is where the writes go instead, which is what a test supplies.
+
+## Reloading when a file changes
+
+```go
+b, err := ferry.Bind[Config](env.New(env.DotEnv(path), env.WatchFiles(ctx, reload)))
+```
+
+`env.WatchFiles` calls back when any file `env.DotEnv` named changes, until the context is done.
+The directory is what is watched rather than the file, because an editor and this package's own sink both replace a file by renaming another over it.
+A burst of events from one save is one call.
+A watch that cannot be opened - no files named, or a directory that is not there - is refused at Bind, because a watch that never fires is the failure this exists to avoid.
+
+Watching starts when the source is built, so the callback runs before `ferry.Bind` has handed the binding back; order the two with an atomic pointer, as `ExampleWatchFiles` does.
+
+## The sharp edges
+
+Every one of them is the same fact: the process environment is above the files, and it is not yours.
+
+- **A save can look as though it did nothing.** Without `env.Setenv`, the file holds the new value and the process still exports the old one.
+- **A save replaces the file, not the union.** Clearing a slice clears it from the file; the process goes on serving what it holds.
+- **An ambient variable can invent a map key.** `TAGS_5` exported by somebody else adds a sixth element to a slice the file gives two of.
+- **Ambient names collide with short field names.** A field tagged `path` reads `PATH`, one tagged `home` reads `HOME`.
+- **A report names the variable, and editing the file may not fix it.** The name is a function of the address and the driver's settings, so it cannot say the process is shadowing the file.
+- **`export ` is kept and never added.** A line that had it keeps it; a new line does not get one.
+- **The sink writes the file a symlink names.** Swapping the link between two saves sends them to two different files.
+
+The way out of the first five is `env.Environ(func() []string { return nil })`, which makes the files the whole plane.
 
 ## More
 
