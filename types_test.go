@@ -780,8 +780,9 @@ func TestANamedTypeOverTimeDurationDumpsNanoseconds(t *testing.T) {
 	}
 }
 
-// refusedKinds holds every kind ADR-0005 refuses outright: four permanently,
-// because the value does not exist outside the process, and two by policy.
+// refusedKinds holds every kind ADR-0005 refuses outright: four core declines
+// because the value is local to the process that made it, and two it declines
+// because no plane in range has the type.
 type refusedKinds struct {
 	C64  complex64      `ferry:"c64"`
 	C128 complex128     `ferry:"c128"`
@@ -843,16 +844,16 @@ func checkSortedByAddress(t *testing.T, elems []error) {
 	}
 }
 
-// TestThePermanentRefusalsOfferNoCodec is the half of the refusal list that a
-// single message cannot say.
+// TestEveryRefusalNamesItsWayOut is the one thing every refusal message has to
+// say, and the assertion that replaced its opposite.
 //
-// ADR-0005 sorts the refusals by what actually limits each: a chan's identity
-// is a pointer into this process's heap and a func type is not even comparable,
-// so nothing text could carry rebuilds either, and offering registration as the
-// remedy would be naming a remedy that does not exist. complex is refused by
-// policy instead - strconv.FormatComplex and ParseComplex are a total inverse
-// pair - so there registration is exactly the answer.
-func TestThePermanentRefusalsOfferNoCodec(t *testing.T) {
+// ADR-0005 sorts the refusals by what actually limits each, and used to call
+// four of them permanent: this test asserted that a chan, func, uintptr or
+// unsafe.Pointer refusal offered no codec, because offering one would name a
+// remedy that did not exist. It does exist, for all four (#116), so the message
+// that withheld it was the defect and this test asserts the remedy instead.
+// What differs per kind is the reason, which refusalMsg still states.
+func TestEveryRefusalNamesItsWayOut(t *testing.T) {
 	t.Parallel()
 
 	report := fmt.Sprintf("%+v", Compile[refusedKinds]())
@@ -862,24 +863,22 @@ func TestThePermanentRefusalsOfferNoCodec(t *testing.T) {
 	}
 }
 
-// checkRemedy holds one refusal line to the remedy its category has.
+// checkRemedy holds one refusal line to the remedy every refusal has.
+//
+// The remedy is the same for all six because registration lifts all six: the
+// identity table is consulted before reflect.Kind, so a registered type is a
+// leaf and the kind switch that refused it is never reached. #116 found the
+// four process-local kinds printing that no codec could be written for them,
+// which a codec registered against this package disproved for each.
 func checkRemedy(t *testing.T, line string) {
 	t.Helper()
 
-	offersCodec := strings.Contains(line, "register a codec")
-
-	switch {
-	case strings.Contains(line, "chan int"), strings.Contains(line, "func()"),
-		strings.Contains(line, "unsafe.Pointer"), strings.Contains(line, "uintptr"):
-		if offersCodec {
-			t.Errorf("a permanent refusal offers a codec that cannot be written: %s", line)
+	for _, kind := range []string{
+		"chan int", "func()", "unsafe.Pointer", "uintptr", "complex64", "complex128",
+	} {
+		if strings.Contains(line, kind) && !strings.Contains(line, "register a codec") {
+			t.Errorf("a refusal names no way out, and registration lifts every one: %s", line)
 		}
-	case strings.Contains(line, "complex"):
-		if !offersCodec {
-			t.Errorf("a refusal by policy offers no way out: %s", line)
-		}
-	default:
-		// The header and the moment lines of a %+v report, which name no type.
 	}
 }
 

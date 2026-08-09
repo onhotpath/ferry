@@ -468,3 +468,60 @@ func TestANullPolicyRoundTripsTheNullAndTheValue(t *testing.T) {
 		}
 	}
 }
+
+// offset is a named uintptr, which is how the kind reaches a config struct in
+// practice: reflect.StructField.Offset, syscall.Handle and a memory-mapped base
+// address are all a uintptr under a name of their own, and none of them is a
+// pointer into this process's heap.
+type offset uintptr
+
+func offsetText(o offset) (string, error) { return strconv.FormatUint(uint64(o), 10), nil }
+
+func parseOffset(s string) (offset, error) {
+	n, err := strconv.ParseUint(s, 10, 64)
+
+	return offset(n), err
+}
+
+// TestRegistrationLiftsAProcessLocalKind is #116's correction, asserted rather
+// than described.
+//
+// ADR-0005 published chan, func, uintptr and unsafe.Pointer as permanent
+// refusals that nothing lifts, and the compiler never enforced that: the
+// identity table is consulted before reflect.Kind, so a registered type is a
+// leaf and the kind switch is never reached. Only the message said otherwise.
+//
+// Both halves are the assertion. The default is a refusal, because core cannot
+// tell an offset from a heap address by the type; the refusal is not forced,
+// because the registrant can say which one theirs is.
+func TestRegistrationLiftsAProcessLocalKind(t *testing.T) {
+	t.Parallel()
+
+	type conf struct {
+		Off offset `ferry:"off"`
+	}
+
+	if err := Compile[conf](); err == nil {
+		t.Fatal("a uintptr compiled clean with no codec, so the default is not a refusal")
+	}
+
+	reg := registryWith(t, NumberValue(offsetText, parseOffset))
+	p := newPlane(map[Path]Value{})
+
+	if err := Dump(t.Context(), conf{Off: 4096}, planeSink{p: p}, WithRegistry(reg)); err != nil {
+		t.Fatalf("dump: %+v", err)
+	}
+
+	if got := p.values[At("off")]; got != Number("4096") {
+		t.Errorf("the leaf dumped as %#v, want %#v", got, Number("4096"))
+	}
+
+	back, err := Load[conf](t.Context(), planeSource{p: p}, WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("load: %+v", err)
+	}
+
+	if back.Off != 4096 {
+		t.Errorf("loaded back %d, want 4096", back.Off)
+	}
+}
