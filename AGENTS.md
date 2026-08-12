@@ -82,7 +82,7 @@ A figure that was typed rather than measured does not go in a file.
 - Core's `require` block stays empty, and core never imports `encoding/json/v2` or `encoding/json/jsontext`.
 - No file carries a `toolchain` directive, `go.work` included. The floor is temporarily go 1.26, pending Go 1.27 GA (#366).
 - No `replace` directive is ever checked in.
-- A driver carries no `require` on core until core is tagged.
+- A driver requires core at a released version. Release order is forced: tag core, bump each driver's `require`, tag drivers.
 
 ## Lint
 

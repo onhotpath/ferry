@@ -9,17 +9,17 @@ module github.com/onhotpath/ferry/examples
 // is not yet GA.
 go 1.26
 
-// There is deliberately no `require` on github.com/onhotpath/ferry, even though
-// this module imports it, and this is the same convention driver/env and
-// driver/yaml carry for the same reason. Core has no v* tag, so v0.0.0 cannot
-// be resolved from the proxy. go.work resolves core sibling-on-disk meanwhile,
-// and CI's GOWORK=off job skips itself until the tag exists. The first
-// `git tag v0.1.0` on core is the event that changes this: the require lands
-// then, and not before.
+// Core is an ordinary dependency now, resolved from the proxy at the version
+// this module was released against, which is where a driver says which core it
+// works with. It carried a comment in place of this require until core's first
+// v* tag existed, because v0.0.0 resolves from nothing.
 //
-// This module also takes no third-party dependency, deliberately. An example is
-// read before it is run, and a reader should not have to resolve a helper
-// library to follow one. That keeps the require block empty in both directions.
-//
-// No `replace` directive either, ever. That is ADR-0002's rule rather than a
-// convenience, and CI fails a build that checks one in.
+// No `replace` stands in for it, ever. ADR-0002 bars one being checked in, and
+// CI fails a build that finds one, because a checked-in replace means CI never
+// once builds against the version a consumer resolves.
+
+require github.com/onhotpath/ferry v0.1.0
+
+// This module takes no third-party dependency, deliberately. An example is read
+// before it is run, and a reader should not have to resolve a helper library to
+// follow one. Core is the whole of the require block, in both directions.

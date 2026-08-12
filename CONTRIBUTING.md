@@ -31,9 +31,11 @@ Three module rules are asserted by CI and are not stylistic:
 - **No `replace` directive is ever checked in.**
   `go.work` gives local development its sibling-on-disk resolution instead, and `GOWORK=off` exercises the resolution a real consumer gets.
 
-A driver module carries no `require` on core until core is tagged.
-`github.com/onhotpath/ferry@v0.0.0` cannot be resolved from the proxy, and a module with any third-party requirement loads the full module graph, which reads core's `go.mod` at the named version rather than taking the workspace copy.
-`go mod tidy` in a driver therefore needs a temporary `replace` that is dropped again before the change is committed.
+A driver module requires core at a released version, which is where a driver says which core it works with.
+It carried a comment in place of that require until core's first tag existed, because `github.com/onhotpath/ferry@v0.0.0` cannot be resolved from the proxy, and a module with any third-party requirement loads the full module graph and reads core's `go.mod` at the named version rather than taking the workspace copy.
+Core is tagged now, so `go mod tidy` in a driver resolves core from the proxy and needs no `replace` standing in for it.
+
+Release order is forced, per ADR-0002: tag core, bump each driver's `require`, tag drivers.
 
 ## Where decisions live: `docs/adr/`
 

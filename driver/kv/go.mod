@@ -9,19 +9,13 @@ module github.com/onhotpath/ferry/driver/kv
 // is not yet GA.
 go 1.26
 
-// There is deliberately no require on github.com/onhotpath/ferry, even though
-// this module imports it. Core carries no v* tag yet, so `v0.0.0` cannot be
-// resolved from the proxy and naming it breaks the build for any module that
-// also loads a third-party graph. go.work resolves the sibling on disk
-// meanwhile, and CI's GOWORK=off job skips itself by reading the repository's
-// tag list rather than a flag.
+// Core is an ordinary dependency now, resolved from the proxy at the version
+// this module was released against, which is where a driver says which core it
+// works with. It carried a comment in place of this require until core's first
+// v* tag existed, because v0.0.0 resolves from nothing.
 //
-// The first `git tag v0.1.0` on core is the event that turns this comment into
-// an ordinary require. No `replace` stands in for it: ADR-0002 bars one, and CI
-// fails the build if one is checked in, because a checked-in replace means CI
-// never once builds against the version a consumer resolves.
+// No `replace` stands in for it, ever. ADR-0002 bars one being checked in, and
+// CI fails a build that finds one, because a checked-in replace means CI never
+// once builds against the version a consumer resolves.
 
-// There is no go.sum, and that is a property rather than an omission: this
-// module's only import outside the standard library is core, and the client is
-// an interface with an in-repo fake behind it, so no third-party dependency is
-// needed to reach a real key-value store in a test.
+require github.com/onhotpath/ferry v0.1.0
