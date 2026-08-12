@@ -1,4 +1,2 @@
 github.com/onhotpath/ferry v0.1.0 h1:viIzFyLL5w2gXUZ70FcVg14DooWO5F/E7+xNpET2tAg=
 github.com/onhotpath/ferry v0.1.0/go.mod h1:oUfGYyj9Y0uI77L/7huQ6WIvOYN9yrX/PitHHVduEDs=
-golang.org/x/sys v0.29.0 h1:TPYlXGxvx1MGTn2GiZDhnjPA9wZzZeGKHHmKhHYvgaU=
-golang.org/x/sys v0.29.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
