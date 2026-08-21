@@ -44,11 +44,15 @@ var _ ferry.Source = (*Source)(nil)
 // until the context it was given is done. A watch that cannot be opened is
 // reported at Bind, because this call returns no error.
 func NewSource(hive Hive, subkey string, opts ...Option) *Source {
-	return &Source{cfg: newConfig(hive, subkey, func(c *config) {
+	s := &Source{cfg: newConfig(hive, subkey, func(c *config) {
 		for _, o := range opts {
 			o.apply(c)
 		}
 	})}
+
+	startWatch(opts, &s.cfg)
+
+	return s
 }
 
 // Bind computes this schema's registry keys and checks them, and it is where a

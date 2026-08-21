@@ -1,3 +1,5 @@
+//go:build !protoe
+
 package winreg
 
 import (
@@ -102,13 +104,35 @@ type watcher struct {
 // handles. A cancelled context stops silently instead, so only losing the watch
 // speaks.
 func Watch(ctx context.Context, onChange func(context.Context)) Option {
-	return sourceOnly(func(c *config) {
-		if onChange == nil {
-			return
+	return watchOpt{w: &watcher{ctx: ctx, onChange: onChange}}
+}
+
+// watchOpt is [Watch]'s value, and it is a type of its own so that [NewSource]
+// can recognise it in the Option list once the configuration behind it has
+// settled. It settles nothing into the config, because what it carries is the
+// whole setting.
+type watchOpt struct{ w *watcher }
+
+func (watchOpt) apply(*config) {}
+
+// startWatch opens whatever the Option list asked for, and it runs inside
+// [NewSource] on the caller's own goroutine, which is what gives a failure
+// somewhere to go (ADR-0020).
+func startWatch(opts []Option, c *config) {
+	if c.err != nil {
+		return
+	}
+
+	for _, o := range opts {
+		w, ok := o.(watchOpt)
+		if !ok || w.w.onChange == nil {
+			continue
 		}
 
-		c.watch = &watcher{ctx: ctx, onChange: onChange}
-	})
+		c.refuse(w.w.start(c.store))
+
+		return
+	}
 }
 
 // start finds the registry's change notification, places the first registration

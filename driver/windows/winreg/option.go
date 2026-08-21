@@ -54,17 +54,6 @@ type optionFunc func(*config)
 func (f optionFunc) apply(c *config)     { f(c) }
 func (f optionFunc) applySink(c *config) { f(c) }
 
-// sourceOnly is the implementation behind a setting only [NewSource] takes, and
-// the whole of what stops it being handed to [NewSink].
-//
-// There is deliberately no sinkOnly beside it. Nothing this driver's write half
-// takes is a setting the read half does not, and a type nothing constructs is
-// dead code the unused linter reports (ADR-0002's lint limits are not raised to
-// keep ceremony alive).
-type sourceOnly func(*config)
-
-func (f sourceOnly) apply(c *config) { f(c) }
-
 // config is a [Source]'s or a [Sink]'s settled configuration, copied into every
 // binding so that one reconfigured after Bind cannot change a binding already
 // handed out.
@@ -78,11 +67,6 @@ type config struct {
 	// was given and the machine's own registry otherwise.
 	store Registry
 
-	// watch is the change notification [Watch] asked for, or nil. It is started
-	// inside the constructor, on the caller's own goroutine, so that a watch
-	// that cannot be opened has somewhere to report it (ADR-0020).
-	watch *watcher
-
 	// err is what building the configuration refused with, held until Bind for
 	// the reason [ErrOption] gives: an Option is applied inside a constructor
 	// that returns no error, so the refusal waits for the first moment the
@@ -91,7 +75,7 @@ type config struct {
 }
 
 // newConfig resolves one option list into the configuration a source or a sink
-// runs under, and opens the watch where one was asked for.
+// runs under.
 //
 // apply is the loop over whichever of the two option types the caller has, which
 // is the only thing that differs between the two constructors.
@@ -100,10 +84,6 @@ func newConfig(hive Hive, subkey string, apply func(*config)) config {
 
 	apply(&c)
 	c.settle()
-
-	if c.err == nil && c.watch != nil {
-		c.refuse(c.watch.start(c.store))
-	}
 
 	return c
 }
