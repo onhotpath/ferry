@@ -4,6 +4,27 @@ Status: Accepted
 Date: 2026-08-06
 Ticket: [#13](https://github.com/onhotpath/ferry/issues/13)
 
+## The six principles this record is judged against
+
+> **Added under [#373](https://github.com/onhotpath/ferry/issues/373): the rules every decision below is an application of, three of which were never written down.**
+>
+> As published this record opens with its Context and states its principles nowhere.
+> They were real all along, and the three that went unwritten are the three the shipped design broke.
+> They are stated first because everything after this is one of them applied, and because the next change in this area has to argue against them rather than around them.
+
+1. **A plane fires events opt-in.**
+   A source that was not asked to watch touches nothing and starts nothing.
+2. **The consumer uses a watchable plane neatly.**
+   One context, no goroutine the caller starts, nothing to stop, and a stream that opens with a load.
+3. **Refusal lands at Bind, and at compile time where that is free.**
+4. **The stream ends observably, with a reason.**
+5. **An event is a hint carrying nothing, and the reload is `Load`.**
+6. **Composition is part of neatly.**
+   Two watchable planes under one binding is an ordinary configuration, not a hypothetical.
+
+The first three are the ones this record already followed.
+The last three are added here, and each of them is a defect in the shipped design named as a rule: a watch that died silently, an announcement that tried to carry a payload, and a composition nobody could write.
+
 ## Context
 
 [ADR-0001](0001-what-ferry-supports.md) put watch and reload in the **Milestoned** bucket, with the note "machinery lands in core when it lands", and was explicit about what milestoning commits to: the mechanism, never the feature.
@@ -100,6 +121,143 @@ Every one of those shipped for its own reasons.
 > **The thirty lines survive in this ADR and nowhere else.**
 > `examples/watcher`'s hand-rolled loop is deleted, because a demonstration of code a caller now imports is a second implementation to keep true.
 
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the change signal crosses the seam as a typed interface the source publishes, and the callback Option is retired in all three drivers.**
+>
+> As published, and as amended under [#352](https://github.com/onhotpath/ferry/issues/352) and [#272](https://github.com/onhotpath/ferry/issues/272), the shape is a caller-supplied callback handed to a driver Option at construction: `onChange func(context.Context)`, an Option and not a method, no error return, no `Stop`, the watch opened inside the constructor.
+> Three drivers agreed on it and this record took that agreement as the shape being a shape.
+>
+> **What moves is the direction the signal travels and what it is allowed to say.**
+>
+> ```go
+> type Notifier interface {
+> 	Notify(ctx context.Context) (Change, error)
+> }
+>
+> type Change interface {
+> 	Wait(ctx context.Context) (bool, error)
+> 	Close() error
+> }
+>
+> type WatchableSource interface {
+> 	Source
+> 	Watching() (Notifier, error)
+> }
+>
+> func BindWatched[T any](src WatchableSource, opts ...Option) (*WatchedBinding[T], error)
+>
+> func (wb *WatchedBinding[T]) Load(ctx context.Context) (T, error)
+> func (wb *WatchedBinding[T]) Watch(ctx context.Context) (seq iter.Seq[T], errf func() error)
+>
+> var ErrWatchLost = errors.New("the watch was lost")
+> ```
+>
+> Eight exports.
+> The driver side is one method on the source that already holds the configuration, spelled the same way in every driver and taking no arguments anywhere:
+>
+> ```go
+> func (s *Source) Watched() *WatchedSource
+> ```
+>
+> **Principle 2 is what the callback could not do.**
+> A callback is handed to a constructor, so the watch starts before `Bind` has returned the binding the callback wants to load through, and the shipped `ExampleWatchFiles` paid for that with an atomic pointer nil-checked on every call.
+> This record's own [#364](https://github.com/onhotpath/ferry/issues/364) amendment named that hole and closed it with a `Signal` the caller carries between two objects.
+> The typed seam removes the hole rather than absorbing it: nothing watches until a stream opens, and the stream opens with a load, so a change that landed before the bind is in the value the range yields first.
+> There is one context, the stream's, where there were two that nothing reconciled.
+>
+> **Principle 4 is what the callback could not say.**
+> `func(context.Context)` has no error return, so a driver that lost its watch had nowhere to report it; this record settled that by calling the callback once and returning, and by trusting the next load to report something.
+> It does not: a lost watch means no next load ever happens, so a process holding stale configuration has nothing to tell it so.
+> `Change.Wait` answers `(bool, error)`, so a lost watch ends the stream with the driver's own reason under `ErrWatchLost`, and a quiet ending is `false` with a nil error.
+>
+> **Principle 3 is what a caller-supplied callback cannot be.**
+> `WatchableSource` is an ordinary interface and a plain `Source` does not satisfy it, so handing an unwatchable source to `BindWatched` is a compile error with no conversion available.
+> What a type cannot carry is whether *this* source has anything to watch, because watchability is option-dependent: an `env.Source` is the same type whatever `DotEnv` said.
+> `Watching() (Notifier, error)` is where that half is answered, once, at the bind, before any load.
+>
+> **Principle 5 is unchanged and is now enforced.**
+> `Change.Wait` reports that the plane may have changed and carries nothing else, exactly as the callback did, and the reload is still `Load`.
+> There is no `Reload`, and no payload anywhere on the seam.
+>
+> **Principle 1 is unchanged.**
+> The constructors are untouched and still start nothing.
+> `Watched()` converts, and the conversion touches nothing either: the mechanism opens when a stream does.
+>
+> **The announcement seam is arm-once, and the arm-before-reload invariant is core's.**
+> `Notify` places a registration that is live on return and `Wait` consumes it once, which is the weakest of the three real mechanisms: a persistent queue models an armed-once registration and the reverse is false, so one core loop is correct against a poll, an fsnotify queue and a Win32 notification handle.
+> Core places the next registration **before** it runs the reload, so a change landing mid-reload is the next change rather than a lost one, and no driver re-derives the subtle part.
+> `Change.Close` is required rather than asserted, because it is a resource obligation core invokes at the re-arm moment and optionality would turn a forgotten release into a silent leak.
+> Each `Watch` call arms its own registration, so two concurrent consumers are well defined and each sees every change.
+>
+> **`Watching` does no I/O.**
+> It refuses what is knowable without the operating system; everything the OS has an opinion about surfaces when the first registration is placed, on the stream, before any value reaches the caller.
+>
+> **Why a conversion method and not a second constructor.**
+> A second constructor - `env.NewWatched(opts...)` - was built and measured, and it duplicates the whole option list per driver.
+> The conversion takes only what watching needs and nothing the source already has, which is [ADR-0017](0017-the-registration-api-and-the-value-it-builds.md)'s `KeyCodec.AsMapKey` precedent read on the source seam: a narrowing that says one more thing about a value already built.
+> It also deletes the mistake the old shape's sharp edge was about, where the file was named in one place and the watcher set up in another and forgetting the second was silent.
+> `env.New(env.DotEnv(".env")).Watched()` names both in one expression.
+>
+> **Why an interface and not a sealed struct core mints.**
+> A sealed `WatchableSource` struct with `ferry.Watchable(src, n)` and `ferry.Unwatchable(err)` constructors was built and measured.
+> It is two more exports, it never sealed anything - both constructors are exported, so anyone can mint one - and it made the one misuse it appeared to guard *easier*, because `Watchable(srcA, notifierB)` pairs a source with an unrelated mechanism in one line at the call site.
+> Under the interface the same mistake needs a type whose own two methods contradict each other.
+> The one misuse neither shape detects is a mechanism that binds and never fires, and it is recorded rather than argued about.
+>
+> **What the caller writes now, against the nine steps this record's own example needed:**
+>
+> ```go
+> wb, err := ferry.BindWatched[Config](env.New(env.DotEnv(".env")).Watched())
+> seq, errf := wb.Watch(ctx)
+> for cfg := range seq { publish(cfg) }
+> if err := errf(); err != nil { alert(err) }
+> ```
+
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): "core grows no surface" is retired, and the claim is withdrawn.**
+>
+> As published this section's heading says core grows no surface, and its text says in as many words that ferry ships no `Watch`, no `Notifier` and no watcher.
+> The #364 amendment kept the claim by putting the helper in a package of the core module rather than in the root package, and said so explicitly: "the root package `ferry` still grows no surface".
+>
+> **That distinction is retired.**
+> `ferry/watch` is deleted and eight exports land in the root package.
+> The heading stands as published because a heading is a record of what was decided, and what it decided is now wrong.
+>
+> The claim was true of the machinery and false of the feature, and holding it cost the two defects the amendment above names.
+> What survives from the published argument is everything about *why* the machinery could land piecemeal: `Bind` split from open, `Load` returning a value, per-open minted sets, `Binding[T]`.
+> Every one of those still carries the watch, and the seam added here is the one thing none of them could be: a place for the driver to say the plane changed, and a place for it to say the watch is over.
+>
+> **What [ADR-0001](0001-what-ferry-supports.md)'s Enabled bucket meant is unchanged.**
+> Enabled is still the default landing place for a feature, and this is the case where the feature could not land outside because the hole it closes is closable only over core's own `Binding[T]` and only in the loop that owns the registration.
+
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the watch's error model, and why exactly one sentinel is core's.**
+>
+> As published this record has no error model for the watch, because the callback had no error return and nothing could fail observably.
+> Three failures exist and they land in three places.
+>
+> - **A driver instance that cannot watch** - `env` with no `DotEnv`, `yaml` over no path, a registry that reports no change of its own - is `Watching`'s error, wrapped by core in `ErrPlane`, with the driver's own sentinel reachable underneath: `env.ErrWatch`, `yaml.ErrWatch`, `winreg.ErrWatch`.
+>   There is no core sentinel for it.
+>   At a bind the caller knows which driver they constructed, so per-driver matching is the honest shape, and a cross-driver "was it specifically the watch that was refused" match has no consumer anybody has named.
+>   `driver/yaml` gains a sentinel it never had, which closes a loose end its poll left open: a poll had no failure mode at all to report.
+> - **A source that answers `Watching` with no mechanism and no reason** is a driver contract violation rather than a plane refusal, so it is `ErrDriver`, the same bucket as an `OpenFunc` that comes back nil.
+>   A nil `WatchableSource` refuses at the bind under `ErrPlane` with a sentence.
+> - **A watch the mechanism could not keep** is `ErrWatchLost`, minted by core's own loop, wrapping the driver's reason, ending the stream.
+>
+> **`ErrWatchLost` is the one sentinel that pays for itself**, and the test is who matches it.
+> Its consumer is the caller's restart policy, which is written once against any driver, so a per-driver spelling would make that policy a switch over drivers.
+> It is also the only way to tell the three-way split apart at the point it matters: a failed reload carries ferry's own load sentinels, a lost watch carries this, and a cancelled context carries `ctx.Err`.
+> There is no leaner spelling that keeps those three distinguishable.
+> [ADR-0011](0011-the-error-model.md) carries it in its vocabulary, and the two driver `ErrWatch` sentinels are not consolidated into it.
+
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): a watchable driver is proved by a conformance harness, and admitting it is [ADR-0014](0014-what-ferrytest-exports.md)'s decision.**
+>
+> As published this record has no conformance story for watching, because there was no seam to conform to.
+> [ADR-0001](0001-what-ferry-supports.md)'s rule is that core's leverage over what it does not ship is a conformance harness, and the watch seam is exactly that shape: core owns the loop and the driver owns the mechanism.
+>
+> The proposal is two exports, `ferrytest.WatchPlane` and `ferrytest.Watchable`, asserting seven properties through `BindWatched` and the stream and through nothing else: the stream opens with a load, a change reloads, a burst is one reload, a held value never moves, cancelling ends it cleanly, a lost watch ends it with a reason, and a source that cannot be watched is refused at the bind.
+> Two of them are optional and are skipped where the plane declares the driver cannot reach that state.
+>
+> **It is not part of `ferrytest` until ADR-0014 says so**, and that amendment is where the surface list moves or does not move.
+> This record decides only that the seam is worth proving identically for every driver rather than once per driver.
+
 ### A reload is `Load`, and there is no second verb
 
 > `Load` produces a new value.
@@ -174,6 +332,13 @@ Four questions that must be answered per API against one shape that answers them
 > As published nothing in ferry returned this pair, and the convention was decided on a prototype.
 > `watch.Values` now ships it.
 > The shape is unchanged, and so is everything decided above about it.
+
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the shipped user is `WatchedBinding.Watch`.**
+>
+> As amended above the convention's first shipped user is `watch.Values`.
+> That function is deleted, so the sentence names something that no longer exists.
+> The shipped user is `WatchedBinding.Watch`, in the root package, returning the same pair for the same reason.
+> **The convention itself does not move**, and neither does anything decided above about it.
 
 ### The YAML sink refuses a commit over a file that changed underneath
 
@@ -290,6 +455,61 @@ The fsnotify machinery never runs unless it is asked for, which joins the driver
 > The bullet under [What this ADR does not decide](#what-this-adr-does-not-decide) says `driver/env` "is a second one"; there is a third, and it is opt-in like both of the others.
 > The last consequence says "until a second watchable driver exists", which stopped being the live condition under [#352](https://github.com/onhotpath/ferry/issues/352) and is superseded here: the condition is now #361's answer, not a count.
 
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the three callback Options are deleted, and this is the list of what goes with them.**
+>
+> As published, and through the three amendments above, the watch is a driver Option in each of `driver/yaml`, `driver/env` and `driver/windows/winreg`, and the shape constraints listed under #272 are the record of those three agreeing.
+> The typed seam replaces all three, so each driver's Option and the loop behind it go, and the agreement recorded above is superseded by an interface rather than by a fourth restatement of a callback.
+>
+> **What is deleted:**
+>
+> - **`ferry/watch`**, the whole package: `Signal`, `Signal.Changed`, `Values`.
+>   Its ordering hole is closed structurally, and its coalescing moves into the drivers that know what a burst is.
+> - **`env.WatchFiles(ctx, onChange)`**, **`yaml.Watch(ctx, every, onChange)`** and **`winreg.Watch(ctx, onChange)`**, with the watcher loops behind them.
+> - **`driver/yaml`'s poll**: the stamp comparison loop, the default interval, and the interval argument.
+> - **`examples/watcher`**, and the two driver examples that demonstrated the nine-step wiring.
+>   Each watchable driver ships one runnable `Watched()` example in their place.
+>
+> **What is not deleted.**
+> The YAML sink's commit-time refusal decided at the top of this section is untouched, and it must be said here because both mechanisms compared a `stamp` and only one of them is going: the sink still stats the file between its open and its commit, and still refuses a commit over a file that changed underneath.
+> Both driver `ErrWatch` sentinels survive and are not consolidated, for the reason the error-model amendment gives.
+> The three shape constraints that were never about the callback survive as properties of the seam: refusal at Bind, no `Stop`, and no interval anywhere.
+>
+> **What the winreg driver contributed is now core's.**
+> The arm-once seam #272 records this driver building for itself, `Notifier.Arm` answering with a `Change` waited on once, is the shape core adopted; the driver's own seam keeps its name and its `Registry` contract, and the watched type adapts it.
+> The bootstrap case decided under #272 - a registration placed on the nearest existing key above one that does not exist yet - is unchanged and is a property of that driver, not of the seam.
+
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): `driver/yaml` takes the fsnotify dependency, and "polling is the answer that needs no argument" is superseded by an owner ruling.**
+>
+> As published under #13 and restated under #352, this section says: "`driver/yaml` depends on `go.yaml.in/yaml/v3` and nothing else, and a watch is not a reason to widen that: the module rules say a driver's dependencies are argued for, and polling is the answer that needs no argument."
+> The #352 amendment adds that "`driver/yaml`'s polling watcher is the fallback if the dependency bites, and it is already written."
+>
+> **Both paragraphs are superseded.**
+> `driver/yaml` requires `github.com/fsnotify/fsnotify`, with `golang.org/x/sys` indirect, and watches the way `driver/env` does.
+>
+> **The relaxation is the owner's, and it is recorded as a ruling rather than derived from the rule.**
+> The module rule that a driver's dependencies are argued for is not repealed; this is the argument, and the owner made the call that mechanism uniformity across the three watchable drivers outweighs the second dependency in this module.
+>
+> **What it buys, stated as three things rather than as latency.**
+>
+> - **A refusal this driver could not make.**
+>   A poll over a directory that is not there is steady rather than wrong, so there was nothing to refuse and `driver/yaml` had no watch failure mode at all.
+>   An inotify watch on the same directory fails, so `yaml.ErrWatch` exists and lands at the stream's first registration with the caller told why.
+> - **A sharp edge deleted.**
+>   "A rewrite landing in the same modification-time tick that leaves the file's length alone is not seen" was the cost of a stat, published in the Option's godoc and in the guide.
+>   It dies with the poll.
+> - **One mechanism across three drivers.**
+>   `Watched()` takes no argument anywhere, so there is no interval to name in one driver and not in the other two, and the conformance harness asks all three the same questions.
+>
+> **What it costs, stated plainly.**
+> Every consumer of `driver/yaml` now pulls fsnotify and `golang.org/x/sys`, including one that never watches anything.
+> That is the same cost `driver/env` pays under #352, paid for the same reason and bounded the same way: this is a driver module, core's `require` block is untouched, and a program that imports neither driver sees neither dependency.
+>
+> **Duplication, measured, and deliberately not shared.**
+> `driver/env` and `driver/yaml` now hold the same mechanism: watch the containing directory rather than the file, filter events by exact name, drop `Chmod`, drain the errors channel, and swallow the burst in a settle window of the driver's own.
+> That is roughly 90 lines each, of which about 60 are genuinely the same, and the two differ only in that `env` watches a set of files across several directories and `yaml` watches one.
+> They are separate modules, so sharing means a third module in the graph of every consumer of either, which is a worse trade than 60 duplicated lines.
+> **Trigger for a shared seam: a third file-watching driver, or a change to the mechanism that has to be made twice and is got wrong once.**
+
 ### `Notifier` is recorded as the upgrade path, and does not ship
 
 The one thing a watcher needs that is not a ferry concept is the change signal, and today it is the driver's own: a channel, an fsnotify loop, a Consul watch plan.
@@ -330,10 +550,37 @@ That is the rule of three applied one door down, and it is the same trigger [ADR
 > `Changed` records a pending change and returns immediately, so a slow consumer no longer delays the driver's next look, where a callback that loads inline holds the watching goroutine for the length of the reload.
 > What is paid for it is coalescing: one slot, so a burst is one change and so is a change that lands while a reload is already running.
 
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): `Notifier` ships, and the decline is answered by never asserting it.**
+>
+> As published this section writes `Notifier` out in full and declines it for three costs; the #352 amendment adds a fourth, and the #272 amendment restates the position with three watchable drivers and declines it again.
+> It now ships, in a shape none of the four costs applies to, and the sketch above is superseded by the seam in the first decision: `Notify(ctx) (Change, error)` rather than `Notify(ctx) (<-chan struct{}, error)`.
+>
+> The three published costs, answered one at a time:
+>
+> - **"It adds a capability to an assertion set that is already the thing [#201](https://github.com/onhotpath/ferry/issues/201) says stops scaling."**
+>   It does not, because nothing asserts it.
+>   `Notifier` is handed to core by `WatchableSource.Watching`, so it is a value that crosses the seam and never a type ferry probes for.
+>   The capability ladder - `Prober`, `Enumerator`, `Releaser` and the rest, all discovered by assertion - is exactly as long as it was.
+> - **"It is option-dependent, so a `yaml.Source` asserts `Notifier` whether or not watching was enabled and the refusal moves to call time."**
+>   This is the real objection, and it is why the seam has two halves.
+>   Watchability by type is `WatchableSource`, decided at compile time; watchability by configuration is `Watching`'s error, decided at `BindWatched`.
+>   Neither is a call-time refusal.
+> - **"Core would own the semantics of a channel it never reads."**
+>   There is no channel.
+>   The shipped shape has an explicit wait and an explicit release, so core reads what it asked for and the driver owns when it answers.
+>
+> **The fourth cost is the one this shape turns into the argument for shipping.**
+> "Nothing in the two Options is shared" was true of their internals and false of their contract: register, wait once, release, and say whether that was a change, an ending or a loss.
+> `driver/windows/winreg` had already written that contract for itself, for the reason the #272 amendment gives at length, and promoting the weakest of the three mechanisms is what makes one loop correct for all three.
+>
+> **The restated trigger is met and taken.**
+> The #352 amendment restated it as "a caller writing the same watch wiring against two drivers and wanting one binding for both".
+> That caller now writes the wiring once, in core, and what remains of the two-binding half is answered below.
+
 ### What this ADR does not decide
 
-- **Whether any first-party driver ever announces changes.** The YAML Option above is the only one on the table and it is opt-in. *(Amended under [#352](https://github.com/onhotpath/ferry/issues/352): `driver/env` ships `WatchFiles`, which is a second one and is also opt-in.)*
-- **Whether `Notifier` or `ferry.Watch` ever ship.** Recorded with a named trigger, and refusing is the reversible direction.
+- **Whether any first-party driver ever announces changes.** The YAML Option above is the only one on the table and it is opt-in. *(Amended under [#352](https://github.com/onhotpath/ferry/issues/352): `driver/env` ships `WatchFiles`, which is a second one and is also opt-in.)* *(Amended under [#13](https://github.com/onhotpath/ferry/issues/13): all three first-party drivers announce changes, through `Watched()` rather than through an Option, and all three are still opt-in. The count is retired, here and in the last consequence: the condition this row was ever about is the seam, not a number.)*
+- **Whether `Notifier` or `ferry.Watch` ever ship.** Recorded with a named trigger, and refusing is the reversible direction. *(Amended under [#13](https://github.com/onhotpath/ferry/issues/13): both ship, as `Notifier` and `BindWatched`, and this row is decided rather than open.)*
 - **Drift detection.** [ADR-0001](0001-what-ferry-supports.md) calls drift and watch the pull and push forms of one concern; the plane-inspection half is still Milestoned on its own terms, and this ADR does not move it.
 - **What a watcher does with a partial failure mid-stream.** The error ends the stream, and a caller who wants to continue rebuilds the iterator, which is a caller's policy rather than ferry's.
 - **Concurrency inside one reload**: [ADR-0019](0019-the-concurrency-model.md)'s.
@@ -351,11 +598,67 @@ That is the rule of three applied one door down, and it is the same trigger [ADR
 > A `Follow`-style convenience wrapping that rebuild loop was considered and deliberately not shipped, because what it would wrap is a retry policy and this row says the policy is the caller's.
 > It is a candidate later addition if real callers turn out to write the same loop.
 
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): what was built, measured and left out, and the trigger for each.**
+>
+> As published this list is the record of what was not decided.
+> The four things below were decided and are not shipping, which is a different thing and belongs beside it: each was built and exercised, and each carries a named trigger rather than a maybe.
+> None of them is planned work, and none of them is a ticket.
+>
+> - **The watch fan-in, composing several watchable sources under one binding.**
+>   It composes the watch and never the read, because ferry has no layering helper and this is not the place to invent one.
+>   **Trigger: a real cross-driver composite**, which is also where the operator-kick-plus-driver-watch combination lands.
+> - **A binding accessor on the watched binding.**
+>   One line, and `Load` is already on `WatchedBinding`.
+>   **Trigger: the first API that needs one** - code that must be handed the load half and must not be able to watch.
+> - **Per-watch options, and with them a caller-owned settle window.**
+>   `Watch` takes a context and nothing else, and coalescing stays where the knowledge is: `driver/env` and `driver/yaml` know what one editor save emits and swallow it in a settle window of their own, and `winreg` has no burst to swallow.
+>   A caller naming a window for a mechanism they did not choose is guessing.
+>   **Trigger: the first caller that needs one** - a deploy that rewrites four files over a second, say, wanting a window wider than the driver's own for a reason the driver cannot know.
+>   Adding a variadic later is source-compatible, which is why waiting costs nothing.
+> - **A core convenience for the operator kick.**
+>   **Out of scope entirely**, with no trigger: see the SIGHUP amendment below.
+
+> **Amended under [#361](https://github.com/onhotpath/ferry/issues/361): two watchable sources under one binding is answered, and the common case turns out not to need the answer.**
+>
+> As published under #272, this record files #361 and declines to decide it, and principle 6 says composition is part of using a watchable plane neatly.
+>
+> **The answer has two halves and only one of them is core's.**
+> Which layer wins at an address is the composing source's own business, and ferry has no layering helper to put an opinion in.
+> Fanning several mechanisms into one is mechanical, and it is the fan-in above: every layer armed before any is waited on, the first to speak answering, one layer's refusal refusing the whole at the bind, and one layer's loss ending the stream with that layer's reason.
+>
+> **What the common case turns out to be is not composition at all.**
+> `env.New(env.DotEnv("base.env", "local.env")).Watched()` is two files, one source, one watch, and the driver already layers them.
+> The composite case is a caller layering *two different drivers* - a YAML file under Consul - which is rarer than this record's filing of #361 implies.
+> That is why the fan-in is deferred rather than shipped: the case it serves is real and it is not the everyday one, and a helper nobody reaches for is surface to keep true.
+> #361 stays open with its trigger restated rather than closed by this record.
+>
+> **Torn reads are not solved by any of this, and were not solved by any shape considered.**
+> A composite opens each layer inside one load, so two layers can be read at two instants.
+> That is a property of the composite's own open, and closing it means the composite taking a snapshot of both, which is the composite's decision to make.
+> This is recorded so the next reader of #361 does not go looking for it in the watch seam.
+
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): a caller-fired reload is guide material, not surface.**
+>
+> As published this record has nothing to say about an operator-driven reload, because a callback was the caller's to fire and the question never arose.
+> Under the typed seam it arises, and the answer is that it needs no core export.
+>
+> A process that reloads on `SIGHUP` writes a `Notifier` whose `Change.Wait` reads the signal channel, and a five-line `WatchableSource` wrapping the source it wants to reload.
+> Both are ordinary code over the published seam, and `docs/guide/watch-reload.md` is where they go.
+>
+> **No `ferry.Trigger`, no `ferry.Manual`, and no caller-facing way to fire a change into a driver's mechanism.**
+> Core minting something a caller announces into puts a handle in the caller's hands that has to be threaded to a driver Option and then to the bind, which is the wiring mistake this whole amendment exists to delete.
+> A caller who wants SIGHUP *and* a driver's own watch under one binding needs the two mechanisms fanned in, which is the fan-in's trigger above and not a signal feature.
+
 ## Consequences
 
 - **Watch moves from Milestoned to Enabled and core grows no surface**, so [ADR-0001](0001-what-ferry-supports.md)'s capability table gains its first row to change bucket.
   The proof is a watcher built against the real shipped module through a nested workspace rather than against a sketch, which is the only form of evidence this claim can take.
-- **The commitment ADR-0001 made was honoured**: the mechanism landed, in core, piece by piece, and the feature ships outside, which is what milestoning promised and what Enabled means.
+
+  > **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the bucket move stands and the second half of this sentence does not.**
+  >
+  > Core grows the watch seam, in the root package.
+  > The bucket move is unaffected: Enabled is where the feature is, and the reason it lands inside core rather than outside is in the amendment to the first decision.
+- **The commitment ADR-0001 made was honoured**: the mechanism landed, in core, piece by piece, and the feature ships outside, which is what milestoning promised and what Enabled means. *(Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the feature ships inside core, and the commitment is honoured anyway. Milestoning promised the mechanism, and the mechanism is what the seam is built out of.)*
 - **The deliverables are two documents rather than an API**: `docs/guide/watch-reload.md` and a runnable `examples/watcher`.
   A capability argued as buildable is worthless undemonstrated.
 
@@ -364,13 +667,37 @@ That is the rule of three applied one door down, and it is the same trigger [ADR
   > As published this consequence is that nothing ships but prose.
   > Package `ferry/watch` ships, in the core module, and the guide is written against it rather than against a listing a reader copies.
   > **Why is in the amendment to the first decision above**, and the part that belongs here is what it costs: a package in core to keep true, in exchange for the ordering hole no driver could close and a demonstration nobody has to copy.
+
+  > **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the deliverable is rewritten rather than layered a third time.**
+  >
+  > As published this consequence is two documents; as amended under #364 it is two documents and a package.
+  > Layering a third qualifier onto a sentence that was wrong twice is worse than replacing it, so it is replaced.
+  > **The deliverable is the seam in the root package, `docs/guide/watch-reload.md` written against it, and one runnable example per watchable driver.**
+  > `examples/watcher` and `ferry/watch` are both gone, and the guide is rewritten rather than edited, because it is written against `watch.Signal` and `watch.Values` throughout.
 - **A reload is `Load` and no alias ships**, so there is one spelling of one operation.
   `LoadOver`'s two traps - a lost address keeping its stale value, and a composite replaced wholesale - are published in its godoc and in the guide, because the shape a reader reaches for first is the wrong one.
 - **ferry now has a convention for a fallible iterator**, `(iter.Seq[T], func() error)`, decided on deliberate-versus-accidental discard rather than on compiler enforcement, which the first draft claimed and which does not hold.
   The cost is a loop that reads worse than `Seq2`'s, paid once per API and stated plainly.
 - **The YAML sink refuses a commit over an externally changed file**, which costs one stat on the commit path and turns a silent lost edit into an actionable refusal.
-  File watching is opt-in through a driver Option, so nothing runs for a caller who did not ask.
+  File watching is opt-in through a driver Option, so nothing runs for a caller who did not ask. *(Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the opt-in is `Watched()` rather than an Option, and it is still an opt-in that starts nothing until a stream opens. The sink's refusal is untouched.)*
 - **`Notifier` is specified, not shipped, with a named trigger.**
   Until a second watchable driver exists, one name across drivers buys nothing and costs a capability in a set that is already crowded.
 
+  > **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): `Notifier` ships, and the count in the sentence above is retired.**
+  >
+  > As published the condition is a count of watchable drivers, which #272 already flagged as no longer the live one.
+  > It is retired rather than re-counted: what buys the interface is a caller wiring one binding over a plane's own mechanism, and that caller exists.
+  > `Notifier` ships as a value the source hands over rather than a capability ferry asserts, so the crowded assertion set is exactly as long as it was.
+- **The watch surface is eight exports in the root package**, and every cut is recorded with a trigger rather than a maybe: the fan-in, the binding accessor, per-watch options with a caller-owned settle window, and any core convenience for an operator kick.
+  A surface that grows later never has to shrink, which is what paying for each export at the seam buys.
+- **A stream ends in one of three distinguishable ways**, and telling them apart is `errors.Is`: a failed reload carries ferry's load sentinels, a lost watch carries `ErrWatchLost`, and a cancelled context carries `ctx.Err`.
+  Silence is no longer one of the endings, which is the defect the callback shape shipped with.
+- **`driver/yaml` gains `github.com/fsnotify/fsnotify` and `golang.org/x/sys`**, by an owner ruling recorded above, so every consumer of that driver pulls both whether or not it watches anything.
+  What it buys is a refusal the poll could not make, a sharp edge deleted, and one mechanism across all three watchable drivers.
+
 Evidence: `prototype/watcher` on [`proto/05-watch-grammar`](https://github.com/onhotpath/ferry/tree/proto/05-watch-grammar), four tests under `-race` against the real module: `TestWatcherBuildsOutsideCore`, `TestErrorConventions`, `TestHeldValueIsImmutable` and `TestLoadOverAsReloadSharpEdges`.
+
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the evidence for everything amended above.**
+>
+> Branch [`proto/06-typed-watch`](https://github.com/onhotpath/ferry/tree/proto/06-typed-watch), behind build tags: core, `ferrytest`, `driver/env`, `driver/yaml` and `driver/windows/winreg`, green under `-race`, with `make check` and `make lint` green on the default build.
+> Every alternative this record declines above - the second constructor, the sealed struct, a core-minted trigger, the debounce option and the fan-in - was built and measured on that branch rather than argued from a sketch.

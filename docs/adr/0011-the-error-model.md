@@ -176,6 +176,23 @@ The driver's own vocabulary stays reachable underneath, so a caller who wants th
 **Cancellation gets no ferry class.**
 `errors.Is(err, context.Canceled)` is the match, and a ferry class for it would be a second spelling of a stdlib one.
 
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the vocabulary gains `ErrWatchLost`, and gains nothing else.**
+>
+> As published the vocabulary is four classes plus a provenance marker plus ADR-0004's `ErrReadOnly`, and every one of them is about a load or a dump that failed.
+> [ADR-0020](0020-watch-and-reload.md)'s watch seam adds one ending those six cannot name: a watch the plane's own mechanism could not keep.
+>
+> ```go
+> var ErrWatchLost error   // ADR-0020's: the watch ended, the driver's reason underneath
+> ```
+>
+> **It is not a class.**
+> It marks how a stream ended rather than what a value or a plane did, and it is minted by core's own watch loop wrapping the driver's reason.
+> It earns a sentinel by who matches it: a restart policy written once against any driver, which needs to tell a failed reload, a lost watch and a cancelled context apart, and which a per-driver spelling would turn into a switch over drivers.
+>
+> **The per-driver watch sentinels are not consolidated into it.**
+> `env.ErrWatch`, `yaml.ErrWatch` and `winreg.ErrWatch` stay where they are, under `ErrPlane`, documented by their own drivers, because a refusal at Bind is matched by a caller who knows which driver they constructed.
+> That is this ADR's extension rule read where it applies: the driver declares the class, and its own vocabulary stays reachable underneath.
+
 **The sentinel text is load-bearing, which was found by rendering rather than by choosing.**
 A driver declares its class by wrapping a sentinel, so the sentinel's own text lands inside the driver's message.
 `plane` read as a stray word in `...cannot contain a space: plane`; `plane error` reads as a sentence.

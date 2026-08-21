@@ -72,6 +72,16 @@ So an environment plane in core forces core either to ship half a driver, breaki
 > Core's own rule - stdlib, unconditionally - is untouched, because this is a driver module.
 > [ADR-0020](0020-watch-and-reload.md) is where the dependency is argued.
 
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): `driver/yaml` carries the same dependency, by an owner ruling.**
+>
+> As amended above, `driver/env` is the one driver whose `require` block grew for a watch, and `driver/yaml` is the module the layout rule is illustrated with as depending on `go.yaml.in/yaml/v3` and nothing else.
+> `driver/yaml` now requires `github.com/fsnotify/fsnotify`, with `golang.org/x/sys` indirect, because its polling watcher is deleted in favour of the mechanism `driver/env` already uses.
+>
+> **The rule that a driver's dependencies are argued for is not repealed, and this is not that argument.**
+> The argument is in [ADR-0020](0020-watch-and-reload.md), where the owner ruled that mechanism uniformity across the three watchable drivers outweighs the second dependency in this module.
+> What is recorded here is only the fact and who pays for it: every consumer of `driver/yaml`, including one that never watches anything, and nobody else.
+> Core's `require` block is untouched and stays empty.
+
 ### The memory plane is apparatus, and the line that keeps it so
 
 The round-trip property harness has to move a value: `Dump` it into something, `Load` it back, compare.
@@ -116,6 +126,13 @@ github.com/onhotpath/ferry                 go.mod    core
 > As published the diagram has one row under core, `ferrytest/`, because that was the only package core shipped beside the root one.
 > `watch/` sits beside it: the typed watch helper, importing the root package and the standard library and nothing else, so core's empty `require` block is untouched.
 > It is a directory rather than a module for the same reason `ferrytest/` is, and the argument that admits it under route (b) is in [ADR-0020](0020-watch-and-reload.md)'s amendment rather than repeated here.
+
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the `watch/` entry is withdrawn.**
+>
+> As amended above the layout has six entries, the sixth being `watch/`.
+> That package is deleted and its surface moves into the root package, so the entry goes with it and the layout is back to five.
+> **Nothing about route (b) moves.**
+> What it admitted was the argument that the ordering hole is closable only over core's own `Binding[T]`, and that argument is now settled inside the root package instead, which is [ADR-0020](0020-watch-and-reload.md)'s to explain.
 
 Separate repositories are rejected because first-party drivers exist to be built against core's HEAD on every commit, which is the whole reason they exist at all.
 
@@ -198,6 +215,7 @@ The list is deferred to [#5](https://github.com/onhotpath/ferry/issues/5), becau
 > `golang.org/x/sys/windows` is where Windows API work in Go actually happens, and it is what every other Go project reaching this surface is already on.
 > Writing the missing half against raw DLL lookups would be reimplementing a maintained package with an unmaintained copy, and getting the handle, rights and UTF-16 conventions right in it is exactly the work that package exists to have already done.
 > That makes this a dependency traded against a frozen equivalent rather than against a convenience, which is not the trade `driver/env`'s fsnotify made: there is no polling fallback for a registry handle.
+> *(Amended under [#13](https://github.com/onhotpath/ferry/issues/13): the polling fallback that sentence contrasts against is deleted, so the contrast is now with a fallback nobody has. The argument it supports is untouched, and `golang.org/x/sys` is still traded against a frozen equivalent.)*
 > It is also a `golang.org/x` module, which is the Go project's own repository for the platform surfaces the standard library does not export, so it is third party in the module graph and is not third party in the sense this ADR's rule is guarding against.
 >
 > **Who pays is every consumer of `driver/windows` and nobody else.**
