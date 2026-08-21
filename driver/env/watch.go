@@ -14,296 +14,327 @@ import (
 
 // ErrWatch reports a watch this driver could not open.
 //
-// [WatchFiles] with no [DotEnv] beside it, and a directory that is not there, are
-// both this: a watch that succeeded silently and never fired is the failure mode
-// the option exists to avoid, so it is refused at Bind instead.
+// A source that names no file with [DotEnv] is refused at [ferry.BindWatched]
+// under this, before any load, because a watch that opened successfully and
+// never fired is the failure that refusal exists to avoid. A directory that is
+// not there, or one removed or moved away while a stream runs, carries this
+// too, on the stream, under [ferry.ErrWatchLost].
 //
-// It wraps [ferry.ErrPlane], and it stays reachable under ferry's wrapper.
+// Ferry's own wrapper carries [ferry.ErrPlane], and this stays reachable
+// underneath it, so errors.Is answers for both on what a bind returned and on
+// what ended a stream.
 var ErrWatch = errors.New("env: this watch could not be opened")
 
-// settle is how long the watcher waits for a file to stop changing before it
-// calls back.
+// settle is how long a wait gives a file to stop changing before it answers.
 //
 // One editor save produces several events - a write, a rename, a chmod - and a
 // reload per event is several reloads of one change. Fifty milliseconds is long
 // enough to swallow that burst and short enough that a reload still lands while
-// the operator is looking at the terminal.
+// the operator is looking at the terminal (ADR-0020).
 const settle = 50 * time.Millisecond
 
-// watcher is the whole of the [WatchFiles] option: what to call, which files
-// count, and the context that ends it.
+// Watched converts this source into one that can be watched.
 //
-// The context is held rather than passed in because there is nowhere to pass one
-// (ADR-0020). Watching starts when the source is built and outlives every
-// individual load, so the lifetime cannot come from a load's context, and the
-// driver grows no Stop method for it: core ships no watch lifecycle, and one
-// invented here would be a second lifecycle beside the one the caller already
-// has.
-type watcher struct {
-	ctx      context.Context
-	onChange func(context.Context)
+//	wb, err := ferry.BindWatched[Config](env.New(env.DotEnv(".env")).Watched())
+//
+// It takes no arguments, because this source already knows which files it reads:
+// what a watch needs here is what [DotEnv] already named.
+//
+// It touches nothing and starts nothing. Whether there is anything to watch is
+// answered at [ferry.BindWatched], and the watch itself opens when a stream
+// does, under that stream's own context.
+//
+// The source it converts is unchanged and still loadable, so a caller who stops
+// watching changes one call rather than two. Converting twice is two watchable
+// sources over one configuration and is not a mistake: a source is settled
+// configuration, and nothing here consumes it.
+func (s *Source) Watched() *WatchedSource { return &WatchedSource{src: s} }
 
-	// files is every path being watched, resolved through the same symlink
-	// following a save uses, so that an event's name can be matched exactly.
-	files map[string]bool
-
-	fs *fsnotify.Watcher
-}
-
-// WatchFiles calls onChange whenever a file [DotEnv] named changes, so that a
-// process holding a loaded value can load a fresh one.
+// WatchedSource is a [Source] that can be watched, and [Source.Watched] is the
+// only way there is to build one. It loads exactly as the source it was
+// converted from does.
 //
-//	b, err := ferry.Bind[Config](env.New(env.DotEnv(path), env.WatchFiles(ctx, reload)))
+// Changes arrive through the operating system's own file notifications, so a
+// hand edit lands without polling latency. What is watched is the directory
+// holding each file rather than the file itself, because an editor and this
+// package's own sink both replace a file by renaming another over it, and a
+// watch on the file survives that attached to an inode nobody reads any more.
+// Everything else in those directories is ignored, including the ".ferry-*"
+// files a save stages.
 //
-//	func reload(ctx context.Context) {
-//		cfg, err := b.Load(ctx) // a reload is a load
-//		...                     // publish it by replacement, never by mutation
-//	}
+// Sharp edges.
 //
-// It is opt-in and it is the only thing in this package that runs on a goroutine
-// of its own. A source built without it touches the files only when a load asks
-// it to.
+// A burst is one change. One editor save produces a write, a rename and a chmod,
+// and a short window after the first of them swallows the rest.
 //
-// The watch begins when the source is built and ends when ctx is done, which is
-// the only way to stop it: cancel the context you gave it, and the goroutine
-// returns. The context reaches onChange as its argument, so a deadline, a
-// cancellation and whatever the caller put in it are all in hand there.
+// A dump through [DotEnvSink] over the same path is a change like any other, so
+// a process that both watches and saves its own configuration hears its own
+// writes. Nothing here suppresses that: a suppression window wide enough to
+// cover a rename is wide enough to swallow somebody else's edit.
 //
-// What is watched is the directory holding each file rather than the file itself,
-// because an editor and this package's own sink both replace a file by renaming
-// another over it, and a watch on the file survives that attached to an inode
-// nobody reads any more. Everything else in those directories is ignored,
-// including the ".ferry-*" files a save stages.
-//
-// It refuses at Bind, before any load, when no [DotEnv] named a file or when a
-// directory holding one is not there. A watch that opens successfully and never
-// fires is the failure this option exists to avoid.
-//
-// Sharp edges, and they are the reason this is a callback and not a stream.
-//
-// onChange runs on the watching goroutine and one call at a time. A callback that
-// reloads inline is a slow one, and a slow callback delays the next look rather
-// than running beside itself, so changes that land while it runs are one call
-// afterwards rather than several. The Changed method of a Signal from
-// github.com/onhotpath/ferry/watch returns immediately instead, which leaves the
-// reload on the goroutine ranging the stream and this one free to keep looking.
-//
-// A panic in onChange takes the process down, exactly as it would on a goroutine
-// the caller started. Nothing here recovers it: there is no result to hand a
-// failure back through, and a watch that swallowed the panic would leave a
-// process that has silently stopped reloading.
-//
-// Watching starts when the source is built, so it starts before [ferry.Bind] has
-// handed back the binding the callback wants to load through, and a change can
-// land while there is nothing yet to load through. A Signal from
-// github.com/onhotpath/ferry/watch is what to pass here in that case: its Changed
-// method records such a change rather than losing it, and the stream that opens
-// afterwards begins with that reload, as the example in this package does.
-//
-// A call says a file may have changed and nothing more. Load to find out what it
-// holds now, which is correct whether the change was real, coalesced with
+// A change says a file may hold something new and nothing more. The reload is
+// what reads it, which is correct whether the change was real, coalesced with
 // another, or a touch that rewrote the same bytes.
 //
-// A dump through [DotEnvSink] over the same path fires it, so a process that both
-// watches and saves its own configuration hears its own writes. Nothing here
-// suppresses that: a reload reads back what was just written, and a suppression
-// window wide enough to cover a rename is wide enough to swallow somebody else's
-// edit.
-//
-// Losing the watch - the directory removed or replaced - fires the callback once
-// and stops. There is nowhere to report it, and the load that follows reports it
-// through a surface the caller already handles. A cancelled context stops
-// silently instead, so only losing the watch speaks.
-func WatchFiles(ctx context.Context, onChange func(context.Context)) Option {
-	return sourceOnly(func(c *config) {
-		if onChange == nil {
-			return
-		}
-
-		c.watch = &watcher{ctx: ctx, onChange: onChange}
-	})
+// Losing the directory the watch is on - removed, or moved out from under it -
+// ends the stream under [ferry.ErrWatchLost], with [ErrWatch] reachable
+// underneath, rather than leaving a process quietly holding stale
+// configuration.
+type WatchedSource struct {
+	src *Source
 }
 
-// start opens the watch and puts it on a goroutine of its own, and it runs inside
-// [New], on the caller's goroutine.
+var _ ferry.WatchableSource = (*WatchedSource)(nil)
+
+// Bind computes this schema's environment variable names and checks them,
+// exactly as [Source.Bind] does.
+func (w *WatchedSource) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
+	return w.src.Bind(addrs)
+}
+
+// Watching answers with the mechanism this source's changes arrive through.
 //
-// That placement is what gives a failure somewhere to go, and it is also what
-// means no change is missed between New returning and the goroutine first
-// running: the inotify watch is already open by then.
-func (w *watcher) start(paths []string) error {
-	if len(paths) == 0 {
-		return watchError("env.WatchFiles was given no files to watch: name them with env.DotEnv")
+// It refuses a source with nothing to watch: no [DotEnv] named a file. That
+// refusal lands at [ferry.BindWatched], before any load, and it carries
+// [ErrWatch].
+//
+// It does no I/O. The directories are opened when a stream places its first
+// registration, so a directory that is not there is reported on the stream.
+func (w *WatchedSource) Watching() (ferry.Notifier, error) {
+	if len(w.src.cfg.dotenv) == 0 {
+		return nil, watchError("this source watches no files: name them with env.DotEnv")
 	}
 
+	return &notifier{paths: w.src.cfg.dotenv}, nil
+}
+
+// notifier is the mechanism half: the files, and one registration per change.
+type notifier struct {
+	paths []string
+}
+
+// Notify registers for the next change to a file [DotEnv] named.
+//
+// The registration is live when Notify returns, so a save between this call and
+// the wait that follows it is reported by that wait rather than missed
+// (ADR-0020).
+//
+// One inotify watcher per registration is the cost the arm-once shape has on
+// this mechanism, and it is bounded: the stream arms the next registration
+// before it releases the current one, so there are at most two open at once.
+//
+// Nothing is lost in the swap. The stream places the next registration before
+// it runs the reload (ADR-0020), so an edit landing while the old watcher is
+// being released is read by that reload, and an edit landing after it is
+// reported by the registration this call just placed.
+func (n *notifier) Notify(context.Context) (ferry.Change, error) {
 	fs, err := fsnotify.NewWatcher()
 	if err != nil {
-		return watchError("no watch could be opened: " + err.Error())
+		return nil, watchFailure("no watch could be opened", err)
 	}
 
-	if err := w.add(fs, paths); err != nil {
+	c, err := watchDirs(fs, n.paths)
+	if err != nil {
 		_ = fs.Close()
 
-		return err
+		return nil, err
 	}
 
-	w.fs = fs
-
-	go w.run()
-
-	return nil
+	return c, nil
 }
 
-// add resolves each file and watches the directory holding it.
+// watchDirs watches the directory holding each file and answers with the
+// registration over them.
+//
+// Both names are kept, and both are matched against later: an event about a
+// file is a change, and an event about a directory is the watch itself.
 //
 // The directories are deduplicated, so several files in one directory open one
-// watch, and the files are kept so an event can be matched by name.
-func (w *watcher) add(fs *fsnotify.Watcher, paths []string) error {
-	w.files = make(map[string]bool, len(paths))
-	dirs := make(map[string]bool, len(paths))
+// watch, and the files are resolved through the same symlink following a save
+// uses.
+func watchDirs(fs *fsnotify.Watcher, paths []string) (*change, error) {
+	c := &change{
+		fs:    fs,
+		files: make(map[string]bool, len(paths)),
+		dirs:  make(map[string]bool, len(paths)),
+	}
 
 	for _, path := range paths {
 		at := target(path)
-		w.files[at] = true
+		c.files[at] = true
 
 		dir := filepath.Dir(at)
-		if dirs[dir] {
+		if c.dirs[dir] {
 			continue
 		}
 
-		dirs[dir] = true
+		c.dirs[dir] = true
 
 		if err := fs.Add(dir); err != nil {
-			return watchError("the directory holding one of these files cannot be watched: " + err.Error())
+			return nil, watchFailure("the directory holding one of these files cannot be watched", err)
 		}
 	}
 
-	return nil
+	return c, nil
 }
 
-// run is the loop: collect events, coalesce them, call back, until the context
-// ends or the watch is lost.
-//
-// The callback runs on this goroutine and one at a time, so a slow callback
-// delays the next look rather than piling up beside itself, and changes that land
-// while it runs coalesce into the burst that follows. That is the same contract a
-// driver's change signal carries anywhere: it says the plane may have changed,
-// and the reload is what reads the truth (ADR-0020).
-//
-// Nothing here fences the callback. It is user code, and the panicking call is
-// the top of this goroutine's own stack.
-func (w *watcher) run() {
-	defer func() { _ = w.fs.Close() }()
+// change is one registration over its own inotify watcher.
+type change struct {
+	fs *fsnotify.Watcher
+	// files is what a change is about, and dirs is what the watch is on. An
+	// event naming one of the latter is the watch going away rather than a
+	// file moving underneath it (ADR-0020).
+	files map[string]bool
+	dirs  map[string]bool
+}
 
+// Wait reports true on a change to a file this registration names, ctx's own
+// error where ctx ended it, and an error where the watch was lost: the
+// directory holding a watched file removed or renamed away, or the mechanism
+// itself failing.
+//
+// A burst is one answer: the first interesting event starts a [settle] window,
+// and the answer follows it.
+func (c *change) Wait(ctx context.Context) (bool, error) {
 	for {
-		switch w.wait() {
-		case changed:
-			w.coalesce()
-			w.fire()
-		case lost:
-			w.fire()
-
-			return
-		default:
-			// stopped, and it is the only silent ending.
-			return
+		v := c.look(ctx)
+		if !v.settled {
+			continue
 		}
+
+		if v.changed {
+			c.coalesce(ctx)
+		}
+
+		// The cancellation outranks whatever the mechanism saw, and this is
+		// where that is decided (ADR-0020). A select whose cases are both ready
+		// picks between them at random, and a burst may settle after ctx ended,
+		// so a wait that answered with the verdict alone could report one more
+		// change after the stream was cancelled. Core reads this as the
+		// cancellation whichever way a driver spells it, and saying so outright
+		// is the honest spelling.
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+
+		return v.changed, v.err
 	}
 }
 
-// verdict is what one turn of the loop concluded, and the set is closed at three.
-type verdict uint8
-
-const (
-	// stopped means the context is done, and it is the only silent ending.
-	stopped verdict = iota
-	// lost means the watch is gone: the directory was removed or replaced, and
-	// nothing further will ever be reported through it.
-	lost
-	// changed means a file this watch names may hold something new.
-	changed
-)
-
-// wait blocks until something happens to one of the watched files.
+// coalesce drains the rest of the burst one save produces into the one change
+// that follows it.
 //
-// Errors from the watcher are read and dropped rather than left unread, because
-// an unread error channel stalls fsnotify's own goroutine. There is nowhere to
-// report one, and the load that follows the next real change reports whatever is
-// actually wrong.
-func (w *watcher) wait() verdict {
-	for {
-		if v, settled := w.look(); settled {
-			return v
-		}
-	}
-}
-
-// look is one turn of the wait, and it reports whether that turn settled the
-// question: an event about a file this watch does not name is a turn that did
-// not.
-func (w *watcher) look() (verdict, bool) {
-	select {
-	case <-w.ctx.Done():
-		return stopped, true
-	case ev, open := <-w.fs.Events:
-		if !open {
-			return lost, true
-		}
-
-		return w.live(), w.interesting(ev)
-	case _, open := <-w.fs.Errors:
-		return lost, !open
-	}
-}
-
-// live is the second read of the context, and it is the one that matters: a
-// select whose cases are both ready picks between them at random, so a watch
-// cancelled while an event was pending would otherwise be able to call back once
-// more afterwards. Cancelling is the only way to stop a watch, so it has to mean
-// stopped.
-func (w *watcher) live() verdict {
-	if w.ctx.Err() != nil {
-		return stopped
-	}
-
-	return changed
-}
-
-// interesting reports whether one event is about a file this watch names.
-//
-// The name has to match exactly, which is what keeps the ".ferry-*" files a save
-// stages, and everything else in the directory, out of the callback. A permission
-// change is not a change to what the file holds.
-func (w *watcher) interesting(ev fsnotify.Event) bool {
-	return !ev.Has(fsnotify.Chmod) && w.files[filepath.Clean(ev.Name)]
-}
-
-// coalesce drains the burst one save produces into the one callback that
-// follows it.
-func (w *watcher) coalesce() {
-	timer := time.NewTimer(settle)
-	defer timer.Stop()
+// The window is a context rather than a bare timer so that the wait ends on
+// whichever comes first, the settle or the caller's cancellation, through one
+// case instead of two.
+func (c *change) coalesce(ctx context.Context) {
+	window, stop := context.WithTimeout(ctx, settle)
+	defer stop()
 
 	for {
 		select {
-		case <-timer.C:
+		case <-window.Done():
 			return
-		case <-w.ctx.Done():
-			return
-		case <-w.fs.Events:
-		case <-w.fs.Errors:
+		case <-c.fs.Events:
+		case <-c.fs.Errors:
 		}
 	}
 }
 
-// fire calls back, unless the context ended while the burst was settling.
-func (w *watcher) fire() {
-	if w.ctx.Err() == nil {
-		w.onChange(w.ctx)
+// Close releases the inotify watcher this registration holds.
+func (c *change) Close() error { return c.fs.Close() }
+
+// verdict is what one turn of the wait concluded, and the four constructors
+// below are the whole of the set: nothing settled, the context ended it, a file
+// this registration names changed, and the watch was lost. Only they build one,
+// so a turn that is both a change and a failure cannot be spelled.
+type verdict struct {
+	changed bool
+	err     error
+	settled bool
+}
+
+// settledNothing is a turn about a file this registration does not name.
+func settledNothing() verdict { return verdict{} }
+
+// watchEnded is the context ending the wait, which is the one silent ending.
+func watchEnded() verdict { return verdict{settled: true} }
+
+// watchChanged is a file this registration names holding something new.
+func watchChanged() verdict { return verdict{changed: true, settled: true} }
+
+// watchLost is the mechanism saying nothing further will ever arrive, and it is
+// the one place a registration is spelled over: the directory going, the
+// watcher failing, and its channels closing all mint here, so the shape of that
+// ending is written once.
+func watchLost(err error) verdict { return verdict{err: err, settled: true} }
+
+// closedWatch is what a wait concluded when the watcher's own channels went
+// away underneath it, which nothing but its own Close does.
+const closedWatch = "this watch was closed"
+
+// look is one turn of the wait.
+//
+// Errors from the watcher are read rather than left unread, because an unread
+// error channel stalls fsnotify's own goroutine, and here they are the watch
+// being lost.
+func (c *change) look(ctx context.Context) verdict {
+	select {
+	case <-ctx.Done():
+		return watchEnded()
+	case ev, open := <-c.fs.Events:
+		if !open {
+			return watchLost(watchError(closedWatch))
+		}
+
+		return c.event(ev)
+	case err, open := <-c.fs.Errors:
+		if !open {
+			return watchLost(watchError(closedWatch))
+		}
+
+		return watchLost(watchFailure("this watch failed", err))
 	}
 }
 
-// watchError states the class this driver has an opinion about and keeps
-// [ErrWatch] reachable underneath it.
+// event decides what one filesystem event means to this registration.
+//
+// A watched directory that is removed or renamed away is asked about first,
+// because it is the watch itself going and not a file changing underneath it.
+// It has to be read from the directory's own event: the two ways of losing a
+// directory do not deliver the same things. Removing one unlinks the file
+// first, so an event names the file as well; renaming one away moves it whole,
+// and the only event there is names the directory. A wait that listened for the
+// file alone would sit through the second one forever (ADR-0020).
+//
+// Otherwise the name has to match a watched file exactly, which is what keeps
+// the ".ferry-*" files a save stages, and everything else in the directory, out
+// of the answer. A permission change is not a change to what the file holds.
+func (c *change) event(ev fsnotify.Event) verdict {
+	at := filepath.Clean(ev.Name)
+
+	if c.dirs[at] && ev.Has(fsnotify.Remove|fsnotify.Rename) {
+		return watchLost(watchError("the directory holding a watched file is gone"))
+	}
+
+	if ev.Has(fsnotify.Chmod) || !c.files[at] {
+		return settledNothing()
+	}
+
+	return watchChanged()
+}
+
+// watchError states the reason under [ErrWatch] and nothing more. Core stamps
+// [ferry.ErrPlane] once at its own seam - the bind refusal and the stream
+// ending both wrap it there - so minting it here as well would spell the
+// prefix twice (ADR-0020).
 func watchError(msg string) error {
-	return fmt.Errorf("%w: %w: %s", ferry.ErrPlane, ErrWatch, msg)
+	return fmt.Errorf("%w: %s", ErrWatch, msg)
+}
+
+// watchFailure is [watchError] over something that went wrong underneath it,
+// and it wraps that error rather than printing it, so errors.Is and errors.As
+// still answer for whatever the operating system said.
+func watchFailure(msg string, cause error) error {
+	return fmt.Errorf("%w: %s: %w", ErrWatch, msg, cause)
 }

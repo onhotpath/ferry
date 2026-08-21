@@ -42,6 +42,14 @@
 // maps are all left as they were. The write is atomic and the file is read before
 // it is written, so a save that fails leaves your file byte for byte as it was.
 //
+// # Reloading when a file changes
+//
+// [Source.Watched] converts a source into one [ferry.BindWatched] takes, and the
+// stream it hands back opens with a load and yields a freshly loaded value every
+// time a file [DotEnv] named changes. The changes come from the operating
+// system's own file notifications, so a hand edit lands without polling latency,
+// and one save is one reload.
+//
 // # Sharp edges
 //
 // These are the ones that cost time in production rather than at the keyboard,
