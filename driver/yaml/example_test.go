@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/driver/yaml"
-	"github.com/onhotpath/ferry/watch"
 )
 
 // Example loads a hand-maintained config file, changes two fields and writes it
@@ -132,16 +130,20 @@ func ExampleExtension() {
 	// port: 8080
 }
 
-// ExampleWatch reloads a config file whenever an operator edits it.
+// ExampleSource_Watched reloads a config file whenever an operator edits it.
 //
-// The binding is held across the edit, the callback loads through it, and the
-// value loaded before the edit is untouched by the one loaded after. That is the
-// whole of reloading: a reload is a load, and publishing one means replacing a
-// value rather than writing into a value somebody else is reading.
+// The whole wiring is two calls: convert the source, bind it, range what comes
+// back. The stream opens with a load, so the value the process starts from
+// arrives without a separate load, and there is nothing to order and nothing to
+// forget.
+//
+// The value held from before the edit is untouched by the one after it. That is
+// the whole of reloading: a reload is a load, and publishing one means replacing
+// a value rather than writing into a value somebody else is reading.
 //
 // A server would keep the fresh value in an atomic pointer and swap it on every
 // turn of the range.
-func ExampleWatch() {
+func ExampleSource_Watched() {
 	type config struct {
 		Port int `ferry:"port"`
 	}
@@ -149,52 +151,62 @@ func ExampleWatch() {
 	path := writeExamplePlane("# the port the server listens on\nport: 8080\n")
 	defer func() { _ = os.RemoveAll(filepath.Dir(path)) }()
 
-	// Cancelling is what stops the watching goroutine, and it is the only thing
-	// that does.
+	// Cancelling is what ends the watch and the stream together, and it is the
+	// only thing that does.
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 
-	// Watching starts when the source is built, which is before Bind has handed
-	// back the binding to load through. The signal is what keeps a change that
-	// lands in that window: it records one, and the stream opens with it.
-	s := watch.New()
-
-	b, err := ferry.Bind[config](yaml.NewSource(path, yaml.Watch(ctx, 10*time.Millisecond, s.Changed)))
+	wb, err := ferry.BindWatched[config](yaml.NewSource(path).Watched())
 	if err != nil {
 		fmt.Println(err)
 
 		return
 	}
 
-	held, err := b.Load(ctx)
-	if err != nil {
-		fmt.Println(err)
+	seq, errf := wb.Watch(ctx)
 
-		return
-	}
+	// The first value off the stream is the load the range opens with, and the
+	// second is the reload the operator's edit produced.
+	var held, reloaded config
 
-	// The operator's own edit, landing while the process holds a loaded value.
-	if err := os.WriteFile(path, []byte("# the port the server listens on\nport: 443\n"), 0o600); err != nil {
-		fmt.Println(err)
+	turn := 0
 
-		return
-	}
-
-	seq, errf := watch.Values(ctx, s, b)
 	for cfg := range seq {
-		fmt.Printf("held:     %d\n", held.Port)
-		fmt.Printf("reloaded: %d\n", cfg.Port)
+		turn++
+
+		if turn == 1 {
+			held = cfg
+
+			editTheExamplePlane(path)
+
+			continue
+		}
+
+		reloaded = cfg
 
 		break // one turn is enough for an example; a server keeps ranging
 	}
 
 	if err := errf(); err != nil {
 		fmt.Println(err)
+
+		return
 	}
+
+	fmt.Printf("held:     %d\n", held.Port)
+	fmt.Printf("reloaded: %d\n", reloaded.Port)
 
 	// Output:
 	// held:     8080
 	// reloaded: 443
+}
+
+// editTheExamplePlane is the operator's own edit, landing while the process
+// holds a loaded value.
+func editTheExamplePlane(path string) {
+	if err := os.WriteFile(path, []byte("# the port\nport: 443\n"), 0o600); err != nil {
+		fmt.Println(err)
+	}
 }
 
 // writeExamplePlane puts the example's starting document in a directory of its

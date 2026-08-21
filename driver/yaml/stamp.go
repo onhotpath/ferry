@@ -6,9 +6,10 @@ import "os"
 // when the file does: it is there, it is this long, and it was last written at
 // this instant.
 //
-// It is the fingerprint both halves of ADR-0020 compare. A save takes one at the
-// open and compares it at the commit, and a watch takes one per look. Nothing
-// reads it for any other purpose, so it holds no mode, no owner and no path.
+// It is what a save compares: one taken at the open, one at the commit, and a
+// file that changed in between is a save refused rather than an edit discarded.
+// Nothing else reads it - the watch is a filesystem notification and takes no
+// stamp at all (ADR-0020) - so it holds no mode, no owner and no path.
 //
 // The fields are all comparable, which is the whole reason the modification time
 // is nanoseconds and not a [time.Time]: two stamps are equal or they are not,
@@ -17,7 +18,7 @@ import "os"
 //
 // What it cannot see is a rewrite that lands in the same modification-time tick
 // and leaves the length alone. That is the cost of a stat, it is stated in the
-// godoc of both things that use it, and the alternative is reading the whole
+// godoc of the save that takes it, and the alternative is reading the whole
 // file to hash it on a path whose budget is one stat (ADR-0020).
 type stamp struct {
 	size int64

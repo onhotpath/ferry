@@ -3,7 +3,9 @@ package yaml_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/onhotpath/ferry"
@@ -20,6 +22,56 @@ import (
 func TestDriver(t *testing.T) {
 	ferrytest.Driver(t, plane(t))
 }
+
+// TestWatchConformance is the watching suite, in one call, over the real
+// mechanism: the seven properties a watchable driver owes its caller, asked of
+// this driver's own fsnotify watch (ADR-0020).
+//
+// The goroutine count around it is the eighth thing the suite cannot ask: every
+// stream it opens is cancelled by the time it returns, so anything still
+// running afterwards is this driver's.
+func TestWatchConformance(t *testing.T) {
+	before := runtime.NumGoroutine()
+
+	ferrytest.Watchable(t, watchPlane(t))
+
+	assertNoLeak(t, before)
+}
+
+// watchPlane describes this driver's watch to the suite: a file in a directory
+// of its own, changed by writing it, and lost by taking the directory away.
+//
+// The directory is this test's own and not t.TempDir() itself, because losing
+// the watch means removing it and the cleanup t.TempDir registers must still
+// find something to remove.
+func watchPlane(t *testing.T) ferrytest.WatchPlane {
+	t.Helper()
+
+	dir := filepath.Join(t.TempDir(), "watched")
+	if err := os.Mkdir(dir, 0o750); err != nil {
+		t.Fatalf("making the directory the watch is on: %v", err)
+	}
+
+	path := filepath.Join(dir, planeName)
+
+	return ferrytest.WatchPlane{
+		Name:   "yaml",
+		Open:   func() ferry.WatchableSource { return yaml.NewSource(path).Watched() },
+		Change: func(to string) { edit(t, path, "host: "+to+"\n") },
+		Lose: func() {
+			if err := os.RemoveAll(dir); err != nil {
+				t.Fatalf("removing the directory the watch is on: %v", err)
+			}
+		},
+		Unwatchable: func() ferry.WatchableSource { return yaml.NewSource("").Watched() },
+		Settle:      watchSettle,
+	}
+}
+
+// watchSettle is how long this driver may take to notice a change: an inotify
+// event and a settle window, with room for a machine running the whole suite
+// under the race detector.
+const watchSettle = 3 * time.Second
 
 // plane describes this driver to the suite. Open mints a fresh file in a fresh
 // directory on every call, which is ADR-0014's fresh-destination rule: a plane
