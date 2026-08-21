@@ -20,4 +20,4 @@ go 1.26
 
 require github.com/onhotpath/ferry v0.1.0
 
-require golang.org/x/sys v0.29.0
+require golang.org/x/sys v0.47.0
