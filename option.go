@@ -69,6 +69,13 @@ type config struct {
 	// ADR-0010's sense - one reflect.Type yields two schemas under two values of
 	// it - so it is in [schemaKey].
 	root rootDecl
+
+	// watchAsked is what the Option list declared about watching, and it is read
+	// only by the typed watch prototype: the default build has no Option that
+	// sets it. It is neither compile-affecting nor load-affecting, so it is
+	// absent from [schemaKey] and from every load.
+	watchAsked    bool
+	watchAskedSet bool
 }
 
 // rootDecl is the declaration the root address carries, in the shape a tag

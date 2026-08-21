@@ -19,6 +19,19 @@ import (
 // the whole of the watch is one method the core stream calls, and the lifetime
 // is the context that stream was opened with.
 
+// BindWatch refuses a source that has nothing to watch.
+//
+// [WatchFiles] refused this at Bind by holding a watcher the whole source knew
+// about; this does the same refusal with no state at all, because whether there
+// is anything to watch is a question about the options and nothing else.
+func (s *Source) BindWatch() error {
+	if len(s.cfg.dotenv) == 0 {
+		return watchError("this source watches no files: name them with env.DotEnv")
+	}
+
+	return nil
+}
+
 // Notify registers for the next change to a file [DotEnv] named.
 //
 // The registration is live when Notify returns, so a save between this call and
@@ -38,8 +51,8 @@ import (
 // changes, and holding a reload back until the plane is quiet is the caller's
 // setting rather than a constant buried in this package.
 func (s *Source) Notify(context.Context) (ferry.Change, error) {
-	if len(s.cfg.dotenv) == 0 {
-		return nil, watchError("this source watches no files: name them with env.DotEnv")
+	if err := s.BindWatch(); err != nil {
+		return nil, err
 	}
 
 	fs, err := fsnotify.NewWatcher()

@@ -33,6 +33,21 @@ import (
 // of the reload and a change landing inside it is the next change rather than a
 // change lost for ever.
 type Notifier interface {
+	// BindWatch refuses a watch this source cannot open, and it is called
+	// during [Bind] when [WithWatch] asked for one.
+	//
+	// It does no I/O, and the missing [context.Context] is how the type says so.
+	// What it may refuse is what the driver can see without touching the plane:
+	// a source configured to watch nothing, a mechanism this build has no access
+	// to. Everything else is refused by [Notifier.Notify], where the
+	// registration is actually placed.
+	//
+	// It is the second half of the seam because watchability is
+	// option-dependent: a source type implements this interface whatever its
+	// options say, so the type assertion alone cannot answer whether this
+	// particular source has anything to watch.
+	BindWatch() error
+
 	// Notify registers for the next change on this plane and answers with the
 	// [Change] that waits for it.
 	//
@@ -71,6 +86,57 @@ var ErrWatchLost = errors.New("the watch was lost")
 
 // ErrWatchInUse reports a second range over one [Watched].
 var ErrWatchInUse = errors.New("this watch is already being ranged")
+
+// WithWatch declares that this binding will be watched, so that a source that
+// cannot be watched is refused at [Bind] rather than at [Binding.Watch].
+//
+//	b, err := ferry.Bind[Config](src, ferry.WithWatch())
+//
+// It reaches no plane. It asserts the source implements [Notifier] and asks the
+// driver's own [Notifier.BindWatch] whether this source has anything to watch,
+// both before any load and both refusing with [ErrNotWatchable].
+//
+// A binding built without it can still be watched, and pays for the omission by
+// finding out at the [Binding.Watch] call instead.
+func WithWatch() Option {
+	return optionFunc(func(c *config) error {
+		if c.watchAskedSet {
+			return fmt.Errorf("%w: ferry.WithWatch was supplied twice", ErrSchema)
+		}
+
+		c.watchAsked, c.watchAskedSet = true, true
+
+		return nil
+	})
+}
+
+// afterBind is the protoa half of the build-tagged pair: where [WithWatch] was
+// given, the capability refusal lands here, on the Bind seam, and never at the
+// call that opens the stream.
+func (c *config) afterBind(src Source) error {
+	if !c.watchAsked {
+		return nil
+	}
+
+	_, err := notifierOf(src)
+
+	return err
+}
+
+// notifierOf is the whole capability check, and it is one function so that the
+// Bind seam and the Watch call cannot drift into refusing different things.
+func notifierOf(src Source) (Notifier, error) {
+	n, ok := src.(Notifier)
+	if !ok {
+		return nil, fmt.Errorf("%w: %w", ErrPlane, ErrNotWatchable)
+	}
+
+	if err := n.BindWatch(); err != nil {
+		return nil, fmt.Errorf("%w: %w: %w", ErrPlane, ErrNotWatchable, err)
+	}
+
+	return n, nil
+}
 
 // WatchOption is a setting [Binding.Watch] takes. The set is closed, because
 // the interface's one method is unexported.
@@ -142,15 +208,18 @@ type Watched[T any] struct {
 //	    alert(err)
 //	}
 //
-// It refuses a source that cannot be watched, with an error wrapping
-// [ErrNotWatchable], and it refuses a [WatchOption] list that does not resolve.
+// It refuses a [WatchOption] list that does not resolve. It also refuses a
+// source that cannot be watched, with an error wrapping [ErrNotWatchable] -
+// unless the binding was built with [WithWatch], which moves that refusal onto
+// [Bind] where a plane refusal belongs.
+//
 // It reaches no plane and starts no goroutine: the registration is placed when
 // the range starts, and ctx is the whole lifetime of both the registration and
 // the stream.
 func (b *Binding[T]) Watch(ctx context.Context, opts ...WatchOption) (*Watched[T], error) {
-	n, ok := b.b.src.(Notifier)
-	if !ok {
-		return nil, fmt.Errorf("%w: %w", ErrPlane, ErrNotWatchable)
+	n, err := notifierOf(b.b.src)
+	if err != nil {
+		return nil, err
 	}
 
 	var cfg watchConfig

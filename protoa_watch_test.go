@@ -395,3 +395,68 @@ func TestVariantATwoWatchableSourcesUnderOneBinding(t *testing.T) {
 		t.Fatalf("the two planes were opened %d times, want 4: two loads over two layers", got)
 	}
 }
+
+// Scenario 7c, the salvaged shape: with WithWatch the refusal lands on Bind,
+// which is where a plane refusal belongs, and Watch can no longer fail on
+// capability grounds.
+func TestVariantAWithWatchRefusesAtBind(t *testing.T) {
+	t.Parallel()
+
+	if _, err := ferry.Bind[watchConfigA](plainPlane{}, ferry.WithWatch()); !errors.Is(err, ferry.ErrNotWatchable) {
+		t.Fatalf("binding an unwatchable source with WithWatch reported %v, want a refusal at Bind", err)
+	}
+}
+
+// Scenario 7d: watchability is option-dependent, so the type assertion alone is
+// not the answer. A source that is a Notifier by type and watches nothing by
+// configuration is refused at Bind too, through the driver's own BindWatch.
+func TestVariantAWithWatchRefusesAnOptionDependentWatchAtBind(t *testing.T) {
+	t.Parallel()
+
+	p := planeA(t)
+	p.bindFail = errors.New("this source watches no files")
+
+	_, err := ferry.Bind[watchConfigA](p, ferry.WithWatch())
+	if !errors.Is(err, ferry.ErrNotWatchable) {
+		t.Fatalf("binding a source configured to watch nothing reported %v, want a refusal at Bind", err)
+	}
+
+	if !errors.Is(err, p.bindFail) {
+		t.Fatalf("the refusal is %v, which does not carry the driver's own reason", err)
+	}
+}
+
+// Scenario 7e: WithWatch does not change what a watchable source does, and a
+// binding built with it streams exactly as one built without it.
+func TestVariantAWithWatchStreamsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	p := planeA(t)
+
+	b, err := ferry.Bind[watchConfigA](p, ferry.WithWatch())
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+
+	w, err := b.Watch(ctx)
+	if err != nil {
+		t.Fatalf("watch: %v", err)
+	}
+
+	if got := run(t, w).next(t).Host; got != "db1" {
+		t.Fatalf("first value is %q, want db1", got)
+	}
+}
+
+// A second WithWatch is a refusal, which is the rule every core Option follows.
+func TestVariantAWithWatchTwiceIsRefused(t *testing.T) {
+	t.Parallel()
+
+	_, err := ferry.Bind[watchConfigA](planeA(t), ferry.WithWatch(), ferry.WithWatch())
+	if !errors.Is(err, ferry.ErrSchema) {
+		t.Fatalf("two WithWatch options reported %v, want a refusal", err)
+	}
+}

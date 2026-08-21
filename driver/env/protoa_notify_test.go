@@ -157,3 +157,20 @@ func settle() {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// The salvaged shape over the real driver: a source naming no file is refused at
+// Bind, not at the stream, once WithWatch says the binding will be watched.
+func TestVariantAWithWatchRefusesTheEnvSourceAtBind(t *testing.T) {
+	t.Parallel()
+
+	src := env.New(env.Environ(func() []string { return []string{"HOST=db1"} }))
+
+	_, err := ferry.Bind[protoaConfig](src, ferry.WithWatch())
+	if !errors.Is(err, ferry.ErrNotWatchable) {
+		t.Fatalf("binding an env source that watches no files reported %v, want a refusal at Bind", err)
+	}
+
+	if !errors.Is(err, env.ErrWatch) {
+		t.Fatalf("the refusal is %v, which does not carry the driver's own reason", err)
+	}
+}

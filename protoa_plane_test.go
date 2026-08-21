@@ -38,6 +38,10 @@ type armedPlane struct {
 	// armFail is what the next Notify refuses with, so a test can drive a
 	// registration that cannot be placed.
 	armFail error
+
+	// bindFail is what BindWatch refuses with, so a test can drive a source
+	// that is a Notifier by type and watches nothing by configuration.
+	bindFail error
 }
 
 func newArmedPlane() *armedPlane {
@@ -53,6 +57,15 @@ func (p *armedPlane) Bind(*ferry.AddressSet) (ferry.OpenFunc, error) {
 
 		return armedSnapshot(maps.Clone(p.data)), nil
 	}, nil
+}
+
+// BindWatch refuses a plane that was told it cannot be watched, which is what a
+// driver configured to watch nothing looks like from core.
+func (p *armedPlane) BindWatch() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return p.bindFail
 }
 
 func (p *armedPlane) Notify(context.Context) (ferry.Change, error) {
@@ -204,6 +217,16 @@ func (l *layeredPlane) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {
 
 		return layeredReader{over: o, under: u}, nil
 	}, nil
+}
+
+// BindWatch refuses where either layer does, so a composed watch is refused at
+// the same seam a single one is.
+func (l *layeredPlane) BindWatch() error {
+	if err := l.over.BindWatch(); err != nil {
+		return err
+	}
+
+	return l.under.BindWatch()
 }
 
 // Notify arms both planes and answers with a registration that reports the
