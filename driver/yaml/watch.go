@@ -1,3 +1,5 @@
+//go:build !protoe
+
 package yaml
 
 import (
@@ -8,8 +10,8 @@ import (
 // look is how often a watch stats the file when the caller named no interval.
 //
 // A second is the resolution a config file is worth: an operator edits one by
-// hand, and a reload that lands within a second of the save is indistinguishable
-// from one that landed at it.
+// hand, and a reload that lands within a second of the save is
+// indistinguishable from one that landed at it.
 const look = time.Second
 
 // watch is the whole of the [Watch] option: what to call, how often to look, and

@@ -1,3 +1,5 @@
+//go:build !protoe
+
 package yaml_test
 
 import (

@@ -70,9 +70,7 @@ func NewSource(path string, opts ...SourceOption) Source {
 		o.applySource(&c)
 	}
 
-	if c.watch != nil {
-		c.watch.start(path)
-	}
+	startWatch(opts, path)
 
 	return Source{path: path}
 }
