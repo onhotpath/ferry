@@ -57,7 +57,11 @@ func New(opts ...Option) *Source {
 		c.refuse(c.watch.start(c.dotenv))
 	}
 
-	return &Source{cfg: c}
+	s := &Source{cfg: c}
+
+	c.afterNew(s)
+
+	return s
 }
 
 // Bind computes this schema's environment variable names and checks them, and it
