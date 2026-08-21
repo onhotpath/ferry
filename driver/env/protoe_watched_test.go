@@ -46,7 +46,7 @@ func TestVariantEOverFsnotify(t *testing.T) {
 		t.Fatalf("bind watched: %v", err)
 	}
 
-	seq, errf := wb.Watch(ctx, ferry.Debounce(80*time.Millisecond))
+	seq, errf := wb.Watch(ctx)
 
 	values := make(chan protoeConfig)
 	done := make(chan struct{})
@@ -104,7 +104,7 @@ func TestVariantETwoDotEnvFilesUnderOneWatch(t *testing.T) {
 		t.Fatalf("bind watched: %v", err)
 	}
 
-	seq, errf := wb.Watch(ctx, ferry.Debounce(80*time.Millisecond))
+	seq, errf := wb.Watch(ctx)
 
 	values := make(chan protoeConfig)
 	done := make(chan struct{})

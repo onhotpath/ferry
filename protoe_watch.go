@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"time"
 )
 
 // Variant E of the typed watch prototype: a watchable source is an interface,
@@ -82,136 +81,6 @@ type WatchableSource interface {
 	Watching() (Notifier, error)
 }
 
-// WatchAll makes one [WatchableSource] out of the source a load reads through
-// and the watchable sources whose changes it is composed of.
-//
-//	base  := env.New(env.DotEnv("base.env")).Watched()
-//	local := env.New(env.DotEnv("local.env")).Watched()
-//	src   := ferry.WatchAll(layered{base, local}, base, local)
-//
-// A change on any of them is a change on the whole, and one announcement per
-// layer for one deployment is one reload under [Debounce]. Every layer is armed
-// before any of them is waited on, so a change on the quiet layer while the
-// noisy one is being read is not lost.
-//
-// It composes the watch and never the read. Which layer wins at an address is
-// the read source's own business, because ferry has no opinion about layering
-// and this is not the place to invent one.
-//
-// It refuses at [BindWatched] where any layer refuses, naming that layer's own
-// reason, and where it was given no layer at all.
-func WatchAll(read Source, of ...WatchableSource) WatchableSource {
-	return allOf{read: read, of: of}
-}
-
-// allOf is [WatchAll]'s value: one reader, many mechanisms.
-type allOf struct {
-	read Source
-	of   []WatchableSource
-}
-
-func (a allOf) Bind(addrs *AddressSet) (OpenFunc, error) {
-	if a.read == nil {
-		return nil, nilPlane(nilSourceMsg)
-	}
-
-	return a.read.Bind(addrs)
-}
-
-// Watching collects every layer's mechanism, refusing on the first layer that
-// cannot be watched, so a composite is refused at the bind exactly as a single
-// source is.
-func (a allOf) Watching() (Notifier, error) {
-	if len(a.of) == 0 {
-		return nil, errors.New("ferry.WatchAll was given no watchable source")
-	}
-
-	ns := make([]Notifier, 0, len(a.of))
-
-	for _, w := range a.of {
-		n, err := watching(w)
-		if err != nil {
-			return nil, err
-		}
-
-		ns = append(ns, n)
-	}
-
-	return fanIn(ns), nil
-}
-
-// fanIn is many mechanisms behind one, and it is the whole of what a caller
-// composing two watchable planes used to have to write.
-type fanIn []Notifier
-
-// Notify arms every layer before any of them is waited on.
-func (f fanIn) Notify(ctx context.Context) (Change, error) {
-	cs := make([]Change, 0, len(f))
-
-	for _, n := range f {
-		c, err := n.Notify(ctx)
-		if err != nil {
-			closeAll(cs)
-
-			return nil, err
-		}
-
-		cs = append(cs, c)
-	}
-
-	return &fanInChange{cs: cs}, nil
-}
-
-// fanInChange is one registration per layer, waited on together.
-type fanInChange struct{ cs []Change }
-
-// Wait answers with whichever layer speaks first, and stops the rest.
-func (f *fanInChange) Wait(ctx context.Context) (bool, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	answers := make(chan waited, len(f.cs))
-
-	for _, c := range f.cs {
-		go func() {
-			ok, err := c.Wait(ctx)
-			answers <- waited{ok: ok, err: err}
-		}()
-	}
-
-	first := <-answers
-
-	cancel()
-
-	// Every layer's wait is drained before this returns, so no goroutine
-	// outlives the call that started it.
-	for range len(f.cs) - 1 {
-		<-answers
-	}
-
-	return first.ok, first.err
-}
-
-// waited is one layer's answer.
-type waited struct {
-	ok  bool
-	err error
-}
-
-func (f *fanInChange) Close() error {
-	closeAll(f.cs)
-
-	return nil
-}
-
-// closeAll releases every registration and discards what each reports, which is
-// what a watcher can do with it.
-func closeAll(cs []Change) {
-	for _, c := range cs {
-		_ = c.Close()
-	}
-}
-
 // ErrNotWatchable reports a source that cannot be watched. It wraps [ErrPlane].
 var ErrNotWatchable = errors.New("this source cannot be watched")
 
@@ -275,10 +144,6 @@ func watching(src WatchableSource) (Notifier, error) {
 	return n, nil
 }
 
-// Binding is the load half on its own, for handing to code that loads and does
-// not watch.
-func (wb *WatchedBinding[T]) Binding() *Binding[T] { return wb.b }
-
 // Load builds a value of T, exactly as [Binding.Load] does.
 func (wb *WatchedBinding[T]) Load(ctx context.Context) (T, error) { return wb.b.Load(ctx) }
 
@@ -304,67 +169,10 @@ func (wb *WatchedBinding[T]) Load(ctx context.Context) (T, error) { return wb.b.
 // Each call opens a registration of its own, so two streams over one binding
 // each see every change rather than sharing them out. The reload runs on the
 // ranging goroutine and no goroutine is started here.
-func (wb *WatchedBinding[T]) Watch(ctx context.Context, opts ...WatchOption,
-) (seq iter.Seq[T], errf func() error) {
-	cfg, err := resolveWatch(opts)
-	if err != nil {
-		return func(func(T) bool) {}, func() error { return err }
-	}
-
-	s := &watchStream[T]{b: wb.b, n: wb.n, ctx: ctx, cfg: cfg}
+func (wb *WatchedBinding[T]) Watch(ctx context.Context) (seq iter.Seq[T], errf func() error) {
+	s := &watchStream[T]{b: wb.b, n: wb.n, ctx: ctx}
 
 	return func(yield func(T) bool) { s.err = s.run(yield) }, func() error { return s.err }
-}
-
-// WatchOption is a setting [WatchedBinding.Watch] takes. The set is closed,
-// because the interface's one method is unexported.
-type WatchOption interface {
-	applyWatch(*watchConfig) error
-}
-
-type watchOptionFunc func(*watchConfig) error
-
-func (f watchOptionFunc) applyWatch(c *watchConfig) error { return f(c) }
-
-type watchConfig struct {
-	debounce    time.Duration
-	debounceSet bool
-}
-
-func resolveWatch(opts []WatchOption) (watchConfig, error) {
-	var cfg watchConfig
-
-	for _, o := range opts {
-		if err := o.applyWatch(&cfg); err != nil {
-			return watchConfig{}, err
-		}
-	}
-
-	return cfg, nil
-}
-
-// Debounce holds a reload back until the plane has been quiet for d.
-//
-// A burst of changes - an editor's several events for one save, or two layered
-// planes each announcing the same deployment - becomes one reload rather than
-// one per announcement. The registration stays live for the whole window, so
-// nothing is lost by waiting.
-//
-// The zero duration is no debounce at all, which is the default.
-func Debounce(d time.Duration) WatchOption {
-	return watchOptionFunc(func(c *watchConfig) error {
-		if c.debounceSet {
-			return fmt.Errorf("%w: ferry.Debounce was supplied twice", ErrSchema)
-		}
-
-		if d < 0 {
-			return fmt.Errorf("%w: ferry.Debounce was given a negative duration", ErrSchema)
-		}
-
-		c.debounce, c.debounceSet = d, true
-
-		return nil
-	})
 }
 
 // watchStream is one range: the loop, and the error it ended on.
@@ -372,7 +180,6 @@ type watchStream[T any] struct {
 	b   *Binding[T]
 	n   Notifier
 	ctx context.Context
-	cfg watchConfig
 	err error
 }
 
@@ -453,7 +260,9 @@ func (s *watchStream[T]) await(a *armed) error {
 		return s.ended()
 	}
 
-	return s.settle(a)
+	// The next registration is placed before the reload runs, so a change
+	// landing inside the reload is the next change rather than a lost one.
+	return a.rearm(s.ctx, s.n)
 }
 
 // ended names the quiet ending. A wait that answers false with no error is the
@@ -465,51 +274,6 @@ func (s *watchStream[T]) ended() error {
 	}
 
 	return fmt.Errorf("%w: %w: the plane ended this watch", ErrPlane, ErrWatchLost)
-}
-
-// settle re-arms and, under a debounce, swallows the rest of the burst.
-//
-// Something is armed at every moment, including while the burst is being
-// swallowed, so coalescing costs latency and never a change.
-func (s *watchStream[T]) settle(a *armed) error {
-	deadline := time.Now().Add(s.cfg.debounce)
-
-	for {
-		if err := a.rearm(s.ctx, s.n); err != nil {
-			return err
-		}
-
-		more, err := s.quiet(a, deadline)
-		if err != nil {
-			return err
-		}
-
-		if !more {
-			return nil
-		}
-	}
-}
-
-// quiet reports whether the burst is still arriving. It is where the debounce
-// window is read, so that the loop above holds one decision at a time.
-func (s *watchStream[T]) quiet(a *armed, deadline time.Time) (bool, error) {
-	if s.cfg.debounce <= 0 || !time.Now().Before(deadline) {
-		return false, nil
-	}
-
-	ctx, cancel := context.WithDeadline(s.ctx, deadline)
-	defer cancel()
-
-	ok, err := a.c.Wait(ctx)
-	if err != nil {
-		return false, lostWatch(err)
-	}
-
-	if !ok && s.ctx.Err() != nil {
-		return false, s.ctx.Err()
-	}
-
-	return ok, nil
 }
 
 // lostWatch states the class and keeps the plane's own reason reachable.

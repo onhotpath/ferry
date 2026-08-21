@@ -5,6 +5,7 @@ package env
 import (
 	"context"
 	"path/filepath"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 
@@ -86,6 +87,10 @@ type notifier struct {
 // One inotify watcher per registration is the cost this shape has on this
 // mechanism, and it is bounded: the stream arms the next registration before it
 // releases the current one, so there are at most two open at once.
+//
+// One editor save produces several events, and a burst is swallowed here rather
+// than reported as several changes: [settle] is how long the wait gives the
+// file to stop changing before it answers.
 func (n *notifier) Notify(context.Context) (ferry.Change, error) {
 	fs, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -135,10 +140,39 @@ type change struct {
 
 // Wait reports true on a change to a file this registration names, false with a
 // nil error where ctx ended it, and an error where the watch was lost.
+//
+// A burst is one answer. One editor save produces a write, a rename and a
+// chmod, and a reload per event is several reloads of one change, so the first
+// interesting event starts a settle window and the answer follows it.
 func (c *change) Wait(ctx context.Context) (bool, error) {
 	for {
-		if v := c.look(ctx); v.settled {
-			return v.changed, v.err
+		v := c.look(ctx)
+		if !v.settled {
+			continue
+		}
+
+		if v.changed {
+			c.coalesce(ctx)
+		}
+
+		return v.changed, v.err
+	}
+}
+
+// coalesce drains the rest of the burst one save produces into the one change
+// that follows it.
+func (c *change) coalesce(ctx context.Context) {
+	timer := time.NewTimer(settle)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-timer.C:
+			return
+		case <-ctx.Done():
+			return
+		case <-c.fs.Events:
+		case <-c.fs.Errors:
 		}
 	}
 }

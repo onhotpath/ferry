@@ -6,6 +6,7 @@ import (
 	"context"
 	"maps"
 	"sync"
+	"time"
 
 	"github.com/onhotpath/ferry"
 )
@@ -131,6 +132,15 @@ func (p *armedPlane) Opens() int {
 	return p.opens
 }
 
+// generation reports how many announcements this plane has made, which is what
+// a settle window compares against.
+func (p *armedPlane) generation() uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return p.gen
+}
+
 func (p *armedPlane) announce() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -147,17 +157,46 @@ type armedChange struct {
 	at uint64
 }
 
+// settle is this plane's own coalescing window, and it is here because
+// coalescing is the driver's job: core does not debounce, so a plane that emits
+// bursts swallows its own.
+const settle = 50 * time.Millisecond
+
 func (c *armedChange) Wait(ctx context.Context) (bool, error) {
 	for {
 		bell, done, err := c.look()
-		if done || err != nil {
-			return done, err
+		if err != nil {
+			return false, err
+		}
+
+		if done {
+			c.coalesce(ctx)
+
+			return true, nil
 		}
 
 		select {
 		case <-ctx.Done():
 			return false, nil
 		case <-bell:
+		}
+	}
+}
+
+// coalesce waits for the plane to go quiet, so a burst of announcements is one
+// change and one reload.
+func (c *armedChange) coalesce(ctx context.Context) {
+	for {
+		at := c.p.generation()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(settle):
+		}
+
+		if c.p.generation() == at {
+			return
 		}
 	}
 }

@@ -77,12 +77,10 @@ func (r *runner) ended(t *testing.T) error {
 
 // watchRun opens a stream and ranges it, which is two calls Go will not let a
 // caller write as one because Watch has two results.
-func watchRun(ctx context.Context, t *testing.T, wb *ferry.WatchedBinding[watchConfigE],
-	opts ...ferry.WatchOption,
-) *runner {
+func watchRun(ctx context.Context, t *testing.T, wb *ferry.WatchedBinding[watchConfigE]) *runner {
 	t.Helper()
 
-	seq, errf := wb.Watch(ctx, opts...)
+	seq, errf := wb.Watch(ctx)
 
 	return run(t, seq, errf)
 }
@@ -134,7 +132,7 @@ func TestVariantEBurstCoalescesAndHeldValueIsImmutable(t *testing.T) {
 	defer cancel()
 
 	p := planeE(t)
-	r := watchRun(ctx, t, boundE(t, p), ferry.Debounce(100*time.Millisecond))
+	r := watchRun(ctx, t, boundE(t, p))
 
 	first := r.next(t)
 	if first.Host != "db1" {
@@ -321,8 +319,8 @@ func TestVariantETwoWatchableSourcesUnderOneBinding(t *testing.T) {
 	over, under := newArmedPlane(), newArmedPlane()
 	under.Set(ferry.At("host"), ferry.String("from-under"))
 
-	src := ferry.WatchAll(&layeredPlane{over: over, under: under}, over, under)
-	r := watchRun(ctx, t, boundE(t, src), ferry.Debounce(100*time.Millisecond))
+	src := watchAll(&layeredPlane{over: over, under: under}, over, under)
+	r := watchRun(ctx, t, boundE(t, src))
 
 	if got := r.next(t).Host; got != "from-under" {
 		t.Fatalf("first value is %q, want the lower layer's", got)
@@ -353,7 +351,7 @@ func TestVariantEAChangeOnEitherLayerReloads(t *testing.T) {
 	over, under := newArmedPlane(), newArmedPlane()
 	under.Set(ferry.At("host"), ferry.String("from-under"))
 
-	src := ferry.WatchAll(&layeredPlane{over: over, under: under}, over, under)
+	src := watchAll(&layeredPlane{over: over, under: under}, over, under)
 	r := watchRun(ctx, t, boundE(t, src))
 
 	r.next(t)
@@ -377,7 +375,7 @@ func TestVariantEOneLayerLosingItsWatchEndsTheStream(t *testing.T) {
 	over, under := newArmedPlane(), newArmedPlane()
 	under.Set(ferry.At("host"), ferry.String("from-under"))
 
-	src := ferry.WatchAll(&layeredPlane{over: over, under: under}, over, under)
+	src := watchAll(&layeredPlane{over: over, under: under}, over, under)
 	r := watchRun(ctx, t, boundE(t, src))
 	r.next(t)
 
@@ -399,7 +397,7 @@ func TestVariantEOneUnwatchableLayerRefusesTheComposite(t *testing.T) {
 	boom := errors.New("this layer watches no files")
 	over.bindFail = boom
 
-	src := ferry.WatchAll(&layeredPlane{over: over, under: under}, over, under)
+	src := watchAll(&layeredPlane{over: over, under: under}, over, under)
 
 	_, err := ferry.BindWatched[watchConfigE](src)
 	if !errors.Is(err, ferry.ErrNotWatchable) || !errors.Is(err, boom) {
@@ -412,7 +410,7 @@ func TestVariantEOneUnwatchableLayerRefusesTheComposite(t *testing.T) {
 func TestVariantEWatchAllOfNothingIsRefused(t *testing.T) {
 	t.Parallel()
 
-	src := ferry.WatchAll(planeE(t))
+	src := watchAll(planeE(t))
 
 	if _, err := ferry.BindWatched[watchConfigE](src); !errors.Is(err, ferry.ErrNotWatchable) {
 		t.Fatalf("binding a composite of no layers reported %v, want a refusal", err)
@@ -564,20 +562,4 @@ func TestVariantEAWatchableSourceIsAlsoASource(t *testing.T) {
 	// ferry.BindWatched[watchConfigE](plainPlane{}) does not compile: it has no
 	// Watching method, and there is no conversion.
 	var _ ferry.Source = plainPlane{}
-}
-
-// A WatchOption list that does not resolve ends the stream rather than
-// returning an error nobody asked for.
-func TestVariantEBadWatchOptionEndsTheStream(t *testing.T) {
-	t.Parallel()
-
-	seq, errf := boundE(t, planeE(t)).Watch(t.Context(), ferry.Debounce(-1))
-
-	for range seq {
-		t.Fatal("a stream built from a refused option yielded a value")
-	}
-
-	if err := errf(); !errors.Is(err, ferry.ErrSchema) {
-		t.Fatalf("the stream reported %v, want the refused option", err)
-	}
 }
