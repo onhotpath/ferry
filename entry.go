@@ -110,6 +110,12 @@ type bound struct {
 	// load. It is held here rather than read off the compiled schema because it
 	// is load-affecting and the schema is cached across configs (ADR-0019).
 	budget int
+
+	// src is the source this was bound to, retained so that a capability
+	// discovered by assertion can be asserted after the bind rather than only
+	// during it. Nothing on the load path reads it: the load goes through open,
+	// which is what ADR-0004's phase split hands back.
+	src Source
 }
 
 // newBound is [Bind] with the type as a value. The order is load-bearing: the
@@ -140,7 +146,7 @@ func newBound(t reflect.Type, src Source, opts []Option) (*bound, error) {
 		return nil, driverNil(momentBind, nilOpenMsg)
 	}
 
-	return &bound{sch: sch, open: open, budget: cfg.budget}, nil
+	return &bound{sch: sch, open: open, budget: cfg.budget, src: src}, nil
 }
 
 // load is the per-load half: open, walk, release. dst is the addressable copy
