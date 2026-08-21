@@ -20,10 +20,18 @@ import (
 type memory struct {
 	keys map[string]bool
 	vals map[string]map[string]winreg.Datum
+
+	// changed is what a watch waits on: every write closes it and puts the next
+	// one in its place, which is the shape RegNotifyChangeKeyValue has.
+	changed chan struct{}
 }
 
 func newMemory() *memory {
-	return &memory{keys: map[string]bool{"": true}, vals: map[string]map[string]winreg.Datum{}}
+	return &memory{
+		keys:    map[string]bool{"": true},
+		vals:    map[string]map[string]winreg.Datum{},
+		changed: make(chan struct{}),
+	}
 }
 
 func (m *memory) Get(_ context.Context, subkey, name string) (winreg.Datum, bool, error) {
@@ -60,6 +68,7 @@ func (m *memory) Set(ctx context.Context, subkey, name string, d winreg.Datum) e
 	}
 
 	m.vals[subkey][name] = d
+	m.fire()
 
 	return nil
 }
@@ -71,11 +80,14 @@ func (m *memory) Create(_ context.Context, subkey string) error {
 		m.keys[at] = true
 	}
 
+	m.fire()
+
 	return nil
 }
 
 func (m *memory) DeleteValue(_ context.Context, subkey, name string) error {
 	delete(m.vals[subkey], name)
+	m.fire()
 
 	return nil
 }
@@ -88,8 +100,39 @@ func (m *memory) DeleteKey(_ context.Context, subkey string) error {
 		}
 	}
 
+	m.fire()
+
 	return nil
 }
+
+// Arm is the [winreg.Notifier] half, and it is what makes a source over this
+// store convertible with Watched: it takes the registration that the next write
+// anywhere in the store will signal.
+func (m *memory) Arm(context.Context) (winreg.Change, error) {
+	return &armedMemory{wait: m.changed}, nil
+}
+
+// fire wakes every registration that is waiting and arms the next one.
+func (m *memory) fire() {
+	close(m.changed)
+	m.changed = make(chan struct{})
+}
+
+// armedMemory is one registration this store handed out, holding the channel it
+// was armed with rather than reading the current one at the wait. That is the
+// registration outliving the wait, which is what the real notification does.
+type armedMemory struct{ wait chan struct{} }
+
+func (a *armedMemory) Wait(ctx context.Context) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, nil
+	case <-a.wait:
+		return true, nil
+	}
+}
+
+func (*armedMemory) Close() error { return nil }
 
 // Example loads an annotated struct out of one registry key.
 func Example() {
@@ -151,4 +194,47 @@ func Example_dump() {
 	// db	host	REG_SZ	db.internal
 	// tags	0	REG_SZ	eu
 	// tags	1	REG_SZ	prod
+}
+
+// ExampleSource_Watched streams a freshly loaded value every time the key
+// changes.
+//
+// The conversion is argument-free, the stream opens with a load, and one context
+// ends the whole of it. The change below is made from inside the range so that
+// this example is deterministic; a real program's changes arrive from whatever
+// else writes the key.
+func ExampleSource_Watched() {
+	type Config struct {
+		Name string `ferry:"name"`
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := newMemory()
+	_ = store.Set(ctx, "", "name", winreg.Datum{Type: winreg.TypeString, Text: "checkout"})
+
+	src := winreg.NewSource(winreg.CurrentUser, `Software\Example`, winreg.Store(store))
+
+	wb, err := ferry.BindWatched[Config](src.Watched())
+	if err != nil {
+		panic(err)
+	}
+
+	seq, errf := wb.Watch(ctx)
+	for cfg := range seq {
+		fmt.Println(cfg.Name)
+
+		if cfg.Name == "payments" {
+			break
+		}
+
+		_ = store.Set(ctx, "", "name", winreg.Datum{Type: winreg.TypeString, Text: "payments"})
+	}
+
+	fmt.Println(errf())
+	// Output:
+	// checkout
+	// payments
+	// <nil>
 }

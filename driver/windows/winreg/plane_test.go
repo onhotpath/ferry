@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/driver/windows/winreg"
@@ -160,68 +159,6 @@ func TestAValueAndASubkeyOfOneNameAreOneMember(t *testing.T) {
 
 	if len(got.Tags) != 1 || got.Tags["A"] != "the value" {
 		t.Errorf("loaded %v, want one member holding the value", got.Tags)
-	}
-}
-
-// TestAWatchThatIsLostSpeaksOnce is ADR-0020's one loud ending: there is nowhere
-// to report a lost watch, so the callback runs once and the load that follows
-// reports whatever is actually wrong.
-func TestAWatchThatIsLostSpeaksOnce(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	fired := make(chan struct{}, 4)
-
-	_ = source(newFake().failWatch(), winreg.Watch(ctx, func(context.Context) { fired <- struct{}{} }))
-
-	select {
-	case <-fired:
-	case <-time.After(2 * time.Second):
-		t.Fatal("a lost watch said nothing")
-	}
-
-	// One call and then the goroutine returns, so nothing else arrives.
-	select {
-	case <-fired:
-		t.Error("a lost watch called back more than once")
-	case <-time.After(50 * time.Millisecond):
-	}
-}
-
-// TestAWatchStopsSilentlyWhenItsContextEnds is the other ending, and the only way
-// to stop a watch: cancelling is not a change, so nothing is reported.
-func TestAWatchStopsSilentlyWhenItsContextEnds(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-
-	store := newFake()
-	fired := make(chan struct{}, 1)
-
-	_ = source(store, winreg.Watch(ctx, func(context.Context) { fired <- struct{}{} }))
-
-	if err := store.Create(t.Context(), "poke"); err != nil {
-		t.Fatalf("poking the store: %v", err)
-	}
-
-	select {
-	case <-fired:
-		t.Error("a cancelled watch called back")
-	case <-time.After(50 * time.Millisecond):
-	}
-}
-
-// TestAWatchWithNoCallbackIsNoWatch is the one shape [winreg.Watch] takes and
-// does nothing with: there is nothing to call, so there is nothing to open and
-// nothing to refuse.
-func TestAWatchWithNoCallbackIsNoWatch(t *testing.T) {
-	t.Parallel()
-
-	if err := bindOf[oneText](source(quiet{newFake()}, winreg.Watch(t.Context(), nil))); err != nil {
-		t.Errorf("Bind refused a source whose watch has no callback: %v", err)
 	}
 }
 

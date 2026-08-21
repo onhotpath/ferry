@@ -78,18 +78,17 @@ type Registry interface {
 }
 
 // Notifier is implemented by a [Registry] that can report a change under the key
-// the driver was built over, and it is what [Watch] needs.
+// the driver was built over, and it is what [Source.Watched] needs.
 //
-// It is optional. A Registry that is no Notifier is refused at Bind when a watch
-// was asked for, because a watch that opens successfully and never fires is the
-// failure the option exists to avoid.
+// It is optional. A Registry that is no Notifier is refused when a source
+// converted by [Source.Watched] is bound, because a watch that opens
+// successfully and never fires is the failure that refusal exists to avoid.
 //
 // Registering and waiting are two calls rather than one, and that is the whole
-// point of the shape. [Watch] arms the next registration before it runs the
-// callback, so a registration is live for the entire time the callback and the
-// load inside it take. An implementation that registered inside the wait would
-// have no registration during that window and would lose every change that
-// landed in it.
+// point of the shape. The next registration is placed before the reload that
+// consumes the last one runs, so a registration is live for the entire time that
+// reload takes. An implementation that registered inside the wait would have no
+// registration during that window and would lose every change that landed in it.
 type Notifier interface {
 	// Arm registers for the next change under the driver's own key and answers
 	// with the [Change] that waits for it.
@@ -102,7 +101,7 @@ type Notifier interface {
 
 // Change is one armed registration: one wait, and the release that follows it.
 //
-// It is what [Notifier.Arm] answers with, and a watcher waits on it once and
+// It is what [Notifier.Arm] answers with, and a stream waits on it once and
 // closes it once.
 type Change interface {
 	// Wait blocks until the change this registration was armed for happens,

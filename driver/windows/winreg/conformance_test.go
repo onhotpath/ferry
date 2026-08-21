@@ -24,6 +24,49 @@ func TestDriver(t *testing.T) {
 	ferrytest.Driver(t, regPlane())
 }
 
+// TestWatchConformance is ADR-0020's watch suite in one call, run against the
+// fake store, which is where this driver's watch contract can be exercised off
+// Windows.
+//
+// What the fake proves here is the seam: register once, wait once, and a
+// registration placed before the reload that consumes the last one. The machine's
+// own registry is put to the same seam by machine_windows_test.go, on Windows.
+//
+// One store stands behind every Open, which is what the suite asks for: a case
+// changes the plane before it opens anything, and the value it wrote is what the
+// stream has to open with.
+func TestWatchConformance(t *testing.T) {
+	t.Parallel()
+
+	store := newFake()
+
+	ferrytest.Watchable(t, ferrytest.WatchPlane{
+		Name:   "winreg",
+		Open:   func() ferry.WatchableSource { return source(store).Watched() },
+		Change: func(to string) { setHost(t, store, to) },
+		// This store decides at the start of a wait, so losing the watch is the
+		// flag plus one change to end the wait that is already running. A real
+		// registry fails the wait in flight.
+		Lose: func() {
+			store.failWatch()
+			setHost(t, store, "lost")
+		},
+		Unwatchable: func() ferry.WatchableSource { return source(quiet{newFake()}).Watched() },
+		// This store closes a channel, so it notices at once and the window is
+		// slack for a loaded machine rather than a mechanism's latency.
+		Settle: time.Second,
+	})
+}
+
+// setHost writes the one address the watch suite moves.
+func setHost(t *testing.T, store winreg.Registry, to string) {
+	t.Helper()
+
+	if err := store.Set(t.Context(), "", "host", winreg.Datum{Type: winreg.TypeString, Text: to}); err != nil {
+		t.Fatalf("writing the plane: %v", err)
+	}
+}
+
 // regPlane describes this driver to the conformance suite.
 //
 // # The kinds are a declaration, and this is what it declares
@@ -134,8 +177,8 @@ type section struct {
 
 // source and sink are the two halves over one store, built the way this package's
 // documentation tells a caller to build them: one list of settings, both halves.
-func source(store winreg.Registry, opts ...winreg.Option) *winreg.Source {
-	return winreg.NewSource(winreg.CurrentUser, base, append([]winreg.Option{winreg.Store(store)}, opts...)...)
+func source(store winreg.Registry) *winreg.Source {
+	return winreg.NewSource(winreg.CurrentUser, base, winreg.Store(store))
 }
 
 func sink(store winreg.Registry) *winreg.Sink {

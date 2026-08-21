@@ -38,11 +38,11 @@ var _ ferry.Source = (*Source)(nil)
 // With no options it reads the machine's own registry in the view the running
 // process would get. Change either with [Store] and [WithView].
 //
-// It touches nothing, and starts nothing, unless it is given [Watch]. That is the
-// one setting that does something before a load: it opens a change notification
-// here, on the caller's own goroutine, and watches from a goroutine of its own
-// until the context it was given is done. A watch that cannot be opened is
-// reported at Bind, because this call returns no error.
+// It touches nothing and starts nothing. A source built here reads the registry
+// only when a load asks it to, and an option it cannot use is refused at Bind
+// rather than here, because this call returns no error.
+//
+// [Source.Watched] is how the same source is watched.
 func NewSource(hive Hive, subkey string, opts ...Option) *Source {
 	return &Source{cfg: newConfig(hive, subkey, func(c *config) {
 		for _, o := range opts {

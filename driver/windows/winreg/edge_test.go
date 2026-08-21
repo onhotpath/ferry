@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/driver/windows/winreg"
@@ -420,61 +419,6 @@ func TestASinkOptionRefusalLandsAtBind(t *testing.T) {
 	_, err := ferry.BindSink[oneText](winreg.NewSink(0, base, winreg.Store(newFake())))
 	if !errors.Is(err, winreg.ErrOption) {
 		t.Fatalf("BindSink answered %v, want an error reaching winreg.ErrOption", err)
-	}
-}
-
-// TestAWatchThatEndsQuietlyStopsWithoutSpeaking is the third ending a watch has:
-// a registry that has stopped reporting without anything having gone wrong.
-//
-// Nothing is called back, because nothing changed. Only losing the watch speaks.
-func TestAWatchThatEndsQuietlyStopsWithoutSpeaking(t *testing.T) {
-	t.Parallel()
-
-	fired := make(chan struct{}, 1)
-
-	_ = source(newFake().endWatch(), winreg.Watch(t.Context(), func(context.Context) { fired <- struct{}{} }))
-
-	select {
-	case <-fired:
-		t.Error("a watch that ended quietly called back")
-	case <-time.After(50 * time.Millisecond):
-	}
-}
-
-// TestAWatchThatCannotBeReArmedSpeaksOnce is the fourth ending, and the one the
-// two-call registration adds: the wait answered with a change and the next
-// registration could not be placed.
-//
-// It is a lost watch like any other, so it says so once and stops. The callback
-// that would have followed the change is the one call, because there is nothing
-// left to hear the next one with.
-func TestAWatchThatCannotBeReArmedSpeaksOnce(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	store := newFake()
-	fired := make(chan struct{}, 4)
-
-	_ = source(store, winreg.Watch(ctx, func(context.Context) { fired <- struct{}{} }))
-
-	store.failArm()
-
-	if err := store.Create(ctx, "poke"); err != nil {
-		t.Fatalf("poking the store: %v", err)
-	}
-
-	select {
-	case <-fired:
-	case <-time.After(2 * time.Second):
-		t.Fatal("a watch that could not be re-armed said nothing")
-	}
-
-	select {
-	case <-fired:
-		t.Error("a lost watch called back more than once")
-	case <-time.After(50 * time.Millisecond):
 	}
 }
 
