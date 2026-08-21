@@ -1192,22 +1192,10 @@ func (d *driverRun) skip(n int, why string) {
 	d.logf("plane %s: case %d skipped: %s", d.plane.Name, n, why)
 }
 
-// logf is where everything this suite says that is not a failure goes.
-//
-// [T] is two methods and neither of them is a log, deliberately: it is what
-// *testing.T satisfies for free and what a probe can implement in four lines. So
-// a skip is written where the reporter can carry one and is otherwise the
-// silence it already was - which is why the reason is in each case's own
-// documentation as well, where it cannot be lost.
+// logf is where everything this suite says that is not a failure goes, and it
+// is [logTo] under this run's reporter.
 func (d *driverRun) logf(format string, args ...any) {
 	d.rep.Helper()
 
-	l, ok := d.rep.(interface {
-		Logf(format string, args ...any)
-	})
-	if !ok {
-		return
-	}
-
-	l.Logf(format, args...)
+	logTo(d.rep, format, args...)
 }

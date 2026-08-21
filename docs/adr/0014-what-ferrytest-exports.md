@@ -236,16 +236,42 @@ func TestMyConfig(t *testing.T) {
 
 ### The surface
 
-**Twenty-eight exported names, in one package.**
+**Thirty exported names, in one package.**
 
 | group | names |
 | --- | --- |
-| what a caller describes | `Plane`, `Instance`, `Artefact`, `Golden`, `T` |
+| what a caller describes | `Plane`, `WatchPlane`, `Instance`, `Artefact`, `Golden`, `T` |
 | the proof | `Proof`, `Type`, `Case`, `At`, `Inside`, `Eq`, `BitEq`, `SliceEq`, `MapEq`, `PtrEq` |
-| the suites | `RoundTrip`, `Driver`, `Codec`, `Complete`, `Injective`, `Spelling` |
+| the suites | `RoundTrip`, `Driver`, `Codec`, `Complete`, `Injective`, `Spelling`, `Watchable` |
 | the apparatus | `MemPlane`, `Static`, `Record` |
 | the table | `CoreTypes` |
 | the assertion | `Want`, `DiffErrors`, `CheckErrors` |
+
+> **Amended under [#376](https://github.com/onhotpath/ferry/issues/376): the count is thirty, and the two new names are `Watchable` and `WatchPlane`.**
+>
+> As published this table has no row for a plane that announces its own changes, because there was no such plane: [ADR-0020](0020-watch-and-reload.md) is what made watchability a typed fact, and it is later than this document.
+> That record proposes the harness, states the seven properties it asserts, and hands the surface question here - "it is not part of `ferrytest` until ADR-0014 says so" - exactly as ADR-0018 handed over `Spelling` and ADR-0011 handed over the error assertion.
+> **This is where it says so.**
+>
+> **`Watchable` joins `the suites` row and `WatchPlane` joins `what a caller describes`**, which is the split this table already draws between a description a driver author fills in and the run that consumes it.
+> `WatchPlane` is a struct with hooks and one duration for the same reason [`Plane`](#what-a-consumer-writes) is a struct: a suite that grows a case must not change its own signature.
+> Two of its six fields are optional, `Lose` and `Unwatchable`, and the cases needing them are skipped out loud through the reporter, which is [the reporting section](#how-a-suite-reports-and-why-it-is-not-testingt)'s existing rule for a case that cannot be run rather than a new one.
+>
+> **The case list is seven, and it is `Watchable`'s own** rather than an extension of `Driver`'s twenty-three.
+> The stream opens with a load, a change reloads, a burst is one reload, a held value never moves, cancelling ends it cleanly, a lost watch ends it with a reason, and a source that cannot be watched is refused at the bind.
+> They are a separate suite because watchability is a separate contract that most drivers do not implement: folding them into `Driver` would either fail every unwatchable driver or add a capability switch to a `Plane` that has none, and both are worse than a second call in the one driver that needs it.
+> The list lives here for the same reason the other lists do, and it may grow in a minor release under [the stability promise](#two-stability-promises-and-only-one-of-them-is-semvers) that already governs every suite.
+>
+> **`Open` mints a fresh source and the plane persists across every one of them**, which is the one thing about `WatchPlane` a driver author can get wrong without the suite saying so.
+> Two of the seven cases put a value on the plane before they open anything, because the property they assert is that the stream opens with what the plane already held.
+> A driver reading `Open` as "a fresh plane too" would lose that write and fail a case whose message names a different defect, so the contract is on the field and stated here.
+> `Change` follows from it: it changes the plane, not a source, and it may be called before the first `Open`.
+>
+> **It asserts through `ferry.BindWatched` and the watched binding and through nothing else**, and it matches every error with `errors.Is`, which is [ADR-0011](0011-the-error-model.md)'s rule that message text is not API applied unchanged.
+> The lost-watch case admits either `ErrWatchLost` or a plane failure the next load reported, because a mechanism that dies with the plane it watched may report the death as the load's error rather than the registration's.
+> The unwatchable case matches `ErrPlane` and not a sentinel, because the sentinel is the driver's own and this suite does not know it; the driver's test is where that match belongs, one line beside this call.
+>
+> **Nothing here is a new decision**: the seam is ADR-0020's, the seven properties are ADR-0020's, and what moves is that the package which enforces ferry's rules now has a name for the newest of them.
 
 > **Amended under [#259](https://github.com/onhotpath/ferry/issues/259): the count is twenty-eight, and the twenty-eighth is `Spelling`.**
 >

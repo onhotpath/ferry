@@ -18,7 +18,8 @@
 // it can carry, and that declaration is the thing a suite holds it to.
 //
 // Conformance is the twenty-three-case suite [Driver] runs over one plane.
-// Passing it is what "this driver implements ferry's contract" means.
+// Passing it is what "this driver implements ferry's contract" means. A driver
+// that can be watched has a second one, the seven cases [Watchable] runs.
 //
 // # Who this is for
 //
@@ -27,6 +28,12 @@
 //	func TestConformance(t *testing.T) {
 //	    ferrytest.Driver(t, myPlane())
 //	}
+//
+// A driver that can also announce its own changes writes a second one,
+// [Watchable] over a [WatchPlane], which is the same bargain for the watch
+// seam: the driver owns the mechanism, ferry owns the loop, and the seven
+// properties a stream owes its caller are asserted identically for every
+// driver.
 //
 // A codec author, who has registered a Go type with ferry, writes four calls:
 // [RoundTrip] to drive their own values through the engine against [MemPlane],
@@ -59,7 +66,7 @@
 // outside a major version.
 //
 // The suites - [Driver], [RoundTrip], [Codec], [Complete], [Injective],
-// [Spelling] - may
+// [Spelling], [Watchable] - may
 // gain cases in a minor release. So a minor upgrade of ferry can make a driver
 // that passed yesterday fail today, and that is intended: a new case does not
 // break a driver, it reports that the driver was already broken. Nothing in the
