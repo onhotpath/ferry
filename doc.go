@@ -282,6 +282,30 @@
 // two addresses collapse onto one plane key. Both refusals land before any
 // backend call.
 //
+// # Watching a plane
+//
+// A plane that can announce its own changes is a [WatchableSource], and a
+// driver hands one back from the source that already holds the configuration.
+// [BindWatched] takes one where [Bind] takes a [Source], so an unwatchable
+// source is a compile error and a source that watches nothing is refused at the
+// bind:
+//
+//	wb, err := ferry.BindWatched[Config](env.New(env.DotEnv(".env")).Watched())
+//	seq, errf := wb.Watch(ctx)
+//	for cfg := range seq {
+//	    publish(cfg)
+//	}
+//	if err := errf(); err != nil {
+//	    alert(err)
+//	}
+//
+// The range opens with a load and yields a freshly loaded value per change, on
+// the ranging goroutine, under that one context. It ends in three ways the
+// caller can tell apart: the reload's own error, ctx.Err, and [ErrWatchLost]
+// carrying the plane's reason. A driver publishes its mechanism through
+// [Notifier] and [Change], and a process that reloads on a signal writes the
+// same two methods.
+//
 // # Errors
 //
 // A failed call carries a set rather than the first thing that went wrong.

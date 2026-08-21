@@ -467,3 +467,84 @@ type shouted struct{}
 
 func (shouted) Apply(v string) (string, error)  { return strings.ToUpper(v), nil }
 func (shouted) Invert(v string) (string, error) { return strings.ToLower(v), nil }
+
+// ExampleBindWatched streams a struct that reloads when the plane behind it
+// changes.
+//
+// The range opens with a load, so there is no separate first load to write, and
+// every value it yields afterwards is a fresh load. errf reports why the stream
+// ended: a failed reload, a cancelled context, or [ferry.ErrWatchLost].
+//
+// The plane here is a test double that announces one change. Ordinary use names
+// a watchable driver instead: env.New(env.DotEnv(".env")).Watched(), and so on.
+func ExampleBindWatched() {
+	src := &promoting{host: "db1"}
+
+	wb, err := ferry.BindWatched[Endpoint](src)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	seq, errf := wb.Watch(context.Background())
+	for cfg := range seq {
+		fmt.Println(cfg.Host)
+
+		if cfg.Host == "db2" {
+			break
+		}
+	}
+
+	if err := errf(); err != nil {
+		fmt.Println(err)
+	}
+	// Output:
+	// db1
+	// db2
+}
+
+// Endpoint is what the watched stream loads.
+type Endpoint struct {
+	Host string `ferry:"host,required"`
+}
+
+// promoting is a one-address plane that promotes db1 to db2 the first time it
+// is waited on, so the example has exactly one change to report.
+type promoting struct {
+	host    string
+	changed bool
+}
+
+func (p *promoting) Bind(*ferry.AddressSet) (ferry.OpenFunc, error) {
+	return func(context.Context) (ferry.Reader, error) {
+		return oneAddress{v: ferry.String(p.host)}, nil
+	}, nil
+}
+
+func (p *promoting) Watching() (ferry.Notifier, error) { return p, nil }
+
+func (p *promoting) Notify(context.Context) (ferry.Change, error) { return p, nil }
+
+func (p *promoting) Wait(context.Context) (bool, error) {
+	if p.changed {
+		return false, nil
+	}
+
+	p.host, p.changed = "db2", true
+
+	return true, nil
+}
+
+func (*promoting) Close() error { return nil }
+
+// oneAddress answers /host and nothing else.
+type oneAddress struct{ v ferry.Value }
+
+func (r oneAddress) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
+	if addr.Path() == ferry.At("host") {
+		return r.v, nil
+	}
+
+	return ferry.Value{}, nil
+}
