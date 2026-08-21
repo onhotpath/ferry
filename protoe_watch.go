@@ -75,14 +75,11 @@ type WatchableSource interface {
 	// carry, and it lands at the bind rather than at the first change that
 	// never comes.
 	//
-	// Answering nil with a nil error is refused as though it had refused,
+	// Answering nil with a nil error is a driver defect and is refused as one,
 	// because a source that says it can be watched and hands over nothing is
 	// the silent failure this method exists to prevent.
 	Watching() (Notifier, error)
 }
-
-// ErrNotWatchable reports a source that cannot be watched. It wraps [ErrPlane].
-var ErrNotWatchable = errors.New("this source cannot be watched")
 
 // ErrWatchLost reports a watch the plane could not keep. It wraps [ErrPlane],
 // and the plane's own reason stays reachable underneath it.
@@ -105,14 +102,17 @@ type WatchedBinding[T any] struct {
 //
 // It is [Bind] over a source that can be watched, so every refusal [Bind] makes
 // it makes too, plus the one the source itself makes: a source that cannot open
-// the watch it was built for is refused here, before any load, wrapping
-// [ErrNotWatchable] and carrying its own reason underneath.
+// the watch it was built for is refused here, before any load. That refusal is
+// the driver's own, wrapped in [ErrPlane], so a driver's watch sentinel -
+// env.ErrWatch, yaml.ErrWatch, winreg.ErrWatch - is what [errors.Is] answers
+// for. The caller knows which driver they constructed, so there is no
+// cross-driver sentinel here to match instead.
 //
 // It reaches no plane and starts no goroutine. The watch opens when a stream
 // does, under that stream's own context.
 func BindWatched[T any](src WatchableSource, opts ...Option) (*WatchedBinding[T], error) {
 	if src == nil {
-		return nil, fmt.Errorf("%w: %w", ErrPlane, ErrNotWatchable)
+		return nil, fmt.Errorf("%w: no watchable source was named", ErrPlane)
 	}
 
 	n, err := watching(src)
@@ -130,15 +130,20 @@ func BindWatched[T any](src WatchableSource, opts ...Option) (*WatchedBinding[T]
 
 // watching asks the source for its mechanism and refuses both ways it can fail
 // to hand one over.
+//
+// The two refusals are different classes on purpose. A source that says why it
+// cannot be watched has made a plane refusal, and its own reason is what the
+// caller matches. A source that says nothing and hands over nothing has broken
+// the contract, which is [ErrDriver]'s bucket and the same one a nil open falls
+// into.
 func watching(src WatchableSource) (Notifier, error) {
 	n, err := src.Watching()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w: %w", ErrPlane, ErrNotWatchable, err)
+		return nil, fmt.Errorf("%w: %w", ErrPlane, err)
 	}
 
 	if n == nil {
-		return nil, fmt.Errorf("%w: %w: it reported no reason and handed over no mechanism",
-			ErrPlane, ErrNotWatchable)
+		return nil, fmt.Errorf("%w: Watching answered no mechanism and no reason", ErrDriver)
 	}
 
 	return n, nil

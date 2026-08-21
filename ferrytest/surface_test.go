@@ -3,6 +3,7 @@ package ferrytest_test
 import (
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
@@ -112,7 +113,7 @@ func exportedNames(t *testing.T) []string {
 	var out []string
 
 	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+		if !inSurface(e.Name()) {
 			continue
 		}
 
@@ -122,6 +123,22 @@ func exportedNames(t *testing.T) []string {
 	slices.Sort(out)
 
 	return out
+}
+
+// inSurface reports whether one file in this directory is part of the published
+// surface: a non-test Go file this build includes.
+//
+// A file the build constraints exclude is not part of the surface. A proposal
+// kept behind a tag is exactly that, and the list above is the specification's
+// own rather than whatever happens to be on disk.
+func inSurface(name string) bool {
+	if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+		return false
+	}
+
+	ok, err := build.Default.MatchFile(".", name)
+
+	return err == nil && ok
 }
 
 func namesIn(t *testing.T, path string) []string {

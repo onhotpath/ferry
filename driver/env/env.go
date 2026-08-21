@@ -53,9 +53,7 @@ func New(opts ...Option) *Source {
 		o.apply(&c)
 	}
 
-	if c.watch != nil {
-		c.refuse(c.watch.start(c.dotenv))
-	}
+	startWatch(opts, &c)
 
 	s := &Source{cfg: c}
 

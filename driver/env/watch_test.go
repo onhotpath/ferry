@@ -1,3 +1,5 @@
+//go:build !protoe
+
 package env
 
 import (
@@ -391,23 +393,24 @@ func refusesTheWatch(t *testing.T, src *Source) {
 // the cost of getting it wrong is a goroutine per source for every caller who
 // never asked for one.
 func TestASourceWithNoWatchStartsNothing(t *testing.T) {
-	t.Parallel()
+	before := runtime.NumGoroutine()
 
-	src := New(Environ(noEnviron), DotEnv(filepath.Join(t.TempDir(), ".env")))
+	_ = New(Environ(noEnviron), DotEnv(filepath.Join(t.TempDir(), ".env")))
 
-	if src.cfg.watch != nil {
-		t.Error("a source built without env.WatchFiles is watching, and the option is the whole of the opt-in")
+	if !settled(before) {
+		t.Error("a source built without env.WatchFiles started a goroutine, and the option is the whole " +
+			"of the opt-in")
 	}
 }
 
 // TestANilCallbackWatchesNothing is the same opt-in from the other side: there is
 // nothing to call, so there is nothing to run.
 func TestANilCallbackWatchesNothing(t *testing.T) {
-	t.Parallel()
+	before := runtime.NumGoroutine()
 
-	src := New(Environ(noEnviron), DotEnv(filepath.Join(t.TempDir(), ".env")), WatchFiles(t.Context(), nil))
+	_ = New(Environ(noEnviron), DotEnv(filepath.Join(t.TempDir(), ".env")), WatchFiles(t.Context(), nil))
 
-	if src.cfg.watch != nil {
-		t.Error("a watch with no callback is watching, and there is nothing for it to call")
+	if !settled(before) {
+		t.Error("a watch with no callback started a goroutine, and there is nothing for it to call")
 	}
 }

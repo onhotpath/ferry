@@ -400,7 +400,7 @@ func TestVariantEOneUnwatchableLayerRefusesTheComposite(t *testing.T) {
 	src := watchAll(&layeredPlane{over: over, under: under}, over, under)
 
 	_, err := ferry.BindWatched[watchConfigE](src)
-	if !errors.Is(err, ferry.ErrNotWatchable) || !errors.Is(err, boom) {
+	if !errors.Is(err, ferry.ErrPlane) || !errors.Is(err, boom) {
 		t.Fatalf("binding a composite with an unwatchable layer reported %v, want that layer's reason", err)
 	}
 }
@@ -412,7 +412,7 @@ func TestVariantEWatchAllOfNothingIsRefused(t *testing.T) {
 
 	src := watchAll(planeE(t))
 
-	if _, err := ferry.BindWatched[watchConfigE](src); !errors.Is(err, ferry.ErrNotWatchable) {
+	if _, err := ferry.BindWatched[watchConfigE](src); !errors.Is(err, ferry.ErrPlane) {
 		t.Fatalf("binding a composite of no layers reported %v, want a refusal", err)
 	}
 }
@@ -430,22 +430,23 @@ func TestVariantEUnwatchableInstanceIsRefusedAtBind(t *testing.T) {
 	p.bindFail = boom
 
 	_, err := ferry.BindWatched[watchConfigE](p)
-	if !errors.Is(err, ferry.ErrNotWatchable) || !errors.Is(err, boom) {
+	if !errors.Is(err, ferry.ErrPlane) || !errors.Is(err, boom) {
 		t.Fatalf("binding a source configured to watch nothing reported %v, want its own reason", err)
 	}
 }
 
-// A source that claims watchability and hands over nothing, with no reason, is
-// refused rather than dereferenced. This is the misuse an open interface admits
-// and a sealed constructor did not.
-func TestVariantENilMechanismWithNoReasonIsRefused(t *testing.T) {
+// A source that claims watchability and hands over nothing, with no reason, has
+// broken the contract rather than refused, so it is a driver defect and is
+// reported as one. This is the misuse an open interface admits and a sealed
+// constructor did not.
+func TestVariantENilMechanismWithNoReasonIsADriverDefect(t *testing.T) {
 	t.Parallel()
 
 	p := planeE(t)
 	p.handOverNothing = true
 
-	if _, err := ferry.BindWatched[watchConfigE](p); !errors.Is(err, ferry.ErrNotWatchable) {
-		t.Fatalf("binding a source that handed over no mechanism reported %v, want a refusal", err)
+	if _, err := ferry.BindWatched[watchConfigE](p); !errors.Is(err, ferry.ErrDriver) {
+		t.Fatalf("binding a source that handed over no mechanism reported %v, want a driver defect", err)
 	}
 }
 
@@ -453,7 +454,7 @@ func TestVariantENilMechanismWithNoReasonIsRefused(t *testing.T) {
 func TestVariantENilSourceIsRefused(t *testing.T) {
 	t.Parallel()
 
-	if _, err := ferry.BindWatched[watchConfigE](nil); !errors.Is(err, ferry.ErrNotWatchable) {
+	if _, err := ferry.BindWatched[watchConfigE](nil); !errors.Is(err, ferry.ErrPlane) {
 		t.Fatalf("binding a nil watchable source reported %v, want a refusal", err)
 	}
 }

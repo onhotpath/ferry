@@ -260,7 +260,7 @@ func TestWatchedWithNoPathIsRefusedAtBind(t *testing.T) {
 	t.Parallel()
 
 	_, err := ferry.BindWatched[watchedE](yaml.NewSource("").Watched())
-	if !errors.Is(err, ferry.ErrNotWatchable) {
+	if !errors.Is(err, ferry.ErrPlane) {
 		t.Fatalf("binding a source over no path reported %v, want a refusal at bind", err)
 	}
 

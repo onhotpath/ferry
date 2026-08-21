@@ -190,7 +190,7 @@ func TestWatchedIsRefusedByARegistryThatReportsNothing(t *testing.T) {
 	t.Parallel()
 
 	_, err := ferry.BindWatched[watchedText](watchedSource(quiet{newFake()}))
-	if !errors.Is(err, ferry.ErrNotWatchable) {
+	if !errors.Is(err, ferry.ErrPlane) {
 		t.Fatalf("binding a source over a registry that reports nothing gave %v, want a refusal at bind", err)
 	}
 

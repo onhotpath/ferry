@@ -140,7 +140,7 @@ func TestVariantEUnwatchableEnvSourceIsRefusedAtBind(t *testing.T) {
 	src := env.New(env.Environ(func() []string { return []string{"HOST=db1"} })).Watched()
 
 	_, err := ferry.BindWatched[protoeConfig](src)
-	if !errors.Is(err, ferry.ErrNotWatchable) {
+	if !errors.Is(err, ferry.ErrPlane) {
 		t.Fatalf("binding an env source that watches no files reported %v, want a refusal at bind", err)
 	}
 

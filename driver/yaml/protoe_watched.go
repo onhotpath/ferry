@@ -28,8 +28,9 @@ import (
 // failure this refusal exists to avoid, so it is refused before any load
 // instead.
 //
-// It wraps [ferry.ErrNotWatchable], and it stays reachable under ferry's
-// wrapper.
+// It wraps [ferry.ErrPlane], and it stays reachable under ferry's own wrapper,
+// so errors.Is answers for it on what [ferry.BindWatched] and the stream
+// returned.
 var ErrWatch = errors.New("yaml: this watch could not be opened")
 
 // settle is how long the watcher waits for the file to stop changing before it
@@ -234,5 +235,5 @@ func (c *change) coalesce(ctx context.Context) {
 // watchError states the class this driver has an opinion about and keeps
 // [ErrWatch] reachable underneath it.
 func watchError(msg string) error {
-	return fmt.Errorf("%w: %s", ErrWatch, msg)
+	return fmt.Errorf("%w: %w: %s", ferry.ErrPlane, ErrWatch, msg)
 }

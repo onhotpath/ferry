@@ -1,34 +1,14 @@
+//go:build !protoe
+
 package env
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"path/filepath"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-
-	"github.com/onhotpath/ferry"
 )
-
-// ErrWatch reports a watch this driver could not open.
-//
-// [WatchFiles] with no [DotEnv] beside it, and a directory that is not there, are
-// both this: a watch that succeeded silently and never fired is the failure mode
-// the option exists to avoid, so it is refused at Bind instead.
-//
-// It wraps [ferry.ErrPlane], and it stays reachable under ferry's wrapper.
-var ErrWatch = errors.New("env: this watch could not be opened")
-
-// settle is how long the watcher waits for a file to stop changing before it
-// calls back.
-//
-// One editor save produces several events - a write, a rename, a chmod - and a
-// reload per event is several reloads of one change. Fifty milliseconds is long
-// enough to swallow that burst and short enough that a reload still lands while
-// the operator is looking at the terminal.
-const settle = 50 * time.Millisecond
 
 // watcher is the whole of the [WatchFiles] option: what to call, which files
 // count, and the context that ends it.
@@ -115,13 +95,31 @@ type watcher struct {
 // through a surface the caller already handles. A cancelled context stops
 // silently instead, so only losing the watch speaks.
 func WatchFiles(ctx context.Context, onChange func(context.Context)) Option {
-	return sourceOnly(func(c *config) {
-		if onChange == nil {
-			return
+	return watchOpt{w: &watcher{ctx: ctx, onChange: onChange}}
+}
+
+// watchOpt is [WatchFiles]'s value, and it is a type of its own so that [New]
+// can recognise it in the Option list once the configuration behind it has
+// settled. It settles nothing into the config, because what it carries is the
+// whole setting.
+type watchOpt struct{ w *watcher }
+
+func (watchOpt) apply(*config) {}
+
+// startWatch opens whatever the Option list asked for, and it runs inside [New]
+// on the caller's own goroutine, which is what gives a failure somewhere to go
+// (ADR-0020).
+func startWatch(opts []Option, c *config) {
+	for _, o := range opts {
+		w, ok := o.(watchOpt)
+		if !ok || w.w.onChange == nil {
+			continue
 		}
 
-		c.watch = &watcher{ctx: ctx, onChange: onChange}
-	})
+		c.refuse(w.w.start(c.dotenv))
+
+		return
+	}
 }
 
 // start opens the watch and puts it on a goroutine of its own, and it runs inside
@@ -300,10 +298,4 @@ func (w *watcher) fire() {
 	if w.ctx.Err() == nil {
 		w.onChange(w.ctx)
 	}
-}
-
-// watchError states the class this driver has an opinion about and keeps
-// [ErrWatch] reachable underneath it.
-func watchError(msg string) error {
-	return fmt.Errorf("%w: %w: %s", ferry.ErrPlane, ErrWatch, msg)
 }

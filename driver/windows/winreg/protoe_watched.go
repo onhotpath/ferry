@@ -28,8 +28,9 @@ import (
 // would not place, are both this. A watch that succeeded silently and never
 // fired is the failure this refusal exists to avoid.
 //
-// It wraps [ferry.ErrNotWatchable], and it stays reachable under ferry's
-// wrapper.
+// It wraps [ferry.ErrPlane], and it stays reachable under ferry's own wrapper,
+// so errors.Is answers for it on what [ferry.BindWatched] and the stream
+// returned.
 var ErrWatch = errors.New("winreg: this watch could not be opened")
 
 // Watched converts this source into one that can be watched.
@@ -101,7 +102,8 @@ type arming struct{ on Notifier }
 func (a arming) Notify(ctx context.Context) (ferry.Change, error) {
 	c, err := a.on.Arm(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: the registry would not report its changes: %w", ErrWatch, err)
+		return nil, fmt.Errorf("%w: %w: the registry would not report its changes: %w",
+			ferry.ErrPlane, ErrWatch, err)
 	}
 
 	return c, nil
@@ -110,5 +112,5 @@ func (a arming) Notify(ctx context.Context) (ferry.Change, error) {
 // notWatchable states the class this driver has an opinion about and keeps
 // [ErrWatch] reachable underneath it.
 func notWatchable(msg string) error {
-	return fmt.Errorf("%w: %s", ErrWatch, msg)
+	return fmt.Errorf("%w: %w: %s", ferry.ErrPlane, ErrWatch, msg)
 }
