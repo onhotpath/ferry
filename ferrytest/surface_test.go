@@ -93,6 +93,7 @@ func TestExportedSurface(t *testing.T) {
 		"Artefact", "At", "BitEq", "Case", "CheckErrors", "Codec", "Complete", "CoreTypes", "DiffErrors",
 		"Driver", "Eq", "Golden", "Injective", "Inside", "Instance", "MapEq", "MemPlane", "Plane", "Proof",
 		"PtrEq", "Record", "RoundTrip", "SliceEq", "Spelling", "Static", "T", "Type", "Want",
+		"WatchPlane", "Watchable",
 	}
 
 	got := exportedNames(t)
