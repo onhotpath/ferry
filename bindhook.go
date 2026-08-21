@@ -6,4 +6,4 @@ package ferry
 // refusal onto the Bind seam, and it is a build-tagged pair so that the default
 // build carries none of it: this half does nothing, and the protoa half asserts
 // the source can be watched.
-func (c *config) afterBind(Source) error { return nil }
+func afterBind([]Option, Source) error { return nil }

@@ -43,7 +43,7 @@ func NewWatched(opts ...Option) ferry.WatchableSource {
 		return ferry.Unwatchable(watchError("this source watches no files: name them with env.DotEnv"))
 	}
 
-	return ferry.Watchable(s, watchedSource{cfg: s.cfg})
+	return ferry.Watchable(s, &watchedSource{cfg: s.cfg})
 }
 
 // watchedSource is the mechanism half, kept in a type of its own so that the
@@ -61,7 +61,7 @@ type watchedSource struct {
 // because an editor and this package's own sink both replace a file by renaming
 // another over it. Everything else in those directories is ignored, including
 // the ".ferry-*" files a save stages.
-func (w watchedSource) Notify(context.Context) (ferry.Change, error) {
+func (w *watchedSource) Notify(context.Context) (ferry.Change, error) {
 	fs, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, watchError("no watch could be opened: " + err.Error())

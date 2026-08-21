@@ -153,22 +153,13 @@ func (c *armedChange) look() (<-chan struct{}, bool, error) {
 	return c.p.bell, false, nil
 }
 
-func (c *armedChange) Close() error { return nil }
+func (*armedChange) Close() error { return nil }
 
 // armedSnapshot serves one load from an immutable copy of the contents.
 type armedSnapshot map[ferry.Path]ferry.Value
 
 func (s armedSnapshot) Get(_ context.Context, addr ferry.LeafAddr) (ferry.Value, error) {
 	return s[addr.Path()], nil
-}
-
-// plainPlane is a source with no watch at all. Under this variant there is no
-// call that has to refuse it: it has no WatchableSource to be handed as, so
-// ferry.BindWatched over it does not compile.
-type plainPlane struct{}
-
-func (plainPlane) Bind(*ferry.AddressSet) (ferry.OpenFunc, error) {
-	return func(context.Context) (ferry.Reader, error) { return armedSnapshot(nil), nil }, nil
 }
 
 // layeredPlane is two watchable planes under one source: the first that holds an

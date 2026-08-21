@@ -75,7 +75,7 @@ func (r *runner) ended(t *testing.T) error {
 
 // wire is the whole caller wiring: open a watch, build a source over it, bind
 // the two together.
-func wire(t *testing.T, ctx context.Context) (*ferry.Watch, *portPlane, *ferry.WatchedBinding[watchConfigC]) {
+func wire(ctx context.Context, t *testing.T) (*portPlane, *ferry.WatchedBinding[watchConfigC]) {
 	t.Helper()
 
 	h := ferry.NewWatch(ctx)
@@ -88,7 +88,7 @@ func wire(t *testing.T, ctx context.Context) (*ferry.Watch, *portPlane, *ferry.W
 		t.Fatalf("bind watched: %v", err)
 	}
 
-	return h, p, wb
+	return p, wb
 }
 
 func watchRun(t *testing.T, wb *ferry.WatchedBinding[watchConfigC], opts ...ferry.WatchOption) *runner {
@@ -135,7 +135,7 @@ func TestVariantCBurstCoalescesAndHeldValueIsImmutable(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	_, p, wb := wire(t, ctx)
+	p, wb := wire(ctx, t)
 	r := watchRun(t, wb, ferry.Debounce(100*time.Millisecond))
 
 	first := r.next(t)
@@ -168,7 +168,7 @@ func TestVariantCStreamOpensWithALoad(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	_, p, wb := wire(t, ctx)
+	p, wb := wire(ctx, t)
 
 	v, err := wb.Load(ctx)
 	if err != nil {
@@ -197,7 +197,7 @@ func TestVariantCFailedReloadIsObservedAndRestartsOnANewHandle(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	_, p, wb := wire(t, ctx)
+	p, wb := wire(ctx, t)
 	r := watchRun(t, wb)
 	r.next(t)
 
@@ -240,7 +240,7 @@ func TestVariantCQuietDeathIsObserved(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	_, p, wb := wire(t, ctx)
+	p, wb := wire(ctx, t)
 	r := watchRun(t, wb)
 	r.next(t)
 
@@ -261,7 +261,7 @@ func TestVariantCEndingWithNoReasonStillEndsTheStream(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	_, p, wb := wire(t, ctx)
+	p, wb := wire(ctx, t)
 	r := watchRun(t, wb)
 	r.next(t)
 
@@ -275,10 +275,10 @@ func TestVariantCEndingWithNoReasonStillEndsTheStream(t *testing.T) {
 // Scenario 6: one context is the whole wiring, and cancelling it ends the
 // stream and leaves no goroutine behind.
 func TestVariantCOneLifetimeLeaksNothing(t *testing.T) {
-	before := goroutines()
+	before := runtime.NumGoroutine()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	_, _, wb := wire(t, ctx)
+	_, wb := wire(ctx, t)
 	r := watchRun(t, wb)
 	r.next(t)
 
@@ -288,19 +288,25 @@ func TestVariantCOneLifetimeLeaksNothing(t *testing.T) {
 		t.Fatalf("the stream ended with %v, want the cancellation", err)
 	}
 
-	if after := goroutines(); after > before {
-		t.Fatalf("goroutines went from %d to %d, so the watch leaked one", before, after)
+	if !settled(before) {
+		t.Fatalf("goroutines went from %d to %d and stayed there, so the watch leaked one",
+			before, runtime.NumGoroutine())
 	}
 }
 
-func goroutines() int {
-	for range 50 {
-		runtime.Gosched()
-		runtime.GC()
-		time.Sleep(10 * time.Millisecond)
+// settled waits for the goroutine count to come back to where it was, because a
+// goroutine returning is not instantaneous and a fixed sleep is either flaky or
+// slow. It is driver/env's own watch test's helper, in its own words.
+func settled(before int) bool {
+	for range 100 {
+		if runtime.NumGoroutine() <= before {
+			return true
+		}
+
+		time.Sleep(20 * time.Millisecond)
 	}
 
-	return runtime.NumGoroutine()
+	return false
 }
 
 // Scenario 7: a second stream over one handle is policed.
@@ -310,7 +316,7 @@ func TestVariantCSecondStreamIsRefused(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	_, _, wb := wire(t, ctx)
+	_, wb := wire(ctx, t)
 
 	seq, errf := wb.Watch()
 
@@ -474,7 +480,7 @@ func TestVariantCBadWatchOptionEndsTheStream(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	_, _, wb := wire(t, ctx)
+	_, wb := wire(ctx, t)
 
 	seq, errf := wb.Watch(ferry.Debounce(-1))
 	for range seq {

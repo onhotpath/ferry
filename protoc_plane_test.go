@@ -115,12 +115,10 @@ func newLayeredPlane() *layeredPlane {
 
 // wire wires every layer and the composite itself, which is what
 // [ferry.BindWatched] checks.
-func (l *layeredPlane) wire(h *ferry.Watch) *layeredPlane {
+func (l *layeredPlane) wire(h *ferry.Watch) {
 	l.over.wire(h)
 	l.under.wire(h)
 	h.Wire(l)
-
-	return l
 }
 
 func (l *layeredPlane) Bind(addrs *ferry.AddressSet) (ferry.OpenFunc, error) {

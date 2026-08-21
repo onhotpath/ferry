@@ -184,7 +184,8 @@ func (wb *WatchedBinding[T]) Load(ctx context.Context) (T, error) { return wb.b.
 // Each call opens a registration of its own, so two streams over one binding
 // each see every change rather than sharing them out. The reload runs on the
 // ranging goroutine and no goroutine is started here.
-func (wb *WatchedBinding[T]) Watch(ctx context.Context, opts ...WatchOption) (iter.Seq[T], func() error) {
+func (wb *WatchedBinding[T]) Watch(ctx context.Context, opts ...WatchOption,
+) (seq iter.Seq[T], errf func() error) {
 	cfg, err := resolveWatch(opts)
 	if err != nil {
 		return func(func(T) bool) {}, func() error { return err }
@@ -255,24 +256,56 @@ type watchStream[T any] struct {
 	err error
 }
 
-// run is the loop, returning the error that ended it: nil when the caller
-// stopped ranging.
+// armed is the registration a stream currently holds: one at a time, and never
+// none while the stream is running.
 //
-// The order is load-bearing. The registration is armed before the load, so a
-// change that lands while the load is running is reported by the wait that
-// follows it rather than lost (ADR-0020, #272).
-func (s *watchStream[T]) run(yield func(T) bool) error {
-	cur, err := s.n.Notify(s.ctx)
+// The order inside rearm is load-bearing. The next registration is placed
+// before the current one is released, so a change landing while a reload runs
+// is reported by the wait that follows it rather than lost, which is what an
+// armed-once mechanism cannot do for itself (ADR-0020, #272).
+type armed struct{ c Change }
+
+func (a *armed) rearm(ctx context.Context, n Notifier) error {
+	next, err := n.Notify(ctx)
 	if err != nil {
 		return lostWatch(err)
 	}
 
-	defer func() {
-		if cur != nil {
-			_ = cur.Close()
-		}
-	}()
+	a.close()
+	a.c = next
 
+	return nil
+}
+
+// close releases what is held, once. It is idempotent, so the deferred release
+// at the top of a stream is correct on every exit, including the one where the
+// registration was never placed at all.
+func (a *armed) close() {
+	if a.c == nil {
+		return
+	}
+
+	_ = a.c.Close()
+	a.c = nil
+}
+
+// run is the whole range: place the first registration, then loop.
+func (s *watchStream[T]) run(yield func(T) bool) error {
+	a := &armed{}
+	defer a.close()
+
+	if err := a.rearm(s.ctx, s.n); err != nil {
+		return err
+	}
+
+	return s.loop(a, yield)
+}
+
+// loop is one turn per value: load, hand it over, wait for the next change.
+//
+// The registration is already armed when the load runs, which is what makes a
+// change landing inside the load the next change rather than a lost one.
+func (s *watchStream[T]) loop(a *armed, yield func(T) bool) error {
 	for {
 		v, err := s.b.Load(s.ctx)
 		if err != nil {
@@ -283,37 +316,29 @@ func (s *watchStream[T]) run(yield func(T) bool) error {
 			return nil
 		}
 
-		next, err := s.await(cur)
-
-		cur = next
-
-		if err != nil {
+		if err := s.await(a); err != nil {
 			return err
 		}
 	}
 }
 
-// await waits for one change on cur and answers with the registration that is
-// live for the reload about to run.
-func (s *watchStream[T]) await(cur Change) (Change, error) {
-	ok, err := cur.Wait(s.ctx)
+// await waits for one change, leaving a armed for the reload that follows it.
+func (s *watchStream[T]) await(a *armed) error {
+	ok, err := a.c.Wait(s.ctx)
 	if err != nil {
-		_ = cur.Close()
-
-		return nil, lostWatch(err)
+		return lostWatch(err)
 	}
 
 	if !ok {
-		_ = cur.Close()
-
-		return nil, s.ended()
+		return s.ended()
 	}
 
-	return s.settle(cur)
+	return s.settle(a)
 }
 
-// ended names the quiet ending. A plane that ends its own watch for a reason it
-// will not name is still an ending the caller must be able to see.
+// ended names the quiet ending. A wait that answers false with no error is the
+// context being done, and a plane that ends its own watch for a reason it will
+// not name is still an ending the caller must be able to see.
 func (s *watchStream[T]) ended() error {
 	if err := s.ctx.Err(); err != nil {
 		return err
@@ -323,50 +348,44 @@ func (s *watchStream[T]) ended() error {
 }
 
 // settle re-arms and, under a debounce, swallows the rest of the burst.
-func (s *watchStream[T]) settle(cur Change) (Change, error) {
+//
+// Something is armed at every moment, including while the burst is being
+// swallowed, so coalescing costs latency and never a change.
+func (s *watchStream[T]) settle(a *armed) error {
 	deadline := time.Now().Add(s.cfg.debounce)
 
 	for {
-		next, err := s.n.Notify(s.ctx)
-		_ = cur.Close()
-
-		if err != nil {
-			return nil, lostWatch(err)
+		if err := a.rearm(s.ctx, s.n); err != nil {
+			return err
 		}
 
-		cur = next
-
-		if s.cfg.debounce <= 0 || !time.Now().Before(deadline) {
-			return cur, nil
-		}
-
-		more, err := s.drain(cur, deadline)
+		more, err := s.quiet(a, deadline)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		if !more {
-			return cur, nil
+			return nil
 		}
 	}
 }
 
-// drain waits on cur until the debounce window closes, reporting whether
-// another change arrived inside it.
-func (s *watchStream[T]) drain(cur Change, deadline time.Time) (bool, error) {
+// quiet reports whether the burst is still arriving. It is where the debounce
+// window is read, so that the loop above holds one decision at a time.
+func (s *watchStream[T]) quiet(a *armed, deadline time.Time) (bool, error) {
+	if s.cfg.debounce <= 0 || !time.Now().Before(deadline) {
+		return false, nil
+	}
+
 	ctx, cancel := context.WithDeadline(s.ctx, deadline)
 	defer cancel()
 
-	ok, err := cur.Wait(ctx)
+	ok, err := a.c.Wait(ctx)
 	if err != nil {
-		_ = cur.Close()
-
 		return false, lostWatch(err)
 	}
 
 	if !ok && s.ctx.Err() != nil {
-		_ = cur.Close()
-
 		return false, s.ctx.Err()
 	}
 

@@ -146,7 +146,7 @@ func newBound(t reflect.Type, src Source, opts []Option) (*bound, error) {
 		return nil, driverNil(momentBind, nilOpenMsg)
 	}
 
-	if err := cfg.afterBind(src); err != nil {
+	if err := afterBind(opts, src); err != nil {
 		return nil, err
 	}
 

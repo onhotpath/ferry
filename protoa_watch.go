@@ -98,29 +98,46 @@ var ErrWatchInUse = errors.New("this watch is already being ranged")
 //
 // A binding built without it can still be watched, and pays for the omission by
 // finding out at the [Binding.Watch] call instead.
-func WithWatch() Option {
-	return optionFunc(func(c *config) error {
-		if c.watchAskedSet {
-			return fmt.Errorf("%w: ferry.WithWatch was supplied twice", ErrSchema)
-		}
+func WithWatch() Option { return watchDeclared{} }
 
-		c.watchAsked, c.watchAskedSet = true, true
+// watchDeclared is [WithWatch]'s value, and it is a type of its own so that the
+// bind can recognise it in the Option list. It changes nothing a schema
+// compiles to and nothing a load runs under, so it settles nothing into the
+// resolved config.
+type watchDeclared struct{}
 
-		return nil
-	})
-}
+func (watchDeclared) apply(*config) error { return nil }
 
 // afterBind is the protoa half of the build-tagged pair: where [WithWatch] was
 // given, the capability refusal lands here, on the Bind seam, and never at the
 // call that opens the stream.
-func (c *config) afterBind(src Source) error {
-	if !c.watchAsked {
+func afterBind(opts []Option, src Source) error {
+	asked := declared(opts)
+
+	if asked > 1 {
+		return fmt.Errorf("%w: ferry.WithWatch was supplied twice", ErrSchema)
+	}
+
+	if asked == 0 {
 		return nil
 	}
 
 	_, err := notifierOf(src)
 
 	return err
+}
+
+// declared counts the WithWatch options in one list.
+func declared(opts []Option) int {
+	var n int
+
+	for _, o := range opts {
+		if _, ok := o.(watchDeclared); ok {
+			n++
+		}
+	}
+
+	return n
 }
 
 // notifierOf is the whole capability check, and it is one function so that the
@@ -302,27 +319,56 @@ func (w *Watched[T]) record(err error) {
 	w.err, w.errSet = err, true
 }
 
-// stream is the loop, returning the error that ended it: nil when the caller
-// stopped ranging.
+// armed is the registration a stream currently holds: one at a time, and never
+// none while the stream is running.
 //
-// The order is load-bearing. The registration is armed before the load, so a
-// change that lands while the load is running is reported by the wait that
-// follows it rather than lost, which is winreg's armed-once mechanism made
-// safe in core instead of in each driver (ADR-0020, #272).
-func (w *Watched[T]) stream(yield func(T) bool) error {
-	cur, err := w.n.Notify(w.ctx)
+// The order inside rearm is load-bearing. The next registration is placed
+// before the current one is released, so a change landing while a reload runs
+// is reported by the wait that follows it rather than lost, which is what an
+// armed-once mechanism cannot do for itself (ADR-0020, #272).
+type armed struct{ c Change }
+
+func (a *armed) rearm(ctx context.Context, n Notifier) error {
+	next, err := n.Notify(ctx)
 	if err != nil {
 		return watchLost(err)
 	}
 
-	// await hands back nil where it closed what it was given, so the release
-	// runs once on every exit and never twice.
-	defer func() {
-		if cur != nil {
-			_ = cur.Close()
-		}
-	}()
+	a.close()
+	a.c = next
 
+	return nil
+}
+
+// close releases what is held, once. It is idempotent, so the deferred release
+// at the top of a stream is correct on every exit, including the one where the
+// registration was never placed at all.
+func (a *armed) close() {
+	if a.c == nil {
+		return
+	}
+
+	_ = a.c.Close()
+	a.c = nil
+}
+
+// stream is the whole range: place the first registration, then loop.
+func (w *Watched[T]) stream(yield func(T) bool) error {
+	a := &armed{}
+	defer a.close()
+
+	if err := a.rearm(w.ctx, w.n); err != nil {
+		return err
+	}
+
+	return w.loop(a, yield)
+}
+
+// loop is one turn per value: load, hand it over, wait for the next change.
+//
+// The registration is already armed when the load runs, which is what makes a
+// change landing inside the load the next change rather than a lost one.
+func (w *Watched[T]) loop(a *armed, yield func(T) bool) error {
 	for {
 		v, err := w.b.Load(w.ctx)
 		if err != nil {
@@ -333,33 +379,24 @@ func (w *Watched[T]) stream(yield func(T) bool) error {
 			return nil
 		}
 
-		next, err := w.await(cur)
-
-		cur = next
-
-		if err != nil {
+		if err := w.await(a); err != nil {
 			return err
 		}
 	}
 }
 
-// await waits for one change on cur and answers with the registration that is
-// live for the reload about to run.
-func (w *Watched[T]) await(cur Change) (Change, error) {
-	ok, err := cur.Wait(w.ctx)
+// await waits for one change, leaving a armed for the reload that follows it.
+func (w *Watched[T]) await(a *armed) error {
+	ok, err := a.c.Wait(w.ctx)
 	if err != nil {
-		_ = cur.Close()
-
-		return nil, watchLost(err)
+		return watchLost(err)
 	}
 
 	if !ok {
-		_ = cur.Close()
-
-		return nil, w.ended()
+		return w.ended()
 	}
 
-	return w.settle(cur)
+	return w.settle(a)
 }
 
 // ended names the quiet ending. A wait that answers false with no error is the
@@ -377,50 +414,41 @@ func (w *Watched[T]) ended() error {
 //
 // Something is armed at every moment, including while the burst is being
 // swallowed, so coalescing costs latency and never a change.
-func (w *Watched[T]) settle(cur Change) (Change, error) {
+func (w *Watched[T]) settle(a *armed) error {
 	deadline := time.Now().Add(w.cfg.debounce)
 
 	for {
-		next, err := w.n.Notify(w.ctx)
-		_ = cur.Close()
-
-		if err != nil {
-			return nil, watchLost(err)
+		if err := a.rearm(w.ctx, w.n); err != nil {
+			return err
 		}
 
-		cur = next
-
-		if w.cfg.debounce <= 0 || !time.Now().Before(deadline) {
-			return cur, nil
-		}
-
-		more, err := w.drain(cur, deadline)
+		more, err := w.quiet(a, deadline)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		if !more {
-			return cur, nil
+			return nil
 		}
 	}
 }
 
-// drain waits on cur until the debounce window closes, reporting whether
-// another change arrived inside it.
-func (w *Watched[T]) drain(cur Change, deadline time.Time) (bool, error) {
+// quiet reports whether the burst is still arriving. It is where the debounce
+// window is read, so that the loop above holds one decision at a time.
+func (w *Watched[T]) quiet(a *armed, deadline time.Time) (bool, error) {
+	if w.cfg.debounce <= 0 || !time.Now().Before(deadline) {
+		return false, nil
+	}
+
 	ctx, cancel := context.WithDeadline(w.ctx, deadline)
 	defer cancel()
 
-	ok, err := cur.Wait(ctx)
+	ok, err := a.c.Wait(ctx)
 	if err != nil {
-		_ = cur.Close()
-
 		return false, watchLost(err)
 	}
 
 	if !ok && w.ctx.Err() != nil {
-		_ = cur.Close()
-
 		return false, w.ctx.Err()
 	}
 

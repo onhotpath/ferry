@@ -74,21 +74,11 @@ func TestVariantBOverFsnotify(t *testing.T) {
 	}
 
 	cancel()
+	endsOn(t, done, errf)
 
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("cancelling the context did not end the stream")
-	}
-
-	if err := errf(); !errors.Is(err, context.Canceled) {
-		t.Fatalf("the stream ended with %v, want the cancellation", err)
-	}
-
-	settle()
-
-	if after := runtime.NumGoroutine(); after > before {
-		t.Fatalf("goroutines went from %d to %d, so the watch leaked one", before, after)
+	if leaked(before) {
+		t.Fatalf("goroutines went from %d to %d and stayed there, so the watch leaked one",
+			before, runtime.NumGoroutine())
 	}
 }
 
@@ -131,6 +121,21 @@ func TestVariantBPlainSourceStillLoads(t *testing.T) {
 	// a ferry.WatchableSource, and there is no conversion.
 }
 
+// endsOn waits for the range to exit and asserts it ended on the cancellation.
+func endsOn(t *testing.T, done chan struct{}, errf func() error) {
+	t.Helper()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelling the context did not end the stream")
+	}
+
+	if err := errf(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("the stream ended with %v, want the cancellation", err)
+	}
+}
+
 func recv(t *testing.T, values chan protobConfig, done chan struct{}) protobConfig {
 	t.Helper()
 
@@ -148,10 +153,17 @@ func recv(t *testing.T, values chan protobConfig, done chan struct{}) protobConf
 
 func noEnviron() []string { return nil }
 
-func settle() {
-	for range 50 {
-		runtime.Gosched()
-		runtime.GC()
-		time.Sleep(10 * time.Millisecond)
+// leaked waits for the goroutine count to come back to where it was, because a
+// goroutine returning is not instantaneous and a fixed sleep is either flaky or
+// slow.
+func leaked(before int) bool {
+	for range 100 {
+		if runtime.NumGoroutine() <= before {
+			return false
+		}
+
+		time.Sleep(20 * time.Millisecond)
 	}
+
+	return true
 }

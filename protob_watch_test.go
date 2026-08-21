@@ -77,7 +77,7 @@ func (r *runner) ended(t *testing.T) error {
 
 // watchRun opens a stream and ranges it, which is two calls Go will not let a
 // caller write as one because Watch has two results.
-func watchRun(t *testing.T, ctx context.Context, wb *ferry.WatchedBinding[watchConfigB],
+func watchRun(ctx context.Context, t *testing.T, wb *ferry.WatchedBinding[watchConfigB],
 	opts ...ferry.WatchOption,
 ) *runner {
 	t.Helper()
@@ -122,7 +122,7 @@ func TestVariantBChangeBeforeBindIsNotLost(t *testing.T) {
 
 	p.Set(ferry.At("host"), ferry.String("db2"))
 
-	if got := watchRun(t, ctx, wb).next(t).Host; got != "db2" {
+	if got := watchRun(ctx, t, wb).next(t).Host; got != "db2" {
 		t.Fatalf("first value is %q, want the change that landed before the stream opened", got)
 	}
 }
@@ -137,7 +137,7 @@ func TestVariantBBurstCoalescesAndHeldValueIsImmutable(t *testing.T) {
 
 	p := planeB(t)
 	wb := boundB(t, ferry.Watchable(p, p))
-	r := watchRun(t, ctx, wb, ferry.Debounce(100*time.Millisecond))
+	r := watchRun(ctx, t, wb, ferry.Debounce(100*time.Millisecond))
 
 	first := r.next(t)
 	if first.Host != "db1" {
@@ -181,7 +181,7 @@ func TestVariantBStreamOpensWithALoadAndTheBindingStillLoads(t *testing.T) {
 		t.Fatalf("the load produced %q, want db1", v.Host)
 	}
 
-	if got := watchRun(t, ctx, wb).next(t).Host; got != "db1" {
+	if got := watchRun(ctx, t, wb).next(t).Host; got != "db1" {
 		t.Fatalf("the stream opened with %q, want the plane's current contents", got)
 	}
 }
@@ -196,7 +196,7 @@ func TestVariantBFailedReloadIsObservedAndRestartable(t *testing.T) {
 
 	p := planeB(t)
 	wb := boundB(t, ferry.Watchable(p, p))
-	r := watchRun(t, ctx, wb)
+	r := watchRun(ctx, t, wb)
 	r.next(t)
 
 	p.Delete(ferry.At("host"))
@@ -207,7 +207,7 @@ func TestVariantBFailedReloadIsObservedAndRestartable(t *testing.T) {
 
 	p.Set(ferry.At("host"), ferry.String("db3"))
 
-	if got := watchRun(t, ctx, wb).next(t).Host; got != "db3" {
+	if got := watchRun(ctx, t, wb).next(t).Host; got != "db3" {
 		t.Fatalf("the restarted stream opened with %q, want db3", got)
 	}
 }
@@ -220,7 +220,7 @@ func TestVariantBQuietDeathIsObserved(t *testing.T) {
 	defer cancel()
 
 	p := planeB(t)
-	r := watchRun(t, ctx, boundB(t, ferry.Watchable(p, p)))
+	r := watchRun(ctx, t, boundB(t, ferry.Watchable(p, p)))
 	r.next(t)
 
 	boom := errors.New("the directory holding this file was removed")
@@ -237,10 +237,10 @@ func TestVariantBQuietDeathIsObserved(t *testing.T) {
 func TestVariantBOneLifetimeLeaksNothing(t *testing.T) {
 	p := planeB(t)
 
-	before := goroutines()
+	before := runtime.NumGoroutine()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	r := watchRun(t, ctx, boundB(t, ferry.Watchable(p, p)))
+	r := watchRun(ctx, t, boundB(t, ferry.Watchable(p, p)))
 	r.next(t)
 
 	cancel()
@@ -249,19 +249,25 @@ func TestVariantBOneLifetimeLeaksNothing(t *testing.T) {
 		t.Fatalf("the stream ended with %v, want the cancellation", err)
 	}
 
-	if after := goroutines(); after > before {
-		t.Fatalf("goroutines went from %d to %d, so the watch leaked one", before, after)
+	if !settled(before) {
+		t.Fatalf("goroutines went from %d to %d and stayed there, so the watch leaked one",
+			before, runtime.NumGoroutine())
 	}
 }
 
-func goroutines() int {
-	for range 50 {
-		runtime.Gosched()
-		runtime.GC()
-		time.Sleep(10 * time.Millisecond)
+// settled waits for the goroutine count to come back to where it was, because a
+// goroutine returning is not instantaneous and a fixed sleep is either flaky or
+// slow. It is driver/env's own watch test's helper, in its own words.
+func settled(before int) bool {
+	for range 100 {
+		if runtime.NumGoroutine() <= before {
+			return true
+		}
+
+		time.Sleep(20 * time.Millisecond)
 	}
 
-	return runtime.NumGoroutine()
+	return false
 }
 
 // Scenario 7: two consumers are well defined rather than policed. Each Watch
@@ -275,8 +281,8 @@ func TestVariantBTwoConsumersEachSeeEveryChange(t *testing.T) {
 	p := planeB(t)
 	wb := boundB(t, ferry.Watchable(p, p))
 
-	one := watchRun(t, ctx, wb)
-	two := watchRun(t, ctx, wb)
+	one := watchRun(ctx, t, wb)
+	two := watchRun(ctx, t, wb)
 
 	one.next(t)
 	two.next(t)
@@ -353,7 +359,7 @@ func TestVariantBTwoWatchableSourcesUnderOneBinding(t *testing.T) {
 
 	l := &layeredPlane{over: over, under: under}
 	wb := boundB(t, ferry.Watchable(l, l))
-	r := watchRun(t, ctx, wb, ferry.Debounce(100*time.Millisecond))
+	r := watchRun(ctx, t, wb, ferry.Debounce(100*time.Millisecond))
 
 	if got := r.next(t).Host; got != "from-under" {
 		t.Fatalf("first value is %q, want the lower layer's", got)

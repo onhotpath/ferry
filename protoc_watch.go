@@ -272,7 +272,7 @@ func (wb *WatchedBinding[T]) Load(ctx context.Context) (T, error) { return wb.b.
 //
 // One handle is one stream. A second range is refused rather than sharing the
 // changes out with the first.
-func (wb *WatchedBinding[T]) Watch(opts ...WatchOption) (iter.Seq[T], func() error) {
+func (wb *WatchedBinding[T]) Watch(opts ...WatchOption) (seq iter.Seq[T], errf func() error) {
 	cfg, err := resolveWatch(opts)
 	if err != nil {
 		return func(func(T) bool) {}, func() error { return err }

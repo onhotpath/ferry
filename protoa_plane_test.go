@@ -166,7 +166,7 @@ func (c *armedChange) look() (<-chan struct{}, bool, error) {
 	return c.p.bell, false, nil
 }
 
-func (c *armedChange) Close() error { return nil }
+func (*armedChange) Close() error { return nil }
 
 // armedSnapshot serves one load from an immutable copy of the contents.
 type armedSnapshot map[ferry.Path]ferry.Value

@@ -76,7 +76,7 @@ func (r *runner) ended(t *testing.T) error {
 	return nil
 }
 
-func watchedA(t *testing.T, ctx context.Context, src ferry.Source,
+func watchedA(ctx context.Context, t *testing.T, src ferry.Source,
 	opts ...ferry.WatchOption,
 ) *ferry.Watched[watchConfigA] {
 	t.Helper()
@@ -143,7 +143,7 @@ func TestVariantABurstCoalescesAndHeldValueIsImmutable(t *testing.T) {
 	defer cancel()
 
 	p := planeA(t)
-	r := run(t, watchedA(t, ctx, p, ferry.Debounce(100*time.Millisecond)))
+	r := run(t, watchedA(ctx, t, p, ferry.Debounce(100*time.Millisecond)))
 
 	first := r.next(t)
 	if first.Host != "db1" {
@@ -177,7 +177,7 @@ func TestVariantAStreamOpensWithALoad(t *testing.T) {
 	defer cancel()
 
 	p := planeA(t)
-	r := run(t, watchedA(t, ctx, p))
+	r := run(t, watchedA(ctx, t, p))
 
 	if got := r.next(t).Host; got != "db1" {
 		t.Fatalf("first value is %q, want the plane's current contents with no change announced", got)
@@ -240,7 +240,7 @@ func TestVariantAQuietDeathIsObserved(t *testing.T) {
 	defer cancel()
 
 	p := planeA(t)
-	r := run(t, watchedA(t, ctx, p))
+	r := run(t, watchedA(ctx, t, p))
 	r.next(t)
 
 	boom := errors.New("the directory holding this file was removed")
@@ -271,7 +271,7 @@ func TestVariantAUnplaceableRegistrationIsObserved(t *testing.T) {
 	p := planeA(t)
 	p.armFail = errors.New("no watch could be opened")
 
-	r := run(t, watchedA(t, ctx, p))
+	r := run(t, watchedA(ctx, t, p))
 
 	if err := r.ended(t); !errors.Is(err, ferry.ErrWatchLost) {
 		t.Fatalf("the stream ended with %v, want a lost watch", err)
@@ -283,10 +283,10 @@ func TestVariantAUnplaceableRegistrationIsObserved(t *testing.T) {
 func TestVariantAOneLifetimeLeaksNothing(t *testing.T) {
 	p := planeA(t)
 
-	before := goroutines()
+	before := runtime.NumGoroutine()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	r := run(t, watchedA(t, ctx, p))
+	r := run(t, watchedA(ctx, t, p))
 	r.next(t)
 
 	cancel()
@@ -295,21 +295,27 @@ func TestVariantAOneLifetimeLeaksNothing(t *testing.T) {
 		t.Fatalf("the stream ended with %v, want the cancellation", err)
 	}
 
-	if after := goroutines(); after > before {
-		t.Fatalf("goroutines went from %d to %d, so the watch leaked one", before, after)
+	if !settled(before) {
+		t.Fatalf("goroutines went from %d to %d and stayed there, so the watch leaked one",
+			before, runtime.NumGoroutine())
 	}
 }
 
 // goroutines settles the scheduler and counts what is left, which is the shape
 // driver/env's own watch test uses.
-func goroutines() int {
-	for range 50 {
-		runtime.Gosched()
-		runtime.GC()
-		time.Sleep(10 * time.Millisecond)
+// settled waits for the goroutine count to come back to where it was, because a
+// goroutine returning is not instantaneous and a fixed sleep is either flaky or
+// slow. It is driver/env's own watch test's helper, in its own words.
+func settled(before int) bool {
+	for range 100 {
+		if runtime.NumGoroutine() <= before {
+			return true
+		}
+
+		time.Sleep(20 * time.Millisecond)
 	}
 
-	return runtime.NumGoroutine()
+	return false
 }
 
 // Scenario 7: a second range is policed rather than sharing the changes out.
@@ -319,7 +325,7 @@ func TestVariantASecondRangeIsRefused(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	w := watchedA(t, ctx, planeA(t))
+	w := watchedA(ctx, t, planeA(t))
 
 	var seen int
 
@@ -376,7 +382,7 @@ func TestVariantATwoWatchableSourcesUnderOneBinding(t *testing.T) {
 	under.Set(ferry.At("host"), ferry.String("from-under"))
 
 	l := &layeredPlane{over: over, under: under}
-	r := run(t, watchedA(t, ctx, l, ferry.Debounce(100*time.Millisecond)))
+	r := run(t, watchedA(ctx, t, l, ferry.Debounce(100*time.Millisecond)))
 
 	if got := r.next(t).Host; got != "from-under" {
 		t.Fatalf("first value is %q, want the lower layer's", got)

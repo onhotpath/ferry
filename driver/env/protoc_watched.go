@@ -50,24 +50,29 @@ import (
 //
 // Coalescing a burst is not done here. It is the caller's setting on the
 // stream rather than a constant buried in this package.
-func Watched(h *ferry.Watch) Option {
-	return sourceOnly(func(c *config) {
-		if h != nil {
-			c.handle = h
-		}
-	})
-}
+func Watched(h *ferry.Watch) Option { return watchedOpt{h: h} }
+
+// watchedOpt is [Watched]'s value, and it is a type of its own so that [New] can
+// recognise it once the Source it configures has been built. It settles nothing
+// into the config: what it carries is the caller's handle and nothing else.
+type watchedOpt struct{ h *ferry.Watch }
+
+func (watchedOpt) apply(*config) {}
 
 // afterNew starts the watch the [Watched] option asked for, and it is called by
 // [New] once the Source is built, so the handle is wired to the value the caller
 // will hand to [ferry.BindWatched].
-func (c *config) afterNew(s *Source) {
-	h, ok := c.handle.(*ferry.Watch)
-	if !ok {
+func afterNew(opts []Option, s *Source) {
+	for _, o := range opts {
+		w, ok := o.(watchedOpt)
+		if !ok || w.h == nil {
+			continue
+		}
+
+		startPortWatch(w.h, s, s.cfg.dotenv)
+
 		return
 	}
-
-	startPortWatch(h, s, c.dotenv)
 }
 
 // portWatcher is the whole of the [Watched] option once [New] has started it.
@@ -144,28 +149,47 @@ func addDir(fs *fsnotify.Watcher, seen map[string]bool, dir string) error {
 func (w *portWatcher) run() {
 	defer func() { _ = w.fs.Close() }()
 
-	ctx := w.port.Context()
-
 	for {
-		select {
-		case <-ctx.Done():
-			// Cancellation is the caller's own ending and the stream already
-			// knows about it, so there is nothing to report.
-			return
-		case ev, open := <-w.fs.Events:
-			if !open {
-				w.port.Ended(watchError("this watch was closed"))
-
-				return
-			}
-
-			w.saw(ev)
-		case err, open := <-w.fs.Errors:
-			w.port.Ended(w.lost(err, open))
+		if over, why := w.turn(); over {
+			w.end(why)
 
 			return
 		}
 	}
+}
+
+// turn is one look at the queue, reporting whether the watch is over and why.
+//
+// A nil reason with over set is the caller's own cancellation, which the stream
+// already knows about and which is the one ending nothing is reported for.
+func (w *portWatcher) turn() (bool, error) {
+	select {
+	case <-w.port.Context().Done():
+		return true, nil
+	case ev, open := <-w.fs.Events:
+		if !open {
+			return true, watchError("this watch was closed")
+		}
+
+		w.saw(ev)
+
+		return false, nil
+	case err, open := <-w.fs.Errors:
+		if !open {
+			return true, watchError("this watch was closed")
+		}
+
+		return true, watchError(err.Error())
+	}
+}
+
+// end reports the ending, unless there is nothing to report.
+func (w *portWatcher) end(why error) {
+	if why == nil {
+		return
+	}
+
+	w.port.Ended(why)
 }
 
 // saw announces one event that is about a file this watch names.
@@ -179,13 +203,4 @@ func (w *portWatcher) saw(ev fsnotify.Event) {
 	}
 
 	w.port.Changed()
-}
-
-// lost names what took the watch away.
-func (w *portWatcher) lost(err error, open bool) error {
-	if !open {
-		return watchError("this watch was closed")
-	}
-
-	return watchError(err.Error())
 }

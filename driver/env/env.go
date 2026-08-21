@@ -59,7 +59,7 @@ func New(opts ...Option) *Source {
 
 	s := &Source{cfg: c}
 
-	c.afterNew(s)
+	afterNew(opts, s)
 
 	return s
 }

@@ -5,6 +5,7 @@ package env_test
 import (
 	"context"
 	"errors"
+	"iter"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -77,21 +78,11 @@ func TestVariantCOverFsnotify(t *testing.T) {
 	}
 
 	cancel()
+	endsOn(t, done, errf)
 
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("cancelling the context did not end the stream")
-	}
-
-	if err := errf(); !errors.Is(err, context.Canceled) {
-		t.Fatalf("the stream ended with %v, want the cancellation", err)
-	}
-
-	settle()
-
-	if after := runtime.NumGoroutine(); after > before {
-		t.Fatalf("goroutines went from %d to %d, so the watch leaked one", before, after)
+	if leaked(before) {
+		t.Fatalf("goroutines went from %d to %d and stayed there, so the watch leaked one",
+			before, runtime.NumGoroutine())
 	}
 }
 
@@ -131,18 +122,10 @@ func TestVariantCHandleNoDriverWasGivenIsRefusedAtBind(t *testing.T) {
 // removed, the driver reports it, and the stream ends with the reason rather
 // than going quiet.
 func TestVariantCLosingTheWatchEndsTheStream(t *testing.T) {
-	dir := t.TempDir()
-	inner := filepath.Join(dir, "conf")
-
-	if err := os.Mkdir(inner, 0o750); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	path := filepath.Join(inner, ".env")
-	writeEnv(t, path, "HOST=db1\n")
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	inner, path := nestedEnv(t)
 
 	h := ferry.NewWatch(ctx)
 	src := env.New(env.DotEnv(path), env.Environ(noEnviron), env.Watched(h))
@@ -153,7 +136,35 @@ func TestVariantCLosingTheWatchEndsTheStream(t *testing.T) {
 	}
 
 	seq, errf := wb.Watch()
+	values, done := drain(ctx, seq)
 
+	recv(t, values, done)
+
+	if err := os.RemoveAll(inner); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	endsLost(t, values, done, errf)
+}
+
+// nestedEnv stages a .env in a directory of its own, so the directory can be
+// removed without taking the test's own temporary directory with it.
+func nestedEnv(t *testing.T) (dir, path string) {
+	t.Helper()
+
+	dir = filepath.Join(t.TempDir(), "conf")
+	if err := os.Mkdir(dir, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	path = filepath.Join(dir, ".env")
+	writeEnv(t, path, "HOST=db1\n")
+
+	return dir, path
+}
+
+// drain ranges a stream on a goroutine of its own.
+func drain(ctx context.Context, seq iter.Seq[protocConfig]) (chan protocConfig, chan struct{}) {
 	values := make(chan protocConfig)
 	done := make(chan struct{})
 
@@ -169,28 +180,50 @@ func TestVariantCLosingTheWatchEndsTheStream(t *testing.T) {
 		}
 	}()
 
-	recv(t, values, done)
+	return values, done
+}
 
-	if err := os.RemoveAll(inner); err != nil {
-		t.Fatalf("remove: %v", err)
-	}
+// endsLost waits for the stream to end, swallowing whatever it reloads on the
+// way: removing the directory is a change as well as a loss, so the stream may
+// yield once more before it ends. What matters is that it ends and says why.
+func endsLost(t *testing.T, values chan protocConfig, done chan struct{}, errf func() error) {
+	t.Helper()
 
-	// The removal is a change as well as a loss, so the stream may reload once
-	// before it ends. What matters is that it ends and says why.
 	deadline := time.After(5 * time.Second)
 
 	for {
 		select {
 		case <-done:
-			if err := errf(); !errors.Is(err, ferry.ErrWatchLost) && !errors.Is(err, ferry.ErrMissing) {
-				t.Fatalf("the stream ended with %v, want a lost watch or the load that found nothing", err)
-			}
+			assertLost(t, errf())
 
 			return
 		case <-values:
 		case <-deadline:
 			t.Fatal("the watch was lost and the stream did not end")
 		}
+	}
+}
+
+func assertLost(t *testing.T, err error) {
+	t.Helper()
+
+	if !errors.Is(err, ferry.ErrWatchLost) && !errors.Is(err, ferry.ErrMissing) {
+		t.Fatalf("the stream ended with %v, want a lost watch or the load that found nothing", err)
+	}
+}
+
+// endsOn waits for the range to exit and asserts it ended on the cancellation.
+func endsOn(t *testing.T, done chan struct{}, errf func() error) {
+	t.Helper()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelling the context did not end the stream")
+	}
+
+	if err := errf(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("the stream ended with %v, want the cancellation", err)
 	}
 }
 
@@ -211,10 +244,17 @@ func recv(t *testing.T, values chan protocConfig, done chan struct{}) protocConf
 
 func noEnviron() []string { return nil }
 
-func settle() {
-	for range 50 {
-		runtime.Gosched()
-		runtime.GC()
-		time.Sleep(10 * time.Millisecond)
+// leaked waits for the goroutine count to come back to where it was, because a
+// goroutine returning is not instantaneous and a fixed sleep is either flaky or
+// slow.
+func leaked(before int) bool {
+	for range 100 {
+		if runtime.NumGoroutine() <= before {
+			return false
+		}
+
+		time.Sleep(20 * time.Millisecond)
 	}
+
+	return true
 }

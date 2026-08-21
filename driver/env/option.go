@@ -88,10 +88,6 @@ type config struct {
 	// inside [New], on the caller's own goroutine, so that a watcher that cannot
 	// be built has somewhere to report it (ADR-0020).
 	watch *watcher
-	// handle is the watch handle a caller passed to a driver option, or nil. It
-	// is typed as any because the type it holds is one the typed watch
-	// prototype adds, and the default build has no option that sets it.
-	handle any
 	// bools is the spelling [BoolWords] built, and it is nil until it is asked
 	// for: this plane holds text and nothing else, so a variable is a String
 	// unless a word of this plane's own says it is a bool (ADR-0018).

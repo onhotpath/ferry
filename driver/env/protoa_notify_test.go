@@ -32,7 +32,7 @@ func writeEnv(t *testing.T, path, body string) {
 }
 
 // watchedEnv is the whole wiring: build the source, bind it, watch it.
-func watchedEnv(t *testing.T, ctx context.Context, path string) *ferry.Watched[protoaConfig] {
+func watchedEnv(ctx context.Context, t *testing.T, path string) *ferry.Watched[protoaConfig] {
 	t.Helper()
 
 	b, err := ferry.Bind[protoaConfig](env.New(env.DotEnv(path), env.Environ(noEnviron)))
@@ -60,7 +60,7 @@ func TestVariantAOverFsnotify(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	w := watchedEnv(t, ctx, path)
+	w := watchedEnv(ctx, t, path)
 
 	values := make(chan protoaConfig)
 	done := make(chan struct{})
@@ -90,28 +90,18 @@ func TestVariantAOverFsnotify(t *testing.T) {
 	}
 
 	cancel()
+	endsOn(t, done, w.Err)
 
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("cancelling the context did not end the stream")
-	}
-
-	if err := w.Err(); !errors.Is(err, context.Canceled) {
-		t.Fatalf("the stream ended with %v, want the cancellation", err)
-	}
-
-	settle()
-
-	if after := runtime.NumGoroutine(); after > before {
-		t.Fatalf("goroutines went from %d to %d, so the watch leaked one", before, after)
+	if leaked(before) {
+		t.Fatalf("goroutines went from %d to %d and stayed there, so the watch leaked one",
+			before, runtime.NumGoroutine())
 	}
 }
 
-// TestVariantAUnwatchableEnvSourceIsObserved is the ladder cost stated as a
-// test: a source naming no file cannot be watched, and under this variant the
-// refusal lands on the stream rather than at Bind.
-func TestVariantAUnwatchableEnvSourceIsObserved(t *testing.T) {
+// TestVariantAUnwatchableEnvSourceIsRefusedAtWatch is the ladder cost stated as
+// a test: a binding built without WithWatch finds out at the Watch call, which
+// is after Bind and is the position this variant exists to be judged on.
+func TestVariantAUnwatchableEnvSourceIsRefusedAtWatch(t *testing.T) {
 	t.Parallel()
 
 	b, err := ferry.Bind[protoaConfig](env.New(env.Environ(func() []string { return []string{"HOST=db1"} })))
@@ -119,17 +109,28 @@ func TestVariantAUnwatchableEnvSourceIsObserved(t *testing.T) {
 		t.Fatalf("bind: %v", err)
 	}
 
-	w, err := b.Watch(t.Context())
-	if err != nil {
-		t.Fatalf("watch refused at the call, which this variant cannot do for an option-dependent watch: %v", err)
+	_, err = b.Watch(t.Context())
+	if !errors.Is(err, ferry.ErrNotWatchable) {
+		t.Fatalf("watching a source that watches no files reported %v, want a refusal", err)
 	}
 
-	for range w.Values() {
-		t.Fatal("a source that watches nothing yielded a value")
+	if !errors.Is(err, env.ErrWatch) {
+		t.Fatalf("the refusal is %v, which does not carry the driver's own reason", err)
+	}
+}
+
+// endsOn waits for the range to exit and asserts it ended on the cancellation.
+func endsOn(t *testing.T, done chan struct{}, errf func() error) {
+	t.Helper()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelling the context did not end the stream")
 	}
 
-	if err := w.Err(); !errors.Is(err, env.ErrWatch) {
-		t.Fatalf("the stream ended with %v, want a watch that could not be opened", err)
+	if err := errf(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("the stream ended with %v, want the cancellation", err)
 	}
 }
 
@@ -150,12 +151,19 @@ func recv(t *testing.T, values chan protoaConfig, done chan struct{}) protoaConf
 
 func noEnviron() []string { return nil }
 
-func settle() {
-	for range 50 {
-		runtime.Gosched()
-		runtime.GC()
-		time.Sleep(10 * time.Millisecond)
+// leaked waits for the goroutine count to come back to where it was, because a
+// goroutine returning is not instantaneous and a fixed sleep is either flaky or
+// slow.
+func leaked(before int) bool {
+	for range 100 {
+		if runtime.NumGoroutine() <= before {
+			return false
+		}
+
+		time.Sleep(20 * time.Millisecond)
 	}
+
+	return true
 }
 
 // The salvaged shape over the real driver: a source naming no file is refused at
