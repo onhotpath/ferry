@@ -674,6 +674,10 @@ That is the rule of three applied one door down, and it is the same trigger [ADR
   > Layering a third qualifier onto a sentence that was wrong twice is worse than replacing it, so it is replaced.
   > **The deliverable is the seam in the root package, `docs/guide/watch-reload.md` written against it, and one runnable example per watchable driver.**
   > `examples/watcher` and `ferry/watch` are both gone, and the guide is rewritten rather than edited, because it is written against `watch.Signal` and `watch.Values` throughout.
+  >
+  > *(Corrected when the deliverable shipped: `ferry/watch` is gone and `examples/watcher` is not.
+  > What was deleted there is the hand-rolled watch machinery - the callback registry a driver's Option used to fill - and what is left is the one thing no driver example can show, which is the caller writing the announcement seam for a plane that announces nothing.
+  > That is where the `SIGHUP` kick the amendment above sends to the guide is compiled, so the guide quotes it rather than carrying a listing that rots.)*
 - **A reload is `Load` and no alias ships**, so there is one spelling of one operation.
   `LoadOver`'s two traps - a lost address keeping its stale value, and a composite replaced wholesale - are published in its godoc and in the guide, because the shape a reader reaches for first is the wrong one.
 - **ferry now has a convention for a fallible iterator**, `(iter.Seq[T], func() error)`, decided on deliberate-versus-accidental discard rather than on compiler enforcement, which the first draft claimed and which does not hold.

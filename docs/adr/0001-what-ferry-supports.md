@@ -96,6 +96,13 @@ Watch is Milestoned: the machinery does not exist yet, and building it is core's
 > What moves is that a helper over `Binding[T]` and the drivers' change callback ships as a directory of the core module, because the ordering hole between a driver's constructor starting the watch and `Bind` returning the binding is closable only over core's own type.
 > The row is unchanged: the bucket is still Enabled, the root package still grows nothing, and [ADR-0020](0020-watch-and-reload.md) carries the argument.
 
+> **Amended under [#13](https://github.com/onhotpath/ferry/issues/13): package `ferry/watch` is deleted and the seam is in the root package.**
+>
+> The amendment above shipped a helper beside the callback options, and both halves of that are gone.
+> Watchability is a type now: a driver converts its source with `Watched()`, `ferry.BindWatched` takes only a source that can be watched, and the stream is a method on what it returns.
+> So "the root package still grows nothing" is withdrawn, and the ordering hole the helper existed to close is closed by the stream opening with a load instead.
+> The row is still unchanged and the bucket is still Enabled; [ADR-0020](0020-watch-and-reload.md) carries the argument and the six principles it is judged against.
+
 > **Amended under [#306](https://github.com/onhotpath/ferry/issues/306): the transfer row's example exists, and it is the struct-mediated shape.**
 >
 > As published the row reads "Falls out of the pluggable design. Ships as an example", and no such example shipped.

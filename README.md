@@ -146,7 +146,7 @@ The guides under [`docs/guide/`](docs/guide/) are the long-form documentation:
 - [The dump lifecycle](docs/guide/dump-lifecycle.md) - the seven stages of a `Dump` call, and the ladder of what refuses where.
 - [Writing a driver](docs/guide/drivers.md) - the two required methods, the eight optional interfaces, and the one-call conformance suite.
 - [Concurrency](docs/guide/concurrency.md) - the two axes, the one budget both layers honour, and what stays serial.
-- [Watch and reload](docs/guide/watch-reload.md) - why a reload is a `Load`, the `watch` helper that streams fresh values off a driver's change callback, and the sharp edges a watch loop inherits.
+- [Watch and reload](docs/guide/watch-reload.md) - why a reload is a `Load`, `BindWatched` over a source converted with `Watched()`, the errors matchable at the bind and at the end of a stream, and the reload you fire yourself.
 
 The design records behind every one of these decisions are in [`docs/adr/`](docs/adr/).
 The ADRs are the specification: where a guide and an ADR disagree, the ADR wins and the guide is wrong.
