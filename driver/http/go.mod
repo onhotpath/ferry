@@ -18,4 +18,4 @@ go 1.26
 // CI fails a build that finds one, because a checked-in replace means CI never
 // once builds against the version a consumer resolves.
 
-require github.com/onhotpath/ferry v0.1.0
+require github.com/onhotpath/ferry v0.2.0
