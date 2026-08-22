@@ -163,7 +163,7 @@ Absence is a result and not an error: `Get` and `List` report an object that is 
 Removal is idempotent, and `DeleteKey` removes everything under the key as well as the key itself.
 `Set` creates every subkey on the way down to the value it writes.
 
-A `Registry` that can also say when it changed implements one more method, and that is what `winreg.Watch` needs:
+A `Registry` that can also say when it changed implements one more method, and that is what `Watched()` needs:
 
 ```go
 type Notifier interface {
@@ -177,7 +177,7 @@ type Change interface {
 ```
 
 Registering and waiting are two calls so that a registration can outlive a wait.
-The watcher arms the next one before it runs your callback, which is what stops a change landing during a reload from being lost.
+The next one is armed before the reload that consumes the last one runs, which is what stops a change landing during a reload from being lost.
 
 The machine's own registry is behind `//go:build windows` and implements both.
 `winreg.Store` is where anything else is handed over, and it is why this module builds, and its tests run, on every platform.
@@ -192,13 +192,62 @@ Name the view rather than inheriting it, and give the same one to both halves.
 A nil argument is the machine's own registry, which is the default.
 This is what makes a test hermetic, and it is how a registry this package does not know about arrives.
 
-**`winreg.Watch(ctx, onChange)`** calls `onChange` whenever anything under this driver's key changes, so that a process holding a loaded value can load a fresh one.
-It is refused at `Bind` when the registry behind the source reports no changes, and when the first registration cannot be placed.
-A key that does not exist yet is not a refusal: the registration goes on the nearest key above it, so the save that creates the key fires the watch and the watch moves down to it.
-Read its documentation before using it: the callback runs on the watching goroutine one call at a time, a panic in it takes the process down, and cancelling `ctx` is the only way to stop the watch.
-
 There is no separator option.
 The hierarchy is the registry's own syntax, not a taste.
+
+## Watching
+
+`Watched()` converts a source into one that can be watched, and `ferry.BindWatched` takes only that type, so handing it an ordinary source does not compile.
+It takes no arguments: the source already knows which key it reads, and `RegNotifyChangeKeyValue` has no interval to choose.
+
+This is `ExampleSource_Watched` in [`example_test.go`](example_test.go), which `go test` compiles and runs.
+
+```go
+type Config struct {
+	Name string `ferry:"name"`
+}
+
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+
+store := newMemory()
+_ = store.Set(ctx, "", "name", winreg.Datum{Type: winreg.TypeString, Text: "checkout"})
+
+src := winreg.NewSource(winreg.CurrentUser, `Software\Example`, winreg.Store(store))
+
+wb, err := ferry.BindWatched[Config](src.Watched())
+if err != nil {
+	panic(err)
+}
+
+seq, errf := wb.Watch(ctx)
+for cfg := range seq {
+	fmt.Println(cfg.Name)
+
+	if cfg.Name == "payments" {
+		break
+	}
+
+	_ = store.Set(ctx, "", "name", winreg.Datum{Type: winreg.TypeString, Text: "payments"})
+}
+
+fmt.Println(errf())
+```
+
+The change is made from inside the range so that the example is deterministic; a real program's changes arrive from whatever else writes the key.
+
+The stream opens with a load, so there is no first load to write by hand, and every value after that is a fresh load taken when the key changed.
+One context governs the whole wiring: cancel it and the registration and the stream end together.
+
+The whole subtree under the driver's key is watched, so a change to any value or subkey at or under it is a change - including a dump through `winreg.NewSink` over the same key, which a process that saves its own configuration will hear.
+
+A key that does not exist yet is not a refusal.
+The registration goes on the nearest key above it, so the dump that creates the key fires the watch and the watch moves down to it.
+That is the bootstrap case, and it needs nothing from the caller.
+
+Two failures, and they land in two places.
+A registry that reports no changes of its own is refused at `ferry.BindWatched`, before any load, with `winreg.ErrWatch` reachable under `ferry.ErrPlane`.
+Anything the operating system has an opinion about - a hive that cannot be opened, a registration it will not place - ends the stream instead, under `ferry.ErrWatchLost`, with this driver's own reason underneath: `Watched()` does no I/O, and the first registration goes down when a stream opens.
 
 ## What this plane cannot do
 

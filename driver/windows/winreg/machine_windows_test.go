@@ -3,7 +3,6 @@
 package winreg_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -282,60 +281,51 @@ func TestMachineUnderANamedView(t *testing.T) {
 }
 
 // TestMachineWatchFires is RegNotifyChangeKeyValue end to end, and it covers the
-// two things only the real notification can show: that the registration is live
-// when the constructor returns, and that a change landing while the callback runs
-// is still reported.
+// two things only the real notification can show: that a registration is live
+// before the stream hands over the value it opened with, and that a change
+// landing while the reload for the last one runs is still reported.
+//
+// The second is the whole reason the registration is placed before the reload
+// (ADR-0020). A stream ranged from one goroutine is inside the reload for as long
+// as this test has not taken the value, so the second write below lands in
+// exactly the window a registration placed afterwards would have missed.
 func TestMachineWatchFires(t *testing.T) {
 	t.Parallel()
 
 	path := scratchKey(t)
 	k := openScratch(t, path)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+	s := watchOf(t, winreg.NewSource(winreg.CurrentUser, path).Watched())
 
-	var (
-		inside  = make(chan struct{})
-		release = make(chan struct{})
-		again   = make(chan struct{}, 1)
-		first   = true
-	)
-
-	_ = winreg.NewSource(winreg.CurrentUser, path, winreg.Watch(ctx, func(context.Context) {
-		if first {
-			first = false
-
-			close(inside)
-			<-release
-
-			return
-		}
-
-		select {
-		case again <- struct{}{}:
-		default:
-		}
-	}))
+	// The stream opens with a load, and the registration is already live when
+	// that value arrives.
+	machineNext(t, s)
 
 	if err := k.SetStringValue("text", "first"); err != nil {
 		t.Fatalf("writing the first change: %v", err)
 	}
 
-	select {
-	case <-inside:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the watch never called back")
-	}
-
 	if err := k.SetStringValue("text", "during"); err != nil {
-		t.Fatalf("writing the change inside the callback: %v", err)
+		t.Fatalf("writing the change inside the reload: %v", err)
 	}
 
-	close(release)
-
-	select {
-	case <-again:
-	case <-time.After(30 * time.Second):
-		t.Fatal("a change that landed while the callback was running was lost")
+	// One reload may carry both writes and two may arrive; neither is a change
+	// that was lost, and only never seeing "during" is.
+	for range 2 {
+		if got := machineNext(t, s); got.Text == "during" {
+			return
+		}
 	}
+
+	t.Fatal("a change that landed while the reload was running was lost")
+}
+
+// machineNext is the next value off a stream over the machine's own registry.
+//
+// It waits far longer than the in-memory cases do, because what it is waiting on
+// is a Windows runner scheduling a notification rather than a channel close.
+func machineNext(t *testing.T, s *stream) oneText {
+	t.Helper()
+
+	return s.nextWithin(t, 30*time.Second)
 }
