@@ -1,7 +1,10 @@
 package env
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/onhotpath/ferry"
 	"github.com/onhotpath/ferry/ferrytest"
@@ -43,6 +46,50 @@ func TestDriverOverTheComposite(t *testing.T) {
 	t.Parallel()
 
 	ferrytest.Driver(t, compositePlane(t))
+}
+
+// TestWatchConformance is ADR-0020's watch suite in one call, which is the whole
+// of what a watchable driver author writes.
+//
+// It runs over a real .env file in a directory of its own, so the mechanism
+// under it is the one a caller gets: the plane is changed by writing the file,
+// and the watch is lost by moving the directory it is on out from under it.
+//
+// The loss is spelled as a rename rather than a removal because a rename is the
+// one signal every kernel delivers identically: the directory moves whole and
+// its own event is the only one there is. Removing it delivers that event on
+// some machines and an unlink of the file first on others, and a suite that
+// depends on which is a suite that goes red on a runner rather than on a
+// defect. Both are asserted against this driver in watch_test.go.
+func TestWatchConformance(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "conformance")
+	if err := os.Mkdir(dir, 0o750); err != nil {
+		t.Fatalf("the directory the watch is on: %v", err)
+	}
+
+	path := filepath.Join(dir, ".env")
+
+	ferrytest.Watchable(t, ferrytest.WatchPlane{
+		Name:        driverName,
+		Open:        func() ferry.WatchableSource { return New(Environ(noEnviron), DotEnv(path)).Watched() },
+		Change:      func(to string) { write(t, path, "HOST="+to+"\n") },
+		Lose:        func() { renameAway(t, dir) },
+		Unwatchable: func() ferry.WatchableSource { return New(Environ(noEnviron)).Watched() },
+		Settle:      3 * time.Second,
+	})
+}
+
+// renameAway is how this plane loses its watch: the directory the inotify watch
+// is on moves out from under it, and nothing will ever be reported through it
+// again.
+func renameAway(t *testing.T, dir string) {
+	t.Helper()
+
+	if err := os.Rename(dir, dir+".gone"); err != nil {
+		t.Fatalf("moving the directory the watch is on: %v", err)
+	}
 }
 
 // goldenRows pins this driver's own spelling of a value, byte for byte.

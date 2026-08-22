@@ -21,9 +21,9 @@ var ErrOption = errors.New("env: unusable driver option")
 
 // Option is a setting handed to [New].
 //
-// Seven of them: [Separator], [RootVar] and [BoolWords], which are also
-// [SinkOption]s, and [Canonical], [Environ], [DotEnv] and [WatchFiles], which
-// belong to the read half alone.
+// Six of them: [Separator], [RootVar] and [BoolWords], which are also
+// [SinkOption]s, and [Canonical], [Environ] and [DotEnv], which belong to the
+// read half alone.
 type Option interface {
 	apply(*config)
 }
@@ -84,10 +84,6 @@ type config struct {
 	// and it is nil until [DotEnv] names any. Naming them does no I/O: a Bind
 	// records the paths and the open reads them (ADR-0012).
 	dotenv []string
-	// watch is the file watcher [WatchFiles] asked for, or nil. It is started
-	// inside [New], on the caller's own goroutine, so that a watcher that cannot
-	// be built has somewhere to report it (ADR-0020).
-	watch *watcher
 	// bools is the spelling [BoolWords] built, and it is nil until it is asked
 	// for: this plane holds text and nothing else, so a variable is a String
 	// unless a word of this plane's own says it is a bool (ADR-0018).

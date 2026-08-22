@@ -262,28 +262,28 @@ It also unsets what a save swept, which is what makes a shortened slice actually
 ## Reloading when a file changes
 
 ```go
-s := watch.New()
+src := env.New(env.Environ(func() []string { return nil }), env.DotEnv(path)).Watched()
 
-src := env.New(env.Environ(func() []string { return nil }), env.DotEnv(path),
-	env.WatchFiles(ctx, s.Changed))
+wb, err := ferry.BindWatched[Config](src)
 
-b, err := ferry.Bind[Config](src)
-
-seq, errf := watch.Values(ctx, s, b)
+seq, errf := wb.Watch(ctx)
 for cfg := range seq {
 	publish(cfg) // replace the pointer, never mutate the old value
 }
 ```
 
-That is `ExampleWatchFiles` in [`example_test.go`](example_test.go), trimmed of its setup and its plumbing.
+That is `ExampleSource_Watched` in [`example_test.go`](example_test.go), trimmed of its setup.
 
-`env.WatchFiles` calls back when any file `env.DotEnv` named changes, until the context is done.
+`env.Source.Watched` converts a source into one that can be watched, and it takes no arguments: the files are the ones `env.DotEnv` already named.
+The stream opens with a load and yields a freshly loaded value for every change afterwards, so there is no first load to write and no change that landed before the range started to lose.
+Cancelling `ctx` ends the watch and the stream together, and it is the only ending a caller asks for.
+
 The directory is what is watched rather than the file, because an editor and this package's own sink both replace a file by renaming another over it.
-A burst of events from one save is one call.
-A watch that cannot be opened - no files named, or a directory that is not there - is refused at Bind, because a watch that never fires is the failure this exists to avoid.
+A burst of events from one save is one reload, and the `.env.ferry-*` files a save stages are ignored.
+A dump through `env.DotEnvSink` over the same path is a change like any other, so a process that both watches and saves its own configuration hears its own writes.
 
-Watching starts when the source is built, so a change can land before `ferry.Bind` has handed the binding back.
-`watch.Signal` is what keeps that change: `s.Changed` records it instead of losing it, and `watch.Values` opens the stream with that reload.
+A source naming no file is refused at `ferry.BindWatched`, under `ferry.ErrPlane` with `env.ErrWatch` reachable underneath, because a watch that never fires is the failure that refusal exists to avoid.
+Whatever the operating system has an opinion about - a directory that is not there, or one removed or moved out from under a running stream - ends the stream under `ferry.ErrWatchLost` instead, so a process holding stale configuration always has something to tell it so.
 
 ## The sharp edges
 

@@ -41,20 +41,13 @@ var _ ferry.Source = (*Source)(nil)
 // keys in [Lower] case, reads the process environment and reads no file. Change
 // any of those with [Separator], [Canonical], [Environ] and [DotEnv].
 //
-// It touches nothing, and starts nothing, unless it is given [WatchFiles]. That
-// is the one setting that does something before a load: it opens a watch on the
-// directories holding the files [DotEnv] named, here, on the caller's own
-// goroutine, and watches from a goroutine of its own until the context it was
-// given is done. A watch that cannot be opened is reported at Bind, because this
-// call returns no error.
+// It touches nothing and starts nothing: the files are read when a load asks
+// for them, and never before. To reload when one of them changes, convert what
+// it returns with [Source.Watched].
 func New(opts ...Option) *Source {
 	c := defaults()
 	for _, o := range opts {
 		o.apply(&c)
-	}
-
-	if c.watch != nil {
-		c.refuse(c.watch.start(c.dotenv))
 	}
 
 	return &Source{cfg: c}
