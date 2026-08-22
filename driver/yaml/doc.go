@@ -206,26 +206,31 @@
 //
 // # Watching the file
 //
-// [Watch] calls you back when the file changes underneath a source, which is how
+// [Source.Watched] converts a source into one that can be watched, which is how
 // a process holding a loaded value learns to load a fresh one:
 //
-//	src := yaml.NewSource("config.yaml", yaml.Watch(ctx, time.Second, onChange))
+//	wb, err := ferry.BindWatched[Config](yaml.NewSource("config.yaml").Watched())
 //
-//	func onChange(ctx context.Context) {
-//	    cfg, err := b.Load(ctx) // a reload is a load; publish it by replacement
+//	seq, errf := wb.Watch(ctx)
+//	for cfg := range seq {
+//	    publish(cfg) // a reload is a load; publish it by replacement
 //	}
 //
-// It is opt-in and it is the only thing in this package that runs on a goroutine
-// of its own: a source built without it touches the file only when a load asks
-// it to. Cancelling the context you gave it is what stops it. Looking is a stat
-// every interval rather than a subscription, so watching a file costs this
-// module no dependency and the interval is yours to name.
+// It is opt-in and it takes no arguments: the source already knows which file it
+// reads, and the mechanism is a filesystem notification rather than a poll, so
+// there is no interval to name. A source that was never converted touches the
+// file only when a load asks it to.
 //
-// Read [Watch] before wiring one up. Two of its sharp edges bite immediately:
-// watching starts when the source is built, which is before [ferry.Bind] has
-// handed back the binding your callback wants to load through, and a panic in
-// the callback takes the process down exactly as it would on a goroutine you
-// started yourself.
+// The stream opens with a load, runs on the goroutine ranging it, and ends when
+// the context ends, when a reload fails, or when the watch is lost - and errf
+// says which. Cancelling that context is what stops it, and it is the only
+// thing that does.
+//
+// Read [Source.Watched] before wiring one up. What is watched is the directory
+// holding the file rather than the file itself, because a save replaces a file
+// by renaming another over it, and a dump through [NewSink] over the same path
+// is a change like any other, so a process that saves its own configuration
+// reloads its own writes.
 //
 // # One thing it cannot do
 //

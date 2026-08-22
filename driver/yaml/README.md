@@ -271,33 +271,36 @@ The one edit the check cannot see is a rewrite that lands in the same modificati
 
 ## Watching the file
 
-Pass `yaml.Watch` to be called when the file changes underneath a source, which is how a process holding a loaded value learns to load a fresh one:
+Call `Watched()` on a source to bind a stream that reloads when the file changes, which is how a process holding a loaded value learns to load a fresh one:
 
 ```go
-s := watch.New()
+wb, err := ferry.BindWatched[config](yaml.NewSource(path).Watched())
 
-b, err := ferry.Bind[config](yaml.NewSource(path, yaml.Watch(ctx, 10*time.Millisecond, s.Changed)))
-
-// ... an operator edits the file ...
-
-seq, errf := watch.Values(ctx, s, b)
+seq, errf := wb.Watch(ctx)
 for cfg := range seq {
 	publish(cfg) // a reload is a load; publish it by replacement
 }
+
+if err := errf(); err != nil {
+	alert(err) // a failed reload, a cancellation, or a watch that was lost
+}
 ```
 
-That is `ExampleWatch` in [`example_test.go`](example_test.go), trimmed of its setup and its plumbing.
+That is `ExampleSource_Watched` in [`example_test.go`](example_test.go), trimmed of its setup.
 
-It is opt-in, and it is the only thing in this package that runs on a goroutine of its own.
-Cancelling the context you gave it is what stops it.
-Looking is a stat every interval rather than an fsnotify subscription, so that watching a file costs this module no dependency, and the interval is yours to name.
+It is opt-in, and it takes no arguments: this source already knows which file it reads, and the mechanism is a filesystem notification rather than a poll, so there is no interval to name.
+The stream opens with a load, so there is no separate first load to write, and it runs on the goroutine ranging it.
+Cancelling the context you gave `Watch` ends the watch and the stream together, and it is the only thing that does.
 
-Two sharp edges are worth reading before you wire it up, and the rest are in the [package documentation](https://pkg.go.dev/github.com/onhotpath/ferry/driver/yaml#Watch).
-Watching starts when the source is built, which is before `ferry.Bind` has handed back the binding to load through, so a change can land while there is nothing to load through yet.
-`watch.Signal` is what keeps it: `s.Changed` records such a change instead of losing it, and `watch.Values` opens the stream with that reload.
-And a panic in the callback takes the process down, exactly as it would on a goroutine you started yourself.
+Two things are worth knowing before you wire one up, and the rest are in the [package documentation](https://pkg.go.dev/github.com/onhotpath/ferry/driver/yaml#Source.Watched).
+What is watched is the directory holding the file rather than the file itself, because an editor and this package's own sink both replace a file by renaming another over it; everything else in that directory is ignored, so a file that does not exist yet is watched too and the watch fires when it appears.
+And a dump through the same path is a change like any other, so a process that both watches and saves its own config reloads its own writes.
 
-The loop this feeds is [`ferry/watch`](https://pkg.go.dev/github.com/onhotpath/ferry/watch), and the whole of it is in [the watch and reload guide](../../docs/guide/watch-reload.md).
+A source that cannot be watched at all - one naming no path - is refused by `ferry.BindWatched` under `ferry.ErrPlane`, with `yaml.ErrWatch` reachable underneath.
+What the operating system has an opinion about, such as a directory that is not there, ends the stream under `ferry.ErrWatchLost` when it places its first registration, which is still before any value reaches you.
+A directory taken away under a running watch ends it the same way, rather than leaving a stream that never fires again.
+
+The whole of the loop this feeds is in [the watch and reload guide](../../docs/guide/watch-reload.md).
 
 ## One thing it cannot do
 
