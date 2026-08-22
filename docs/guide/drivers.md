@@ -1250,6 +1250,12 @@ That is affordable for exactly one reason, and it is why every case cites the AD
 
 A case asserting a rule no ADR states is not a case, it is a new rule, and it needs the ADR first.
 
+## If your plane can announce changes
+
+Everything above is a driver that answers when it is asked.
+A plane that can also say it changed publishes a second source type implementing `ferry.WatchableSource`, converted from the ordinary one with `Watched()`, and `ferrytest.Watchable` proves it the way `ferrytest.Driver` proves the rest.
+The seam, the invariant core owns on your behalf, and the conformance call are in [the watch and reload guide](watch-reload.md).
+
 ## Shipping it
 
 A driver is a module of its own, versioned independently of core, so your users take your representation changes on your schedule and not on core's.
