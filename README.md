@@ -162,8 +162,9 @@ Both the Go API and the text ferry writes into a plane are still free to move.
 The trigger for v1 is the tag grammar surviving real use, and the golden table that pins what a plane holds settling (ADR-0013).
 
 **The Go floor is 1.26**, declared by every module in this repository.
-This is temporary: the floor returns to 1.27 when Go 1.27 is generally available.
+It stays there now that Go 1.27 has shipped: 1.27 was the floor for `encoding/json/v2` alone, and ferry imports neither it nor `jsontext` (ADR-0001).
 `errors.AsType` is what sets it, and core takes no non-stdlib dependency at all.
+CI builds on the floor and on the newest released Go, in separate jobs.
 
 ## Performance
 
