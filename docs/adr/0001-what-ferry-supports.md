@@ -223,6 +223,31 @@ Whether every sub-module takes core's floor is [#3](https://github.com/onhotpath
 > Since the `go` directive is a strict minimum, `go 1.27` today excludes everyone on a released toolchain, which is precisely the population the original reasoning said it would not reach.
 > The floor drops to `go 1.26` to stop bearing a cost the section itself said was conditional on ferry not existing yet, and returns to `go 1.27` when Go 1.27 reaches GA.
 
+> **Amended under [#391](https://github.com/onhotpath/ferry/issues/391): Go 1.27 is GA, and the floor stays at `go 1.26`. This section's heading no longer describes what ferry does.**
+>
+> The amendment above wrote its own revert - "returns to `go 1.27` when Go 1.27 reaches GA" - and `go1.27.0` shipped on 2026-08-20.
+> That revert is declined, and this is the paragraph saying so rather than a silent lapse.
+>
+> **The reason the floor was raised is still unspent, and GA does not spend it.**
+> The section names one thing 1.27 buys: `encoding/json/v2` generally available.
+> No module in this repository imports `encoding/json/v2` or `encoding/json/jsontext`, [ADR-0002](0002-core-and-sub-modules.md) forbids it, CI asserts it per module on every push, and `make nojsonv2` proves core builds without them.
+> A floor is only worth what is spent through it, and nothing is.
+>
+> **What changed is which population the exclusion reaches, and it did not change back.**
+> The original reasoning priced the exclusion as affordable because ferry had no code and would not ship before 1.27 was out.
+> The amendment above recorded that inverting: ferry has code, and people are using it.
+> GA does not restore the original pricing, it fixes the population at "everyone on 1.26", which is now a released, supported, widely deployed toolchain rather than a soon-to-be-obsolete one.
+> The `go` directive is a strict minimum, so raising it is not a preference about which Go ferry is written in, it is a decision to stop being importable by people who have done nothing wrong.
+>
+> **This is the fallback the section records, now permanent rather than transitional.**
+> Core sits at `go 1.26` with no json/v2 import, and the v2 dependency stays reachable from a sub-module at `go 1.27` the day one is written.
+> `errors.AsType` is what holds the floor as high as 1.26; see [ADR-0002](0002-core-and-sub-modules.md) for the launch exception that prices it.
+> The floor moves the day something in core needs a 1.27 API or language feature and the cost of that need is argued out loud, which is what "raising core's floor is never a patch release" has always meant.
+>
+> **Nothing about how the toolchain is exercised is loosened by this.**
+> CI moves to `1.27.x` and gains a `floor` job that builds, vets and tests every module on core's own directive with `GOTOOLCHAIN=local`.
+> The floor being lower than the newest release is exactly why both have to be run: before this, one pin was both, and a single job could carry both claims.
+
 ### What ferry will not support
 
 Two kinds, and the charter says which, because a flat list invites readers to assume the strong reading for both.

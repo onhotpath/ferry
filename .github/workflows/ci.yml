@@ -23,15 +23,18 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # ADR-0001's floor is go 1.27, which is not GA, so #366 drops it to 1.26
-  # until it is. This pin names a released toolchain rather than a release
-  # candidate, so the floor CI enforces is one a consumer can install.
+  # The newest released Go, and the toolchain every job below builds, vets,
+  # tests and lints with. Go 1.27 is GA, which clears the last of the four
+  # workarounds its release candidate forced: this pin named a 1.26 toolchain
+  # so that the floor CI enforced was one a consumer could install.
   #
-  # Three of the four workarounds the release candidate forced are cleared by
-  # that: the GOWORK=off toolchain guard, the source build of golangci-lint,
-  # and staticcheck being switched off in .golangci.yml. This pin is the
-  # fourth, and it returns to '1.27.x' when Go 1.27 goes GA.
-  GO_VERSION: '1.26.x'
+  # This is deliberately NOT the floor any more. ADR-0001 keeps core's `go`
+  # directive at 1.26 now that 1.27 is out (#391), so the two claims CI has to
+  # prove have come apart and are proved by two jobs: `floor` below builds on
+  # the oldest toolchain a consumer can import ferry with, and everything else
+  # builds on the newest that exists. A library that only ever compiles on its
+  # own floor finds out about the next release from a bug report.
+  GO_VERSION: '1.27.x'
 
   # The golangci-lint pin used to live here. It lives in the Makefile now, as
   # GOLANGCI_LINT_VERSION, because the lint job runs `make lint` and there is no
@@ -311,8 +314,8 @@ jobs:
           # Gate 2: outside the workspace there is no toolchain line, by design,
           # so the go directive has to be satisfiable by a released toolchain.
           # Kept as a defensive probe even though it is not expected to fire
-          # while #366 holds the floor at a released Go: if a go directive ever
-          # outruns what is installed again, this is what catches it.
+          # while the floor is a released Go: if a go directive ever outruns
+          # what is installed again, this is what catches it.
           if ! probe=$(GOWORK=off go list -m 2>&1); then
             case "$probe" in
               *toolchain*|*"requires go >="*)
@@ -320,8 +323,8 @@ jobs:
                 echo "  why: $probe"
                 echo "       the go directive resolves to a toolchain that"
                 echo "       is not installed outside the workspace."
-                echo "  note: not expected to fire while #366 holds the floor"
-                echo "        at a released Go. Gate 1 above skips the job"
+                echo "  note: not expected to fire while the floor is a"
+                echo "        released Go. Gate 1 above skips the job"
                 echo "        first anyway until core is tagged."
                 exit 0
                 ;;
@@ -340,8 +343,52 @@ jobs:
           go vet ./...
           go test ./...
 
-  # ADR-0002 keeps ADR-0001's go 1.27 fallback alive by construction rather than
-  # by anyone remembering to check, and this job is the construction.
+  # The floor, exercised rather than merely declared.
+  #
+  # Every other job runs on GO_VERSION, which is the newest released Go. This
+  # one runs on core's own `go` directive, so the oldest toolchain ferry claims
+  # to support is one CI has actually compiled and run the tests with. Without
+  # it the directive is a number in a file that nobody checks.
+  #
+  # The version is read from go.mod by setup-go rather than pinned here. That
+  # is the whole point: there is one place the floor is written down, the
+  # invariants job asserts every other module is at or above it, and this job
+  # cannot drift from either.
+  floor:
+    name: Floor toolchain ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    needs: modules
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.modules.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          # Core's go.mod, not the matrix module's. The floor is core's, every
+          # other module is held at or above it, and a driver that one day
+          # raises its own directive is still owed a build on core's.
+          go-version-file: go.mod
+
+      - name: Build, vet and test on the floor toolchain
+        working-directory: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          echo "module: ${{ matrix.module }}   go: $(go env GOVERSION)"
+          # GOTOOLCHAIN=local, so a `go` directive that outruns what setup-go
+          # installed fails here instead of quietly downloading a newer
+          # toolchain and testing the thing this job exists to not test.
+          export GOTOOLCHAIN=local
+          go build ./...
+          go vet ./...
+          go test ./...
+
+  # ADR-0002 keeps the json/v2 escape hatch alive by construction rather than by
+  # anyone remembering to check, and this job is the construction. ADR-0001
+  # raised the floor to go 1.27 for json/v2 and then never spent it; that is why
+  # the floor can sit at 1.26 with 1.27 out, and this is what keeps it true.
   nojsonv2:
     name: Core builds under GOEXPERIMENT=nojsonv2
     runs-on: ubuntu-latest
@@ -415,14 +462,20 @@ jobs:
           set -euo pipefail
           # The developer's command, with the module list narrowed to this
           # matrix leg. Everything that used to be spelled out here - the
-          # pinned version, `config verify` before `run`, and the source build
-          # with GOTOOLCHAIN forced because every released golangci-lint binary
-          # is compiled with Go 1.26 and refuses a module targeting 1.27 - now
-          # lives in the Makefile, so `make lint` locally and this job cannot
-          # disagree about what "lint" means.
+          # pinned version and `config verify` before `run` - now lives in the
+          # Makefile, so `make lint` locally and this job cannot disagree about
+          # what "lint" means.
           #
-          # TODO: revert to golangci/golangci-lint-action once a golangci-lint
-          # release is built with Go 1.27, which cannot happen before 1.27 is GA.
+          # The source build stays, and it is not a leftover waiting on a
+          # golangci-lint release built with Go 1.27. golangci-lint bundles its
+          # own go/types and its own IR builder, so a binary compiled with an
+          # older Go cannot read a newer Go's standard library: measured, the
+          # released 2.12.2 binaries are built with go1.26, and under a go1.27
+          # toolchain they report typecheck errors inside internal/poll and
+          # panic in staticcheck's IR builder. Building from source under
+          # GO_VERSION makes the linter's Go and the code's Go the same by
+          # construction, at every future release rather than once. The .bin
+          # cache key names GO_VERSION for exactly that reason.
           make lint MODULES=${{ matrix.module }}
 
   race:
@@ -682,7 +735,7 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     if: always()
-    needs: [modules, invariants, build, nojsonv2, format, lint, race, coverage, windows]
+    needs: [modules, invariants, build, floor, nojsonv2, format, lint, race, coverage, windows]
     steps:
       - uses: actions/checkout@v7
 

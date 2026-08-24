@@ -82,8 +82,7 @@ func withFilter(b *ferry.Binding[Filter], next http.Handler) http.Handler {
 // refuse answers a request the load would not build a value for, naming the
 // parameter it was about and never quoting what that parameter held.
 func refuse(w http.ResponseWriter, err error) {
-	var located *ferry.Error
-	if errors.As(err, &located) {
+	if located, ok := errors.AsType[*ferry.Error](err); ok {
 		http.Error(w, "bad request at "+located.Address().String(), http.StatusBadRequest)
 
 		return
@@ -202,8 +201,7 @@ func Example_repeatedName() {
 
 	_, err = ferry.Load[page](ferryhttp.WithQuery(context.Background(), values), ferryhttp.NewQuerySource())
 
-	var located *ferry.Error
-	if errors.As(err, &located) {
+	if located, ok := errors.AsType[*ferry.Error](err); ok {
 		fmt.Println(located.Address())
 	}
 

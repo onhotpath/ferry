@@ -304,6 +304,28 @@ As of this date Go 1.27 is still `go1.27rc2` with `"stable": false`, so the fall
 >
 > **Unchanged**: a driver module may still declare a higher `go` directive than core and never a lower one, CI still asserts it, and the comparison stays relative, so a uniform drop across core and drivers passes it untouched.
 
+> **Amended under [#391](https://github.com/onhotpath/ferry/issues/391): Go 1.27 is GA, the floor stays at `go 1.26`, and "the return to `go 1.27` at GA" is withdrawn.**
+>
+> The amendment above named GA as the trigger for going back to `go 1.27`.
+> `go1.27.0` shipped on 2026-08-20 and the floor does not move, because the only thing 1.27 was ever the floor for is `encoding/json/v2`, and the "no module imports json/v2" invariant this ADR states is still asserted per module on every push.
+> [ADR-0001](0001-what-ferry-supports.md) carries the argument.
+>
+> **The launch exception is untouched in size and in justification.**
+> It is still `errors.AsType`, a Go 1.26 API used in ten places in `error.go`, still one release above the general rule's `go 1.25`, and reaching the general rule still means giving that up.
+> What is withdrawn is only the sentence describing the exception as a stop on the way back to 1.27.
+>
+> **"The fallback, for the record" is no longer a fallback.**
+> Core at `go 1.26` with no json/v2 import, and the v2 dependency in a sub-module at `go 1.27` when one is written, is the standing arrangement.
+> It is recorded above as the escape hatch from a decision, and it is now the decision.
+>
+> **"Raising core's floor is never a patch release" is what is actually load-bearing here.**
+> A floor that follows the newest release by default would raise itself on Go's schedule and not on ferry's, which is the opposite of a deliberate release decision.
+> The floor moves when core needs something above it and the exclusion is argued for, and never because a release happened.
+>
+> **What CI proves changes shape, because the pin and the floor were one thing and are now two.**
+> `GO_VERSION` names the newest released Go and every job builds, vets, tests and lints on it; a new `floor` job builds, vets and tests every module on core's own `go` directive, read from `go.mod` by `setup-go` so there is no second place the number is written down, under `GOTOOLCHAIN=local` so a directive that outruns the installed toolchain fails rather than quietly downloading one.
+> The "every module is at or above core's floor" step is unchanged and still relative.
+
 ### Development and release
 
 **No `replace` directive is ever checked in.**

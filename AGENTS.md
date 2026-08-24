@@ -80,7 +80,7 @@ A figure that was typed rather than measured does not go in a file.
 ## Module rules, asserted by CI
 
 - Core's `require` block stays empty, and core never imports `encoding/json/v2` or `encoding/json/jsontext`.
-- No file carries a `toolchain` directive, `go.work` included. The floor is temporarily go 1.26, pending Go 1.27 GA (#366).
+- No file carries a `toolchain` directive, `go.work` included. The floor is go 1.26, deliberately below the go 1.27 ADR-0001 first set, and CI builds on both it and the newest released Go.
 - No `replace` directive is ever checked in.
 - A driver requires core at a released version. Release order is forced: tag core, bump each driver's `require`, tag drivers.
 

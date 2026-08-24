@@ -85,8 +85,8 @@ func methodOf(t *testing.T, typ reflect.Type, name string) reflect.Type {
 func countParams(fn, want reflect.Type) int {
 	n := 0
 
-	for i := range fn.NumIn() {
-		if fn.In(i) == want {
+	for in := range fn.Ins() {
+		if in == want {
 			n++
 		}
 	}

@@ -2,6 +2,7 @@ package ferry
 
 import (
 	"errors"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -693,9 +694,7 @@ func compositeShapes() []requiredShape {
 // through by the shape that ran before it.
 func copyOf(v map[Path]Value) map[Path]Value {
 	out := make(map[Path]Value, len(v))
-	for k, got := range v {
-		out[k] = got
-	}
+	maps.Copy(out, v)
 
 	return out
 }

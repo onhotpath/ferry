@@ -381,8 +381,7 @@ func (c *compiler) compileStruct(t reflect.Type, s site, base []int) (n *node, a
 
 	c.stack = append(c.stack, t)
 
-	for i := range t.NumField() {
-		f := t.Field(i)
+	for f := range t.Fields() {
 		count += c.compileField(&f, n, site{addr: s.addr, field: s.field, index: base, dynamic: s.dynamic})
 	}
 

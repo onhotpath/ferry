@@ -138,7 +138,7 @@ func TestAChainClaimedTypeRoundTripsThroughEveryPosition(t *testing.T) {
 
 		want := everyPosition{
 			Leaf:  netip.MustParseAddr("10.0.0.1"),
-			Ptr:   ptrTo(netip.MustParseAddr("10.0.0.2")),
+			Ptr:   new(netip.MustParseAddr("10.0.0.2")),
 			Slice: []netip.Addr{netip.MustParseAddr("10.0.0.3")},
 		}
 
@@ -170,8 +170,6 @@ type everyPosition struct {
 	Arr   [2]netip.Addr         `ferry:"arr"`
 	Map   map[string]netip.Addr `ferry:"map"`
 }
-
-func ptrTo[T any](v T) *T { return &v }
 
 // hostPort is a struct with two exported fields and a text pair, and neither
 // field carries a tag: the chain claims the whole type before the struct rule

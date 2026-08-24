@@ -667,8 +667,7 @@ func loadHeaderErr[T any](t *testing.T, h http.Header) error {
 
 // addressOf is the address a refusal is attached to, or the empty path.
 func addressOf(err error) ferry.Path {
-	var e *ferry.Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*ferry.Error](err); ok {
 		return e.Address()
 	}
 

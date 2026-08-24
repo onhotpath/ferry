@@ -22,7 +22,7 @@ MODULES := . driver/env driver/http driver/kv driver/windows driver/yaml example
 # Pinned, not `latest`: a lint failure should always be this repository's doing
 # and never a tool release nobody asked for. This file is the only place either
 # version is named; the CI lint job runs `make lint` rather than repeating them.
-GOLANGCI_LINT_VERSION ?= v2.12.2
+GOLANGCI_LINT_VERSION ?= v2.13.1
 GCI_VERSION ?= v0.14.0
 
 GOLANGCI_LINT := $(BIN_DIR)/golangci-lint
@@ -99,10 +99,12 @@ lint: lint-canary ## golangci-lint every module, after verifying the config.
 #
 # unused is the one that needs saying out loud. golangci-lint hosts it inside
 # the shared goanalysis_metalinter runner alongside staticcheck, so a bundled
-# analyser that cannot read the toolchain's source takes unused down with it -
-# which is exactly why staticcheck is switched off in .golangci.yml today. That
-# pin is moved by Renovate, not by anyone who has read the comment there, so the
-# claim "unused is unaffected" is asserted here rather than believed.
+# analyser that cannot read the toolchain's source takes unused down with it,
+# silently - measured, a 2.12.2 binary pointed at a go1.27 standard library
+# panics in staticcheck's IR builder and unused reports nothing. That pin is
+# moved by Renovate, and the toolchain moves on Go's schedule, neither of them
+# by anyone who has read the comment in .golangci.yml, so the claim "unused is
+# unaffected" is asserted here rather than believed.
 #
 # lintcanary.go carries a build tag no ordinary run sets, so the dead function
 # it holds is invisible to build, vet, test and `make lint` itself.
@@ -198,10 +200,16 @@ tools: $(GOLANGCI_LINT) $(GCI) ## Install the pinned tools into .bin.
 
 $(GOLANGCI_LINT):
 	@echo "==> installing golangci-lint $(GOLANGCI_LINT_VERSION)"
-	@# The GOTOOLCHAIN prefix this install used to carry is gone under #366.
-	@# It was there because golangci-lint refuses a module whose directive is
-	@# newer than the Go it was built with, and the floor is a released Go now.
-	@# It comes back if the floor returns to a release candidate.
+	@# Built from source, deliberately, and never downloaded as a release
+	@# binary. golangci-lint bundles its own go/types and its own IR builder,
+	@# so one compiled with an older Go cannot read a newer Go's standard
+	@# library - a released 2.12.2 binary is built with go1.26 and under a
+	@# go1.27 toolchain reports typecheck errors in internal/poll and panics
+	@# inside staticcheck. Installing from source makes the linter's Go and
+	@# the code's Go the same one, whichever that is.
+	@#
+	@# 2.13.1 is the first release whose bundled analysers read Go 1.27, which
+	@# is why the pin moved with the toolchain rather than waiting for Renovate.
 	@$(GOINSTALL) github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	@$(GOLANGCI_LINT) --version
 

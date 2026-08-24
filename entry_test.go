@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -218,13 +219,7 @@ func TestFailureYieldsNoValueFerryBuilt(t *testing.T) {
 }
 
 func (p *plane) answered(addr Path) bool {
-	for _, got := range p.got {
-		if got == addr {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(p.got, addr)
 }
 
 // TestAGetErrorIsNeverReadAsAbsent is asserted directly, because a prototype

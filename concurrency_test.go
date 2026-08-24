@@ -182,7 +182,7 @@ type concLeaves struct {
 
 func concLeafValues() map[Path]Value {
 	out := map[Path]Value{}
-	for _, name := range strings.Split("a b c d e f g h", " ") {
+	for name := range strings.SplitSeq("a b c d e f g h", " ") {
 		out[At(name)] = String(name)
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/onhotpath/ferry"
@@ -445,11 +446,5 @@ func (r *reader) holdsAny(scope sectionScope) bool {
 		}
 	}
 
-	for _, scan := range scope.scans {
-		if r.holdsUnder(scan) {
-			return true
-		}
-	}
-
-	return false
+	return slices.ContainsFunc(scope.scans, r.holdsUnder)
 }

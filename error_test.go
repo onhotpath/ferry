@@ -122,8 +122,8 @@ func TestErrorHasNoExportedFields(t *testing.T) {
 		t.Fatal("Error has no fields at all, so this test asserts nothing")
 	}
 
-	for i := range typ.NumField() {
-		if f := typ.Field(i); f.IsExported() {
+	for f := range typ.Fields() {
+		if f.IsExported() {
 			t.Fatalf("Error.%s is exported", f.Name)
 		}
 	}

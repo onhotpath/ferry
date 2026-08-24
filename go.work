@@ -2,10 +2,12 @@
 // gives local development the sibling-on-disk resolution instead, and flipping
 // GOWORK=off exercises the resolution a real consumer gets.
 //
-// ADR-0001 sets the floor at go 1.27, not yet GA. Until it is, the floor is
-// go 1.26, tracked by #366 and reverted the day 1.27 ships. errors.AsType is
-// what holds it at 1.26. No file in this repository carries a `toolchain`
-// directive; a consumer resolves the floor with whatever toolchain they have.
+// The floor is go 1.26, and it stays there now that Go 1.27 has shipped:
+// ADR-0001 raised it to 1.27 for encoding/json/v2 alone, and ferry imports
+// neither json/v2 nor jsontext, so the reason was never spent. errors.AsType
+// is what holds it as high as 1.26. No file in this repository carries a
+// `toolchain` directive; a consumer resolves the floor with whatever toolchain
+// they have, and CI builds on both the floor and the newest released Go.
 go 1.26
 
 use (

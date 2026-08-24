@@ -39,11 +39,15 @@ linters:
     - ineffassign
     - staticcheck
     #
-    # staticcheck could not run at all under go1.27rc2: its IR builder failed
-    # to parse Go 1.27 standard-library source and took the whole metalinter
-    # down with it, not just its own findings. #366 moves the floor and CI onto
-    # a released Go, which clears that. It goes back off if the floor ever
-    # returns to a release candidate the bundled analyser cannot read.
+    # staticcheck is the linter here most sensitive to the toolchain. Its IR
+    # builder parses standard-library source, and when that source is newer
+    # than the Go the bundled analyser was built against it panics and takes
+    # the whole metalinter down with it, not just its own findings - measured
+    # under go1.27rc2, and again with a golangci-lint 2.12.2 binary pointed at
+    # a go1.27 standard library. What keeps it running is that CI builds
+    # golangci-lint from source under the same Go it lints with, so the two
+    # cannot be a release apart. Switching this off is not the answer if it
+    # ever fires again; the linter's Go is.
     #
     # `unused` shares the same metalinter runner, so its health is a property
     # of which analyser golangci-lint happens to bundle and not a property of

@@ -602,7 +602,7 @@ type wide struct {
 // member plus the slice holding them.
 func BenchmarkLoadOverAWideContainer(b *testing.B) {
 	values := map[Path]Value{}
-	for _, name := range strings.Split("abcdefghijklmnopqrst", "") {
+	for name := range strings.SplitSeq("abcdefghijklmnopqrst", "") {
 		values[At(name)] = String(name)
 	}
 

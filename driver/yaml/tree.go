@@ -3,6 +3,7 @@ package yaml
 import (
 	"fmt"
 	"iter"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -505,13 +506,7 @@ func hasAlias(n *yamlv3.Node) bool {
 		return true
 	}
 
-	for _, c := range n.Content {
-		if hasAlias(c) {
-			return true
-		}
-	}
-
-	return false
+	return slices.ContainsFunc(n.Content, hasAlias)
 }
 
 // nameInDocument is this document's own name for an address: the members joined with
