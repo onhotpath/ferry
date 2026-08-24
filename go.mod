@@ -5,7 +5,8 @@ module github.com/onhotpath/ferry
 // takes no non-stdlib dependency and no `toolchain` directive either; no file
 // in this repository carries one.
 //
-// The floor is go 1.26, not the go 1.27 ADR-0001 sets, because 1.27 is not yet
-// GA. errors.AsType is what holds it at 1.26. Tracked by #366, reverted to
-// 1.27 the day it ships.
+// The floor is go 1.26, not the go 1.27 ADR-0001 first set, and it stays there
+// now that 1.27 has shipped: 1.27 was the floor for encoding/json/v2 alone,
+// and the require block above is why that reason was never spent. errors.AsType
+// is what holds it as high as 1.26 (#391).
 go 1.26

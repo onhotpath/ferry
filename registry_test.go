@@ -1146,8 +1146,8 @@ func TestThereIsNoDynamicRegistration(t *testing.T) {
 	var methods []string
 
 	registry := reflect.TypeFor[*Registry]()
-	for i := range registry.NumMethod() {
-		methods = append(methods, registry.Method(i).Name)
+	for method := range registry.Methods() {
+		methods = append(methods, method.Name)
 	}
 
 	if want := []string{"Types"}; !slices.Equal(methods, want) {
@@ -1174,9 +1174,9 @@ func TestNothingIsExportedFromARegistration(t *testing.T) {
 
 	key := reflect.TypeFor[KeyCodec]()
 
-	for i := range key.NumField() {
-		if key.Field(i).IsExported() {
-			t.Errorf("KeyCodec exports the field %s", key.Field(i).Name)
+	for field := range key.Fields() {
+		if field.IsExported() {
+			t.Errorf("KeyCodec exports the field %s", field.Name)
 		}
 	}
 
@@ -1191,8 +1191,8 @@ func TestNothingIsExportedFromARegistration(t *testing.T) {
 func methodNames(t reflect.Type) []string {
 	var out []string
 
-	for i := range t.NumMethod() {
-		if m := t.Method(i); m.PkgPath == "" {
+	for m := range t.Methods() {
+		if m.PkgPath == "" {
 			out = append(out, m.Name)
 		}
 	}

@@ -26,8 +26,9 @@ Three module rules are asserted by CI and are not stylistic:
   A driver may have dependencies; core may not.
   Core must also never import `encoding/json/v2` or `encoding/json/jsontext`, and `make nojsonv2` proves it still builds without them.
 - **No file carries a `toolchain` directive, `go.work` included.**
-  The floor is temporarily Go 1.26, pending Go 1.27 going GA (#366).
+  The floor is Go 1.26, deliberately below the Go 1.27 [ADR-0001](docs/adr/0001-what-ferry-supports.md) first set: 1.27 was the floor for `encoding/json/v2` alone, and ferry imports neither it nor `jsontext`, so the reason was never spent.
   A consumer resolves the floor with whatever toolchain they have.
+  CI builds on the floor and on the newest released Go, in separate jobs, because a library that only ever compiles on its own floor hears about the next release from a bug report.
 - **No `replace` directive is ever checked in.**
   `go.work` gives local development its sibling-on-disk resolution instead, and `GOWORK=off` exercises the resolution a real consumer gets.
 

@@ -5,8 +5,9 @@ module github.com/onhotpath/ferry/driver/yaml
 // and the lever only points up. No `toolchain` directive here either; no file
 // in this repository carries one.
 //
-// The floor is go 1.26 while #366 is open, not core's usual 1.27, because 1.27
-// is not yet GA.
+// The floor is go 1.26, which is core's, and it stays there now that Go 1.27
+// has shipped: core raised it to 1.27 for encoding/json/v2 alone and never
+// spent that reason (#391).
 go 1.26
 
 // Core is an ordinary dependency now, resolved from the proxy at the version

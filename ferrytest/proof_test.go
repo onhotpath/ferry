@@ -72,8 +72,8 @@ func TestProofIsSealed(t *testing.T) {
 
 	unexported := 0
 
-	for i := range typ.NumMethod() {
-		if typ.Method(i).PkgPath != "" {
+	for method := range typ.Methods() {
+		if method.PkgPath != "" {
 			unexported++
 		}
 	}

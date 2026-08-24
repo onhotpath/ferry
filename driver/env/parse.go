@@ -260,8 +260,8 @@ func (s *scanner) expectEq(name string, nameAt int) error {
 	}
 
 	head := s.src[nameAt:s.lineEnd()]
-	if i := strings.IndexByte(head, '='); i >= 0 {
-		return s.badName(head[:i])
+	if before, _, ok := strings.Cut(head, "="); ok {
+		return s.badName(before)
 	}
 
 	return s.refuse("this line is not blank, not a comment and holds no \"=\", so it assigns nothing")

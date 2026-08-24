@@ -34,8 +34,7 @@ const (
 func TestWatchedReloadsWhenTheFileChanges(t *testing.T) {
 	path := write(t, "port: 1\n")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	s := watchStream(ctx, t, path)
 
@@ -96,8 +95,7 @@ func TestWatchedStopsWithItsContext(t *testing.T) {
 func TestWatchedFileThatDoesNotExistYetIsWatched(t *testing.T) {
 	path := filepath.Join(t.TempDir(), planeName)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	s := watchStream(ctx, t, path)
 
@@ -118,8 +116,7 @@ func TestWatchedFileThatDoesNotExistYetIsWatched(t *testing.T) {
 func TestWatchedIgnoresAWriteBesideThePlane(t *testing.T) {
 	path := write(t, "port: 1\n")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	s := watchStream(ctx, t, path)
 
@@ -349,8 +346,7 @@ func TestWatchedEndsWhenTheDirectoryGoesAway(t *testing.T) {
 		t.Fatalf("making the directory the watch is on: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	s := watchStream(ctx, t, filepath.Join(dir, planeName))
 

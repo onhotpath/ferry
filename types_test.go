@@ -829,8 +829,7 @@ func checkSortedByAddress(t *testing.T, elems []error) {
 	addrs := make([]Path, 0, len(elems))
 
 	for _, e := range elems {
-		var fe *Error
-		if errors.As(e, &fe) {
+		if fe, ok := errors.AsType[*Error](e); ok {
 			addrs = append(addrs, fe.Address())
 		}
 	}
@@ -858,7 +857,7 @@ func TestEveryRefusalNamesItsWayOut(t *testing.T) {
 
 	report := fmt.Sprintf("%+v", Compile[refusedKinds]())
 
-	for _, line := range strings.Split(report, "\n") {
+	for line := range strings.SplitSeq(report, "\n") {
 		checkRemedy(t, line)
 	}
 }

@@ -576,8 +576,7 @@ func (l loadFrom) getOnce(ctx context.Context, at LeafAddr) (Value, *LeafAddr, e
 // into that call's interface parameter, is allocated on the path that has an
 // error to examine and never on the path that read a value.
 func leafHop(err error) *LeafAddr {
-	var hop *LeafRedirect
-	if errors.As(err, &hop) {
+	if hop, ok := errors.AsType[*LeafRedirect](err); ok {
 		return &hop.Target
 	}
 

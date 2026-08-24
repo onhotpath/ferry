@@ -1,6 +1,9 @@
 package ferry
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // Spelling is how one plane spells one payload: the pair of functions that
 // turns what the plane carries into a payload and back.
@@ -155,8 +158,8 @@ func renderThrough[T, C any](s Spelling[T, C], ts []Transform[T], v T) (C, error
 
 	w := v
 
-	for i := len(ts) - 1; i >= 0; i-- {
-		stepped, err := ts[i].Apply(w)
+	for _, t := range slices.Backward(ts) {
+		stepped, err := t.Apply(w)
 		if err != nil {
 			return zero, err
 		}

@@ -332,8 +332,8 @@ func checkNoLockField(t *testing.T) {
 
 	typ := reflect.TypeFor[ferry.Keys]()
 
-	for i := range typ.NumField() {
-		if f := typ.Field(i); strings.HasPrefix(f.Type.String(), "sync.") {
+	for f := range typ.Fields() {
+		if strings.HasPrefix(f.Type.String(), "sync.") {
 			t.Errorf("Keys holds a %s, so its read path takes a lock", f.Type)
 		}
 	}
