@@ -510,9 +510,10 @@ func theNumberProbeIsTotal(t *testing.T) {
 		}
 	}
 
-	if _, err := ferry.Load[numberHolder](context.Background(),
+	_, err := ferry.Load[numberHolder](context.Background(),
 		Static(map[ferry.Path]ferry.Value{probeNumberPath: ferry.String("")}),
-		ferry.WithRegistry(reg)); err == nil {
+		ferry.WithRegistry(reg))
+	if err == nil {
 		t.Error("the number probe accepted an empty text, so case 5 would pass over a codec that takes anything")
 	}
 }

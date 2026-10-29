@@ -642,9 +642,10 @@ func aNilRootPointerDumpsItsNull(t *testing.T) {
 
 	p := newPlane(map[Path]Value{})
 
-	if err := withoutPanicking(t, func() error {
+	err := withoutPanicking(t, func() error {
 		return Dump(t.Context(), (*int)(nil), planeSink{p: p})
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("dump: %+v", err)
 	}
 
@@ -691,11 +692,12 @@ func loadRootPointer(t *testing.T, p *plane) (*int, error) {
 		err error
 	)
 
-	if panicked := withoutPanicking(t, func() error {
+	panicked := withoutPanicking(t, func() error {
 		got, err = Load[*int](t.Context(), planeSource{p: p})
 
 		return nil
-	}); panicked != nil {
+	})
+	if panicked != nil {
 		return nil, panicked
 	}
 

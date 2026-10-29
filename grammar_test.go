@@ -328,9 +328,10 @@ func TestGrammarWhitespace(t *testing.T) {
 func TestGrammarWhitespaceInAValue(t *testing.T) {
 	t.Parallel()
 
-	if err := Compile[struct {
+	err := Compile[struct {
 		F string `ferry:"h,default= x "`
-	}](); err != nil {
+	}]()
+	if err != nil {
 		t.Fatalf("whitespace in a default is the user's text: %+v", err)
 	}
 }

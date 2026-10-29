@@ -745,8 +745,9 @@ func TestARegisteredMapKeyAddressesByItsOwnText(t *testing.T) {
 	addr := netip.MustParseAddr("192.0.2.1")
 
 	p := newPlane(map[Path]Value{})
-	if err := Dump(t.Context(), conf{Limits: map[netip.Addr]int{addr: 7}},
-		planeSink{p: p}, WithRegistry(reg)); err != nil {
+	err := Dump(t.Context(), conf{Limits: map[netip.Addr]int{addr: 7}},
+		planeSink{p: p}, WithRegistry(reg))
+	if err != nil {
 		t.Fatalf("dump: %+v", err)
 	}
 

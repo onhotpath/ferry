@@ -330,13 +330,15 @@ func TestASchemaHoldingASliceLoadsAndSavesThroughTheDecorator(t *testing.T) {
 	s, k := newStore(), newKeeper()
 	src, dst := halves(s, k)
 
-	if err := ferry.Dump(t.Context(), listed{Tokens: []string{"a", "b", "c"}, Token: "s3cr3t"}, dst,
-		ferry.WithRegistry(declaring())); err != nil {
+	err := ferry.Dump(t.Context(), listed{Tokens: []string{"a", "b", "c"}, Token: "s3cr3t"}, dst,
+		ferry.WithRegistry(declaring()))
+	if err != nil {
 		t.Fatalf("a slice needs the sink's Unsetter and the source's Enumerator, both of them the plane's: %v", err)
 	}
 
-	if err := ferry.Dump(t.Context(), listed{Tokens: []string{"a"}, Token: "s3cr3t"}, dst,
-		ferry.WithRegistry(declaring())); err != nil {
+	err = ferry.Dump(t.Context(), listed{Tokens: []string{"a"}, Token: "s3cr3t"}, dst,
+		ferry.WithRegistry(declaring()))
+	if err != nil {
 		t.Fatalf("the second dump: %v", err)
 	}
 
