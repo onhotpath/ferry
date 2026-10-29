@@ -280,8 +280,9 @@ func TestTheNamingOptionsHaveToMatchAcrossThePair(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), ".env")
 
-	if err := ferry.Dump(t.Context(), outer{DB: nested{Host: "written"}},
-		NewDotEnvSink(path, Separator("__"))); err != nil {
+	err := ferry.Dump(t.Context(), outer{DB: nested{Host: "written"}},
+		NewDotEnvSink(path, Separator("__")))
+	if err != nil {
 		t.Fatalf("dump: %+v", err)
 	}
 

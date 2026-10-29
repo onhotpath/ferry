@@ -22,7 +22,7 @@ MODULES := . driver/env driver/http driver/kv driver/windows driver/yaml example
 # Pinned, not `latest`: a lint failure should always be this repository's doing
 # and never a tool release nobody asked for. This file is the only place either
 # version is named; the CI lint job runs `make lint` rather than repeating them.
-GOLANGCI_LINT_VERSION ?= v2.13.1
+GOLANGCI_LINT_VERSION ?= v2.14.0
 GCI_VERSION ?= v0.14.0
 
 GOLANGCI_LINT := $(BIN_DIR)/golangci-lint
@@ -208,8 +208,9 @@ $(GOLANGCI_LINT):
 	@# inside staticcheck. Installing from source makes the linter's Go and
 	@# the code's Go the same one, whichever that is.
 	@#
-	@# 2.13.1 is the first release whose bundled analysers read Go 1.27, which
-	@# is why the pin moved with the toolchain rather than waiting for Renovate.
+	@# 2.14.0 is the first release whose bundled analysers read the export data
+	@# of Go 1.27.3 (2.13.x decodes up to version 4 and 1.27.3 writes 5), which
+	@# is why the pin moves with the toolchain rather than waiting for Renovate.
 	@$(GOINSTALL) github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	@$(GOLANGCI_LINT) --version
 

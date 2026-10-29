@@ -933,9 +933,10 @@ func contradictions() []compileCase {
 func TestOmitzeroWithAZeroDefaultCompiles(t *testing.T) {
 	t.Parallel()
 
-	if err := Compile[struct {
+	err := Compile[struct {
 		C int `ferry:"c,omitzero,default=0"`
-	}](); err != nil {
+	}]()
+	if err != nil {
 		t.Errorf("omitzero beside a zero default did not compile: %+v", err)
 	}
 }
