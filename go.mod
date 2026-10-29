@@ -9,4 +9,4 @@ module github.com/onhotpath/ferry
 // now that 1.27 has shipped: 1.27 was the floor for encoding/json/v2 alone,
 // and the require block above is why that reason was never spent. errors.AsType
 // is what holds it as high as 1.26 (#391).
-go 1.26
+go 1.26.0

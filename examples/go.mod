@@ -8,7 +8,7 @@ module github.com/onhotpath/ferry/examples
 // The floor is go 1.26, which is core's, and it stays there now that Go 1.27
 // has shipped: core raised it to 1.27 for encoding/json/v2 alone and never
 // spent that reason (#391).
-go 1.26
+go 1.26.0
 
 // Core is an ordinary dependency now, resolved from the proxy at the version
 // this module was released against, which is where a driver says which core it
