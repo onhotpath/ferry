@@ -257,6 +257,15 @@ linters:
           - errcheck
           - gosec
           - gocritic
+      - path: _test\.go
+        linters:
+          - revive
+        # codec_test.go's valueDec and registry_test.go's copies declare
+        # UnmarshalText on a value receiver on purpose: Compile refuses that
+        # shape, and the fixture is the shape. A pointer receiver would test
+        # nothing. Scoped to the one rule and to _test.go, so a shipped
+        # package still gets it.
+        text: "marshal-receiver"
 
 issues:
   # golangci-lint hides findings by default: at most 50 per linter, at most 3

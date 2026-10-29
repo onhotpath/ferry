@@ -395,10 +395,11 @@ func TestANullPolicyOverAKeyRegistrationIsRefused(t *testing.T) {
 
 	// The same policy over the same codec without the claim is legal, which is
 	// what makes the refusal about the combination rather than about either half.
-	if err := refusalFrom(NullValue(
+	err := refusalFrom(NullValue(
 		StringValue(countText, parseCount),
 		func() (plainCount, error) { return 0, nil },
-		func(c plainCount) bool { return c == 0 })); err != nil {
+		func(c plainCount) bool { return c == 0 }))
+	if err != nil {
 		t.Errorf("the same policy over a registration that is not a key was refused: %+v", err)
 	}
 }

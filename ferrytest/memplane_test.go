@@ -584,8 +584,9 @@ func TestMemPlaneAnswersAtAContainersOwnAddress(t *testing.T) {
 	}
 
 	other := ferrytest.MemPlane().Open()
-	if got := mustProbe(t, openReader(t, other.Source, set),
-		compositeOf(t, set, ferry.At("tags"))); got != ferry.PresenceAbsent {
+	got := mustProbe(t, openReader(t, other.Source, set),
+		compositeOf(t, set, ferry.At("tags")))
+	if got != ferry.PresenceAbsent {
 		t.Errorf("Probe at an address nothing wrote = %s, want %s", got, ferry.PresenceAbsent)
 	}
 }

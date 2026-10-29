@@ -125,8 +125,9 @@ func TestACodecPanicOnLoadStillClosesTheReader(t *testing.T) {
 
 	p := fusePlane()
 
-	if _, err := Load[fuseConf](t.Context(), planeSource{p: p},
-		WithRegistry(registryWith(t, fuseCodec()))); err == nil {
+	_, err := Load[fuseConf](t.Context(), planeSource{p: p},
+		WithRegistry(registryWith(t, fuseCodec())))
+	if err == nil {
 		t.Fatal("a panicking codec loaded cleanly")
 	}
 

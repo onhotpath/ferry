@@ -92,8 +92,9 @@ func TestOneTypeUnderTwoTagKeysIsTwoEntries(t *testing.T) {
 		t.Fatalf("the load under the default key: %+v", err)
 	}
 
-	if _, err := Load[cacheKeyed](t.Context(), planeSource{p: libPlane},
-		WithRegistry(reg), TagKey("mylib")); err != nil {
+	_, err := Load[cacheKeyed](t.Context(), planeSource{p: libPlane},
+		WithRegistry(reg), TagKey("mylib"))
+	if err != nil {
 		t.Fatalf("the load under mylib: %+v", err)
 	}
 

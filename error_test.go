@@ -1332,14 +1332,10 @@ func TestConcurrentFormattingIsOneRendering(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(goroutines)
-
 	for i := range goroutines {
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			got[i] = fmt.Sprintf("%+v", agg)
-		}()
+		})
 	}
 
 	wg.Wait()
