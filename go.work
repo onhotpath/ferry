@@ -2,13 +2,15 @@
 // gives local development the sibling-on-disk resolution instead, and flipping
 // GOWORK=off exercises the resolution a real consumer gets.
 //
-// The floor is go 1.26, and it stays there now that Go 1.27 has shipped:
+// The floor is go 1.26 (spelled 1.26.0, which is what golang.org/x/sys now
+// requires and what excludes only the 1.26 release candidates), and it stays
+// there now that Go 1.27 has shipped:
 // ADR-0001 raised it to 1.27 for encoding/json/v2 alone, and ferry imports
 // neither json/v2 nor jsontext, so the reason was never spent. errors.AsType
 // is what holds it as high as 1.26. No file in this repository carries a
 // `toolchain` directive; a consumer resolves the floor with whatever toolchain
 // they have, and CI builds on both the floor and the newest released Go.
-go 1.26
+go 1.26.0
 
 use (
 	.
