@@ -21,7 +21,7 @@ go 1.26.0
 
 require github.com/onhotpath/ferry v0.2.0
 
-require go.yaml.in/yaml/v3 v3.0.5
+require go.yaml.in/yaml/v3 v3.0.6
 
 // fsnotify is the watch mechanism, and it is the one relaxation of this
 // module's own rule that it depends on go.yaml.in/yaml/v3 and nothing else.
